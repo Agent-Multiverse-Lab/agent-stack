@@ -3,23 +3,19 @@ from .base import (
     KnowledgeRecord,
     KnowledgeSearch,
 )
-from .chunk import (
-    CleanedChunk,
-    CleanResult,
-    clean_document_text,
-)
 from .factory import (
     KnowledgeFactory,
     KnowledgeType,
 )
+from .flow.types import DocumentBlock, DocumentChunk, ParsedDocument
 
 __all__ = [
     "BaseKnowledge",
-    "CleanResult",
-    "CleanedChunk",
+    "DocumentBlock",
+    "DocumentChunk",
     "KnowledgeFactory",
     "KnowledgeRecord",
     "KnowledgeSearch",
     "KnowledgeType",
-    "clean_document_text",
+    "ParsedDocument",
 ]

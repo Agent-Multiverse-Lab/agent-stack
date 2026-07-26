@@ -12,10 +12,11 @@ Current top-level layout:
 - `src/agents/`: shared agent primitives, the agent manager, `LeaderAgent`, internal subagents, middleware, model helpers, and sandbox backends.
 - `src/configs/`: Pydantic settings loaded from environment variables and `.env`.
 - `src/database/`: SQLAlchemy models, PostgreSQL lifecycle/session helpers, and repositories.
-- `src/knowledge/`: document parsing, extraction, cleanup, knowledge providers, and Milvus integration.
+- `src/knowledge/`: the unified document-processing flow, knowledge providers, and Milvus integration.
 - `src/storage/`: MinIO storage in `minio.py` and Redis/ARQ connection helpers under `redis/`.
 - `web/`: React client and its frontend-specific `AGENTS.md`.
 - `test/`: lightweight backend helper tests and manual smoke scripts.
+- `tests/`: tracked backend unit tests, including the Knowledge Flow contract.
 - `sandbox_server/`, `docker/`, and `scripts/`: local runtime support, Compose services, and helper scripts.
 
 The public top-level agent is `LeaderAgent` in `src/agents/leaderagent/`. Internal subagents are `SearchAgent`, `OutlineAgent`, `CharacterAgent`, and `ScenarioAgent` under `src/agents/subagents/`.
@@ -38,6 +39,24 @@ The public top-level agent is `LeaderAgent` in `src/agents/leaderagent/`. Intern
 - `src/storage/redis/redis_manger.py` owns only Redis/ARQ connection creation, lazy shared-client initialization, and close behavior. It must not own Agent Run semantics.
 - `server/worker.py` is the independent ARQ worker entrypoint and the single startup owner for database bootstrap. Worker startup initializes PostgreSQL, creates missing model tables with `checkfirst=True`, applies the non-destructive `AgentRun.run_type` column/index patch for existing databases, and inserts only missing public/internal Agent registration rows before accepting jobs. It must not drop tables, seed users or conversations, or overwrite existing Agent rows. Worker shutdown only disposes its own PostgreSQL resources; it does not reuse the FastAPI lifespan.
 - Database access belongs in `src/database/repositories/`. Do not put persistence queries inside agents.
+
+## Knowledge Flow
+
+- `src/knowledge/flow/pipeline.py` owns the document-processing order:
+  async Parser execution, explicit Chunker selection, and the final Chunk list.
+- `src/knowledge/flow/parser/parser.py` is the only public document Parser. It
+  routes by normalized file suffix; it must not infer formats from document
+  content or send one input through multiple format parsers.
+- OCR implementations live under `src/knowledge/flow/extractor/` and are called
+  only by PDF or image parsing paths. Extractors do not select file types,
+  chunk content, or write knowledge records.
+- Chunking lives under `src/knowledge/flow/chunker/`. `TokenChunker` uses a
+  fixed token step. `TitleChunker` explicitly selects `group` or `hierarchy`;
+  do not restore content-based `general` / `book` / `laws` / `paper` profile
+  inference.
+- Parser, Extractor, and Chunker share only the document block and chunk
+  structures from `src/knowledge/flow/types.py`. Vectorization, persistence,
+  object storage, and queue behavior remain outside the Flow.
 
 ## Agent Runtime Context
 
