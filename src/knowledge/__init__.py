@@ -3,6 +3,7 @@ from .base import (
     KnowledgeRecord,
     KnowledgeSearch,
 )
+from .embedding_service import EmbeddedChunk, EmbeddingService
 from .factory import (
     KnowledgeFactory,
     KnowledgeType,
@@ -13,6 +14,8 @@ __all__ = [
     "BaseKnowledge",
     "DocumentBlock",
     "DocumentChunk",
+    "EmbeddedChunk",
+    "EmbeddingService",
     "KnowledgeFactory",
     "KnowledgeRecord",
     "KnowledgeSearch",

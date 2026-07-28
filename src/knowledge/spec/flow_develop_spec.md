@@ -4,29 +4,31 @@
 
 ## 1. 处理链路
 
-所有支持的文件都由 `DocumentFlow` 根据 `file_name` 的 suffix 选择 `Parser`
+所有支持的文件都由 `Pipeline` 根据 `file_name` 的 suffix 选择 `Parser`
 格式方法，再由该方法调用 `src/knowledge/file_parser/` 中的具体 File Parser：
 
 ```text
 file_source（str / Path / bytes / BinaryIO）+ file_name
   -> Parser.__init__(...) 初始化实例内部配置
-  -> DocumentFlow.parse_document(...) 按 suffix 分发
+  -> Pipeline.parse_document(...) 按 suffix 分发
   -> Parser._pdf/_doc/_docx/...(file_source)
   -> 仅在底层库要求 Path 时由当前格式方法临时落盘
   -> Markdown 中间结果
   -> Markdown Blocks
   -> Chunker
+  -> PostProcessor
   -> DocumentChunk
 ```
 
 默认链路为：
 
 ```text
-Parser -> TitleChunker(method="hierarchy")
+Parser -> TitleChunker(method="hierarchy") -> [RaptorPostProcessor]
 ```
 
-调用方仍可显式选择 Token Chunker 或 Group Title Chunker。Flow 不做向量化、数据库、
-对象存储、队列或知识库写入。
+调用方仍可显式选择 Token Chunker 或 Group Title Chunker。后处理器默认不启用；
+启用 RAPTOR 时必须显式注入 Embedding Provider。Flow 不构造 Embedding 模型，也不做
+向量持久化、数据库、对象存储、队列或知识库写入。
 
 ## 2. 目录边界
 
@@ -46,6 +48,7 @@ src/knowledge/
 ├── flow/
 │   ├── __init__.py
 │   ├── pipeline.py
+│   ├── post_processor.py
 │   ├── types.py
 │   ├── parser/
 │   │   ├── __init__.py
@@ -81,7 +84,10 @@ src/knowledge/
 - `Parser._document(...)` 只负责 Markdown 归一化和 blocks 投影，不负责格式分发。
 - `flow/extractor/` 只负责 OCR 能力，不决定文件格式、File Parser 或 Chunker。
 - `flow/chunker/` 只消费 `ParsedDocument.blocks`。
-- `pipeline.py` 只编排 Parser 和 Chunker。
+- `flow/post_processor.py` 只消费 `DocumentChunk`。`RaptorPostProcessor` 使用显式
+  注入的 Embedding Provider，并按照 RAGFlow 的 UMAP 降维、最低 BIC 选择聚类数和
+  scikit-learn `GaussianMixture` 聚类顺序补充 RAPTOR cluster metadata。
+- `pipeline.py` 只编排 Parser、Chunker 和 PostProcessor。
 
 `file_parser/` 不设置格式注册表或服务层。具体 File Parser 也不决定后续使用哪一种
 Chunker。
@@ -347,9 +353,10 @@ ParsedDocument
 
 ### 9.2 Group Title Chunker
 
-- TitleChunker 先调用 `chunker/common.py::resolve_outline_levels(document)`。该函数
-  使用 `extract_pdf_outline(document.file_source)`，读取 Plain PDF 行级 JSON list，
-  并补充 `title + heading_level`。
+- TitleChunker 通过 `BaseTitleChunker.invoke()` 统一解析层级：优先使用 bigram 匹配
+  Parser 已写入的 PDF outline，无有效命中时按 RAGFlow 标题正则族的全文命中频率退避。
+- Group 和 Hierarchy 只覆盖 `resolve_levels()` 与 `build_chunks()`，不重复读取 PDF
+  JSON 或 outline。
 - 按目标标题层级划分 section。
 - 同一 section 的连续段落尽量合并。
 - 严格不跨目标标题边界。
@@ -399,7 +406,7 @@ Pipeline 根据 `file_name` 查 suffix 映射并选择对应 Parser 格式方法
 6. 删除旧 `src/knowledge/chunk/`；Token、Group、Hierarchy 只保留新实现。
 7. 删除无源码职责的 `src/knowledge/cleaner/` 残留。
 8. 删除或迁移旧 Parser/Chunk 规范，避免出现第二套目录、路由或 profile 说明。
-9. 若不保留旧文本聚类工具，移除其唯一直接依赖 `scikit-learn` 并更新 lock。
+9. RAPTOR 聚类后处理显式保留 `scikit-learn` 和 `umap-learn` 直接依赖并更新 lock。
 10. 最后重新搜索旧 import，执行根包、API、worker、SearchAgent 和 Flow 的 import
     smoke。
 
