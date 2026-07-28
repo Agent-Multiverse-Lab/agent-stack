@@ -78,7 +78,7 @@ class SearchAgent(BaseAgent):
     description = "Search-task orchestrator for multi-source retrieval."
     context = SearchAgentContext
 
-    def get_agent(self, context=None) -> CompiledStateGraph:
+    async def get_agent(self, context=None) -> CompiledStateGraph:
         model = load_model(model=sys_config.flash_model)
         return create_agent(
             model=model,

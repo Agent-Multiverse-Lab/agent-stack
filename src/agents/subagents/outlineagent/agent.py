@@ -17,7 +17,7 @@ class OutlineAgent(BaseAgent):
     required_artifacts: tuple[str, ...] = ()
     output_artifact = "outline"
 
-    def get_agent(self, context=None) -> CompiledStateGraph:
+    async def get_agent(self, context=None) -> CompiledStateGraph:
         runtime_context = context or self.context()
         return create_agent(
             model=load_model(runtime_context.model or sys_config.default_model),

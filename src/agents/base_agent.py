@@ -60,7 +60,7 @@ class BaseAgent:
         return f"{self.module_name}_{self.name}"
 
     @abstractmethod
-    def get_agent(self, context: BaseContext) -> CompiledStateGraph:
+    async def get_agent(self, context: BaseContext) -> CompiledStateGraph:
         pass
 
     async def stream_messages(
@@ -78,7 +78,7 @@ class BaseAgent:
 
         context: BaseContext = self.agent_context()
         context.update_context(runtime_context or {})
-        agent: CompiledStateGraph = self.get_agent(context)
+        agent: CompiledStateGraph = await self.get_agent(context)
         async for mode, chunk in agent.astream(
             messages,
             config=runtime_context,
@@ -104,7 +104,7 @@ class BaseAgent:
         # 配置上下文
         context: BaseContext = self.agent_context()
         context.update_context(runtime_context or {})
-        agent: CompiledStateGraph = self.get_agent(context)
+        agent: CompiledStateGraph = await self.get_agent(context)
         logger.info(f"智能体：{agent} 初始化成功")
 
         # 配置运行中的 configuarable 参数， 具体可看 agent 的stream方法
