@@ -26,14 +26,18 @@ Current top-level responsibilities and construction rules:
   `.env`. Keep parsing, defaults, and validation centralized here. Configuration
   modules must not perform business orchestration or introduce mutable runtime
   state outside the concrete agent context.
+- `src/model/`: shared LangChain chat and Embedding model construction. Resolve
+  `provider/model` specifications from `src/configs/model.py` here so Agents,
+  Knowledge services, and other callers do not depend on each other.
 - `src/database/`: SQLAlchemy models, PostgreSQL lifecycle/session helpers, and
   repositories. Define schema and relationships in models, centralize engine and
   session lifecycle, and place all persistence queries in responsibility-named
   repositories. Do not add HTTP, agent, queue, or storage orchestration here.
 - `src/knowledge/`: document parsing and chunking, knowledge-provider adapters,
   and Milvus-backed knowledge access. Construct processing as explicit pipelines
-  with narrow Parser, Extractor, Chunker, and provider contracts. Keep database
-  records, object storage, queues, and request handling outside the Flow.
+  with narrow Parser, Extractor, Chunker, PostProcessor, and provider contracts.
+  Keep database records, object storage, queues, and request handling outside
+  the Flow.
 - `src/storage/`: infrastructure adapters for MinIO and Redis/ARQ connections.
   Keep adapters thin and limited to client creation, connection lifecycle, and
   raw transport operations. Domain semantics such as Agent Run state and
@@ -91,8 +95,20 @@ internal subagents are `SearchAgent` and `OutlineAgent` under
 
 ## Knowledge Flow
 
-- `src/knowledge/flow/pipeline.py` owns the document-processing order:
-  async Parser execution, explicit Chunker selection, and the final Chunk list.
+- Knowledge-file indexing is an explicit confirmation step. Only a file in
+  `parsed` state may enter `indexing`; the service reloads its persisted
+  Markdown, applies the configured Chunker and Embedding binding, writes stable
+  `file_id + chunk_index` records to Milvus, and then marks it `indexed`.
+  Indexing failures return the file to `parsed` so the same artifact can be
+  retried. Uploading or parsing a file must never trigger this step implicitly.
+- `MilvusKnowledge` is a thin database adapter. Its `build_file_index(...)`
+  accepts only already embedded file records and owns Collection creation plus
+  Milvus CRUD. It must not read object storage, select Chunkers, load Embedding
+  models, generate vectors, or update PostgreSQL file state.
+- `src/knowledge/flow/pipeline.py` exposes parsing and chunking as separate
+  stages. `parse_document(...)` returns a `ParsedDocument` whose Markdown may be
+  persisted for user review; `chunk_document(...)` runs only after the caller
+  explicitly resumes indexing. Do not restore an all-in-one `run(...)` path.
 - `src/knowledge/flow/parser/parser.py` is the only public document Parser. It
   routes by normalized file suffix; it must not infer formats from document
   content or send one input through multiple format parsers.
@@ -101,11 +117,34 @@ internal subagents are `SearchAgent` and `OutlineAgent` under
   chunk content, or write knowledge records.
 - Chunking lives under `src/knowledge/flow/chunker/`. `TokenChunker` uses a
   fixed token step. `TitleChunker` explicitly selects `group` or `hierarchy`;
-  do not restore content-based `general` / `book` / `laws` / `paper` profile
-  inference.
-- Parser, Extractor, and Chunker share only the document block and chunk
-  structures from `src/knowledge/flow/types.py`. Vectorization, persistence,
-  object storage, and queue behavior remain outside the Flow.
+  both strategies reuse `BaseTitleChunker.invoke()` and the same
+  outline-first, regex-frequency-fallback level resolver. Do not restore
+  content-based `general` / `book` / `laws` / `paper` profile inference.
+- `src/knowledge/embedding_service.py` accepts an injected LangChain
+  `Embeddings` instance and owns batching plus vector result validation. It must
+  not import Agent packages or choose Provider configuration.
+- `KnowledgeEmbeddingBinding` durably binds each `uid + kb_id` to one model
+  spec, observed dimension, batch size, and Milvus collection. Initial indexing
+  creates this binding; every later indexing and query path must load it and
+  reject model or dimension drift.
+- `KnowledgeBase` owns logical knowledge-base metadata. `KnowledgeFile` belongs
+  to exactly one KnowledgeBase and tracks `uploaded`, `parsing`, `parsed`,
+  `indexing`, `indexed`, or `failed`. Conversation `Attachment` rows must never
+  be reused for knowledge files.
+- `server/service/knowledge_service.py` assembles the configured model and
+  owns the parsing boundary: original files and parsed Markdown use
+  `knowledge-files/{uid}/{kb_id}/{file_id}/...` MinIO paths, and parsing stops
+  at `KnowledgeFile.status="parsed"`. Chunking, Embedding, and Milvus writes
+  must not run before explicit user confirmation.
+- Post-processing remains isolated in
+  `src/knowledge/flow/post_processor.py` and is not wired into the current
+  parse/index chain. `RaptorPostProcessor` uses an injected Embedding Provider
+  and the RAGFlow UMAP + scikit-learn GaussianMixture/BIC algorithm; do not add
+  it to `Pipeline` until a dedicated indexing requirement enables it.
+- Parser, Extractor, Chunker, and PostProcessor exchange only the document block
+  and chunk structures from `src/knowledge/flow/types.py`. Embedding Provider
+  construction, persistence, object storage, and queue behavior remain outside
+  the Flow.
 
 ## Agent Runtime Context
 
@@ -188,7 +227,7 @@ the agent.
 
 ### SearchAgent
 
-`SearchAgent` is an internal search-task orchestrator. It currently exposes knowledge and web search tools, uses `SearchToolMiddleware`, and returns evidence-oriented search guidance to its caller.
+`SearchAgent` is an internal search-task orchestrator. It currently exposes knowledge and web search tools and returns evidence-oriented search guidance to its caller.
 
 Keep search opt-in through `LeaderAgent`; do not add automatic pre-retrieval
 middleware around every request. `SearchAgent` owns query planning, retrieval,
@@ -254,6 +293,13 @@ git diff --check
 
 ## Working Rules
 
+- Before changing implementation code, provide a concrete file-level
+  modification plan and wait for the user's explicit approval.
+- Preserve the existing directory structure, module boundaries, and public
+  contracts whenever possible. If a task requires moving or deleting existing
+  files, changing established ownership, or restructuring existing modules,
+  stop first, explain why the structural change is necessary and what it
+  affects, then wait for the user's explicit approval before proceeding.
 - Prefer existing local patterns over new abstractions.
 - Keep agent responsibilities narrow.
 - Keep API/service orchestration outside agents.

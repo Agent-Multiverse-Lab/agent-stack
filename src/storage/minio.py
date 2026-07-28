@@ -124,7 +124,8 @@ class MinioStorage:
             logger.info(f"buket name:{bucket_name} 可访问")
 
     def check_file_exist(self, bucket_name: str, object_name: str) -> bool:
-        if result := self._client.stat_object(
+        client = self.get_client()
+        if result := client.stat_object(
             bucket_name=bucket_name, object_name=object_name
         ):
             return True
@@ -178,7 +179,8 @@ class MinioStorage:
 
     def delete_file(self, bucket_name: str, object_name: str) -> bool:
         """从存储中删除文件。"""
-        self._client.remove_object(bucket_name=bucket_name, object_name=object_name)
+        client = self.get_client()
+        client.remove_object(bucket_name=bucket_name, object_name=object_name)
         logger.info(f"bucket:{bucket_name} 下的文件:{object_name} 已删除")
         return True
 
@@ -207,7 +209,8 @@ class MinioStorage:
 
     def download_file(self, bucket_name: str, object_name: str) -> bytes:
         """下载文档"""
-        result = self._client.get_object(
+        client = self.get_client()
+        result = client.get_object(
             bucket_name=bucket_name, object_name=object_name
         )
         data = result.read()

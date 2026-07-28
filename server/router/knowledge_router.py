@@ -1,112 +1,279 @@
-from typing import Any
+"""知识库向量记录 API。"""
 
-from fastapi import APIRouter
-from pydantic import BaseModel, Field
-
-from server.service.knowledge_service import (
-    delete_knowledge_records,
-    get_knowledge_status,
-    search_knowledge,
-    upsert_knowledge_records,
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
 )
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from server.service.knowledge_service import KnowledgeService
 from server.utils.auth import AuthenticatedUser
-from src.knowledge import KnowledgeFactory, KnowledgeRecord, KnowledgeSearch
+from src.database import get_db
 
-router = APIRouter(prefix="/knowledge", tags=["knowledge"])
-
-
-class KnowledgeRecordPayload(BaseModel):
-    id: str
-    content: str | None = None
-    vector: list[float] | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 
 
-class KnowledgeUpsertRequest(BaseModel):
-    records: list[KnowledgeRecordPayload] = Field(min_length=1)
-    options: dict[str, Any] = Field(default_factory=dict)
+class KnowledgeBaseCreateRequest(BaseModel):
+    """知识库创建请求。"""
+
+    name: str = Field(min_length=1, max_length=255)
+    description: str = ""
+
+
+class KnowledgeBaseResponse(BaseModel):
+    """知识库基础信息。"""
+
+    kb_id: str
+    name: str
+    description: str
+    status: str
+
+
+class KnowledgeFileResponse(BaseModel):
+    """知识文件解析信息。"""
+
+    file_id: str
+    kb_id: str
+    original_file_name: str
+    original_object_name: str
+    markdown_object_name: str | None
+    content_type: str
+    file_size: int
+    status: str
+    error_message: str | None
+
+
+class KnowledgeIndexResponse(BaseModel):
+    """知识文件索引结果。"""
+
+    kb_id: str
+    file_id: str
+    status: str
+    chunk_count: int
+    collection_name: str
+    embedding_model_spec: str
+    embedding_dimension: int
 
 
 class KnowledgeSearchRequest(BaseModel):
-    query: str | None = None
-    vector: list[float] | None = None
+    """知识库检索请求。"""
+
+    kb_id: str = Field(min_length=1, max_length=128)
+    query: str = Field(min_length=1)
     limit: int = Field(default=10, ge=1, le=100)
-    options: dict[str, Any] = Field(default_factory=dict)
 
 
 class KnowledgeDeleteRequest(BaseModel):
-    ids: list[str] = Field(min_length=1)
-    options: dict[str, Any] = Field(default_factory=dict)
+    """知识记录删除请求。"""
+
+    kb_id: str = Field(min_length=1, max_length=128)
+    record_ids: list[str] = Field(min_length=1)
 
 
-@router.get("/types", response_model=dict[str, Any])
-async def list_knowledge_types(_current_user: AuthenticatedUser):
-    return {
-        "types": [
-            {
-                "type": knowledge_type,
-                "database": KnowledgeFactory.database_name(knowledge_type),
-            }
-            for knowledge_type in KnowledgeFactory.supported_types()
-        ]
-    }
-
-
-@router.get("/{knowledge_type}/status", response_model=dict[str, Any])
-async def knowledge_status(
-    knowledge_type: str,
-    _current_user: AuthenticatedUser,
+@router.post("/bases", response_model=KnowledgeBaseResponse)
+async def create_knowledge_base(
+    payload: KnowledgeBaseCreateRequest,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
 ):
-    return await get_knowledge_status(knowledge_type)
-
-
-@router.post("/{knowledge_type}/records", response_model=dict[str, Any])
-async def upsert_knowledge_records_route(
-    knowledge_type: str,
-    payload: KnowledgeUpsertRequest,
-    _current_user: AuthenticatedUser,
-):
-    records = [
-        KnowledgeRecord(
-            id=record.id,
-            content=record.content,
-            vector=record.vector,
-            metadata=record.metadata,
-        )
-        for record in payload.records
-    ]
-    return await upsert_knowledge_records(
-        knowledge_type,
-        records,
-        **payload.options,
+    """创建当前用户的逻辑知识库。"""
+    knowledge_base = await KnowledgeService(db).create_knowledge_base(
+        uid=current_user.uid,
+        name=payload.name,
+        description=payload.description,
+    )
+    return KnowledgeBaseResponse(
+        kb_id=knowledge_base.kb_id,
+        name=knowledge_base.name,
+        description=knowledge_base.description,
+        status=knowledge_base.status,
     )
 
 
-@router.post("/{knowledge_type}/search", response_model=dict[str, Any])
-async def search_records(
+@router.post("/bases/{kb_id}/files", response_model=KnowledgeFileResponse)
+async def upload_knowledge_file(
+    kb_id: str,
+    current_user: AuthenticatedUser,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """上传知识库原文件，不触发解析和索引。"""
+    try:
+        content = await file.read()
+        knowledge_file = await KnowledgeService(db).upload_file(
+            uid=current_user.uid,
+            kb_id=kb_id,
+            file_name=file.filename or "file",
+            content=content,
+            content_type=file.content_type,
+        )
+        return _knowledge_file_response(knowledge_file)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(
+    "/bases/{kb_id}/files/{file_id}/parse",
+    response_model=KnowledgeFileResponse,
+)
+async def parse_knowledge_file(
+    kb_id: str,
+    file_id: str,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """解析原文件并保存 Markdown，等待用户确认索引。"""
+    try:
+        knowledge_file = await KnowledgeService(db).parse_file(
+            uid=current_user.uid,
+            kb_id=kb_id,
+            file_id=file_id,
+        )
+        return _knowledge_file_response(knowledge_file)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(
+    "/bases/{kb_id}/files/{file_id}/index",
+    response_model=KnowledgeIndexResponse,
+)
+async def index_knowledge_file(
+    kb_id: str,
+    file_id: str,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+) -> KnowledgeIndexResponse:
+    """确认解析结果后执行分块、向量化和 Milvus 入库。"""
+    try:
+        result = await KnowledgeService(db).index_file(
+            uid=current_user.uid,
+            kb_id=kb_id,
+            file_id=file_id,
+        )
+        return KnowledgeIndexResponse(**result)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post("/{knowledge_type}/search")
+async def search_knowledge_records(
     knowledge_type: str,
     payload: KnowledgeSearchRequest,
-    _current_user: AuthenticatedUser,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
 ):
-    return await search_knowledge(
-        knowledge_type,
-        KnowledgeSearch(
+    """按知识库绑定模型执行向量检索。"""
+    try:
+        return await KnowledgeService(db, knowledge_type).search(
+            uid=current_user.uid,
+            kb_id=payload.kb_id,
             query=payload.query,
-            vector=payload.vector,
             limit=payload.limit,
-            options=payload.options,
-        ),
-    )
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
 
 
-@router.delete("/{knowledge_type}/records", response_model=dict[str, Any])
-async def delete_knowledge_records_route(
+@router.delete("/{knowledge_type}/records")
+async def delete_knowledge_records(
     knowledge_type: str,
     payload: KnowledgeDeleteRequest,
-    _current_user: AuthenticatedUser,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
 ):
-    return await delete_knowledge_records(
-        knowledge_type,
-        payload.ids,
-        **payload.options,
+    """删除绑定知识库中的指定记录。"""
+    try:
+        return await KnowledgeService(db, knowledge_type).delete_records(
+            uid=current_user.uid,
+            kb_id=payload.kb_id,
+            record_ids=payload.record_ids,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get("/{knowledge_type}/status")
+async def get_knowledge_status(
+    knowledge_type: str,
+    current_user: AuthenticatedUser,
+    kb_id: str = Query(min_length=1, max_length=128),
+    db: AsyncSession = Depends(get_db),
+):
+    """读取当前用户绑定知识库的集合状态。"""
+    try:
+        return await KnowledgeService(db, knowledge_type).status(
+            uid=current_user.uid,
+            kb_id=kb_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+def _knowledge_file_response(knowledge_file) -> KnowledgeFileResponse:
+    """将知识文件模型转换为 API 响应。"""
+    return KnowledgeFileResponse(
+        file_id=knowledge_file.file_id,
+        kb_id=knowledge_file.kb_id,
+        original_file_name=knowledge_file.original_file_name,
+        original_object_name=knowledge_file.original_object_name,
+        markdown_object_name=knowledge_file.markdown_object_name,
+        content_type=knowledge_file.content_type,
+        file_size=knowledge_file.file_size,
+        status=knowledge_file.status,
+        error_message=knowledge_file.error_message,
     )
