@@ -28,7 +28,9 @@ class HumanInLoopMiddleware(HumanInTheLoopMiddleware):
         )
 
 
-def create_hil_middleware(approve_mode: str = "always_trust"):
+def create_human_in_loop_middleware(
+    approve_mode: str = "always_trust",
+) -> HumanInLoopMiddleware | None:
     if approve_mode == "always_trust":
         return None
     return HumanInLoopMiddleware(interrupt_on=TOOL_APPROVAL_INTERRUPT_ON)

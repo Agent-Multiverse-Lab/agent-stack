@@ -83,3 +83,8 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
                     if isinstance(value, int)
                 }
         return {}
+
+
+def create_token_usage_middleware() -> TokenUsageMiddleware:
+    """创建 token usage 观测 middleware。"""
+    return TokenUsageMiddleware()

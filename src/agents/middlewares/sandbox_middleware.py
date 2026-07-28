@@ -190,3 +190,7 @@ class SandboxMiddleware(AgentMiddleware[SandboxMiddlewareState]):
             return None
         await asyncio.to_thread(get_sandbox_provider().release, sandbox_id)
         return {"sandbox": None}
+
+
+def create_sandbox_middleware() -> SandboxMiddleware:
+    return SandboxMiddleware()

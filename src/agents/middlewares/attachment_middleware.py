@@ -82,4 +82,5 @@ class AttachmentMiddleware(AgentMiddleware):
 
         return await handler(request)
             
-attachment_middleware = AttachmentMiddleware()
+def create_attachment_middleware() -> AttachmentMiddleware:
+    return AttachmentMiddleware()

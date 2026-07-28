@@ -8,7 +8,7 @@ from langchain.agents.middleware import (
 )
 
 
-def create_call_limit_middlewares() -> list[Any]:
+def create_call_limit_middleware() -> list[Any]:
     """创建一组仅限制单次 Agent Run 的 middleware。"""
     return [
         ModelCallLimitMiddleware(run_limit=5, exit_behavior="end"),
