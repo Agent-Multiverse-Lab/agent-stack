@@ -5,6 +5,7 @@ from typing import Any
 
 from ...types import DocumentBlock, DocumentChunk, ParsedDocument
 from ..common import (
+    BODY_LEVEL,
     DEFAULT_CHUNK_TOKEN_SIZE,
     count_tokens,
     join_texts,
@@ -38,23 +39,31 @@ class HierarchyTitleChunker:
         self.target_level = target_level
         self.chunk_token_size = chunk_token_size
 
-    def chunk(self, document: ParsedDocument) -> list[DocumentChunk]:
-        root = self._build_tree(document)
+    def chunk(
+        self,
+        document: ParsedDocument,
+        levels: list[int],
+    ) -> list[DocumentChunk]:
+        root = self._build_tree(document, levels)
         chunks: list[DocumentChunk] = []
         self._collect_node(document, root, [], chunks)
         return chunks
 
-    def _build_tree(self, document: ParsedDocument) -> _HeadingNode:
+    def _build_tree(
+        self,
+        document: ParsedDocument,
+        levels: list[int],
+    ) -> _HeadingNode:
         root = _HeadingNode(level=0)
         stack = [root]
 
-        for block in document.blocks:
-            if block.kind != "title":
+        for block_index, block in enumerate(document.blocks):
+            level = levels[block_index]
+            if level == BODY_LEVEL:
                 stack[-1].items.append(block)
                 continue
 
             title = normalize_text(block.text)
-            level = _heading_level(block)
             if not title or level > self.target_level:
                 stack[-1].items.append(block)
                 continue
@@ -191,17 +200,6 @@ def _content_metadata(
         path=path,
         heading_level=heading_level,
     )
-    headings = [
-        {
-            "text": normalize_text(block.text),
-            "heading_level": block.heading_level,
-            "metadata": dict(block.metadata),
-        }
-        for block in blocks
-        if block.kind == "title" and normalize_text(block.text)
-    ]
-    if headings:
-        metadata["headings"] = headings
     block_metadata = [dict(block.metadata) for block in blocks if block.metadata]
     if block_metadata:
         metadata["block_metadata"] = block_metadata
@@ -219,10 +217,6 @@ def _path_metadata(
     if heading_level:
         metadata["heading_level"] = heading_level
     return metadata
-
-
-def _heading_level(block: DocumentBlock) -> int:
-    return block.heading_level if block.heading_level is not None else 1
 
 
 __all__ = ["HierarchyTitleChunker"]

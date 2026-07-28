@@ -34,7 +34,8 @@ class TitleChunker:
         )
 
     def chunk(self, document: ParsedDocument) -> list[DocumentChunk]:
-        return self._implementation.chunk(resolve_outline_levels(document))
+        resolved_document, levels = resolve_outline_levels(document)
+        return self._implementation.chunk(resolved_document, levels)
 
 
 __all__ = ["TitleChunker", "TitleMethod"]

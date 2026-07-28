@@ -4,6 +4,7 @@ from typing import Any
 
 from ...types import DocumentBlock, DocumentChunk, ParsedDocument
 from ..common import (
+    BODY_LEVEL,
     DEFAULT_CHUNK_TOKEN_SIZE,
     normalize_text,
     validate_chunk_token_size,
@@ -31,7 +32,11 @@ class GroupTitleChunker:
             chunk_token_size=chunk_token_size,
         )
 
-    def chunk(self, document: ParsedDocument) -> list[DocumentChunk]:
+    def chunk(
+        self,
+        document: ParsedDocument,
+        levels: list[int],
+    ) -> list[DocumentChunk]:
         chunks: list[DocumentChunk] = []
         buffered_blocks: list[DocumentBlock] = []
         heading_stack: list[tuple[int, str]] = []
@@ -57,10 +62,10 @@ class GroupTitleChunker:
             chunks.extend(self._token_chunker.chunk(section_document))
             buffered_blocks.clear()
 
-        for block in document.blocks:
-            if block.kind == "title":
+        for block_index, block in enumerate(document.blocks):
+            level = levels[block_index]
+            if level != BODY_LEVEL:
                 title = normalize_text(block.text)
-                level = _heading_level(block)
                 if title and level <= self.target_level:
                     flush_text()
                     _push_heading(heading_stack, level, title)
@@ -93,10 +98,6 @@ class GroupTitleChunker:
 
         flush_text()
         return chunks
-
-
-def _heading_level(block: DocumentBlock) -> int:
-    return block.heading_level if block.heading_level is not None else 1
 
 
 def _push_heading(

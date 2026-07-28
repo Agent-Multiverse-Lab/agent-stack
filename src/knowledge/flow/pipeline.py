@@ -3,19 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import BinaryIO, Literal
 
+from src.utils import logger
+
 from .chunker import TitleChunker, TokenChunker
 from .parser import Parser
-from .parser.parser import (
-    _SUFFIX_HANDLERS,
-    _resolve_file_name,
-)
 from .types import DocumentChunk, ParsedDocument
 
 ChunkerName = Literal["token", "title"]
 TitleChunkerMethod = Literal["group", "hierarchy"]
 
 
-class DocumentFlow:
+class Pipeline:
     def __init__(self, parser: Parser | None = None) -> None:
         self._parser = parser or Parser()
 
@@ -25,22 +23,18 @@ class DocumentFlow:
         *,
         file_name: str,
     ) -> ParsedDocument:
-        name, suffix = _resolve_file_name(file_name)
-        handler_name = _SUFFIX_HANDLERS.get(suffix)
-        if handler_name is None:
-            supported = ", ".join(sorted(_SUFFIX_HANDLERS))
-            raise ValueError(f"不支持的文件后缀：{suffix!r}。支持的后缀：{supported}。")
-
-        source = "filename" if isinstance(file_source, (str, Path)) else "byte_stream"
-
-        handler = getattr(self._parser, handler_name)
-        parsed = await handler(file_source, file_name=name)
-        return await self._parser._document(
+        logger.info("Pipeline 开始解析文档：file_name=%s", file_name)
+        document = await self._parser.parse(
             file_source,
-            name=name,
-            source=source,
-            parsed=parsed,
+            file_name=file_name,
         )
+        logger.info(
+            "Pipeline 文档解析完成：file_name=%s suffix=%s blocks=%s",
+            document.name,
+            document.suffix,
+            len(document.blocks),
+        )
+        return document
 
     async def run(
         self,
@@ -52,21 +46,43 @@ class DocumentFlow:
         target_level: int = 3,
         chunk_token_size: int = 512,
     ) -> list[DocumentChunk]:
-        document = await self.parse_document(file_source, file_name=file_name)
+        logger.info(
+            "Pipeline 开始执行：file_name=%s chunker=%s chunk_token_size=%s",
+            file_name,
+            chunker,
+            chunk_token_size,
+        )
+        try:
+            document = await self.parse_document(file_source, file_name=file_name)
 
-        if chunker == "token":
-            return TokenChunker(chunk_token_size=chunk_token_size).chunk(document)
-        if chunker == "title":
-            return TitleChunker(
-                method=title_method,
-                target_level=target_level,
-                chunk_token_size=chunk_token_size,
-            ).chunk(document)
-        raise ValueError(f"不支持的 chunker：{chunker!r}")
+            if chunker == "token":
+                chunks = TokenChunker(
+                    chunk_token_size=chunk_token_size
+                ).chunk(document)
+            elif chunker == "title":
+                chunks = TitleChunker(
+                    method=title_method,
+                    target_level=target_level,
+                    chunk_token_size=chunk_token_size,
+                ).chunk(document)
+        except Exception:
+            logger.exception(
+                "Pipeline 执行失败：file_name=%s chunker=%s",
+                file_name,
+                chunker,
+            )
+            raise
+
+        logger.info(
+            "Pipeline 执行完成：file_name=%s chunks=%s",
+            file_name,
+            len(chunks),
+        )
+        return chunks
 
 
 __all__ = [
     "ChunkerName",
-    "DocumentFlow",
+    "Pipeline",
     "TitleChunkerMethod",
 ]

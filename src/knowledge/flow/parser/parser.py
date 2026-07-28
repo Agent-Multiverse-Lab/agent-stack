@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, BinaryIO, Literal
@@ -23,6 +23,7 @@ from src.knowledge.file_parser.pdf_parser import (
     PdfParseError,
     PlainPdfParser,
 )
+from src.utils import logger
 
 from ..types import BlockKind, DocumentBlock, ParsedDocument
 
@@ -35,20 +36,6 @@ _IMAGE_SUFFIXES = {
     ".gif",
     ".tif",
     ".tiff",
-}
-_SUFFIX_HANDLERS = {
-    ".pdf": "_pdf",
-    ".doc": "_doc",
-    ".docx": "_docx",
-    ".md": "_markdown",
-    ".markdown": "_markdown",
-    ".txt": "_text",
-    ".csv": "_table",
-    ".xlsx": "_table",
-    ".pptx": "_pptx",
-    ".html": "_html",
-    ".htm": "_html",
-    **{suffix: "_image" for suffix in _IMAGE_SUFFIXES},
 }
 _PAGE_HEADING = re.compile(
     r"^(?:Page\s+|第\s*)(\d+)(?:\s*页)?$",
@@ -138,46 +125,6 @@ class Parser:
         }
         self._config = {suffix: config for config in configs.values() for suffix in config["suffix"]}
 
-    async def _document(
-        self,
-        file_source: str | Path | bytes | BinaryIO,
-        *,
-        name: str,
-        source: str,
-        parsed: tuple[str, object, dict[str, Any]],
-    ) -> ParsedDocument:
-        suffix = Path(name).suffix.lower()
-        markdown, parser, parser_metadata = parsed
-        parser_metadata = dict(parser_metadata)
-        json_result = parser_metadata.pop("_json_result", None)
-        outlines = parser_metadata.pop("_outlines", [])
-
-        markdown = _normalize_markdown(markdown, parser)
-        config = self._config[suffix]
-        blocks = await _markdown_blocks(
-            markdown,
-            extensions=_markdown_extensions(config),
-            body_kind="image" if suffix in _IMAGE_SUFFIXES else "text",
-        )
-        metadata: dict[str, Any] = {
-            "parser": _parser_name(suffix),
-            "parser_class": type(parser).__name__,
-            "intermediate_format": "markdown",
-            "source": source,
-            "parser_config": deepcopy(config),
-            **parser_metadata,
-        }
-        return ParsedDocument(
-            name=name,
-            suffix=suffix,
-            blocks=blocks,
-            metadata=metadata,
-            markdown=markdown,
-            json_result=json_result,
-            file_source=file_source if suffix == ".pdf" else None,
-            outlines=outlines,
-        )
-
     async def _pdf(
         self,
         file_source: str | Path | bytes | BinaryIO,
@@ -245,7 +192,7 @@ class Parser:
         suffix = Path(file_name).suffix.lower()
         config = self._config[suffix]
         parser = DocParser()
-        intermediate = _require_mapping(
+        intermediate = _require_dict(
             await parser.parse(file_source, as_json=True),
             "DocParser",
         )
@@ -301,7 +248,7 @@ class Parser:
         suffix = Path(file_name).suffix.lower()
         config = self._config[suffix]
         parser = TextParser()
-        intermediate = _require_mapping(
+        intermediate = _require_dict(
             await parser.parse(
                 file_source,
                 encoding=str(config.get("encoding", "utf-8-sig")),
@@ -338,7 +285,7 @@ class Parser:
         suffix = Path(file_name).suffix.lower()
         config = self._config[suffix]
         parser = PptxParser()
-        intermediate = _require_mapping(
+        intermediate = _require_dict(
             await parser.parse(
                 file_source,
                 file_name=file_name,
@@ -380,7 +327,7 @@ class Parser:
             raise ValueError("图片 parser_method 只支持 'rapidocr'、'paddleocr' 或 'unlimitedocr'。")
 
         parser = ImageParser()
-        intermediate = _require_mapping(
+        intermediate = _require_dict(
             await parser.parse(
                 file_source,
                 file_name=file_name,
@@ -403,18 +350,98 @@ class Parser:
             {"parser_method": parser_method},
         )
 
+    async def parse(
+        self,
+        file_source: str | Path | bytes | BinaryIO,
+        *,
+        file_name: str,
+    ) -> ParsedDocument:
+        name, suffix = _resolve_file_name(file_name)
+        handlers = {
+            ".pdf": self._pdf,
+            ".doc": self._doc,
+            ".docx": self._docx,
+            ".md": self._markdown,
+            ".markdown": self._markdown,
+            ".txt": self._text,
+            ".csv": self._table,
+            ".xlsx": self._table,
+            ".pptx": self._pptx,
+            ".html": self._html,
+            ".htm": self._html,
+            **{image_suffix: self._image for image_suffix in _IMAGE_SUFFIXES},
+        }
+        handler = handlers.get(suffix)
+        if handler is None:
+            supported = ", ".join(sorted(handlers))
+            logger.warning(
+                "Parser 不支持文件后缀：file_name=%s suffix=%s",
+                name,
+                suffix,
+            )
+            raise ValueError(f"不支持的文件后缀：{suffix!r}。支持的后缀：{supported}。")
 
-def _require_mapping(value: object, parser_name: str) -> Mapping[str, Any]:
-    if not isinstance(value, Mapping):
-        raise ParseError(f"{parser_name} 的中间态必须是 Mapping。")
+        logger.info(
+            "Parser 分派处理器：file_name=%s suffix=%s handler=%s",
+            name,
+            suffix,
+            handler.__name__,
+        )
+        source = "filename" if isinstance(file_source, (str, Path)) else "byte_stream"
+        markdown, parser, parser_metadata = await handler(
+            file_source,
+            file_name=name,
+        )
+        parser_metadata = dict(parser_metadata)
+        json_result = parser_metadata.pop("_json_result", None)
+        outlines = parser_metadata.pop("_outlines", [])
+
+        markdown = _normalize_markdown(markdown, parser)
+        config = self._config[suffix]
+        blocks = await _markdown_blocks(
+            markdown,
+            extensions=_markdown_extensions(config),
+            body_kind="image" if suffix in _IMAGE_SUFFIXES else "text",
+        )
+        metadata: dict[str, Any] = {
+            "parser": _parser_name(suffix),
+            "parser_class": type(parser).__name__,
+            "intermediate_format": "markdown",
+            "source": source,
+            "parser_config": deepcopy(config),
+            **parser_metadata,
+        }
+        document = ParsedDocument(
+            name=name,
+            suffix=suffix,
+            blocks=blocks,
+            metadata=metadata,
+            markdown=markdown,
+            json_result=json_result,
+            file_source=file_source if suffix == ".pdf" else None,
+            outlines=outlines,
+        )
+        logger.info(
+            "Parser 解析完成：file_name=%s suffix=%s parser=%s blocks=%s",
+            name,
+            suffix,
+            type(parser).__name__,
+            len(blocks),
+        )
+        return document
+
+
+def _require_dict(value: object, parser_name: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ParseError(f"{parser_name} 的中间态必须是 dict。")
     return value
 
 
 def _require_json_items(
     value: object,
     parser_name: str,
-) -> list[Mapping[str, Any]]:
-    if not isinstance(value, list) or not all(isinstance(item, Mapping) for item in value):
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
         raise ParseError(f"{parser_name} 的中间态必须是 JSON list。")
     return value
 
@@ -426,8 +453,8 @@ def _normalize_markdown(markdown: object, parser: object) -> str:
 
 
 def _pdf_to_markdown(
-    value: Sequence[Mapping[str, Any]],
-    config: Mapping[str, Any],
+    value: Sequence[dict[str, Any]],
+    config: dict[str, Any],
 ) -> str:
     lines = [str(item.get("text") or "").strip() for item in value]
     lines = [line for line in lines if line]
@@ -437,8 +464,8 @@ def _pdf_to_markdown(
 
 
 def _doc_to_markdown(
-    value: Mapping[str, object],
-    config: Mapping[str, Any],
+    value: dict[str, object],
+    config: dict[str, Any],
 ) -> str:
     html = str(value.get("html") or "")
     if not html:
@@ -454,15 +481,15 @@ def _doc_to_markdown(
 
 
 def _pptx_to_markdown(
-    value: Mapping[str, object],
-    config: Mapping[str, Any],
+    value: dict[str, object],
+    config: dict[str, Any],
 ) -> str:
     slides = value.get("slides")
     if not isinstance(slides, list):
         raise ParseError("PptxParser 的中间态缺少 slides。")
     sections: list[str] = []
     for slide in slides:
-        if not isinstance(slide, Mapping):
+        if not isinstance(slide, dict):
             continue
         heading = f"# 幻灯片 {slide.get('position')}"
         title = str(slide.get("title") or "")
@@ -471,7 +498,7 @@ def _pptx_to_markdown(
         lines = [heading]
         elements = slide.get("elements")
         for element in elements if isinstance(elements, list) else ():
-            if not isinstance(element, Mapping):
+            if not isinstance(element, dict):
                 continue
             if element.get("type") == "table":
                 rows = element.get("rows")
@@ -503,7 +530,7 @@ async def _markdown_blocks(
     blocks: list[DocumentBlock] = []
     current_page: int | None = None
     for element in elements:
-        if not isinstance(element, Mapping):
+        if not isinstance(element, dict):
             continue
         element_type = str(element.get("type") or "")
         text = str(element.get("text") or "").strip()
@@ -575,7 +602,7 @@ def _looks_like_toc(text: str) -> bool:
     return first_line.lower() in {"目录", "目 录", "table of contents"}
 
 
-def _markdown_extensions(config: Mapping[str, Any]) -> tuple[str, ...]:
+def _markdown_extensions(config: dict[str, Any]) -> tuple[str, ...]:
     extensions = config.get("extensions", ["tables"])
     requested = [extensions] if isinstance(extensions, str) else extensions
     if not isinstance(requested, Sequence):

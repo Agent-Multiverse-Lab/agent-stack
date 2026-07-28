@@ -4,20 +4,22 @@ import hashlib
 import html
 import os
 import re
+import sys
 import tempfile
 from bisect import bisect_right
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 
 import tiktoken
 
-from src.knowledge.file_parser.utils.parser_pdf_outline import extract_pdf_outline
+from src.utils import logger
 
-from ..types import DocumentBlock, ParsedDocument
+from ..types import BlockKind, DocumentBlock, ParsedDocument
 
 DEFAULT_CHUNK_TOKEN_SIZE = 512
+BODY_LEVEL = sys.maxsize - 1
 
 _CL100K_BASE_URL = "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken"
 _CL100K_BASE_HASH = "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7"
@@ -139,22 +141,72 @@ def normalize_text(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
-def resolve_outline_levels(document: ParsedDocument) -> ParsedDocument:
-    """用 PDF 原始大纲为解析后的 JSON 内容补充标题层级。"""
-    if document.suffix.lower() != ".pdf":
-        return document
-    if document.json_result is None:
-        return document
+def build_pdf_json_blocks(document: ParsedDocument) -> list[DocumentBlock]:
+    """将 PDF JSON 中间态转换为保留原始字段的文档块。"""
+    if document.suffix.lower() != ".pdf" or document.json_result is None:
+        return []
+
+    blocks: list[DocumentBlock] = []
+    kind_counts = {
+        "text": 0,
+        "table": 0,
+        "image": 0,
+    }
+    for item in document.json_result:
+        kind = _pdf_json_block_kind(item)
+        text = str(item.get("text") or "")
+        if not text.strip() and kind == "text":
+            continue
+
+        metadata = dict(item)
+        metadata.pop("text", None)
+        blocks.append(
+            DocumentBlock(
+                text=text,
+                kind=kind,
+                metadata=metadata,
+            )
+        )
+        kind_counts[kind] += 1
+
+    logger.info(
+        "PDF JSON 文档块构建完成：file_name=%s blocks=%s text=%s table=%s image=%s",
+        document.name,
+        len(blocks),
+        kind_counts["text"],
+        kind_counts["table"],
+        kind_counts["image"],
+    )
+    return blocks
+
+
+def resolve_outline_levels(
+    document: ParsedDocument,
+) -> tuple[ParsedDocument, list[int]]:
+    """为每个文档块生成与其位置对齐的显式层级。"""
+    if document.suffix.lower() == ".pdf" and document.json_result is not None:
+        document = replace(
+            document,
+            blocks=build_pdf_json_blocks(document),
+        )
+
+    levels: list[int] = []
+    for block in document.blocks:
+        if block.kind == "title" and block.heading_level is not None:
+            levels.append(block.heading_level)
+        else:
+            levels.append(BODY_LEVEL)
+
+    if document.suffix.lower() != ".pdf" or document.json_result is None:
+        return document, levels
 
     outlines = document.outlines
-    if not outlines and document.file_source is not None:
-        outlines = extract_pdf_outline(document.file_source)
     if not outlines:
-        return document
-
-    line_blocks = _pdf_json_line_blocks(document.json_result)
-    if not line_blocks:
-        return document
+        logger.info(
+            "PDF 大纲层级匹配完成：file_name=%s outlines=0 matched=0",
+            document.name,
+        )
+        return document, levels
 
     candidates: list[tuple[int, str, int]] = []
     for index, (title, depth, _) in enumerate(outlines):
@@ -164,58 +216,47 @@ def resolve_outline_levels(document: ParsedDocument) -> ParsedDocument:
         candidate = (index, normalized_title, max(depth + 1, 1))
         candidates.append(candidate)
 
-    resolved_blocks: list[DocumentBlock] = []
     matched_candidates: set[int] = set()
     matched_count = 0
-    for block in line_blocks:
+    for block_index, block in enumerate(document.blocks):
+        if block.kind in {"table", "image"}:
+            continue
+
         level = _match_outline_level(
             block.text,
             candidates,
             matched_candidates,
         )
         if level is None:
-            resolved_blocks.append(block)
             continue
 
         matched_count += 1
-        metadata = dict(block.metadata)
-        metadata.update(
-            {
-                "element_type": "heading",
-                "outline": True,
-            }
-        )
-        resolved_blocks.append(
-            DocumentBlock(
-                text=block.text,
-                kind="title",
-                heading_level=level,
-                metadata=metadata,
-            )
-        )
+        levels[block_index] = level
 
-    if matched_count == 0:
-        return document
-    return replace(document, blocks=resolved_blocks)
+    logger.info(
+        "PDF 大纲层级匹配完成：file_name=%s outlines=%s matched=%s",
+        document.name,
+        len(outlines),
+        matched_count,
+    )
+    return document, levels
 
 
-def _pdf_json_line_blocks(
-    json_result: Sequence[Mapping[str, object]],
-) -> list[DocumentBlock]:
-    blocks: list[DocumentBlock] = []
-    for item in json_result:
-        text = normalize_text(str(item.get("text") or ""))
-        if not text:
-            continue
-        blocks.append(
-            DocumentBlock(
-                text=text,
-                metadata={
-                    "element_type": "paragraph",
-                },
-            )
-        )
-    return blocks
+def _pdf_json_block_kind(item: dict[str, object]) -> BlockKind:
+    doc_type = item.get("doc_type_kwd")
+    layout_type = item.get("layout_type")
+
+    if doc_type == "table" or layout_type in {"table", "table_caption"}:
+        return "table"
+    if doc_type == "image" or layout_type in {
+        "image",
+        "figure",
+        "figure_caption",
+    }:
+        return "image"
+    if item.get("image") is not None:
+        return "image"
+    return "text"
 
 
 def _match_outline_level(
@@ -354,8 +395,10 @@ def _split_encoded_tokens(
 
 
 __all__ = [
+    "BODY_LEVEL",
     "DEFAULT_CHUNK_TOKEN_SIZE",
     "SourcedTextPart",
+    "build_pdf_json_blocks",
     "count_tokens",
     "join_texts",
     "normalize_text",
