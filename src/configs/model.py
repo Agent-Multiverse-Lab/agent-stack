@@ -9,6 +9,28 @@ class BaseModelProvider(BaseModel):
     model_list: list[str] = Field(..., description="模型列表")
 
 
+class EmbeddingModelProvider(BaseModel):
+    """定义 Embedding 模型提供商的连接配置。"""
+
+    name: str = Field(..., description="模型提供商名称")
+    api_key: str = Field(..., description="API 密钥配置字段")
+    base_url: str = Field(..., description="OpenAI 兼容 API 地址")
+    batch_size: int = Field(default=32, gt=0, description="单次向量化批大小")
+    max_retries: int = Field(default=3, ge=0, description="请求最大重试次数")
+    request_timeout: float = Field(
+        default=30.0,
+        gt=0,
+        description="单次请求超时秒数",
+    )
+    batch_size: int = Field(default=32, gt=0, description="单次向量化批大小")
+    max_retries: int = Field(default=3, ge=0, description="请求最大重试次数")
+    request_timeout: float = Field(
+        default=30.0,
+        gt=0,
+        description="单次请求超时秒数",
+    )
+
+
 DEFAULT_BASE_MODEL_PROVIER: dict[str, BaseModelProvider] = {
     # 阿里
     "dashscope": BaseModelProvider(
@@ -52,3 +74,24 @@ DEFAULT_BASE_MODEL_PROVIER: dict[str, BaseModelProvider] = {
         ],
     ),
 }
+
+DEFAULT_EMBEDDING_MODEL_PROVIDER: dict[str, EmbeddingModelProvider] = {
+    "dashscope": EmbeddingModelProvider(
+        name="dashscope",
+        api_key="DASHSCOPE_API_KEY",
+        base_url="https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    ),
+    "openai": EmbeddingModelProvider(
+        name="openai",
+        api_key="OPENAI_API_KEY",
+        base_url="https://api.openai.com/v1",
+    ),
+}
+
+
+__all__ = [
+    "BaseModelProvider",
+    "DEFAULT_BASE_MODEL_PROVIER",
+    "DEFAULT_EMBEDDING_MODEL_PROVIDER",
+    "EmbeddingModelProvider",
+]

@@ -59,7 +59,10 @@ class Config(BaseSettings):
     image_model: str = Field(default="qwen/qwen-image-2.0-pro-2026-04-22", description="图片生成模型名称")
 
     
-    embed_model: str = Field(default="", description="向量生成模型名称")
+    embed_model: str = Field(
+        default="",
+        description="向量生成模型名称，格式为 provider/model",
+    )
     rerank_model: str = Field(default="", description="重排序模型名称")
 
     # ---------- Agent ----------
