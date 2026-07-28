@@ -12,7 +12,7 @@ from src.agents.base_agent import BaseAgent
 from src.agents.middlewares.subagent_middlware import create_subagent_middleware
 from src.agents.subagents.outlineagent import OutlineAgent
 from src.agents.subagents.searchagent import SearchAgent
-from src.agents.utils.model_tool import load_model
+from src.model import load_model
 from src.configs import config as sys_config
 
 from .context import LeaderAgentContext

@@ -3,7 +3,7 @@ from langchain.agents.middleware import ModelRetryMiddleware
 from langgraph.graph.state import CompiledStateGraph
 
 from src.agents.base_agent import BaseAgent
-from src.agents.utils.model_tool import load_model
+from src.model import load_model
 from src.configs import config as sys_config
 
 from .context import OutlineAgentContext

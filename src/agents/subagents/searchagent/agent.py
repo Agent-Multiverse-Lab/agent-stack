@@ -3,8 +3,7 @@ from langchain.agents.middleware import ModelRetryMiddleware
 from langgraph.graph.state import CompiledStateGraph
 
 from src.agents.base_agent import BaseAgent
-from src.agents.middlewares import SearchToolMiddleware
-from src.agents.utils.model_tool import load_model
+from src.model import load_model
 from src.configs import config as sys_config
 
 from .context import SearchAgentContext
@@ -86,7 +85,6 @@ class SearchAgent(BaseAgent):
             system_prompt=SEARCH_AGENT_SYSTEM_PROMPT,
             checkpointer=self.get_checkpointer(),
             middleware=[
-                SearchToolMiddleware(),
                 ModelRetryMiddleware(max_retries=1, on_failure="continue"),
             ],
         )
