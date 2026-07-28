@@ -4,22 +4,71 @@ This file is the single source of repository guidance for Claude/Codex-style cod
 
 ## Current Project Shape
 
-`multi-agent-s2c` is a script-driven visual creation system. The backend is a FastAPI service built around LangChain/LangGraph agents, SQLAlchemy repositories, PostgreSQL, Redis/ARQ background work, and MinIO-backed uploads. The frontend is a React + TypeScript + Vite application under `web/`.
+`multi-agent-s2c` is a general-purpose multi-agent system for technical learning
+and engineering practice. The backend is a FastAPI service built around
+LangChain/LangGraph agents, SQLAlchemy repositories, PostgreSQL, Redis/ARQ
+background work, and MinIO-backed uploads.
 
-Current top-level layout:
+Current top-level responsibilities and construction rules:
 
-- `server/`: FastAPI application, auth middleware, routers, services, lifespan startup, and the ARQ worker entrypoint.
-- `src/agents/`: shared agent primitives, the agent manager, `LeaderAgent`, internal subagents, middleware, model helpers, and sandbox backends.
-- `src/configs/`: Pydantic settings loaded from environment variables and `.env`.
-- `src/database/`: SQLAlchemy models, PostgreSQL lifecycle/session helpers, and repositories.
-- `src/knowledge/`: the unified document-processing flow, knowledge providers, and Milvus integration.
-- `src/storage/`: MinIO storage in `minio.py` and Redis/ARQ connection helpers under `redis/`.
-- `web/`: React client and its frontend-specific `AGENTS.md`.
-- `test/`: lightweight backend helper tests and manual smoke scripts.
-- `tests/`: tracked backend unit tests, including the Knowledge Flow contract.
-- `sandbox_server/`, `docker/`, and `scripts/`: local runtime support, Compose services, and helper scripts.
+- `server/`: FastAPI transport and application orchestration. Build it from thin
+  routers, responsibility-named services, explicit middleware, and separate API
+  and worker lifecycle entrypoints. Routers own HTTP validation and response
+  shaping; services own use-case coordination; lifespan and worker hooks own
+  process resources. Do not put SQL queries, agent reasoning, or storage-client
+  construction in routers.
+- `src/agents/`: shared agent contracts, concrete top-level and internal agents,
+  middleware, model helpers, MCP integration, and sandbox backends. Construct
+  agents as context-driven `BaseAgent` packages, expose each concrete class from
+  its package, and assemble tools and middleware at the concrete agent boundary.
+  Agents must not own HTTP, database, queue, or object-storage workflows.
+- `src/configs/`: typed Pydantic settings loaded from environment variables and
+  `.env`. Keep parsing, defaults, and validation centralized here. Configuration
+  modules must not perform business orchestration or introduce mutable runtime
+  state outside the concrete agent context.
+- `src/database/`: SQLAlchemy models, PostgreSQL lifecycle/session helpers, and
+  repositories. Define schema and relationships in models, centralize engine and
+  session lifecycle, and place all persistence queries in responsibility-named
+  repositories. Do not add HTTP, agent, queue, or storage orchestration here.
+- `src/knowledge/`: document parsing and chunking, knowledge-provider adapters,
+  and Milvus-backed knowledge access. Construct processing as explicit pipelines
+  with narrow Parser, Extractor, Chunker, and provider contracts. Keep database
+  records, object storage, queues, and request handling outside the Flow.
+- `src/storage/`: infrastructure adapters for MinIO and Redis/ARQ connections.
+  Keep adapters thin and limited to client creation, connection lifecycle, and
+  raw transport operations. Domain semantics such as Agent Run state and
+  cancellation belong in application services.
+- `src/third_party/`: compatibility boundaries for external libraries and SDKs.
+  Expose a small local interface and isolate vendor-specific behavior; do not
+  place application policy or general utilities here.
+- `src/utils/`: small, stateless utilities shared across multiple packages.
+  Utilities must remain domain-neutral and dependency-light. A helper used by
+  one subsystem belongs in that subsystem instead.
+- `test/`: deterministic backend unit and contract tests plus explicitly named
+  manual demos. Mirror production boundaries, avoid live network dependencies in
+  the default suite, and keep manual scripts distinguishable with `demo_` names
+  or dedicated fixture directories.
+- `sandbox_server/`: the standalone sandbox support service. Keep its API and
+  container contract independent from the main FastAPI process; it must not own
+  application persistence or Agent Run orchestration.
+- `docker/`: Dockerfiles and Compose topology only. Keep service wiring,
+  environment mapping, volumes, and health checks declarative; application
+  behavior remains in production modules.
+- `scripts/`: repeatable maintenance and migration entrypoints. Require explicit
+  inputs, keep operations observable, and avoid import-time side effects.
+- `doc/`: architecture diagrams and supporting project documentation. Keep
+  diagrams aligned with the boundaries defined in this guide.
 
-The public top-level agent is `LeaderAgent` in `src/agents/leaderagent/`. Internal subagents are `SearchAgent`, `OutlineAgent`, `CharacterAgent`, and `ScenarioAgent` under `src/agents/subagents/`.
+Dependencies should follow this ownership direction: routers call services, and
+services call repositories or infrastructure adapters. Agent and Knowledge Flow
+packages receive runtime values through their declared contexts or method
+contracts and must not import server routers. Cross-layer use-case coordination
+belongs in `server/service/`; format-specific processing belongs in
+`src/knowledge/flow/`.
+
+The public top-level agent is `LeaderAgent` in `src/agents/leaderagent/`. Current
+internal subagents are `SearchAgent` and `OutlineAgent` under
+`src/agents/subagents/`.
 
 ## Backend Architecture
 
@@ -63,10 +112,10 @@ The public top-level agent is `LeaderAgent` in `src/agents/leaderagent/`. Intern
 Agent runtime configuration has exactly three sources:
 
 1. The context class defined by the concrete top-level agent or subagent, including its schema and defaults.
-2. Values supplied by the frontend for the current run.
+2. Values supplied for the current run.
 3. Values loaded by the backend from the database for the current agent or run.
 
-Frontend-supplied and database-loaded values must be merged into the concrete agent context before execution. The resulting context is the only source of runtime configuration for agents, subagents, middleware, tools, and backends. Do not introduce parallel runtime configuration through module globals, middleware-local defaults, ad hoc keyword arguments, or direct database/config reads; resolve those values first and bind them to the context.
+Run-supplied and database-loaded values must be merged into the concrete agent context before execution. The resulting context is the only source of runtime configuration for agents, subagents, middleware, tools, and backends. Do not introduce parallel runtime configuration through module globals, middleware-local defaults, ad hoc keyword arguments, or direct database/config reads; resolve those values first and bind them to the context.
 
 Invocation data such as input messages and similar per-call payloads is not runtime configuration and may remain outside the context.
 
@@ -96,15 +145,13 @@ Important current boundary:
 
 - `process_agent_run(...)` publishes `messages`, `values`, and `agent_execute_event` entries to `run:events:{run_id}`. Lifecycle notifications use `type: "status"` with `status: "running"`; every terminal notification uses `type: "end"` with `status: "completed"`, `"failed"`, or `"cancelled"`.
 - Cancellation is two-phase: `request_cancel_agent_run(...)` first persists `cancel_requested`, then writes `run:cancel:{run_id}`. Cancelling a `run_type="chat"` Run also marks all of that user's active direct `run_type="subagent"` Runs in the same transaction and signals each one after commit; cancelling a subagent Run affects only that child. The worker stops consuming each Agent stream, persists `cancelled`, publishes the terminal `end` event, and clears the cancel key.
-- After run creation, the frontend navigates to the independent `/workspace/{run_id}` route, immediately shows the local optimistic human message, then opens the returned `stream_url` with an authenticated `fetch` stream.
-- `web/src/api/agent.ts` owns the SSE transport/parser, `useAgentRunStream` maps run events into UI state, and `WorkspaceView` only renders the optimistic input, streaming assistant content, status, and transport errors.
-- Do not describe enqueueing as invoking the SSE endpoint. The worker produces events and the frontend independently opens the SSE read endpoint.
+- Do not describe enqueueing as invoking the SSE endpoint. The worker produces events, while consumers independently open the SSE read endpoint.
 - Rebuild the Compose worker after backend source changes because the worker image does not bind-mount the checkout.
 
 ## Persistence and ID Boundaries
 
 - PostgreSQL is the source of truth for users, agents, conversations, messages, attachments, knowledge records, and Agent Run lifecycle state.
-- The content schema now includes `ScriptProject`, `Episode`, `EpisodeOutline`, `EpisodeScript`, `Character`, `ScriptScene`, `ScriptLine`, and `StoryboardFrame`. At this stage these are table definitions only; no repository, HTTP API, or frontend persistence binding exists yet.
+- The content schema now includes `ScriptProject`, `Episode`, `EpisodeOutline`, `EpisodeScript`, `Character`, `ScriptScene`, `ScriptLine`, and `StoryboardFrame`. At this stage these are table definitions only; no repository, HTTP API, or application binding exists yet.
 - Outlines use Markdown text in `EpisodeOutline`. Screenplays use relational scene and semantic-line rows instead of whole-document JSON: `ScriptScene` stores scene structure and `ScriptLine` stores ordered action, character, parenthetical, dialogue, beat, and transition content.
 - `ScriptLine.position` is the stable semantic order inside a scene, not a rendered line or page number. Physical wrapping and pagination must be derived from screenplay layout settings.
 - `ScriptProject.workspace_key` is unique per user. Episode numbers are unique per project, character names are unique per project, scene positions and assigned scene numbers are unique per Episode script, semantic-line positions are unique per scene, and storyboard positions are unique per Episode.
@@ -126,51 +173,34 @@ Agent design references, in priority order:
 
 ### LeaderAgent
 
-`LeaderAgent` is the public script and storyboard creation orchestrator. Its context prompt asks for production-ready story concepts, character relationships, dramatic structure, scenes, camera language, pacing, dialogue, storyboard plans, and sound/music guidance.
+`LeaderAgent` is the public general-purpose orchestrator. It interprets the user
+goal, selects direct execution or planning and delegation, coordinates tools and
+internal agents, and returns the integrated final result. Keep its base prompt
+domain-neutral; specialized behavior belongs in explicit tools, subagents, or
+runtime context rather than hard-coded product assumptions.
 
-It currently has no direct tools. It delegates retrieval and fact-checking to a separately persisted and queued `SearchAgent` Run through `SubAgentMiddleware`, and uses retry middleware around model execution. The middleware provides `task`, `subagent_start`, `subagent_status`, `subagent_cancel`, and `subagent_await`.
+Construct `LeaderAgent` from its concrete `LeaderAgentContext`.
+`_create_middlewares(...)` owns middleware assembly, while `get_agent(...)` loads
+context-configured MCP tools and `_build_agent(...)` assembles the LangChain
+agent. It delegates bounded work to registered internal agents through
+`SubAgentMiddleware`. Do not move persistence, queueing, or storage behavior into
+the agent.
 
 ### SearchAgent
 
 `SearchAgent` is an internal search-task orchestrator. It currently exposes knowledge and web search tools, uses `SearchToolMiddleware`, and returns evidence-oriented search guidance to its caller.
 
-Keep search opt-in through `LeaderAgent`; do not add automatic pre-retrieval middleware around every request. `SearchAgent` should not generate the final script or storyboard.
+Keep search opt-in through `LeaderAgent`; do not add automatic pre-retrieval
+middleware around every request. `SearchAgent` owns query planning, retrieval,
+source comparison, and evidence synthesis. It must not take over the parent
+agent's final user response.
 
-### LayoutAgent
+### OutlineAgent
 
-`LayoutAgent` is responsible for composition analysis, visual hierarchy, and generation-ready prompt drafting. It should not call image-generation APIs unless that responsibility is explicitly changed.
-
-## Frontend Architecture
-
-For frontend-specific conventions, follow `web/AGENTS.md`.
-
-Current frontend stack:
-
-- React 19, TypeScript, and Vite 7.
-- Radix UI primitives and Tailwind CSS 4.
-- Zustand 5 and `react-router-dom` 7.
-- `motion/react` for component motion and GSAP for the authentication landing choreography.
-
-Current frontend boundaries:
-
-- `web/src/App.tsx` owns route guards and router setup.
-- Any newly introduced UI container with its own visual boundary, layout
-  responsibility, state, or interaction must be implemented as a dedicated
-  React component and imported by its parent. Do not leave substantial
-  container markup inline in a page or list loop, even when it currently has
-  only one call site; see `web/AGENTS.md` for the detailed component-boundary
-  principle.
-- Authenticated routes live under `/app/:sectionId` and `/app/:sectionId/:pageId`. `/` and `/app` redirect to `/app/script`.
-- `AuthLanding` owns the mounted login/register experience for `/login` and `/register`. The standalone `LoginView.tsx` and `RegisterView.tsx` files are not the current routed UI.
-- `web/src/pages/AppView/AppView.tsx` owns the authenticated studio shell and page-level state. Tab/page components live under `web/src/pages/AppView/components/`.
-- `web/src/api/index.ts` currently provides only the shared JSON request primitive plus `get` and `post` helpers.
-- `web/src/api/auth.ts` owns email auth calls. `web/src/api/agent.ts` owns thread creation, Agent Run creation, and authenticated Agent Run SSE transport/parsing.
-- `useAuthStore` is the active persisted shared auth store. The former `web/src/store/chat.ts`, `web/src/hooks/useChat.ts`, and `web/src/api/library.ts` paths have been deleted; do not reference or restore them unless a feature explicitly requires it.
-- `NewPromptPage` submits through `AppView`, creates a new thread and run, then navigates to the standalone `WorkspaceView` route at `/workspace/{run_id}`.
-- `WorkspaceView` is not embedded in the `AppView` shell. It owns its full-screen resource rail, central canvas, Agent configuration rail, and floating chat panel. `insertOptimisticHumanMessage(...)` adds the submitted user bubble to router state before navigation.
-- Script creation, imports, and script cards in Recent or the script list all open in the same standalone `WorkspaceView`; keep screenplay work on this shared page.
-- The frontend must not ship seeded scripts, storyboard projects, community entries, update notices, preset prompts, preset images, or mock Agent output. Studio collections start empty until real API or user-created data is available.
-- `useAgentRunStream` consumes run events and projects model text/status into `WorkspaceView`; the optimistic human message remains local UI state and is not an SSE event.
+`OutlineAgent` is an internal structure-planning agent. It receives a bounded
+outline task, produces the requested outline artifact, and returns it to the
+parent. Keep it tool-light and context-driven; it must not become a second
+top-level orchestrator or own persistence and transport behavior.
 
 ## Development Commands
 
@@ -193,15 +223,6 @@ Local infrastructure and worker through Compose:
 docker compose -f docker/docker-compose.yml up -d postgres redis minio worker
 ```
 
-Frontend:
-
-```bash
-cd web
-npm install
-npm run dev
-npm run build
-```
-
 Targeted backend validation:
 
 ```bash
@@ -216,7 +237,6 @@ git diff --check
 - Follow `CONTRIBUTING.md` for repository contribution workflow.
 - Pull requests should include a concise Chinese summary and motivation unless the task explicitly requires another language.
 - Link the issue or task ID when available.
-- For UI changes in `web/`, include screenshots or video.
 - Include verification notes with the commands run and outcomes.
 
 ## Git Commit Rules
@@ -224,10 +244,10 @@ git diff --check
 - Use Conventional Commits.
 - Commit format: `<type>(<scope>): <subject>`.
 - `type` must be one of `feat`, `fix`, `refactor`, `doc`, `test`, `chore`, `build`, or `ci`.
-- `scope` is recommended and should use a concise module name such as `agent`, `thread`, `worker`, `web`, `auth`, or `deps`.
+- `scope` is recommended and should use a concise module name such as `agent`, `thread`, `worker`, `auth`, or `deps`.
 - Keep the Conventional Commit `type` and `scope` tokens in lowercase English; write the `subject` and optional commit body in Chinese.
 - Keep the Chinese subject concise, recommended no more than 72 characters, and do not end it with punctuation.
-- Examples: `feat(worker): 发布 Agent Run 流式事件`, `fix(web): 修复任务创建后未订阅事件流`, `doc(agent): 更新仓库代理指南`.
+- Examples: `feat(worker): 发布 Agent Run 流式事件`, `fix(auth): 修复令牌校验失败`, `doc(agent): 更新仓库代理指南`.
 - Do not wrap commit messages, subjects, or scopes with `@` characters.
 - Before every push, especially after committing from PowerShell, inspect all outgoing commit subjects and bodies for accidental `@` characters or wrappers. Do not push until malformed commit messages are corrected.
 - Keep one commit focused on one coherent change.
@@ -238,9 +258,22 @@ git diff --check
 - Keep agent responsibilities narrow.
 - Keep API/service orchestration outside agents.
 - Keep database reads and writes in repositories.
-- Keep ARQ enqueueing, raw Redis Stream I/O, Agent Run semantics, worker execution, and frontend SSE consumption as distinct layers.
+- Keep ARQ enqueueing, raw Redis Stream I/O, Agent Run semantics, worker execution, and SSE consumption as distinct layers.
 - Read project source and config files using UTF-8 unless another encoding is explicitly required.
 - Preserve user changes in the working tree; never revert unrelated modifications.
 - Add tests or compile checks for behavior changes with non-trivial blast radius.
 - Treat current FIXME/TODO comments as incomplete work, not proof that the described behavior already exists.
-- If implementing run-event delivery, wire and verify all three boundaries: worker event production, backend SSE reading, and frontend authenticated stream consumption.
+- If implementing run-event delivery, wire and verify worker event production and backend SSE reading.
+- Do not create an abstraction for logic used only once, and do not reserve flexibility or configurability for hypothetical future requirements.
+- Do not split simple linear logic into a collection of tiny helpers. Extract a function only for clear reuse, side-effect isolation, or a substantial reduction in cognitive load.
+- Follow the Stepdown Rule: place public, high-level methods first and move implementation details progressively downward. A reader should be able to follow the call relationships continuously from top to bottom.
+- Prefer early returns and a clear main path. Avoid unnecessary nesting, indirect jumps, aggregation layers, priority systems, protocol interpreters, and multi-level fallbacks.
+- Place constants and named values in the smallest reasonable scope. Use module-level constants for cross-function reuse, protocol identifiers, configuration constraints, or values that require centralized maintenance. Prefer function-local named values for error messages and rules used by only one function, even when repeated locally. Do not force values inline merely to reduce variable count, and do not promote local implementation details to global state.
+- Names should express business intent. Comments should explain reasons, constraints, and non-obvious trade-offs rather than restating visible code behavior.
+- Match the existing file style when modifying code. Do not opportunistically improve adjacent implementations. Unrelated code smells may be reported, but must not be changed without authorization.
+- Remove unused imports, variables, functions, and branches introduced by the current change. Do not clean up unrelated dead code that existed before the change unless explicitly requested.
+- For small status, progress, or summary requirements, read the source directly, select only the necessary fields, and return the smallest useful result. Do not reconstruct event streams or debugging views.
+- If an implementation is clearly longer than the problem itself, or 200 lines could be expressed clearly in 50, stop extending it and simplify first.
+- New functions and classes must have clear, concise Chinese docstrings. Important or critical locations should include additional comments explaining reasons, constraints, or trade-offs.
+- Code should prioritize readability and have clear paragraph-like structure. Leave one blank line between semantically distinct blocks when it improves continuous reading.
+- Before submitting, ask whether a senior engineer would consider the implementation over-designed, over-defensive, excessively nested, or overly fragmented. If so, simplify it first.
