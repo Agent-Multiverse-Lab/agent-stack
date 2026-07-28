@@ -31,7 +31,12 @@ class BaseContext:
         default=None, metadata={"description": "agent技能目录"}
     )
     
-    mcps: list[str] = field(default="", metadata={"description": "mcp工具"})  # ty:ignore[invalid-assignment]
+    mcps: list[str] = field(
+        default_factory=list,
+        metadata={
+            "description": "本次运行启用的 MCP Server 名称；为空时使用全部已配置服务"
+        },
+    )
     
     style_profolio: dict = field(default_factory=dict, metadata={"description": "素材，算是吧"})
     

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import timedelta
 from typing import Any, cast
 
@@ -127,13 +127,29 @@ def get_mcp_server_errors() -> dict[str, str]:
     return dict(_SERVER_ERRORS)
 
 
-async def get_mcp_tools() -> tuple[BaseTool, ...]:
-    """获取全部 MCP 工具；首次调用时自动发现并缓存。"""
+async def get_mcp_tools(
+    server_names: Sequence[str] | None = None,
+) -> tuple[BaseTool, ...]:
+    """按 Server 名称获取 MCP 工具；首次调用时自动发现并缓存。"""
 
     async with _TOOLS_LOCK:
         if not _TOOLS_LOADED:
             await _reload_mcp_tools()
-        return tuple(sorted(_TOOLS.values(), key=lambda tool: tool.name))
+
+        selected_servers = {
+            str(server_name).strip()
+            for server_name in server_names or ()
+            if str(server_name).strip()
+        }
+        tools = (
+            tool
+            for tool_name, tool in _TOOLS.items()
+            if (
+                not selected_servers
+                or _TOOL_ROUTES[tool_name][0] in selected_servers
+            )
+        )
+        return tuple(sorted(tools, key=lambda tool: tool.name))
 
 
 async def refresh_mcp_tools() -> tuple[BaseTool, ...]:
