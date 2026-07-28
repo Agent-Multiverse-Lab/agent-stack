@@ -702,6 +702,133 @@ class Attachment(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), comment="更新时间")
 
 
+class KnowledgeBase(Base):
+    """用户拥有的逻辑知识库。"""
+
+    __tablename__ = "knowledge_base"
+
+    kb_id = Column(String(128), primary_key=True, comment="知识库业务标识")
+    uid = Column(
+        String(128),
+        ForeignKey("user.uid", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="所属用户",
+    )
+    name = Column(String(255), nullable=False, comment="知识库名称")
+    description = Column(Text, nullable=False, default="", comment="知识库描述")
+    status = Column(
+        String(32),
+        nullable=False,
+        default="active",
+        index=True,
+        comment="知识库状态",
+    )
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        comment="创建时间",
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        comment="更新时间",
+    )
+
+    files = relationship(
+        "KnowledgeFile",
+        back_populates="knowledge_base",
+        cascade="all, delete-orphan",
+    )
+
+
+class KnowledgeFile(Base):
+    """知识库中的独立文件及其解析生命周期。"""
+
+    __tablename__ = "knowledge_file"
+
+    file_id = Column(String(64), primary_key=True, comment="文件业务标识")
+    kb_id = Column(
+        String(128),
+        ForeignKey("knowledge_base.kb_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="所属知识库",
+    )
+    original_file_name = Column(String(512), nullable=False, comment="原始文件名")
+    original_object_name = Column(
+        String(1024),
+        nullable=False,
+        unique=True,
+        comment="原文件 MinIO 对象名",
+    )
+    markdown_object_name = Column(
+        String(1024),
+        nullable=True,
+        comment="解析后 Markdown 对象名",
+    )
+    content_type = Column(String(128), nullable=False, comment="原文件 MIME 类型")
+    file_size = Column(Integer, nullable=False, comment="原文件字节数")
+    status = Column(
+        String(32),
+        nullable=False,
+        default="uploaded",
+        index=True,
+        comment="uploaded/parsing/parsed/indexing/indexed/failed",
+    )
+    error_message = Column(Text, nullable=True, comment="最近一次处理错误")
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        comment="创建时间",
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        comment="更新时间",
+    )
+
+    knowledge_base = relationship("KnowledgeBase", back_populates="files")
+
+
+class KnowledgeEmbeddingBinding(Base):
+    """持久化知识库唯一的 Embedding 与向量集合契约。"""
+
+    __tablename__ = "knowledge_embedding_binding"
+
+    uid = Column(
+        String(128),
+        ForeignKey("user.uid", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    kb_id = Column(
+        String(128),
+        ForeignKey("knowledge_base.kb_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    collection_name = Column(String(64), nullable=False)
+    embedding_model_spec = Column(String(255), nullable=False)
+    embedding_dimension = Column(Integer, nullable=False)
+    embedding_batch_size = Column(Integer, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
 class Knowledge(Base):
     __tablename__ = "knowledge"
 
