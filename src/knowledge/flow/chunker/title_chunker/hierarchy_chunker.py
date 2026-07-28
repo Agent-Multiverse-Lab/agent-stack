@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from ...types import DocumentBlock, DocumentChunk, ParsedDocument
-from ..common import (
-    BODY_LEVEL,
-    DEFAULT_CHUNK_TOKEN_SIZE,
+from src.knowledge.flow.chunker.common import (
     count_tokens,
     join_texts,
     normalize_text,
     split_blocks_fixed,
-    validate_chunk_token_size,
 )
+from src.knowledge.flow.chunker.title_chunker.common import (
+    BODY_LEVEL,
+    BaseTitleChunker,
+    ResolvedLevels,
+)
+from src.knowledge.flow.types import DocumentBlock, DocumentChunk, ParsedDocument
 
 _ATOMIC_KINDS = {"table", "image"}
 
@@ -23,48 +26,21 @@ class _HeadingNode:
     title: DocumentBlock | None = None
     items: list[DocumentBlock | _HeadingNode] = field(default_factory=list)
 
-
-class HierarchyTitleChunker:
-    """构建标题树，并在正文和 metadata 中保留每个节点的完整路径。"""
-
-    def __init__(
+    def build_tree(
         self,
-        *,
-        target_level: int = 3,
-        chunk_token_size: int = DEFAULT_CHUNK_TOKEN_SIZE,
-    ) -> None:
-        if target_level <= 0:
-            raise ValueError("target_level 必须大于 0")
-        validate_chunk_token_size(chunk_token_size)
-        self.target_level = target_level
-        self.chunk_token_size = chunk_token_size
-
-    def chunk(
-        self,
-        document: ParsedDocument,
-        levels: list[int],
-    ) -> list[DocumentChunk]:
-        root = self._build_tree(document, levels)
-        chunks: list[DocumentChunk] = []
-        self._collect_node(document, root, [], chunks)
-        return chunks
-
-    def _build_tree(
-        self,
-        document: ParsedDocument,
-        levels: list[int],
+        line_records: Sequence[DocumentBlock],
+        levels: Sequence[int],
+        target_level: int,
     ) -> _HeadingNode:
-        root = _HeadingNode(level=0)
-        stack = [root]
-
-        for block_index, block in enumerate(document.blocks):
-            level = levels[block_index]
+        """使用标题层级栈构建保持原始块顺序的结构树。"""
+        stack = [self]
+        for block, level in zip(line_records, levels):
             if level == BODY_LEVEL:
                 stack[-1].items.append(block)
                 continue
 
             title = normalize_text(block.text)
-            if not title or level > self.target_level:
+            if not title or level > target_level:
                 stack[-1].items.append(block)
                 continue
 
@@ -73,8 +49,38 @@ class HierarchyTitleChunker:
             node = _HeadingNode(level=level, title=block)
             stack[-1].items.append(node)
             stack.append(node)
+        return self
 
-        return root
+
+class HierarchyTitleChunker(BaseTitleChunker):
+    """构建标题树，并在正文和 metadata 中保留每个节点的完整路径。"""
+
+    def resolve_levels(
+        self,
+        document: ParsedDocument,
+        line_records: Sequence[DocumentBlock],
+    ) -> ResolvedLevels:
+        """复用 BaseTitleChunker 的 outline 与正则层级解析。"""
+        return self.resolve_title_levels(
+            document,
+            line_records,
+        )
+
+    def build_chunks(
+        self,
+        document: ParsedDocument,
+        line_records: Sequence[DocumentBlock],
+        resolved: ResolvedLevels,
+    ) -> list[DocumentChunk]:
+        """构造标题结构树并沿节点路径生成分块。"""
+        root = _HeadingNode(level=0).build_tree(
+            line_records,
+            resolved.levels,
+            self.target_level,
+        )
+        chunks: list[DocumentChunk] = []
+        self._collect_node(document, root, [], chunks)
+        return chunks
 
     def _collect_node(
         self,

@@ -1,42 +1,43 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
-from ...types import DocumentBlock, DocumentChunk, ParsedDocument
-from ..common import (
-    BODY_LEVEL,
-    DEFAULT_CHUNK_TOKEN_SIZE,
+from src.knowledge.flow.chunker.common import (
     normalize_text,
-    validate_chunk_token_size,
 )
-from ..token_chunker import TokenChunker
+from src.knowledge.flow.chunker.title_chunker.common import (
+    BODY_LEVEL,
+    BaseTitleChunker,
+    ResolvedLevels,
+)
+from src.knowledge.flow.chunker.token_chunker import TokenChunker
+from src.knowledge.flow.types import DocumentBlock, DocumentChunk, ParsedDocument
 
 _ATOMIC_KINDS = {"table", "image"}
 
 
-class GroupTitleChunker:
+class GroupTitleChunker(BaseTitleChunker):
     """尽量合并同一目标标题段落内的内容，绝不跨段落合并。"""
 
-    def __init__(
-        self,
-        *,
-        target_level: int = 3,
-        chunk_token_size: int = DEFAULT_CHUNK_TOKEN_SIZE,
-    ) -> None:
-        if target_level <= 0:
-            raise ValueError("target_level 必须大于 0")
-        validate_chunk_token_size(chunk_token_size)
-        self.target_level = target_level
-        self.chunk_token_size = chunk_token_size
-        self._token_chunker = TokenChunker(
-            chunk_token_size=chunk_token_size,
-        )
-
-    def chunk(
+    def resolve_levels(
         self,
         document: ParsedDocument,
-        levels: list[int],
+        line_records: Sequence[DocumentBlock],
+    ) -> ResolvedLevels:
+        """复用 BaseTitleChunker 的 outline 与正则层级解析。"""
+        return self.resolve_title_levels(
+            document,
+            line_records,
+        )
+
+    def build_chunks(
+        self,
+        document: ParsedDocument,
+        line_records: Sequence[DocumentBlock],
+        resolved: ResolvedLevels,
     ) -> list[DocumentChunk]:
+        """按目标标题层级建立 section 并在 section 内固定切分。"""
         chunks: list[DocumentChunk] = []
         buffered_blocks: list[DocumentBlock] = []
         heading_stack: list[tuple[int, str]] = []
@@ -59,11 +60,14 @@ class GroupTitleChunker:
                 blocks=list(buffered_blocks),
                 metadata=section_metadata(),
             )
-            chunks.extend(self._token_chunker.chunk(section_document))
+            chunks.extend(
+                TokenChunker(
+                    chunk_token_size=self.chunk_token_size,
+                ).chunk(section_document)
+            )
             buffered_blocks.clear()
 
-        for block_index, block in enumerate(document.blocks):
-            level = levels[block_index]
+        for block, level in zip(line_records, resolved.levels):
             if level != BODY_LEVEL:
                 title = normalize_text(block.text)
                 if title and level <= self.target_level:

@@ -3,16 +3,15 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from src.utils import logger
-
-from ..types import DocumentBlock, DocumentChunk, ParsedDocument
-from .common import (
+from src.knowledge.flow.chunker.common import (
     DEFAULT_CHUNK_TOKEN_SIZE,
     build_pdf_json_blocks,
     normalize_text,
     split_blocks_fixed,
     validate_chunk_token_size,
 )
+from src.knowledge.flow.types import DocumentBlock, DocumentChunk, ParsedDocument
+from src.utils import logger
 
 _ATOMIC_KINDS = {"table", "image"}
 

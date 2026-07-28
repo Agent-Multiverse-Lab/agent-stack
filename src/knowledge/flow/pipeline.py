@@ -14,7 +14,10 @@ TitleChunkerMethod = Literal["group", "hierarchy"]
 
 
 class Pipeline:
-    def __init__(self, parser: Parser | None = None) -> None:
+    def __init__(
+        self,
+        parser: Parser | None = None,
+    ) -> None:
         self._parser = parser or Parser()
 
     async def parse_document(
@@ -36,25 +39,23 @@ class Pipeline:
         )
         return document
 
-    async def run(
+    def chunk_document(
         self,
-        file_source: str | Path | bytes | BinaryIO,
+        document: ParsedDocument,
         *,
-        file_name: str,
         chunker: ChunkerName = "title",
         title_method: TitleChunkerMethod = "hierarchy",
         target_level: int = 3,
         chunk_token_size: int = 512,
     ) -> list[DocumentChunk]:
+        """对已确认的解析结果执行显式分块。"""
         logger.info(
-            "Pipeline 开始执行：file_name=%s chunker=%s chunk_token_size=%s",
-            file_name,
+            "Pipeline 开始分块：file_name=%s chunker=%s chunk_token_size=%s",
+            document.name,
             chunker,
             chunk_token_size,
         )
         try:
-            document = await self.parse_document(file_source, file_name=file_name)
-
             if chunker == "token":
                 chunks = TokenChunker(
                     chunk_token_size=chunk_token_size
@@ -65,17 +66,19 @@ class Pipeline:
                     target_level=target_level,
                     chunk_token_size=chunk_token_size,
                 ).chunk(document)
+            else:
+                raise ValueError(f"不支持的 Chunker：{chunker}")
         except Exception:
             logger.exception(
-                "Pipeline 执行失败：file_name=%s chunker=%s",
-                file_name,
+                "Pipeline 分块失败：file_name=%s chunker=%s",
+                document.name,
                 chunker,
             )
             raise
 
         logger.info(
-            "Pipeline 执行完成：file_name=%s chunks=%s",
-            file_name,
+            "Pipeline 分块完成：file_name=%s chunks=%s",
+            document.name,
             len(chunks),
         )
         return chunks

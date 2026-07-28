@@ -71,14 +71,16 @@ record 不会继续切开，因此 token 大小可能超过配置值；delimiter
 
 ### 2.2 TitleChunker
 
-RAGFlow 的 `TitleChunker` 先统一输入，再解析每一行的标题层级：
+当前实现按 RAGFlow 的职责拆分统一解析每一行的标题层级：
 
 ```text
-PDF outline 命中率足够
-  -> 使用 outline 层级
-否则
-  -> 从多组标题正则中选择命中最多的一组
-  -> 再使用 layout 中的 section/title/head 信息补充
+TitleChunker._invoke()
+  -> HierarchyTitleChunker.invoke() 或 GroupTitleChunker.invoke()
+  -> BaseTitleChunker.invoke()
+  -> resolve_levels()
+  -> resolve_title_levels()
+     -> resolve_outline_levels()：优先使用 bigram 匹配 PDF outline
+     -> resolve_frequency_levels()：无有效 outline 时按正则族命中频率退避
 ```
 
 层级确定后再选择：
@@ -116,9 +118,9 @@ Chunker 仍只接受一种稳定输入 `ParsedDocument`。它不直接处理：
 - OCR、版面识别或 PDF Canvas；
 - 向量、索引或持久化。
 
-只有 `resolve_outline_levels(document)` 会读取 `document.json_result`，并把
-`document.file_source` 交给现有 `extract_pdf_outline(...)`。Group 和 Hierarchy 不
-直接读取文件或 JSON。
+只有 `BaseTitleChunker.extract_line_records(document)` 会读取
+`document.json_result`；`resolve_outline_levels(...)` 使用 Parser 已写入
+`document.outlines` 的结果。Group 和 Hierarchy 不直接读取文件或 JSON。
 
 ### 3.1 输入
 
@@ -299,9 +301,9 @@ Plain PDF JSON
   -> 命中行转成 title + heading_level
 ```
 
-`resolve_outline_levels` 放在 `chunker/common.py`，输入和输出都是
-`ParsedDocument`。TitleChunker 门面在选择 Group 或 Hierarchy 前统一调用一次，两种
-标题策略不重复实现。
+`resolve_outline_levels` 和 `resolve_frequency_levels` 放在
+`chunker/title_chunker/common.py`。Group 和 Hierarchy 都继承
+`BaseTitleChunker.invoke()`，只覆盖 `resolve_levels()` 与 `build_chunks()`。
 
 PDF outline 的 depth 从 0 开始，转换成 `heading_level` 时统一加 1：
 
@@ -334,15 +336,13 @@ PDF 没有 outline 或没有任何标题命中
 
 Plain PDF JSON 不生成 `## Page N` 页面标记。
 
-后续仍可考虑的标题解析优先级为：
+标题解析优先级为：
 
 1. Parser 原生输出的 Markdown 标题；
 2. PDF outline；
 3. OCR/layout 给出的 title、section、head 标签；
-4. 中文章节编号和数字编号正则；
+4. 从 RAGFlow 标题正则族中选择全文命中次数最多的一组；
 5. 全部未命中时保持正文，不猜标题。
-
-本次只实现前两项，不实现正则或 layout fallback。
 
 ## 8. GroupTitleChunker
 

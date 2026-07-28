@@ -1,10 +1,10 @@
-from .title_chunker import (
+from src.knowledge.flow.chunker.title_chunker import (
     GroupTitleChunker,
     HierarchyTitleChunker,
     TitleChunker,
     TitleMethod,
 )
-from .token_chunker import TokenChunker
+from src.knowledge.flow.chunker.token_chunker import TokenChunker
 
 __all__ = [
     "GroupTitleChunker",
