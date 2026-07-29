@@ -1,124 +1,247 @@
-# Web ChatGPT Vue Frontend Guide
+# Vue Frontend Agent Guide
 
-Root-level repository guidance still applies. This file narrows conventions for
-the standalone Vue frontend in `web-chatgpt/`.
+This file contains the frontend-specific rules for `web-chatgpt/`. The root
+repository guide still applies. This Vue application is independent from the
+React application in `web/`.
 
-## Current Phase
+## Product and Technology
 
-`web-chatgpt/` is a Vue 3 + TypeScript + Vite application. The `web/chatgpt`
-branch first establishes the OpenGPT interface and local interaction model. Authentication, thread
-creation, Agent Runs, uploads, and SSE are intentionally not connected yet.
+`web-chatgpt/` is a general-purpose AI conversation frontend. It is composed of
+route-level Views, feature Components, and reusable Composables.
 
-Never make an unconnected control look successful. Preview-only behavior must say
-that it is local or awaiting backend integration. Do not add fake tokens, fake
+The frontend uses:
+
+- Vue 3 with the Composition API and TypeScript;
+- Vite 7 and Vue Router 4;
+- Tailwind CSS 4 for styling;
+- Lucide for interface icons;
+- GSAP for authored motion;
+- `markstream-vue` for assistant Markdown.
+
+The current application is a local design prototype. Authentication,
+conversation APIs, Agent Runs, uploads, and authenticated SSE streaming are not
+connected. Never make an unconnected control look successful. Do not add fake
 users, fake conversations, fake Agent output, simulated tool calls, seeded
-projects, preset prompts, or timer-driven streaming.
+content, fake uploads, or timer-driven streaming.
 
-## Product Direction
+## Application Composition
 
-OpenGPT is a general-purpose chat frontend with no script, storyboard, studio,
-or vertical-product semantics. Reproduce the current ChatGPT web information
-architecture and interaction pattern closely: compact history sidebar, model
-selector, single conversation surface, and bottom composer. Replace only the
-product name and brand glyph; never use ChatGPT or OpenAI trademark assets.
+The normal responsibility chain is:
 
-The visual language stays close to the current neutral ChatGPT surface:
+`main.ts` -> `App.vue` -> router -> View -> feature Component
 
-- no decorative shadows, glass effects, or gradients;
-- use spacing and surface color instead of excessive borders;
-- use the neutral tokens in `src/styles/tokens.css`;
-- use Inspire Mono only for utility labels and the body stack for content;
-- respect visible keyboard focus and `prefers-reduced-motion`.
+This chain describes ownership. It is not a requirement to create one file for
+every visual layer.
 
-## Component Boundaries
+- `src/App.vue` contains the root router outlet.
+- `src/router/` maps URLs to Views and owns application-level redirects.
+- `src/views/` contains route entries and route-level coordination.
+- `src/components/` contains complete user-facing functions grouped by feature.
+- `src/composables/` contains reusable Vue state and behavior without markup.
+- `src/types/` contains shared TypeScript contracts.
+- `src/styles/` contains the Tailwind entrypoint, tokens, and unavoidable global
+  rules.
+- `src/assets/` contains fonts and static visual assets.
+- Future HTTP, upload, and SSE transport belongs in `src/api/`.
 
-Every introduced UI container with its own visual boundary, layout
-responsibility, state, or interaction must be a dedicated Vue component imported
-by its parent. Pages and route views assemble components; they must not contain
-large sidebar, message timeline, composer, modal, account, or authentication
-containers inline.
+Use the `@` alias for imports from `src/`.
 
-Do not split single icons or one-line text purely to increase component count.
-The boundary rule applies to meaningful spaces and behaviors.
+## Views
 
-Current structure:
+A View is the entry for a routed page.
 
-- `src/App.vue`: router outlet only.
-- `src/router/`: Vue Router configuration and compatibility routes.
-- `src/views/`: route-level assembly components.
-- `src/components/layout/`: application shells and cross-page layout.
-- `src/components/sidebar/`: conversation navigation regions.
-- `src/components/app-views/`: standalone surfaces opened from the left App Bar.
-- `src/components/chat/`: model selector, conversation header, timeline, notices, and composer.
-- `src/components/auth/`: authentication composition and form regions.
-- `src/components/dialogs/`: search and preview-information overlays.
-- `src/components/ui/`: small reusable interaction primitives.
-- `src/composables/`: local prototype state; future API concerns stay separate.
-- `src/styles/`: global tokens and base styles only.
+- View filenames use PascalCase and end with `View.vue`.
+- Views own route parameters, navigation, page-level state, and coordination.
+- A View may keep one-off page chrome and layout markup inline.
+- A View should import Components when the page is composed of multiple
+  complete, independently nameable functions.
+- Do not create a shared layout for one route. Shared route structure is
+  justified only when multiple routed Views actually use it.
 
-Use PascalCase for `.vue` components and `<script setup lang="ts">`. Use the `@`
-alias for imports from `src/`.
+The main navigation routes render their Views in one persistent right-side
+content region. Search and settings remain overlays because they are temporary
+interactions rather than destinations.
 
-## Local Prototype Data
+## Components
 
-Only content typed or files selected by the current user may appear as local
-prototype data. Conversations saved to `localStorage` must remain clearly local.
-Selected attachments must not be described as uploaded.
+A Component represents a complete, nameable user-facing function.
 
-When real integration begins:
+Create a Component only when at least one of these statements is true:
 
-- place HTTP, upload, and authenticated SSE transport in `src/api/`;
-- keep SSE parsing and event normalization out of visual components;
-- keep transient streaming/upload state out of persistent storage;
-- render model Markdown only through a sanitized dedicated component;
-- use authenticated `fetch` for SSE rather than unauthenticated `EventSource`;
-- do not expose internal Run or request IDs in normal UI.
+- it owns substantial independent interaction or lifecycle behavior;
+- it is genuinely reused;
+- it is a complete feature boundary that makes its parent easier to understand.
 
-## Routing
+Do not extract markup merely because it has a visual boundary, a layout role,
+its own CSS, or a convenient slot. Keep one-off headers, footers, rows, action
+groups, empty states, icons, labels, and simple event forwarding inline in the
+owning View or Component.
 
-Primary routes are `/`, `/c/:conversationId`, `/login`, and `/register`.
-Unrecognized legacy paths redirect to `/`; do not reintroduce the old studio
-route tree into this standalone client.
+A cohesive Component may be long. Prefer one readable feature implementation
+over a chain of small Components that only pass props and emits through several
+files.
 
-Do not fake route protection before authentication is connected.
+Pass parent-owned values down with typed `defineProps` and report actions or
+state changes with typed `defineEmits`. Components must not mutate props.
+Sibling Components communicate through their closest common parent. Do not add
+a global event bus for communication inside one page.
 
-## Dependencies
+### Component naming
 
-The application uses Vue, Vue Router, and `@lucide/vue`. Use Lucide icons
-consistently in application source. Prefer native Vue state and CSS for the
-current design prototype. Do not reintroduce React, Zustand, Ant Design, Radix
-React, React Router, or React motion packages.
+- Component filenames use PascalCase and end with `Component.vue`.
+- The text before `Component` must name the exact function implemented by the
+  file, for example `ConversationComponent.vue`,
+  `MessageInputComponent.vue`, `ConversationSearchComponent.vue`, and
+  `SettingsComponent.vue`.
+- Do not prefix local Component filenames or import identifiers with a product
+  brand such as `OpenGpt`.
+- Do not use vague structural names such as `Surface`, `Shell`, `Glyph`,
+  `Wrapper`, `Container`, generic `Panel`, or similar words that do not reveal
+  the function.
+- Do not create standalone `Header`, `Footer`, `Item`, `Actions`, `Toolbar`, or
+  `Tray` Components when they only render markup or forward props and events.
+- A Component must contain only the UI and behavior required by the function in
+  its filename. Do not add unrelated controls, page chrome, branding wrappers,
+  or speculative future UI to make the Component look more complete.
 
-Use CSS transitions for small UI changes. Add an animation or state dependency
-only when a real interaction needs it.
+Do not explicitly assign a Vue Component name. Do not use
+`defineOptions({ name: ... })`, `defineComponent({ name: ... })`, or an Options
+API `name` field. The `.vue` filename is the Component name. `defineProps` and
+`defineEmits` define the public contract only.
 
-## Commands and Verification
+## Feature-Based Organization
+
+Keep Component files directly under `src/components/` while the Component set
+is small. Do not create feature subdirectories in advance.
+
+Create a feature directory only after that feature has enough tightly related
+Components or local helpers that a flat list is genuinely difficult to
+navigate. When a feature directory becomes necessary, use PascalCase and end
+its name with `Component`, such as `ConversationComponent/`. Use the exact
+product function before the suffix; do not create lowercase feature directories
+or generic directories such as `ui/`, `panels/`, or `shared/`.
+
+Do not group files by visual fragments or generic layers such as `ui/`,
+`surface/`, or `panels/` when the files belong to one feature. Keep feature
+state, behavior, markup, and feature-local helpers close together.
+
+## Composables
+
+A Composable is reusable Vue state and behavior without a template.
+
+- Composable files and exported functions use `use<Feature>`.
+- Use a Composable for cohesive state, computed values, watchers, persistence,
+  or transport behavior shared by more than one owner.
+- Keep HTML, CSS, icons, and presentation decisions out of Composables.
+- Keep one-off UI state in its owning View or Component.
+- Return only the reactive state and actions callers need.
+
+Composables do not replace props and emits. They provide behavior to the state
+owner; component-tree communication remains explicit.
+
+## Routing, State, and API Boundaries
+
+- Each primary navigation destination has its own URL and renders in the shared
+  right-side content region.
+- `/` starts a local conversation and `/c/:conversationId` opens one.
+- `/library`, `/agent`, `/image`, `/static`, and `/sandbox` are feature
+  destinations.
+- `/login` and `/register` are standalone authentication pages.
+- Do not fake route protection before authentication is connected.
+- Prefer `ref`, `reactive`, and `computed` for locally owned state.
+- Add a global state library only when real cross-route state cannot remain
+  clear with Vue primitives and Composables.
+- Persist only durable, serializable, user-created state.
+- Keep dialog state, errors, pending uploads, streaming state, and abort
+  controllers out of `localStorage`.
+- A selected attachment is local metadata and must not be described as
+  uploaded.
+- Keep HTTP, upload, authenticated SSE transport, parsing, and event
+  normalization outside visual Components.
+- Use authenticated `fetch` streaming rather than unauthenticated `EventSource`
+  for future Agent Run SSE.
+
+## Styling, Icons, Motion, and Markdown
+
+- Vue templates must use semantic kebab-case class names. Do not place Tailwind
+  utility strings directly in `class`, `:class`, Transition class props, or
+  render-time string expressions.
+- Inject Tailwind utilities through the owning SFC's `<style scoped>` block
+  with `@reference` to `src/styles/index.css` and `@apply`.
+- Class names must describe the feature or element they identify. Use `is-*`
+  names for dynamic states. Do not replace utility lists with vague numbered or
+  purely visual names.
+- Keep injected styles local to the owning Component or View. Use native CSS
+  only where it is clearer for CSS variables, pseudo-classes, media queries, or
+  values that `@apply` cannot express reliably.
+- Keep global CSS limited to design tokens, font declarations, resets, and
+  behavior that cannot be scoped to one template.
+- `src/styles/tokens.css` is the single source of application colors, radii,
+  shared dimensions, and theme-level typography. Only palette tokens may
+  contain literal color values. Components and Views must consume semantic
+  `--color-*` tokens; do not place hex, `rgb()`, or `hsl()` values in their
+  scoped styles.
+- Keep the palette compact and derive interaction surfaces, borders, overlays,
+  and muted states from it. Add a semantic token only for a real visual role;
+  do not create a full numbered color scale speculatively.
+- Tailwind remains the utility system and CSS custom properties remain the
+  runtime theme boundary. Do not add Less only to centralize colors or theme
+  values.
+- If another theme mode is implemented, override the existing semantic tokens
+  from one root theme selector. Keep theme selection and persistence in one
+  state owner; Components must not set root theme classes independently.
+- Use existing design tokens before adding new colors, radii, shadows, or
+  dimensions.
+- Use Lucide for common interface icons. Do not add another icon library or
+  hand-draw common controls.
+- Keep product artwork as a static asset instead of wrapping it in a Vue
+  Component without functional behavior.
+- Use Tailwind or CSS for simple hover, focus, color, and opacity transitions.
+- Use GSAP for authored sequences, coordinated DOM/SVG motion, and timelines.
+- Create GSAP work after mount, scope it to the owning element, clean it up on
+  unmount, and respect `prefers-reduced-motion`.
+- Render assistant Markdown through one
+  `MarkdownRendererComponent.vue` backed by `markstream-vue`.
+- Do not use `v-html` for untrusted user or model content.
+
+Maintain the restrained conversation-product visual language: practical
+density, weak borders, stable surfaces, clear focus states, and responsive
+layouts.
+
+## Vue and TypeScript Style
+
+- Use `<script setup lang="ts">`.
+- Use 2-space indentation.
+- Keep imports grouped as external packages, `@/` imports, then relative
+  imports.
+- Keep props, emits, route contracts, and shared domain objects typed.
+- Prefer direct code over factories, generic wrappers, or configuration for one
+  value.
+- Do not add an abstraction for a possible future caller.
+- When renaming a file, update its imports, router records, and references in
+  the same change.
+
+## Verification
+
+Run:
 
 ```bash
-npm install
-npm run dev
 npm run typecheck
 npm run lint
 npm run build
-```
-
-For visual changes, verify at least 1440×900 and 390×844. Check sidebar
-collapse/drawer behavior, composer overlap, empty/local-only states, keyboard
-focus, and reduced-motion behavior.
-
-Before publishing, also verify:
-
-```bash
 git diff --check -- web-chatgpt
-rg --files web-chatgpt/src -g '*.tsx' -g '*.jsx'
-rg -n '@iconify/vue|@phosphor-icons/vue|@tabler/icons-vue|react-dom|react-router-dom|zustand|lucide-react|@vitejs/plugin-react' web-chatgpt/src web-chatgpt/vite.config.ts
-rg -n 'initialScripts|initialVideoProjects|initialCommunityItems|EXAMPLE_PROMPTS' web-chatgpt/src
 ```
 
-The last four searches should produce no offending application code.
+For visual changes, verify affected routes at desktop and mobile widths. Check
+sidebar collapse and drawer behavior, composer overlap, local-only states,
+keyboard focus, and reduced-motion behavior.
 
-## Commits
+## Security and Contributions
 
-Follow the root `AGENTS.md`: Conventional Commit type and scope stay lowercase
-English, while the subject and body use concise Chinese. Never wrap commit
-messages with `@`.
+- Keep secrets out of the repository.
+- Expose only client-safe configuration through `VITE_*` variables.
+- Validate API payloads and file metadata before sending them.
+- Follow the root repository Conventional Commit rules.
+- Keep the lowercase English commit type and scope, and use a concise Chinese
+  subject and body.
+- Never wrap commit messages in `@` characters.

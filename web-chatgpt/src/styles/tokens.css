@@ -1,26 +1,71 @@
 :root {
   color-scheme: light;
 
-  --canvas: #ffffff;
-  --surface: #ffffff;
-  --surface-muted: #f7f7f7;
-  --surface-strong: #efefef;
-  --sidebar: #f7f7f7;
-  --sidebar-hover: #ececec;
-  --ink: #0d0d0d;
-  --muted: #6b6b6b;
-  --faint: #9a9a9a;
-  --accent: #0d0d0d;
-  --accent-hover: #2f2f2f;
-  --accent-soft: #f0f0f0;
-  --signal: #10a37f;
-  --signal-soft: #e7f6f2;
-  --danger: #d00e17;
-  --danger-soft: #fff0f0;
-  --focus-ring: #0d0d0d;
-  --line: rgb(13 13 13 / 6%);
-  --line-strong: rgb(13 13 13 / 10%);
-  --overlay: rgb(0 0 0 / 36%);
+  --palette-paper: #ffffff;
+  --palette-mist: #f7f7f7;
+  --palette-graphite: #0d0d0d;
+  --palette-slate: #6b6b6b;
+  --palette-danger: #d00e17;
+
+  --color-canvas: var(--palette-paper);
+  --color-surface: var(--palette-paper);
+  --color-surface-muted: var(--palette-mist);
+  --color-surface-emphasis: color-mix(
+    in srgb,
+    var(--palette-graphite) 6%,
+    var(--palette-paper)
+  );
+  --color-surface-hover: color-mix(
+    in srgb,
+    var(--palette-graphite) 8%,
+    var(--palette-paper)
+  );
+  --color-text: var(--palette-graphite);
+  --color-text-muted: var(--palette-slate);
+  --color-text-subtle: color-mix(
+    in srgb,
+    var(--palette-graphite) 58%,
+    var(--palette-paper)
+  );
+  --color-action-primary: var(--palette-graphite);
+  --color-action-primary-hover: color-mix(
+    in srgb,
+    var(--palette-graphite) 86%,
+    var(--palette-paper)
+  );
+  --color-on-action: var(--palette-paper);
+  --color-danger: var(--palette-danger);
+  --color-focus-ring: var(--palette-graphite);
+  --color-border-subtle: color-mix(
+    in srgb,
+    var(--palette-graphite) 6%,
+    transparent
+  );
+  --color-border: color-mix(
+    in srgb,
+    var(--palette-graphite) 10%,
+    transparent
+  );
+  --color-border-control: color-mix(
+    in srgb,
+    var(--palette-graphite) 16%,
+    transparent
+  );
+  --color-border-focus: color-mix(
+    in srgb,
+    var(--palette-graphite) 22%,
+    transparent
+  );
+  --color-overlay: color-mix(
+    in srgb,
+    var(--palette-graphite) 36%,
+    transparent
+  );
+  --color-scrollbar-thumb: color-mix(
+    in srgb,
+    var(--palette-graphite) 18%,
+    transparent
+  );
 
   --font-body:
     system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
@@ -35,6 +80,7 @@
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
+  --radius-composer: 28px;
   --radius-pill: 999px;
 
   --space-1: 0.25rem;

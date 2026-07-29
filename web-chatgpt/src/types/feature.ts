@@ -1,4 +1,4 @@
-export type AppViewId =
+export type FeatureId =
   | "library"
   | "agent"
   | "image"

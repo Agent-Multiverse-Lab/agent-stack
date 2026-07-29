@@ -1,29 +1,54 @@
 import { createRouter, createWebHistory } from "vue-router"
 
-import OpenGptChatView from "@/views/OpenGptChatView.vue"
+import AuthenticationView from "@/views/AuthenticationView.vue"
+import ChatView from "@/views/ChatView.vue"
+import NavigationView from "@/views/NavigationView.vue"
+import UnavailableFeatureView from "@/views/UnavailableFeatureView.vue"
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
       path: "/",
-      name: "chat",
-      component: OpenGptChatView
-    },
-    {
-      path: "/c/:conversationId",
-      name: "conversation",
-      component: OpenGptChatView
+      component: NavigationView,
+      children: [
+        {
+          path: "",
+          name: "chat",
+          component: ChatView,
+          meta: { title: "Chat" }
+        },
+        {
+          path: "c/:conversationId",
+          name: "conversation",
+          component: ChatView,
+          props: (route) => ({
+            conversationId:
+              typeof route.params.conversationId === "string"
+                ? route.params.conversationId
+                : undefined
+          }),
+          meta: { title: "Chat" }
+        },
+        {
+          path: ":featureId(library|agent|image|static|sandbox)",
+          name: "feature",
+          component: UnavailableFeatureView,
+          props: true
+        }
+      ]
     },
     {
       path: "/login",
       name: "login",
-      component: () => import("@/views/LoginView.vue")
+      component: AuthenticationView,
+      props: { mode: "login" }
     },
     {
       path: "/register",
       name: "register",
-      component: () => import("@/views/RegisterView.vue")
+      component: AuthenticationView,
+      props: { mode: "register" }
     },
     {
       path: "/:pathMatch(.*)*",
