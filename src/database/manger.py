@@ -1,7 +1,6 @@
 import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -20,9 +19,6 @@ _NOT_INITIALIZED_MSG = "PostgreManger is not initialized."
 
 class PostgreManger:
     """PostgreSQL 运行时资源的唯一管理者。
-
-    只负责 engine / session factory / schema 初始化 / 资源释放的生命周期收口，
-    不涉及具体业务表设计、agent 执行、ARQ 或 Redis Stream。
     """
 
     def __init__(self) -> None:
@@ -30,7 +26,7 @@ class PostgreManger:
         self.engine: AsyncEngine | None = None
         self.session_maker: async_sessionmaker[AsyncSession] | None = None
         # LangGraph checkpoint 连接池，接入前用 None 占位。
-        self.langgraph_checkpointer_pool: Any | None = None
+        self.langgraph_checkpointer_pool: str = None
         # 初始化标记，防止重复初始化，并作为依赖方法的显式前置条件。
         self.initialized: bool = False
 

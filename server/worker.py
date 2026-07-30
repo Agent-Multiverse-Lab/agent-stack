@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from arq.connections import RedisSettings
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, BaseMessageChunk
 from sqlalchemy import select
 
 from server.service.agent_run_service import publish_agent_run_event
@@ -258,6 +258,74 @@ async def write_agent_run_event(
     )
 
 
+class StreamEventSmoother:
+    """按字符阈值合并并发布连续的消息流事件。"""
+
+    def __init__(
+        self,
+        *,
+        thread_id: str,
+        run_id: str,
+        character_limit: int,
+    ) -> None:
+        """初始化单个 Agent Run 的消息缓冲池。"""
+
+        if character_limit < 1:
+            raise ValueError("character_limit 必须大于 0")
+
+        self.thread_id = thread_id
+        self.run_id = run_id
+        self.character_limit = character_limit
+        self.buffer_pool: list[
+            tuple[BaseMessageChunk, dict[str, Any]]
+        ] = []
+
+    async def buffer(
+        self,
+        payload: tuple[BaseMessageChunk, dict[str, Any]],
+    ) -> None:
+        """缓冲消息 chunk，达到字符阈值后立即释放。"""
+
+        chunk, metadata = payload
+        if self.buffer_pool:
+            buffered_chunk, buffered_metadata = self.buffer_pool[-1]
+            if (
+                type(buffered_chunk) is not type(chunk)
+                or buffered_chunk.id != chunk.id
+                or buffered_metadata.get("namespace") != metadata.get("namespace")
+                or buffered_metadata.get("langgraph_node")
+                != metadata.get("langgraph_node")
+            ):
+                await self.release()
+
+        self.buffer_pool.append(payload)
+        buffered_characters = sum(
+            len(message_chunk.text)
+            for message_chunk, _ in self.buffer_pool
+        )
+        if buffered_characters >= self.character_limit:
+            await self.release()
+
+    async def release(self) -> None:
+        """将缓冲池合并为一条 messages 事件并写入 Redis Stream。"""
+
+        if not self.buffer_pool:
+            return
+
+        merged_chunk, _ = self.buffer_pool[0]
+        for chunk, _ in self.buffer_pool[1:]:
+            merged_chunk = merged_chunk + chunk
+        metadata = self.buffer_pool[-1][1]
+
+        await write_agent_run_event(
+            run_id=self.run_id,
+            payload=(merged_chunk, metadata),
+            event_type="messages",
+            thread_id=self.thread_id,
+        )
+        self.buffer_pool.clear()
+
+
 async def process_agent_run(ctx, run_id: str):
     agent_run_event: AgentRun | None = await _get_agent_run(run_id)
     if agent_run_event is None:
@@ -350,35 +418,48 @@ async def process_agent_run(ctx, run_id: str):
         },
     )
     result_text = ""
+    stream_event_smoother = StreamEventSmoother(
+        thread_id=str(thread_id),
+        run_id=run_id,
+        character_limit=20,
+    )
     try:
-        async with postgres_manager.get_async_session_context() as db:
-            stream_thread_events = stream_agent_response(
-                agent_slug=agent_slug,  # ty:ignore[invalid-argument-type]
-                thread_id=thread_id,  # ty:ignore[invalid-argument-type]
-                runtime_metadata=metadata,
-                thread_input_message=agent_input_message_formatted,
-                current_user=user,
-                db=db,
-            )
-
-            async for event_type, payload in _consume_stream_with_cancel(
-                stream_thread_events,
-                run_id=run_id,
-            ):
-                if event_type == "values":
-                    messages = payload["messages"]
-                    if messages and isinstance(messages[-1], AIMessage):
-                        result_text = str(messages[-1].text)
-                logger.info(
-                    f"Agent run 事件输出：run_id={run_id}, "
-                    f"event_type={event_type}, payload={payload}"
-                )
-                await write_agent_run_event(
-                    run_id=run_id,
-                    payload=payload,
-                    event_type=event_type,
+        try:
+            async with postgres_manager.get_async_session_context() as db:
+                stream_thread_events: AsyncIterator = stream_agent_response(
+                    agent_slug=agent_slug,  # ty:ignore[invalid-argument-type]
                     thread_id=thread_id,  # ty:ignore[invalid-argument-type]
+                    runtime_metadata=metadata,
+                    thread_input_message=agent_input_message_formatted,
+                    current_user=user,
+                    db=db,
                 )
+
+                async for event_type, payload in _consume_stream_with_cancel(
+                    stream_thread_events,
+                    run_id=run_id,
+                ):
+                    if event_type == "values":
+                        messages = payload["messages"]
+                        if messages and isinstance(messages[-1], AIMessage):
+                            result_text = str(messages[-1].text)
+                    logger.info(
+                        f"Agent run 事件输出：run_id={run_id}, "
+                        f"event_type={event_type}, payload={payload}"
+                    )
+                    if event_type == "messages":
+                        await stream_event_smoother.buffer(payload)
+                        continue
+
+                    await stream_event_smoother.release()
+                    await write_agent_run_event(
+                        run_id=run_id,
+                        payload=payload,
+                        event_type=event_type,
+                        thread_id=thread_id,  # ty:ignore[invalid-argument-type]
+                    )
+        finally:
+            await stream_event_smoother.release()
     except AgentRunCancelRequested:
         logger.info(f"Agent run 收到取消请求：{run_id}")
         return await _finalize_cancelled_run(

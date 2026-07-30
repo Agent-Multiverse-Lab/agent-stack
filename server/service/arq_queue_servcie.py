@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
+
+from redis.asyncio.client import PubSub
 
 from src.configs import config
 from src.storage import create_arq_pool, get_async_redis_client
@@ -16,6 +20,24 @@ async def get_arq_pool():
     if _arq_pool is None:
         _arq_pool = await create_arq_pool()
     return _arq_pool
+
+
+@asynccontextmanager
+async def subscribe_redis_channel(channel: str):
+    """订阅信道，并在退出上下文时关闭 PubSub。"""
+
+    redis = await get_async_redis_client()
+    pubsub = redis.pubsub()
+    try:
+        await pubsub.subscribe(channel)
+    except Exception:
+        await pubsub.aclose()
+        raise
+
+    try:
+        yield pubsub
+    finally:
+        await pubsub.aclose()
 
 
 def queue_event_stream_key(run_id: str) -> str:
