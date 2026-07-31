@@ -10,9 +10,11 @@ from redis.asyncio.client import PubSub
 
 from src.configs import config
 from src.storage import create_arq_pool, get_async_redis_client
+from src.utils import logger
 
 _arq_pool = None
 RUN_REDIS_TTL_SECONDS = 24 * 60 * 60
+AGENT_RUN_CANCEL_CHANNEL = "run:cancel"
 
 
 async def get_arq_pool():
@@ -23,7 +25,7 @@ async def get_arq_pool():
 
 
 @asynccontextmanager
-async def subscribe_redis_channel(channel: str):
+async def subscribe_redis_channel(channel: str) -> AsyncIterator[PubSub]:
     """订阅信道，并在退出上下文时关闭 PubSub。"""
 
     redis = await get_async_redis_client()
@@ -110,20 +112,54 @@ async def publish_agent_run_cancel_signal(
     *,
     reason: str | None = None,
 ) -> None:
-    """写入供 Worker 轮询的 Agent Run 取消信号。"""
+    """持久化 Agent Run 取消信号并通过 Pub/Sub 唤醒 Worker。"""
 
-    redis = await get_async_redis_client()
-    payload = {
-        "run_id": run_id,
-        "status": "cancel_requested",
-        "reason": reason or "cancel_requested",
-        "created_at": datetime.now(UTC).isoformat(),
-    }
-    await redis.set(
-        agent_run_cancel_key(run_id),
-        json.dumps(payload, ensure_ascii=False),
-        ex=RUN_REDIS_TTL_SECONDS,
-    )
+    try:
+        redis = await get_async_redis_client()
+        payload = {
+            "run_id": run_id,
+            "status": "cancel_requested",
+            "reason": reason or "cancel_requested",
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+        await redis.set(
+            agent_run_cancel_key(run_id),
+            json.dumps(payload, ensure_ascii=False),
+            ex=RUN_REDIS_TTL_SECONDS,
+        )
+        await redis.publish(AGENT_RUN_CANCEL_CHANNEL, run_id)
+    except Exception:
+        logger.exception(f"Agent Run 取消信号发布失败：{run_id}")
+        raise
+
+
+async def wait_agent_run_cancel_signal(run_id: str) -> bool:
+    """等待指定 Agent Run 的持久化取消信号或 Pub/Sub 消息。"""
+
+    try:
+        if await has_agent_run_cancel_signal(run_id):
+            return True
+
+        async with subscribe_redis_channel(AGENT_RUN_CANCEL_CHANNEL) as pubsub:
+            while True:
+                message = await pubsub.get_message(timeout=None)
+                if message is None:
+                    continue
+
+                if message.get("type") == "subscribe":
+                    # 每次订阅确认后重查 key，同时覆盖首次订阅竞态和断线重订阅。
+                    if await has_agent_run_cancel_signal(run_id):
+                        return True
+                    continue
+
+                message_run_id = message.get("data")
+                if isinstance(message_run_id, bytes):
+                    message_run_id = message_run_id.decode()
+                if message_run_id == run_id:
+                    return True
+    except Exception:
+        logger.exception(f"Agent Run 取消信号监听失败：{run_id}")
+        raise
 
 
 async def has_agent_run_cancel_signal(run_id: str) -> bool:

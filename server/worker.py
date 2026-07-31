@@ -11,6 +11,7 @@ from server.service.agent_run_service import publish_agent_run_event
 from server.service.arq_queue_servcie import (
     clear_agent_run_cancel_signal,
     has_agent_run_cancel_signal,
+    wait_agent_run_cancel_signal,
 )
 from server.service.input_message_service import build_agent_input_msg
 from server.service.thread_service import stream_agent_response
@@ -28,9 +29,6 @@ from src.utils import logger
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-RUN_CANCEL_POLL_SECONDS = 0.2
-
-
 class AgentRunCancelRequested(Exception):
     """Worker 收到已落库 Run 的取消信号。"""
 
@@ -38,8 +36,6 @@ class AgentRunCancelRequested(Exception):
 
 
 async def ensure_agents_exist() -> None:
-    """只补充缺失的代码注册 Agent，不刷新已有数据库记录。"""
-
     agents = agent_manager.list_top_level_agents()
     subagents = agent_manager.list_subagents()
     async with postgres_manager.get_async_session_context() as session:
@@ -149,43 +145,61 @@ async def _get_agent_run(run_id: str):
         return await agent_run_repo.get_by_id(run_id)
 
 
-async def _wait_for_cancel_signal(run_id: str) -> None:
-    while not await has_agent_run_cancel_signal(run_id):
-        await asyncio.sleep(RUN_CANCEL_POLL_SECONDS)
-
-
 async def _consume_stream_with_cancel(
     stream: AsyncIterator[tuple[str, Any]],
     *,
     run_id: str,
 ) -> AsyncIterator[tuple[str, Any]]:
-    cancel_task = asyncio.create_task(_wait_for_cancel_signal(run_id))
-    next_task: asyncio.Task | None = None
+    """为一个 Agent Run 创建取消事件并逐条消费流。"""
+
+    cancel_event = asyncio.Event()
+    signal_task = asyncio.create_task(
+        wait_cancel_event(run_id, cancel_event)
+    )
+    cancel_task = asyncio.create_task(cancel_event.wait())
+    stream_task: asyncio.Task[tuple[str, Any]] | None = None
     try:
         while True:
-            next_task = asyncio.create_task(stream.__anext__())
+            stream_task = asyncio.create_task(anext(stream))
             done, _ = await asyncio.wait(
-                {next_task, cancel_task},
+                {stream_task, cancel_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if cancel_task in done:
-                cancel_task.result()
-                next_task.cancel()
-                await asyncio.gather(next_task, return_exceptions=True)
+                stream_task.cancel()
+                await asyncio.gather(stream_task, return_exceptions=True)
+                await signal_task
                 raise AgentRunCancelRequested(run_id)
 
             try:
-                yield next_task.result()
+                yield stream_task.result()
             except StopAsyncIteration:
                 return
     finally:
-        for task in (next_task, cancel_task):
+        tasks = (stream_task, cancel_task, signal_task)
+        for task in tasks:
             if task is not None and not task.done():
                 task.cancel()
         await asyncio.gather(
-            *(task for task in (next_task, cancel_task) if task is not None),
+            *(task for task in tasks if task is not None),
             return_exceptions=True,
         )
+
+
+async def wait_cancel_event(
+    run_id: str,
+    event: asyncio.Event,
+) -> None:
+    """等待 Redis 取消信号并设置当前事件循环中的 Event。"""
+
+    try:
+        await wait_agent_run_cancel_signal(run_id)
+    except Exception:
+        logger.exception(f"Agent Run 取消事件等待失败：{run_id}")
+        raise
+    finally:
+        # Redis 异常也必须唤醒等待方，再由等待方取得 watcher 的真实异常。
+        event.set()
 
 
 async def _finalize_cancelled_run(
@@ -332,7 +346,7 @@ async def process_agent_run(ctx, run_id: str):
         logger.error(f"当前agent运行id：{run_id} 不存在")
         return
 
-    # FIXME: agent_status 是当前 run 生命周期的事实字段，避免再读取旧 status 默认值。
+    # agent_status 是当前 Run 生命周期的唯一状态字段。
     initial_status = str(agent_run_event.agent_status)
     if initial_status in {"completed", "failed", "cancelled"}:
         return {"run_id": run_id, "status": initial_status}
