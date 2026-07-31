@@ -31,6 +31,11 @@ A general-purpose multi-agent system for exploring agent orchestration, interact
 
 ![multi-agent-s2c 系统架构图](./doc/image.png)
 
+## 数据库迁移样例
+
+仓库当前只提供不包含真实 Schema 变更的 Alembic 迁移样例。目录边界和
+`upgrade()`、`downgrade()` 使用方式见 [`migrate/README.md`](./migrate/README.md)。
+
 ## Contributing
 
 See commit and PR conventions in [CONTRIBUTING.md](./CONTRIBUTING.md).

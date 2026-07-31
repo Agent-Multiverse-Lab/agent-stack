@@ -39,7 +39,8 @@ async def enqueue_agent_run(run_id: str) -> None: ...
 async def publish_agent_run_event(run_id: str, event: dict[str, Any]) -> str: ...
 async def read_agent_run_events(...) -> list[tuple[str, dict[str, Any]]]: ...
 async def stream_agent_run_event(...) -> AsyncIterator[str]: ...
-async def request_cancel_agent_run(*, run_id: str, current_uid: str, reason: str | None = None) -> dict[str, Any]: ...
+async def cancel_run_service(*, run_id: str, current_user_id: str, db: AsyncSession) -> dict[str, str]: ...
+async def request_cancel_agent_run(*, run_id: str, current_uid: str, db: AsyncSession) -> AgentRun: ...
 ```
 
 队列服务提供直接 Redis 操作：
@@ -140,14 +141,15 @@ worker 不直接拼 Redis key。
 
 ## 8. 取消顺序
 
-取消入口必须先把 PostgreSQL 状态写成 `cancel_requested`，提交成功后才能发布
-Redis 取消信号。请求取消时不写终态 Stream 事件；只有 Worker 确认 Agent
+`POST /api/agent/runs/{run_id}/cancel` 通过 `cancel_run_service(...)` 调用统一的
+`request_cancel_agent_run(...)`。取消入口必须先把 PostgreSQL 状态写成
+`cancel_requested`，提交成功后才能发布 Redis 取消信号。请求取消时不写终态
+Stream 事件；只有 Worker 确认 Agent
 消费已经停止后，才能把状态写成 `cancelled` 并发布最终 `end`。
 
-当目标 Run 的 `run_type` 为 `chat` 时，它是主对话 Run；同一事务内还要通过
-`AgentRunRepository.list_active_child_runs(...)` 把当前用户下的活跃直接
-子 Agent Run 一并标记为 `cancel_requested`，提交后分别发布取消信号。
-`run_type="subagent"` 的 Run 只取消自身，不影响主 Run 或兄弟 Run。
+取消入口通过 `AgentRunRepository.list_active_child_runs(...)` 查询目标 Run
+下当前用户的活跃直接子 Agent Run；同一事务内先把子 Run、再把目标 Run 标记为
+`cancel_requested`，提交后分别发布取消信号。取消范围不按 `run_type` 分支。
 
 `parent_run_id` 只表示 Run 之间的关联：连续的主对话 Run 也可能记录上一条 Run，
 因此取消、Worker Agent 解析和子 Agent 查询都不能用它推断 Run 类型。

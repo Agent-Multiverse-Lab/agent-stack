@@ -58,8 +58,12 @@ Current top-level responsibilities and construction rules:
 - `docker/`: Dockerfiles and Compose topology only. Keep service wiring,
   environment mapping, volumes, and health checks declarative; application
   behavior remains in production modules.
-- `scripts/`: repeatable maintenance and migration entrypoints. Require explicit
-  inputs, keep operations observable, and avoid import-time side effects.
+- `migrate/`: Alembic environment, revision template, and ordered database
+  Schema versions. Keep only Schema changes and tightly coupled data backfills
+  here; do not add application startup, connection lifecycle, business seeding,
+  Worker, Agent, queue, or storage behavior.
+- `scripts/`: repeatable maintenance entrypoints. Require explicit inputs, keep
+  operations observable, and avoid import-time side effects.
 - `doc/`: architecture diagrams and supporting project documentation. Keep
   diagrams aligned with the boundaries defined in this guide.
 
@@ -86,8 +90,8 @@ internal subagents are `SearchAgent` and `OutlineAgent` under
 - Lifespan startup verifies JWT configuration and initializes the API process's PostgreSQL resources. It does not create tables or seed records. Shutdown closes the shared async Redis client before disposing PostgreSQL.
 - HTTP routes live under `server/router/`: `auth_router.py`, `thread_router.py`, `agent_router.py`, `knowledge_router.py`, `library_router.py`, and `model_router.py`.
 - Thread creation, public agent listing, and temporary attachment upload live in `server/router/thread_router.py`. Thread-level agent execution helpers live in `server/service/thread_service.py`.
-- Agent Run creation and SSE exposure live in `server/router/agent_router.py`. Run orchestration helpers, including the shared `request_cancel_agent_run(...)` path for top-level and child Runs, live in `server/service/agent_run_service.py`.
-- `server/service/arq_queue_servcie.py` owns ARQ pool access, direct Redis Stream `XADD`/`XREAD` operations, and Agent Run cancellation-key `SET`/`EXISTS`/`DELETE` operations. Keep the existing filename spelling unless a dedicated rename is requested.
+- Agent Run creation, cancellation, and SSE exposure live in `server/router/agent_router.py`. The cancellation endpoint calls `cancel_run_service(...)`, while the shared `request_cancel_agent_run(...)` path handles top-level and child Runs in `server/service/agent_run_service.py`.
+- `server/service/arq_queue_servcie.py` owns ARQ pool access, direct Redis Stream `XADD`/`XREAD` operations, Agent Run cancellation-key `SET`/`EXISTS`/`DELETE` operations, and cancellation Pub/Sub `PUBLISH`/blocking `get_message` operations. Keep the existing filename spelling unless a dedicated rename is requested.
 - `server/service/subagent_service.py` owns child conversation/message/Run persistence, parent-child ownership checks, and enqueue handoff. It does not own generic Agent Run cancellation; `SubAgentMiddleware` verifies parent-child scope there before calling `request_cancel_agent_run(...)`.
 - `src/storage/redis/redis_manger.py` owns only Redis/ARQ connection creation, lazy shared-client initialization, and close behavior. It must not own Agent Run semantics.
 - `server/worker.py` is the independent ARQ worker entrypoint and the single startup owner for database bootstrap. Worker startup initializes PostgreSQL, creates missing model tables with `checkfirst=True`, applies the non-destructive `AgentRun.run_type` column/index patch for existing databases, and inserts only missing public/internal Agent registration rows before accepting jobs. It must not drop tables, seed users or conversations, or overwrite existing Agent rows. Worker shutdown only disposes its own PostgreSQL resources; it does not reuse the FastAPI lifespan.
@@ -183,7 +187,7 @@ Subagent runs reuse that same durable flow. `task` creates and enqueues a child 
 Important current boundary:
 
 - `process_agent_run(...)` publishes `messages`, `values`, and `agent_execute_event` entries to `run:events:{run_id}`. Lifecycle notifications use `type: "status"` with `status: "running"`; every terminal notification uses `type: "end"` with `status: "completed"`, `"failed"`, or `"cancelled"`.
-- Cancellation is two-phase: `request_cancel_agent_run(...)` first persists `cancel_requested`, then writes `run:cancel:{run_id}`. Cancelling a `run_type="chat"` Run also marks all of that user's active direct `run_type="subagent"` Runs in the same transaction and signals each one after commit; cancelling a subagent Run affects only that child. The worker stops consuming each Agent stream, persists `cancelled`, publishes the terminal `end` event, and clears the cancel key.
+- Cancellation is two-phase: `POST /api/agent/runs/{run_id}/cancel` passes the request-scoped database session through `cancel_run_service(...)` to `request_cancel_agent_run(...)`. The latter first marks the target Run and all of that user's active direct child Runs as `cancel_requested` in one transaction, then writes each `run:cancel:{run_id}` and publishes its Run ID to the `run:cancel` channel after commit. Cancellation scope does not branch on `run_type`. The worker first checks the durable cancel key and otherwise blocks on Pub/Sub; the matching message sets a Run-local `asyncio.Event`, stops the current Agent stream awaitable, persists `cancelled`, publishes the terminal `end` event, and clears the cancel key.
 - Do not describe enqueueing as invoking the SSE endpoint. The worker produces events, while consumers independently open the SSE read endpoint.
 - Rebuild the Compose worker after backend source changes because the worker image does not bind-mount the checkout.
 
@@ -197,10 +201,10 @@ Important current boundary:
 - `Conversation.id` is the internal database primary key; `Conversation.thread_id` is the external conversation/runtime identifier.
 - `Message.id` identifies the persisted triggering input. `AgentRun.trigger_message_id` lets the worker reconstruct input from only `run_id`.
 - `AgentRun.run_type` is the execution-kind flag: `chat` for a main conversation Run and `subagent` for an internally delegated Run. `AgentRun.parent_run_id` remains a relationship field and may also link consecutive main conversation Runs.
-- `AgentRun.agent_status` is the current lifecycle field. The older `AgentRun.status` field is temporarily mirrored for compatibility and should not become a second source of truth.
+- `AgentRun.agent_status` is the only lifecycle field.
 - Current coarse run states are `pending`, `running`, `cancel_requested`, `completed`, `failed`, and `cancelled`.
 - Redis/ARQ queue state is separate from PostgreSQL run state.
-- ARQ job IDs use `run:{run_id}`. Redis Stream event keys use `run:events:{run_id}`. Cancellation keys use `run:cancel:{run_id}`.
+- ARQ job IDs use `run:{run_id}`. Redis Stream event keys use `run:events:{run_id}`. Cancellation keys use `run:cancel:{run_id}`; the cancellation Pub/Sub channel is `run:cancel`.
 - Redis Stream IDs are event cursors, not Agent Run IDs and not durable business status.
 
 ## Agent Responsibilities
@@ -256,6 +260,13 @@ ARQ worker:
 uv run --no-sync arq server.worker.WorkerSettings
 ```
 
+Database migration sample:
+
+```bash
+uv run --no-sync alembic upgrade head
+uv run --no-sync alembic downgrade -1
+```
+
 Local infrastructure and worker through Compose:
 
 ```bash
@@ -308,6 +319,7 @@ git diff --check
 - Read project source and config files using UTF-8 unless another encoding is explicitly required.
 - Preserve user changes in the working tree; never revert unrelated modifications.
 - Add tests or compile checks for behavior changes with non-trivial blast radius.
+- Worker jobs, long-running async loops, and infrastructure I/O boundaries must catch unexpected `Exception`s with `try/except`, call the existing `logger.exception(...)` with relevant IDs and context, and re-raise unless the use case explicitly defines recovery. Do not silently swallow errors or log normal `asyncio.CancelledError` as a failure.
 - Treat current FIXME/TODO comments as incomplete work, not proof that the described behavior already exists.
 - If implementing run-event delivery, wire and verify worker event production and backend SSE reading.
 - Do not create an abstraction for logic used only once, and do not reserve flexibility or configurability for hypothetical future requirements.
