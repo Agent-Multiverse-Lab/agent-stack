@@ -6,6 +6,8 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from server.service.arq_queue_servcie import (
     RUN_REDIS_TTL_SECONDS,
     get_arq_pool,
@@ -15,6 +17,7 @@ from server.service.arq_queue_servcie import (
     write_agent_run_stream_event,
 )
 from src.configs import config
+from src.database.models import AgentRun
 from src.database.repositories import AgentRunRepository, ConversationRepository
 from src.database.session import session_context
 from src.utils import logger
@@ -237,59 +240,72 @@ async def stream_agent_run_events(
                 return
 
 
+async def cancel_run_service(
+    *,
+    run_id: str,
+    current_user_id: str,
+    db: AsyncSession,
+) -> dict[str, str]:
+    """取消当前用户的 Agent Run，并返回接口所需的运行信息。"""
+
+    run = await request_cancel_agent_run(
+        run_id=run_id,
+        current_uid=current_user_id,
+        db=db,
+    )
+    return {
+        "run_id": str(run.id),
+        "thread_id": str(run.thread_id),
+        "agent_id": str(run.agent_id),
+        "status": str(run.agent_status),
+    }
+
+
 async def request_cancel_agent_run(
     *,
     run_id: str,
     current_uid: str,
-    reason: str | None = None,
-) -> dict[str, Any]:
-    """持久化任意 Agent Run 的取消请求；主对话 Run 同时取消活跃子 Run。"""
+    db: AsyncSession,
+) -> AgentRun:
+    """持久化目标 Agent Run 及其活跃子 Run 的取消请求。"""
 
     signal_run_ids: list[str] = []
-    async with session_context() as db:
-        run_repository = AgentRunRepository(db)
-        run = await run_repository.get_by_id_for_user(
-            run_id=run_id,
-            uid=current_uid,
-        )
-        if run is None:
-            raise ValueError(f"Agent Run 不存在或不属于当前用户：{run_id}")
+    run_repository = AgentRunRepository(db)
+    run = await run_repository.get_by_id_for_user(
+        run_id=run_id,
+        uid=current_uid,
+    )
+    if run is None:
+        raise ValueError(f"Agent Run 不存在或不属于当前用户：{run_id}")
 
-        if str(run.run_type) == "chat":
-            child_runs = await run_repository.list_active_child_runs(
-                parent_run_id=run_id,
-                uid=current_uid,
-            )
-            for child_run in child_runs:
-                child_run = await run_repository.request_cancel(str(child_run.id))
-                if (
-                    child_run is not None
-                    and str(child_run.agent_status) == "cancel_requested"
-                ):
-                    signal_run_ids.append(str(child_run.id))
+    child_runs = await run_repository.list_active_child_runs(
+        parent_run_id=run_id,
+        uid=current_uid,
+    )
+    for child_run in child_runs:
+        child_run = await run_repository.request_cancel(str(child_run.id))
+        if (
+            child_run is not None
+            and str(child_run.agent_status) == "cancel_requested"
+        ):
+            signal_run_ids.append(str(child_run.id))
 
-        run = await run_repository.request_cancel(run_id)
-        if run is None:
-            raise ValueError(f"Agent Run 不存在：{run_id}")
-        status = str(run.agent_status)
-        if status == "cancel_requested":
-            signal_run_ids.append(run_id)
-        record = {
-            "run_id": str(run.id),
-            "thread_id": str(run.thread_id),
-            "agent_id": str(run.agent_id),
-            "status": status,
-            "terminal": status in _TERMINAL_RUN_STATUSES,
-            "error": str(run.error) if run.error is not None else None,
-        }
+    run = await run_repository.request_cancel(run_id)
+    if run is None:
+        raise ValueError(f"Agent Run 不存在：{run_id}")
+    if str(run.agent_status) == "cancel_requested":
+        signal_run_ids.append(run_id)
+
+    # Redis 信号只能在取消状态持久化成功后发布，避免 Worker 先收到信号。
+    await db.commit()
 
     await asyncio.gather(
         *(
-            publish_agent_run_cancel_signal(signal_run_id, reason=reason)
+            publish_agent_run_cancel_signal(signal_run_id)
             for signal_run_id in signal_run_ids
         )
     )
-    return record
+    return run
 
 
 def _build_agent_run_event(run_id: str, event: dict[str, Any]) -> dict[str, Any]:

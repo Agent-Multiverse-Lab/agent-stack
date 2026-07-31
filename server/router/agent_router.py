@@ -9,7 +9,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.service.agent_run_service import enqueue_agent_run, stream_agent_run_events
+from server.service.agent_run_service import (
+    cancel_run_service,
+    enqueue_agent_run,
+    stream_agent_run_events,
+)
 from server.utils.auth import AuthenticatedUser
 from src.configs import config
 from src.database import get_db
@@ -138,7 +142,25 @@ async def create_agent_run(agentrun_request: AgentRunCreateRequest,
         ),
     }
 
-    
+
+@agent_router.post("/runs/{run_id}/cancel")
+async def cancel_agent_run(
+    run_id: str,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """请求取消当前用户的 Agent Run。"""
+
+    try:
+        return await cancel_run_service(
+            run_id=run_id,
+            current_user_id=current_user.uid,
+            db=db,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @agent_router.get("/runs/{run_id}/events")        
 async def stream_run_event(
     run_id: str,

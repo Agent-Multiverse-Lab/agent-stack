@@ -234,11 +234,12 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
                         run_id=run_id,
                     )
                     parent_uid = str(parent_run.uid)
-                cancel_record = await request_cancel_agent_run(
-                    run_id=run_id,
-                    current_uid=parent_uid,
-                )
-                result_record = {**child_run_status, **cancel_record}
+                    cancelled_run = await request_cancel_agent_run(
+                        run_id=run_id,
+                        current_uid=parent_uid,
+                        db=db,
+                    )
+                    cancel_status = str(cancelled_run.agent_status)
             except Exception as exc:
                 return self._result(
                     runtime=runtime,
@@ -258,9 +259,15 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
                 runtime=runtime,
                 tool_name="subagent_cancel",
                 subagent_slug=str(child_run_status["agent_slug"]),
-                content=json.dumps(result_record, ensure_ascii=False),
-                run_id=run_id,
-                status=str(result_record["status"]),
+                content=json.dumps(
+                    {
+                        "run_id": str(cancelled_run.id),
+                        "status": cancel_status,
+                    },
+                    ensure_ascii=False,
+                ),
+                run_id=str(cancelled_run.id),
+                status=cancel_status,
             )
 
         return StructuredTool.from_function(
