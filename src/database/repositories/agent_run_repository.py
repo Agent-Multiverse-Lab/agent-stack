@@ -89,7 +89,6 @@ class AgentRunRepository:
             trigger_message_id=trigger_message_id,
             run_type=run_type,
             agent_status=agent_status,
-            status=agent_status,
             parent_run_id=parent_run_id,
         )
         self.session.add(run)
@@ -157,7 +156,6 @@ class AgentRunRepository:
             return run
 
         run.agent_status = "running"
-        run.status = "running"
         run.started_at = run.started_at or datetime.now(UTC)
         run.error = None
         await self.session.flush()
@@ -173,7 +171,6 @@ class AgentRunRepository:
             return run
 
         run.agent_status = "completed"
-        run.status = "completed"
         run.finished_at = datetime.now(UTC)
         run.error = None
         await self.session.flush()
@@ -189,7 +186,6 @@ class AgentRunRepository:
             return run
 
         run.agent_status = "failed"
-        run.status = "failed"
         run.finished_at = datetime.now(UTC)
         run.error = error
         await self.session.flush()
@@ -203,7 +199,6 @@ class AgentRunRepository:
             return run
 
         run.agent_status = "cancel_requested"
-        run.status = "cancel_requested"
         await self.session.flush()
         return run
 
@@ -218,7 +213,6 @@ class AgentRunRepository:
             return run
 
         run.agent_status = "cancelled"
-        run.status = "cancelled"
         run.finished_at = datetime.now(UTC)
         run.error = None
         await self.session.flush()

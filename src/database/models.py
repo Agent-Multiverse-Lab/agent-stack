@@ -128,9 +128,6 @@ class AgentRun(Base):
     request_id = Column(String(128), unique=True, index=True, nullable=True, comment="请求ID")
     parent_run_id = Column(String(64), nullable=True, index=True, comment="当前runid的父id")
 
-    # FIXME: status 是待收敛的旧字段；原型闭环期间与 agent_status 保持同一初始值。
-    status = Column(String(16), nullable=False, default="queued", comment="Agent运行状态")
-
     error = Column(Text, nullable=True, comment="错误信息")
     error_type = Column(String(64), nullable=True, comment="错误信息类型")
     started_at = Column(DateTime(timezone=True), nullable=True, comment="开始时间")
