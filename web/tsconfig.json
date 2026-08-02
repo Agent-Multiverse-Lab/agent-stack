@@ -5,17 +5,17 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
-    "jsx": "react-jsx",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "esModuleInterop": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
     "noEmit": true,
+    "types": ["vite/client"],
     "paths": {
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"],
+  "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts"],
   "exclude": ["node_modules", "dist"]
 }

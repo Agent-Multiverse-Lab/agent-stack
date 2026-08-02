@@ -1,6 +1,6 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Uploaded to: SVG Repo, www.svgrepo.com, Generator: SVG Repo Mixer Tools -->
-<svg width="800px" height="800px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M22 10V14M2 10V14M22 6C22 4.89543 21.1046 4 20 4H4C2.89543 4 2 4.89543 2 6V18C2 19.1046 2.89543 20 4 20H20C21.1046 20 22 19.1046 22 18V6Z" stroke="#333333" stroke-width="1.5"/>
-<path d="M6 17V17.01M6 14V14.01M6 10V10.01M6 7V7.01M18 17V17.01M18 14V14.01M18 10V10.01M18 7V7.01" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="64" height="64" rx="18" fill="#18201E"/>
+  <path d="M43.2 18.8A19 19 0 1 0 48.8 41" stroke="#F7F8F6" stroke-width="5.5" stroke-linecap="round"/>
+  <path d="M45.2 14.8L43.8 24.5L53.4 22.8" stroke="#65CFB8" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="32" cy="32" r="5" fill="#4E5EE4"/>
 </svg>

@@ -1,263 +1,247 @@
-# Frontend Agent Guide
+# Vue Frontend Agent Guide
 
-This file contains frontend-specific guidance for coding agents working in `web/`.
-Root-level repository guidance still applies; this file only narrows conventions for
-the React client.
+This file contains the frontend-specific rules for `web-chatgpt/`. The root
+repository guide still applies. This Vue application is independent from the
+React application in `web/`.
 
-## Current Frontend Shape
+## Product and Technology
 
-The web client is a React 19 + TypeScript + Vite 7 application. It uses Ant Design
-6 for common UI primitives, Tailwind CSS 4 through the Vite plugin, Zustand 5 for
-client state, and `react-router-dom` 7 for routing.
+`web-chatgpt/` is a general-purpose AI conversation frontend. It is composed of
+route-level Views, feature Components, and reusable Composables.
 
-The current UI also uses `motion/react` for component-level motion, GSAP for the
-auth landing choreography, `lucide-react` for action icons, and
-`markdown-it`/DOMPurify/Shiki/KaTeX for assistant markdown rendering.
+The frontend uses:
 
-The Vite dev server proxies `/api` requests to `http://localhost:5050`. In
-production-style code, API calls should continue to use `VITE_API_BASE_URL` when
-provided and fall back to `/api`.
+- Vue 3 with the Composition API and TypeScript;
+- Vite 7 and Vue Router 4;
+- Tailwind CSS 4 for styling;
+- Lucide for interface icons;
+- GSAP for authored motion;
+- `markstream-vue` for assistant Markdown.
 
-## Project Structure
+The current application is a local design prototype. Authentication,
+conversation APIs, Agent Runs, uploads, and authenticated SSE streaming are not
+connected. Never make an unconnected control look successful. Do not add fake
+users, fake conversations, fake Agent output, simulated tool calls, seeded
+content, fake uploads, or timer-driven streaming.
 
-- `src/App.tsx` owns router setup, route guards, and Ant Design theme tokens.
-- `src/main.tsx` mounts the React app and imports global styles.
-- `src/pages/` contains route-level screens, currently `AppView.tsx`,
-  `LoginView.tsx`, and `RegisterView.tsx`. Do not place CSS files in this
-  directory.
-- `src/components/` contains reusable UI modules. Most component folders keep
-  `ComponentName.tsx`, `ComponentName.css`, and `index.ts` together.
-- `src/components/*/component/` contains component-local submodules where that
-  pattern is already established.
-- `src/api/` contains framework-agnostic API client logic. Keep request,
-  upload, and streaming transport concerns here instead of embedding them in UI
-  components.
-- `src/store/` contains Zustand stores for shared client state.
-- `src/hooks/` contains reusable React hooks.
-- `src/assets/css/Global.css` contains the Tailwind entrypoint, font-face
-  declarations, and global base styles.
-- `src/assets/animations/` and `src/assets/icon/` contain animation helpers and
-  static visual assets.
-- `src/assets/landing/` contains auth landing visual assets.
+## Application Composition
+
+The normal responsibility chain is:
+
+`main.ts` -> `App.vue` -> router -> View -> feature Component
+
+This chain describes ownership. It is not a requirement to create one file for
+every visual layer.
+
+- `src/App.vue` contains the root router outlet.
+- `src/router/` maps URLs to Views and owns application-level redirects.
+- `src/views/` contains route entries and route-level coordination.
+- `src/components/` contains complete user-facing functions grouped by feature.
+- `src/composables/` contains reusable Vue state and behavior without markup.
+- `src/types/` contains shared TypeScript contracts.
+- `src/styles/` contains the Tailwind entrypoint, tokens, and unavoidable global
+  rules.
+- `src/assets/` contains fonts and static visual assets.
+- Future HTTP, upload, and SSE transport belongs in `src/api/`.
 
 Use the `@` alias for imports from `src/`.
 
-## Routing, Auth, and API Rules
+## Views
 
-- Keep protected route behavior in `App.tsx` aligned with `RequireAuth` and
-  `RedirectIfAuthenticated`.
-- The authenticated app shell currently lives under `/app/:sectionId`, with `/`
-  and `/app` redirecting to `/app/script`.
-- Login and registration routes are `/login` and `/register`.
-- Do not bypass `useAuthStore` for token handling. API helpers in `src/api/`
-  attach `Authorization` and clear auth on `401`.
-- Use the shared helpers from `src/api/index.ts` (`get`, `post`, `put`, `del`,
-  `postForm`, `requestStream`, `requestRunStream`) for backend calls.
-- Keep streaming JSON-line parsing and tool-event normalization inside the API
-  layer or a dedicated hook, not inside presentational components.
-- Treat attachment upload progress and abort behavior as transport concerns first;
-  expose clean UI state to components.
+A View is the entry for a routed page.
 
-## State Management
+- View filenames use PascalCase and end with `View.vue`.
+- Views own route parameters, navigation, page-level state, and coordination.
+- A View may keep one-off page chrome and layout markup inline.
+- A View should import Components when the page is composed of multiple
+  complete, independently nameable functions.
+- Do not create a shared layout for one route. Shared route structure is
+  justified only when multiple routed Views actually use it.
 
-- Prefer local component state for UI-only details.
-- Use Zustand stores in `src/store/` for shared state across pages, chat sessions,
-  authentication, or workspace-level behavior.
-- Persist only serializable, durable state. Strip transient state such as
-  `streaming`, active uploads, temporary errors, and in-flight progress before
-  storage.
-- Keep state update helpers typed and narrowly scoped; avoid broad global stores
-  for unrelated UI concerns.
+The main navigation routes render their Views in one persistent right-side
+content region. Search and settings remain overlays because they are temporary
+interactions rather than destinations.
 
-## UI and Styling Conventions
+## Components
 
-- Follow existing Ant Design theme tokens in `App.tsx` before introducing new
-  color, radius, typography, or control-height conventions.
-- Prefer Ant Design controls for standard inputs, forms, menus, drawers, buttons,
-  and feedback states unless an existing custom component is already the local
-  pattern.
-- Prefer `lucide-react` icons for common action icons.
-- Prefer Tailwind utility classes for page layout and new UI work. Avoid adding
-  new page-level CSS files; keep `src/pages/` free of CSS.
-- Tailwind CSS is available, but do not rewrite established CSS-module-style files
-  into utility-only markup unless the change is already scoped to that component.
-- Use `motion/react` for React component enter/exit, panel, drawer, and canvas
-  item motion when following the existing component pattern.
-- Keep reusable motion configuration in `src/assets/animations/` when it is shared
-  across a component surface.
-- Maintain the existing studio/workspace product feel: dense, practical,
-  responsive interfaces over marketing-style sections.
-- Use stable dimensions for toolbars, canvas items, panels, buttons, and dynamic
-  message content so loading states and streaming text do not shift the layout.
-- Check mobile and desktop widths for text overflow, overlapping panels, and
-  unreadable controls when changing layout.
+A Component represents a complete, nameable user-facing function.
 
-## Markdown and Generated Content
+Create a Component only when at least one of these statements is true:
 
-- Render assistant/model markdown through `src/components/MarkdownRenderer/`.
-- Preserve the `markdown-it` parser, DOMPurify sanitization, KaTeX math rendering,
-  Shiki code highlighting, and streaming-safe fence/math normalization boundaries
-  unless the change is explicitly about replacing that renderer.
-- Keep raw HTML disabled in markdown parsing. Do not insert model-provided HTML
-  with `dangerouslySetInnerHTML` outside the sanitized renderer boundary.
-- Keep assistant chat rendering wired through `AgentChat` message components
-  instead of adding a parallel rendering path.
+- it owns substantial independent interaction or lifecycle behavior;
+- it is genuinely reused;
+- it is a complete feature boundary that makes its parent easier to understand.
 
-## WebGL / Three.js Strategy
+Do not extract markup merely because it has a visual boundary, a layout role,
+its own CSS, or a convenient slot. Keep one-off headers, footers, rows, action
+groups, empty states, icons, labels, and simple event forwarding inline in the
+owning View or Component.
 
-Do not use WebGL for normal UI animation.
+A cohesive Component may be long. Prefer one readable feature implementation
+over a chain of small Components that only pass props and emits through several
+files.
 
-Use WebGL only when the task requires real-time GPU-rendered graphics, 3D scenes, shader effects, particles, simulations, or interactive canvas-based visuals.
+Pass parent-owned values down with typed `defineProps` and report actions or
+state changes with typed `defineEmits`. Components must not mutate props.
+Sibling Components communicate through their closest common parent. Do not add
+a global event bus for communication inside one page.
 
-Default choice:
+### Component naming
 
-* Use CSS for simple UI transitions.
-* Use GSAP for complex DOM/SVG animation, timeline choreography, and scroll-driven animation.
-* Use Three.js or React Three Fiber when the feature requires WebGL-based rendering.
-* Avoid writing raw WebGL unless the user explicitly asks for low-level shader or WebGL code.
+- Component filenames use PascalCase and end with `Component.vue`.
+- The text before `Component` must name the exact function implemented by the
+  file, for example `ConversationComponent.vue`,
+  `MessageInputComponent.vue`, `ConversationSearchComponent.vue`, and
+  `SettingsComponent.vue`.
+- Do not prefix local Component filenames or import identifiers with a product
+  brand such as `OpenGpt`.
+- Do not use vague structural names such as `Surface`, `Shell`, `Glyph`,
+  `Wrapper`, `Container`, generic `Panel`, or similar words that do not reveal
+  the function.
+- Do not create standalone `Header`, `Footer`, `Item`, `Actions`, `Toolbar`, or
+  `Tray` Components when they only render markup or forward props and events.
+- A Component must contain only the UI and behavior required by the function in
+  its filename. Do not add unrelated controls, page chrome, branding wrappers,
+  or speculative future UI to make the Component look more complete.
 
-Use WebGL / Three.js when the request includes:
+Do not explicitly assign a Vue Component name. Do not use
+`defineOptions({ name: ... })`, `defineComponent({ name: ... })`, or an Options
+API `name` field. The `.vue` filename is the Component name. `defineProps` and
+`defineEmits` define the public contract only.
 
-* 3D models, 3D product viewers, camera movement, lights, materials, or scene composition.
-* Particle systems, star fields, smoke, fire, water, fluid-like effects, noise fields, or GPU-heavy visuals.
-* Shader effects such as distortion, refraction, bloom-like glow, scanlines, glitch, displacement, or custom fragment/vertex shader work.
-* Interactive 3D experiences, mini-games, virtual showrooms, maps, simulations, or canvas-based visual editors.
-* Large numbers of animated objects that would be inefficient as DOM nodes.
+## Feature-Based Organization
 
-Avoid WebGL when:
+Keep Component files directly under `src/components/` while the Component set
+is small. Do not create feature subdirectories in advance.
 
-* The animation is a simple hover, fade, slide, scale, accordion, modal, tooltip, navbar, or card effect.
-* GSAP or CSS can achieve the effect cleanly.
-* The page is mostly content/UI and the 3D effect is only decorative.
-* Mobile performance, bundle size, accessibility, or loading time would suffer without strong product value.
+Create a feature directory only after that feature has enough tightly related
+Components or local helpers that a flat list is genuinely difficult to
+navigate. When a feature directory becomes necessary, use PascalCase and end
+its name with `Component`, such as `ConversationComponent/`. Use the exact
+product function before the suffix; do not create lowercase feature directories
+or generic directories such as `ui/`, `panels/`, or `shared/`.
 
-React / Next.js rules:
+Do not group files by visual fragments or generic layers such as `ui/`,
+`surface/`, or `panels/` when the files belong to one feature. Keep feature
+state, behavior, markup, and feature-local helpers close together.
 
-* For React projects, prefer `@react-three/fiber` over imperative Three.js when building a React-based 3D scene.
-* Keep WebGL components isolated from normal UI components.
-* In Next.js App Router, put Three.js / R3F code inside client components.
-* Lazy-load heavy 3D scenes where possible.
-* Provide loading states and fallbacks.
-* Do not block the main page content while large 3D assets load.
+## Composables
 
-Performance rules:
+A Composable is reusable Vue state and behavior without a template.
 
-* Optimize models, textures, geometry count, draw calls, and material complexity.
-* Avoid unnecessary post-processing.
-* Pause or reduce rendering when the canvas is offscreen.
-* Respect device capability and provide lower-quality fallbacks on weak devices.
-* Do not use WebGL for purely decorative effects if CSS/GSAP is sufficient.
+- Composable files and exported functions use `use<Feature>`.
+- Use a Composable for cohesive state, computed values, watchers, persistence,
+  or transport behavior shared by more than one owner.
+- Keep HTML, CSS, icons, and presentation decisions out of Composables.
+- Keep one-off UI state in its owning View or Component.
+- Return only the reactive state and actions callers need.
 
-Accessibility rules:
+Composables do not replace props and emits. They provide behavior to the state
+owner; component-tree communication remains explicit.
 
-* Respect `prefers-reduced-motion`.
-* Avoid intense camera movement, flashing, rapid particles, and aggressive parallax.
-* Ensure core content and navigation do not depend on WebGL.
-* Provide fallback content when WebGL is unavailable.
+## Routing, State, and API Boundaries
 
-## Animation Strategy / Motion And GSAP
+- Each primary navigation destination has its own URL and renders in the shared
+  right-side content region.
+- `/` starts a local conversation and `/c/:conversationId` opens one.
+- `/library`, `/agent`, `/image`, `/static`, and `/sandbox` are feature
+  destinations.
+- `/login` and `/register` are standalone authentication pages.
+- Do not fake route protection before authentication is connected.
+- Prefer `ref`, `reactive`, and `computed` for locally owned state.
+- Add a global state library only when real cross-route state cannot remain
+  clear with Vue primitives and Composables.
+- Persist only durable, serializable, user-created state.
+- Keep dialog state, errors, pending uploads, streaming state, and abort
+  controllers out of `localStorage`.
+- A selected attachment is local metadata and must not be described as
+  uploaded.
+- Keep HTTP, upload, authenticated SSE transport, parsing, and event
+  normalization outside visual Components.
+- Use authenticated `fetch` streaming rather than unauthenticated `EventSource`
+  for future Agent Run SSE.
 
-Do not use GSAP or heavy motion libraries by default for every animation.
+## Styling, Icons, Motion, and Markdown
 
-Default rule:
+- Vue templates must use semantic kebab-case class names. Do not place Tailwind
+  utility strings directly in `class`, `:class`, Transition class props, or
+  render-time string expressions.
+- Inject Tailwind utilities through the owning SFC's `<style scoped>` block
+  with `@reference` to `src/styles/index.css` and `@apply`.
+- Class names must describe the feature or element they identify. Use `is-*`
+  names for dynamic states. Do not replace utility lists with vague numbered or
+  purely visual names.
+- Keep injected styles local to the owning Component or View. Use native CSS
+  only where it is clearer for CSS variables, pseudo-classes, media queries, or
+  values that `@apply` cannot express reliably.
+- Keep global CSS limited to design tokens, font declarations, resets, and
+  behavior that cannot be scoped to one template.
+- `src/styles/tokens.css` is the single source of application colors, radii,
+  shared dimensions, and theme-level typography. Only palette tokens may
+  contain literal color values. Components and Views must consume semantic
+  `--color-*` tokens; do not place hex, `rgb()`, or `hsl()` values in their
+  scoped styles.
+- Keep the palette compact and derive interaction surfaces, borders, overlays,
+  and muted states from it. Add a semantic token only for a real visual role;
+  do not create a full numbered color scale speculatively.
+- Tailwind remains the utility system and CSS custom properties remain the
+  runtime theme boundary. Do not add Less only to centralize colors or theme
+  values.
+- If another theme mode is implemented, override the existing semantic tokens
+  from one root theme selector. Keep theme selection and persistence in one
+  state owner; Components must not set root theme classes independently.
+- Use existing design tokens before adding new colors, radii, shadows, or
+  dimensions.
+- Use Lucide for common interface icons. Do not add another icon library or
+  hand-draw common controls.
+- Keep product artwork as a static asset instead of wrapping it in a Vue
+  Component without functional behavior.
+- Use Tailwind or CSS for simple hover, focus, color, and opacity transitions.
+- Use GSAP for authored sequences, coordinated DOM/SVG motion, and timelines.
+- Create GSAP work after mount, scope it to the owning element, clean it up on
+  unmount, and respect `prefers-reduced-motion`.
+- Render assistant Markdown through one
+  `MarkdownRendererComponent.vue` backed by `markstream-vue`.
+- Do not use `v-html` for untrusted user or model content.
 
-* Prefer CSS transitions / CSS keyframes / Tailwind animation utilities for simple UI animations.
-* Use `motion/react` when React component state drives enter/exit, layout, drawer,
-  panel, or canvas-item animation and the existing local pattern already uses it.
-* Use GSAP only when animation complexity justifies it, or when extending the
-  existing `AuthLanding` choreography.
+Maintain the restrained conversation-product visual language: practical
+density, weak borders, stable surfaces, clear focus states, and responsive
+layouts.
 
-Use GSAP when the task involves one or more of the following:
+## Vue and TypeScript Style
 
-* Multi-step timeline choreography across multiple elements.
-* Scroll-driven animation, ScrollTrigger, scrub, pin, snap, parallax, or section-based storytelling.
-* Complex hero animations or landing-page motion design.
-* SVG animation, path animation, text splitting, morphing, draggable/inertia, Flip transitions, or advanced plugin usage.
-* Precise imperative control: play, pause, reverse, seek, timeline labels, timeScale, restart.
-* Framework-agnostic animation that needs to work outside React state-driven animation patterns.
-* Existing project already uses GSAP and the change must follow that style.
+- Use `<script setup lang="ts">`.
+- Use 2-space indentation.
+- Keep imports grouped as external packages, `@/` imports, then relative
+  imports.
+- Keep props, emits, route contracts, and shared domain objects typed.
+- Prefer direct code over factories, generic wrappers, or configuration for one
+  value.
+- Do not add an abstraction for a possible future caller.
+- When renaming a file, update its imports, router records, and references in
+  the same change.
 
-Avoid GSAP when:
+## Verification
 
-* The animation is a simple hover, focus, opacity, transform, dropdown, modal, tooltip, or button transition.
-* `motion/react` already covers the component-level interaction cleanly.
-* CSS can express the animation clearly with less code.
-* The project already uses another animation library and the requested change fits that library.
-* The animation would add unnecessary dependency, complexity, or accessibility risk.
-
-React / Next.js rules:
-
-* For React components, use `@gsap/react` and `useGSAP()` instead of raw `useEffect()` when writing GSAP code.
-* Scope selectors with a container ref.
-* Register required GSAP plugins explicitly.
-* In Next.js App Router, keep GSAP usage inside client components.
-* Clean up animations properly; avoid leaking ScrollTriggers, timelines, or event listeners.
-
-Accessibility rules:
-
-* Always respect `prefers-reduced-motion`.
-* For reduced motion, remove decorative motion or simplify it to opacity-only / minimal movement.
-* Avoid large fast swipes, aggressive parallax, flashing, or excessive infinite motion unless there is a clear reason.
-
-Performance rules:
-
-* Prefer animating `transform` and `opacity`.
-* Avoid layout-heavy animation of `width`, `height`, `top`, `left`, or frequent DOM measurement unless necessary.
-* Do not introduce ScrollTrigger or heavy plugins for tiny micro-interactions.
-* Keep animation code isolated and readable.
-
-## Code Style
-
-- Use React, TypeScript, and TSX.
-- Indent with 2 spaces.
-- Component files use PascalCase, for example `MessageInput.tsx`.
-- API, hook, and store modules use the naming style already present in their
-  folder, usually lower-case file names such as `agent.ts` or `chat.ts`.
-- Keep imports grouped logically: external libraries first, then `@/` imports,
-  then relative imports.
-- Prefer typed props and exported domain types near the component, hook, API, or
-  store that owns them.
-- Avoid adding new abstractions until at least two real call sites need them or an
-  existing local pattern already exists.
-
-## Build, Test, and Development Commands
+Run:
 
 ```bash
-npm install
-npm run dev
+npm run typecheck
+npm run lint
 npm run build
-npm run preview
-npx eslint .
+git diff --check -- web-chatgpt
 ```
 
-`npm run build` runs TypeScript project checks with `tsc -b` and then creates the
-Vite production build.
+For visual changes, verify affected routes at desktop and mobile widths. Check
+sidebar collapse and drawer behavior, composer overlap, local-only states,
+keyboard focus, and reduced-motion behavior.
 
-## Testing and Verification
+## Security and Contributions
 
-- No automated test framework is currently configured.
-- Do not run `npm run build` after every code change by default; the user will
-  validate frontend behavior manually.
-- Run `npx eslint .` when touching broad TypeScript or React code.
-- For UI changes, manually verify the affected route in a browser at desktop and
-  mobile widths. Include screenshots or recordings in PRs when visual behavior
-  changes.
-- If adding tests, prefer Vitest + React Testing Library and colocate tests as
-  `*.spec.tsx` beside the component or hook under test.
-
-## Security and Configuration
-
-- Keep secrets out of the repository. Use `.env.*` files for local configuration.
-- Only expose client-safe values through `VITE_*` environment variables.
-- Sanitize or safely render model/user-provided markdown and HTML; preserve the
-  existing markdown rendering boundary instead of inserting raw HTML directly.
-- Validate API payloads and file metadata before sending them to the backend.
-
-## Commit and PR Guidance
-
-- Use English commit messages and do not wrap them in `@` characters.
-- Prefer Conventional Commit style for frontend work, for example
-  `feat(web): add workspace drawer`.
-- Keep commits focused.
-- PR descriptions should include a behavior summary, visual evidence for UI
-  changes, and verification notes.
+- Keep secrets out of the repository.
+- Expose only client-safe configuration through `VITE_*` variables.
+- Validate API payloads and file metadata before sending them.
+- Follow the root repository Conventional Commit rules.
+- Keep the lowercase English commit type and scope, and use a concise Chinese
+  subject and body.
+- Never wrap commit messages in `@` characters.
