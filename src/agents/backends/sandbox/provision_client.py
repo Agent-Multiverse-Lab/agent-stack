@@ -6,8 +6,6 @@ from urllib.parse import quote
 
 import httpx
 
-from src.configs import config
-
 
 @dataclass(frozen=True)
 class SandboxProvision:
@@ -41,24 +39,22 @@ class SandboxProvision:
 
 
 class SandboxProvisionClient:
-    """HTTP client for the sandbox provisioner service."""
+    """直接调用沙箱供应服务 HTTP 接口的客户端。"""
 
     def __init__(
         self,
-        base_url: str | None = None,
+        base_url: str,
         *,
         timeout: float = 30.0,
         http_client: httpx.Client | None = None,
     ) -> None:
-        base_url = (
-            str(base_url).strip()
-            if base_url is not None
-            else str(config.sandbox_provisioner_url).strip()
-        )
+        base_url = str(base_url).strip()
         if not base_url:
-            raise RuntimeError("SANDBOX_PROVISIONER_URL is required.")
+            raise ValueError("base_url is required.")
 
         self.base_url = base_url.rstrip("/")
+        self._owns_client = http_client is None
+        self._closed = False
         self._client = http_client or httpx.Client(
             base_url=self.base_url,
             timeout=timeout,
@@ -97,7 +93,7 @@ class SandboxProvisionClient:
     def get(self, sandbox_id: str) -> SandboxProvision | None:
         data = self._request_json(
             "GET",
-            f"/api/sandboxes/{quote(self._required(sandbox_id, 'sandbox_id'))}",
+            self._sandbox_path(sandbox_id),
         )
         if data is None:
             return None
@@ -114,16 +110,34 @@ class SandboxProvisionClient:
             if isinstance(item, dict)
         ]
 
-    def shut(self, sandbox_id: str) -> SandboxProvision:
-        _ = self._required(sandbox_id, "sandbox_id")
-        
+    def touch(self, sandbox_id: str) -> bool:
+        """刷新供应服务中指定沙箱的空闲计时。"""
+        data = self._request_json(
+            "POST",
+            f"{self._sandbox_path(sandbox_id)}/touch",
+        )
+        return bool(data.get("ok", False)) if isinstance(data, dict) else False
 
     def delete(self, sandbox_id: str) -> bool:
         data = self._request_json(
             "DELETE",
-            f"/api/sandboxes/{quote(self._required(sandbox_id, 'sandbox_id'))}",
+            self._sandbox_path(sandbox_id),
         )
         return bool(data.get("ok", True)) if isinstance(data, dict) else True
+
+    def close(self) -> None:
+        """关闭由当前适配器创建并持有的 HTTP 客户端。"""
+        if self._closed:
+            return
+        self._closed = True
+        if self._owns_client:
+            self._client.close()
+
+    def __enter__(self) -> SandboxProvisionClient:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
 
     def _request_json(
         self,
@@ -132,6 +146,8 @@ class SandboxProvisionClient:
         *,
         json: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
+        if self._closed:
+            raise RuntimeError("Sandbox provision client is closed.")
         try:
             response = self._client.request(method, path, json=json)
         except httpx.HTTPError as exc:
@@ -155,10 +171,14 @@ class SandboxProvisionClient:
             raise RuntimeError("Sandbox provisioner returned non-object JSON.")
         return data
 
+    @classmethod
+    def _sandbox_path(cls, sandbox_id: str) -> str:
+        encoded_id = quote(cls._required(sandbox_id, "sandbox_id"), safe="")
+        return f"/api/sandboxes/{encoded_id}"
+
     @staticmethod
     def _required(value: str, label: str) -> str:
         value = str(value).strip()
         if not value:
             raise ValueError(f"{label} is required.")
         return value
-

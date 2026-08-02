@@ -333,7 +333,7 @@ evaluator_embeddings = LangchainEmbeddingsWrapper(your_embeddings)
 
 ## 10. 和本仓库的关系（multi-agent-s2c）
 
-当前仓库是多 Agent 创作系统（DesignAgent / SearchAgent / Knowledge 等），**尚未内置 Ragas 评测流水线**。可落地的方向：
+当前仓库是多 Agent 创作系统（LeaderAgent / SearchAgent / Knowledge 等），**尚未内置 Ragas 评测流水线**。可落地的方向：
 
 1. **Knowledge / 向量检索**  
    - 对 `src/knowledge/` + Milvus 检索：收集 `user_input`、`retrieved_contexts`、`response`。  
@@ -341,7 +341,7 @@ evaluator_embeddings = LangchainEmbeddingsWrapper(your_embeddings)
 
 2. **SearchAgent 参考检索**  
    - 对 `search_references` 返回的 `web_refs` / `knowledge_refs` 做检索侧指标。  
-   - 再评估 DesignAgent 是否忠实使用参考（Faithfulness）。
+   - 再评估 LeaderAgent 是否忠实使用参考（Faithfulness）。
 
 3. **离线脚本**  
    - 建议放在 `scripts/eval_ragas.py`（或 `test/eval/`），不要塞进在线请求路径。  

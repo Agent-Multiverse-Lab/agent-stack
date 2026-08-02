@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -58,8 +59,19 @@ class Config(BaseSettings):
     image_model: str = Field(default="qwen/qwen-image-2.0-pro-2026-04-22", description="图片生成模型名称")
 
     
-    embed_model: str = Field(default="", description="向量生成模型名称")
+    embed_model: str = Field(
+        default="",
+        description="向量生成模型名称，格式为 provider/model",
+    )
     rerank_model: str = Field(default="", description="重排序模型名称")
+
+    # ---------- Agent ----------
+    hil_approval_tools: tuple[str, ...] = Field(
+        default=("write_file", "edit_file", "execute"),
+        min_length=1,
+        max_length=3,
+        description="需要人工审批的工具名称（1-3 个）",
+    )
 
     # ---------- 数据库 ----------
     database_url: str = Field(default="", description="PostgreSQL 数据库连接地址")
@@ -95,11 +107,55 @@ class Config(BaseSettings):
     search_route_timeout_seconds: float = Field(default=8.0, description="单路搜索超时时间")
     local_reference_root: str = Field(default="", description="本地参考资料搜索根目录")
 
+    # ---------- MCP ----------
+    mcp_servers: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="MCP 服务器连接配置",
+    )
+    mcp_connect_timeout_seconds: float = Field(
+        default=15.0,
+        gt=0,
+        description="MCP 服务器连接和工具发现超时时间",
+    )
+    mcp_tool_call_timeout_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        description="MCP 工具调用超时时间",
+    )
+    mcp_max_concurrency: int = Field(
+        default=16,
+        ge=1,
+        description="单进程 MCP 工具最大并发调用数",
+    )
+
     # ---------- Document Parser APIs ----------
     mineru_api_url: str = Field(default="", description="MinerU parsing API URL")
     mineru_api_key: str = Field(default="", description="MinerU parsing API key")
+    tika_server_url: str = Field(default="", description="Apache Tika Server URL")
     paddle_ocr_api_url: str = Field(default="https://paddleocr.aistudio-app.com/api/v2/ocr/jobs", description="PaddleOCR parsing API URL")
     paddle_ocr_api_key: str = Field(default="", description="PaddleOCR parsing API key")
+    unlimited_ocr_api_url: str = Field(
+        default="https://aip.baidubce.com/rest/2.0/brain/online/v2/unlimited-ocr-parser/task",
+        description="百度 Unlimited-OCR 任务提交接口",
+    )
+    unlimited_ocr_api_key: str = Field(
+        default="",
+        description="百度 Unlimited-OCR API Key",
+    )
+    unlimited_ocr_secret_key: str = Field(
+        default="",
+        description="百度 Unlimited-OCR Secret Key",
+    )
+    unlimited_ocr_poll_interval_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        description="Unlimited-OCR 任务轮询间隔",
+    )
+    unlimited_ocr_poll_timeout_seconds: float = Field(
+        default=600.0,
+        gt=0,
+        description="Unlimited-OCR 任务轮询超时时间",
+    )
     document_parser_api_timeout_seconds: float = Field(
         default=120.0, description="Document parser API request timeout"
     )
@@ -107,7 +163,9 @@ class Config(BaseSettings):
     # ---------- Sandbox ----------
     sandbox_provider: str = Field(default="provisioner", description="沙箱提供者")
     sandbox_provisioner_url: str = Field(
-        default="", description="沙盒url"
+        default="http://localhost:8002",
+        validation_alias="SANDBOX_PROVISIONER_URL",
+        description="沙箱供应服务地址",
     )
     sandbox_volume_path: str = Field(default="/home/sandbox/data", description="Sandbox provisioner service URL")
     sandbox_execute_timeout: int = Field(default=180, description="执行最长时间")

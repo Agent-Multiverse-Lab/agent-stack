@@ -3,17 +3,16 @@ from langchain.agents.middleware import ModelRetryMiddleware
 from langgraph.graph.state import CompiledStateGraph
 
 from src.agents.base_agent import BaseAgent
-from src.agents.middlewares import SearchToolMiddleware
-from src.agents.subagents.subagent import knowledge_search, web_search_one, web_search_parallel
-from src.agents.utils.model_tool import load_model
+from src.model import load_model
 from src.configs import config as sys_config
 
 from .context import SearchAgentContext
+from .tools import knowledge_search, web_search_one, web_search_parallel
 
 SEARCH_AGENT_SYSTEM_PROMPT = """
 You are SearchAgent, the search-task orchestrator inside a creative agent system.
 
-Your upstream agent is DesignAgent. DesignAgent owns the overall creative task,
+Your upstream agent is LeaderAgent. LeaderAgent owns the overall creative task,
 including whether the user needs script design, storyboard planning, drawing
 script generation, layout work, or search. Your responsibility is narrower:
 understand the search need, choose the right search strategy, and coordinate
@@ -34,7 +33,7 @@ Core responsibilities:
    a clear query, scope, and expected evidence type.
 7. Merge subagent results by removing duplicates, compressing evidence, and
    keeping source attribution.
-8. Turn evidence into search guidance for DesignAgent, including what must be
+8. Turn evidence into search guidance for LeaderAgent, including what must be
    followed, what can be used as inspiration, and what should be avoided.
 
 Complexity policy:
@@ -64,7 +63,7 @@ ReAct and delegation rules:
 - Never ask a subagent to generate final creative content.
 
 Boundaries:
-- You are not DesignAgent. Do not produce the final script, storyboard, drawing
+- You are not LeaderAgent. Do not produce the final script, storyboard, drawing
   script, or creative plan.
 - You are not a raw search tool. Do not dump unfiltered search results.
 - You are responsible for search planning, evidence synthesis, and search
@@ -78,7 +77,7 @@ class SearchAgent(BaseAgent):
     description = "Search-task orchestrator for multi-source retrieval."
     context = SearchAgentContext
 
-    def get_agent(self, context=None) -> CompiledStateGraph:
+    async def get_agent(self, context=None) -> CompiledStateGraph:
         model = load_model(model=sys_config.flash_model)
         return create_agent(
             model=model,
@@ -86,7 +85,6 @@ class SearchAgent(BaseAgent):
             system_prompt=SEARCH_AGENT_SYSTEM_PROMPT,
             checkpointer=self.get_checkpointer(),
             middleware=[
-                SearchToolMiddleware(),
                 ModelRetryMiddleware(max_retries=1, on_failure="continue"),
             ],
         )

@@ -1,45 +1,21 @@
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models import Conversation, Message
-
-
-def _make_title(text: str, max_length: int = 80) -> str:
-    title = text.split("\n")[0][:max_length].strip()
-    return title if title else "New conversation"
 
 
 class ConversationRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_by_id_for_user(
+    async def get_conversation_by_id(
         self,
-        conversation_id: str,
-        user_id: str,
+        conversation_id: int | str,
     ) -> Conversation | None:
-        result = await self.session.execute(
-            select(Conversation).where(
-                Conversation.id == int(conversation_id),
-                Conversation.uid == int(user_id),
-            )
-        )
-        return result.scalar_one_or_none()
-
-    async def list_by_user(self, user_id: str) -> list[Conversation]:
         result = await self.session.execute(
             select(Conversation)
-            .where(Conversation.uid == int(user_id))
-            .order_by(Conversation.updated_at.desc())
-        )
-        return list(result.scalars().all())
-
-    async def get_conversation_by_thead_id(
-        self,
-        thread_id: str,
-    ) -> Conversation | None:
-        result = await self.session.execute(
-            select(Conversation).where(Conversation.thread_id == thread_id)
+            .where(Conversation.id == int(conversation_id))
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
 
@@ -60,116 +36,93 @@ class ConversationRepository:
         self,
         uid: str,
         thread_id: str,
-        agent_id:str,
+        agent_slug: str,
+        parent_conversation_id: int | None = None,
         title: str | None = None,
         summary: str | None = None,
-        conversation_metadata: dict | None = None
+        conversation_metadata: dict | None = None,
     ) -> Conversation:
         conversation = Conversation(
             uid=uid,
             thread_id=thread_id,
-            agent_id=agent_id,
-            title=title,
+            agent_id=agent_slug,
+            parent_conversation_id=parent_conversation_id,
+            title=title or "",
             summary=summary,
-            conversation_metadata = conversation_metadata
+            conversation_metadata=conversation_metadata,
         )
         self.session.add(conversation)
         await self.session.flush()
         return conversation
 
-    async def save_message(
+    async def create_agent_input_message(
         self,
+        *,
+        conversation_id: int | str,
+        content: str,
+        image_content: str | None = None,
+        message_type: str = "text",
+    ) -> Message:
+        return await self._create_message(
+            conversation_id=conversation_id,
+            role="user",
+            content=content,
+            image_content=image_content,
+            message_type=message_type,
+        )
+
+    async def create_agent_output_message(
+        self,
+        *,
+        conversation_id: int | str,
+        agent_run_id: str,
+        content: str,
+    ) -> Message:
+        return await self._create_message(
+            conversation_id=conversation_id,
+            agent_run_id=agent_run_id,
+            role="assistant",
+            content=content,
+        )
+
+    async def _create_message(
+        self,
+        *,
+        conversation_id: int | str,
         role: str,
         content: str,
-        conversation_id: str | None = None,
-        user_id: str | None = None,
         agent_run_id: str | None = None,
+        request_id: str | None = None,
+        image_content: str | None = None,
+        message_type: str = "text",
         status: str = "completed",
-    ) -> tuple[str, Message]:
-        if conversation_id:
-            conv_id = conversation_id
-        else:
-            conv = Conversation(
-                user_id=int(user_id),
-                title=_make_title(content),
-            )
-            self.session.add(conv)
-            await self.session.flush()
-            conv_id = str(conv.id)
-
+    ) -> Message:
         message = Message(
-            conversation_id=int(conv_id),
-            agent_run_id=int(agent_run_id) if agent_run_id is not None else None,
+            conversation_id=int(conversation_id),
+            agent_run_id=agent_run_id,
             role=role,
             content=content,
+            image_content=image_content,
+            request_id=request_id,
+            message_type=message_type,
             status=status,
         )
         self.session.add(message)
         await self.session.flush()
-        return conv_id, message
+        return message
 
-    async def update_message_content(
+    async def get_run_result_message(
         self,
-        message_id: str,
-        content: str,
-        *,
-        status: str | None = None,
+        run_id: str,
     ) -> Message | None:
-        message = await self.session.get(Message, int(message_id))
-        if message is None:
-            return None
-        message.content = content  # ty:ignore[invalid-assignment]
-        if status is not None:
-            message.status = status
-        await self.session.flush()
-        return message
-
-    async def append_message_content(
-        self,
-        message_id: str,
-        delta: str,
-        *,
-        status: str | None = None,
-    ) -> Message | None:
-        message = await self.session.get(Message, int(message_id))
-        if message is None:
-            return None
-        message.content = f"{message.content}{delta}"
-        if status is not None:
-            message.status = status
-        await self.session.flush()
-        return message
-
-    async def set_message_status(self, message_id: str, status: str) -> Message | None:
-        message = await self.session.get(Message, int(message_id))
-        if message is None:
-            return None
-        message.status = status
-        await self.session.flush()
-        return message
-
-    async def get_messages(self, conversation_id: str) -> list[Message]:
         result = await self.session.execute(
             select(Message)
-            .where(Message.conversation_id == int(conversation_id))
-            .order_by(Message.created_at.asc())
+            .where(
+                Message.agent_run_id == run_id,
+                Message.role == "assistant",
+            )
+            .order_by(Message.id.desc())
+            .limit(1)
+            .execution_options(populate_existing=True)
         )
-        return list(result.scalars().all())
-
-    async def delete(self, conversation: Conversation) -> None:
-        await self.session.delete(conversation)
-        await self.session.flush()
-
-    async def delete_by_id_for_user(self, conversation_id: str, user_id: str) -> bool:
-        conversation = await self.get_by_id_for_user(conversation_id, user_id)
-        if conversation is None:
-            return False
-
-        await self.delete(conversation)
-        return True
-
-    async def commit(self) -> None:
-        await self.session.commit()
-
-    async def rollback(self) -> None:
-        await self.session.rollback()
+        return result.scalar_one_or_none()

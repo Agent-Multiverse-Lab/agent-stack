@@ -13,12 +13,6 @@ class UserRepository:
     async def get_by_email(self, email: str) -> User | None:
         return await self.session.scalar(select(User).where(User.email == email))
 
-    async def get_active_by_id(self, user_id: int) -> User | None:
-        user = await self.session.get(User, user_id)
-        if user is None or not user.is_active:
-            return None
-        return user
-
     async def create(
         self,
         *,

@@ -45,5 +45,5 @@ async def list_knowledge(
     current_user: AuthenticatedUser,
     db: AsyncSession = Depends(get_db),
 ):
-    items = await KnowledgeRepository(db).list_items(user_id=current_user.id)
+    items = await KnowledgeRepository(db).list_for_user(user_id=current_user.id)
     return [_knowledge_response(item) for item in items]

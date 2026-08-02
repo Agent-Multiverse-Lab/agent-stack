@@ -2,7 +2,12 @@ from .agent_repository import AgentRepository
 from .agent_run_repository import AgentRunRepository
 from .attachment_repository import AttachmentRepository
 from .conversation_repository import ConversationRepository
-from .knowledge_repository import KnowledgeRepository
+from .knowledge_repository import (
+    KnowledgeBaseRepository,
+    KnowledgeEmbeddingBindingRepository,
+    KnowledgeFileRepository,
+    KnowledgeRepository,
+)
 from .user_repository import UserRepository
 
 __all__ = [
@@ -10,6 +15,9 @@ __all__ = [
     "AgentRunRepository",
     "AttachmentRepository",
     "ConversationRepository",
+    "KnowledgeBaseRepository",
+    "KnowledgeEmbeddingBindingRepository",
+    "KnowledgeFileRepository",
     "KnowledgeRepository",
     "UserRepository",
 ]

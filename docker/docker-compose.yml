@@ -67,7 +67,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/multi_agent_s2c
       REDIS_URL: redis://redis:6379/0
       ENABLE_RUN_QUEUE: "true"
-      ARQ_MAX_JOBS: "1"
+      # 父 Run 等待子 Run 时仍需给子任务保留并发槽位。
+      ARQ_MAX_JOBS: "${ARQ_MAX_JOBS:-64}"
     depends_on:
       postgres:
         condition: service_started

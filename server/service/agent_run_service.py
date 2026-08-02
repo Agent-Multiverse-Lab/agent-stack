@@ -1,22 +1,29 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from server.service.arq_queue_servcie import (
+    RUN_REDIS_TTL_SECONDS,
     get_arq_pool,
-    queue_event_stream_key,
-    read_queue_events,
-    write_queue_event,
+    publish_agent_run_cancel_signal,
+    read_agent_run_stream_events,
+    read_recent_agent_run_stream_events,
+    write_agent_run_stream_event,
 )
 from src.configs import config
-from src.storage import get_async_redis_client
+from src.database.models import AgentRun
+from src.database.repositories import AgentRunRepository, ConversationRepository
+from src.database.session import session_context
 from src.utils import logger
 
-RUN_REDIS_TTL_SECONDS = 24 * 60 * 60
-_TERMINAL_EVENT_TYPES = {"done", "error", "cancelled"}
+_TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
+SUBAGENT_PROGRESS_EVENT_COUNT = 5
 
 
 async def enqueue_agent_run(run_id: str) -> None:
@@ -31,8 +38,30 @@ async def enqueue_agent_run(run_id: str) -> None:
     )
 
 
+async def wait_agent_run_result(run_id: str) -> str:
+    """从数据库等待 Run 终态并读取最终消息。"""
+    while True:
+        async with session_context() as db:
+            run = await AgentRunRepository(db).get_by_id(run_id)
+            if run is None:
+                raise ValueError(f"Agent Run 不存在：{run_id}")
+
+            status = str(run.agent_status)
+            if status == "completed":
+                message = await ConversationRepository(db).get_run_result_message(
+                    run_id
+                )
+                if message is None:
+                    raise RuntimeError(f"Agent Run 未保存最终消息：{run_id}")
+                return str(message.content)
+            if status in {"failed", "cancelled"}:
+                raise RuntimeError(str(run.error or status))
+
+        await asyncio.sleep(1)
+
+
 async def publish_agent_run_event(run_id: str, event: dict[str, Any]) -> str:
-    return await write_queue_event(
+    return await write_agent_run_stream_event(
         run_id,
         _build_agent_run_event(run_id, event),
         ttl_seconds=RUN_REDIS_TTL_SECONDS,
@@ -46,7 +75,7 @@ async def read_agent_run_events(
     count: int | None = None,
     block_ms: int | None = None,
 ) -> list[tuple[str, dict[str, Any]]]:
-    rows = await read_queue_events(
+    rows = await read_agent_run_stream_events(
         run_id,
         after_id=after_id,
         count=count,
@@ -59,52 +88,224 @@ async def read_agent_run_events(
     return events
 
 
+async def read_subagent_progress(
+    *,
+    run_id: str,
+    read_event_limit: int = SUBAGENT_PROGRESS_EVENT_COUNT,
+) -> dict[str, Any]:
+    """从 Redis Stream 读取子 Agent Run 状态和最近事件。"""
+
+    if read_event_limit < 1:
+        raise ValueError("read_event_limit 必须大于 0")
+
+    subagent_event = await read_recent_agent_run_stream_events(
+        run_id,
+        count=read_event_limit,
+    )
+    events: list[dict[str, Any]] = []
+    status = "running" if subagent_event else "pending"
+    error: str | None = None
+    for event_id, fields in reversed(subagent_event):
+        payload = _decode_event_fields(fields)
+        event_status = payload.get("status")
+        if isinstance(event_status, str) and event_status:
+            status = event_status
+
+        if payload.get("error") is not None:
+            error = str(payload["error"])
+        events.append(
+            {
+                "event_id": _to_text(event_id),
+                "payload": payload,
+            }
+        )
+
+    return {
+        "run_id": run_id,
+        "status": status,
+        "terminal": status in _TERMINAL_RUN_STATUSES,
+        "error": error,
+        "events": events,
+    }
+
+
+async def get_agent_run_result(
+    *,
+    current_uid: str,
+    run_id: str,
+) -> str | None:
+    """按当前用户和 Run ID 从数据库读取最终 Agent 消息。"""
+
+    async with session_context() as db:
+        run = await AgentRunRepository(db).get_by_id_for_user(
+            run_id=run_id,
+            uid=current_uid,
+        )
+        if run is None:
+            raise ValueError(f"Agent Run 不存在或不属于当前用户：{run_id}")
+        if str(run.agent_status) != "completed":
+            return None
+
+        message = await ConversationRepository(db).get_run_result_message(run_id)
+        if message is None:
+            raise RuntimeError(f"Agent Run 未保存最终消息：{run_id}")
+        return str(message.content)
+
+
 async def stream_agent_run_events(
     *,
     run_id: str,
     current_uid: str,
+    thread_id: str,
 ) -> AsyncIterator[str]:
-    # ponytail: ownership check stays in the router/repository path; this only formats run events.
-    _ = current_uid
+    async with session_context() as db:
+        run = await AgentRunRepository(db).get_by_id_for_user_and_thread(
+            run_id=run_id,
+            uid=current_uid,
+            thread_id=thread_id,
+        )
+        if run is None:
+            return
+
     after_id = "0-0"
     while True:
         events = await read_agent_run_events(run_id, after_id=after_id)
         for event_id, payload in events:
             after_id = event_id
             yield _format_sse(event_id, payload)
-            if payload.get("type") in _TERMINAL_EVENT_TYPES:
+            if payload.get("type") == "end":
+                return
+
+        if events:
+            continue
+
+        # Redis Stream 可能尚未创建、已经过期，或漏掉了终态事件；此时以数据库为准收口 SSE。
+        async with session_context() as db:
+            run = await AgentRunRepository(db).get_by_id_for_user_and_thread(
+                run_id=run_id,
+                uid=current_uid,
+                thread_id=thread_id,
+            )
+            if run is None:
+                return
+
+            status = str(run.agent_status)
+            if status == "completed":
+                message = await ConversationRepository(db).get_run_result_message(
+                    run_id
+                )
+                if message is not None:
+                    yield _format_sse(
+                        after_id,
+                        _build_agent_run_event(
+                            run_id,
+                            {
+                                "type": "messages",
+                                "thread_id": thread_id,
+                                "payload": [
+                                    {
+                                        "event": "content-block-finish",
+                                        "content": {"text": str(message.content)},
+                                    }
+                                ],
+                            },
+                        ),
+                    )
+                yield _format_sse(
+                    after_id,
+                    _build_agent_run_event(
+                        run_id,
+                        {
+                            "type": "end",
+                            "status": "completed",
+                            "thread_id": thread_id,
+                        },
+                    ),
+                )
+                return
+
+            if status in {"failed", "cancelled"}:
+                yield _format_sse(
+                    after_id,
+                    _build_agent_run_event(
+                        run_id,
+                        {
+                            "type": "end",
+                            "status": status,
+                            "thread_id": thread_id,
+                            "error": str(run.error or status),
+                        },
+                    ),
+                )
                 return
 
 
-async def cancel_agent_run(run_id: str, *, reason: str | None = None) -> None:
-    redis = await get_async_redis_client()
-    payload = _build_agent_run_event(
-        run_id,
-        {
-            "type": "cancelled",
-            "status": "cancelled",
-            "reason": reason or "cancelled",
-        },
+async def cancel_run_service(
+    *,
+    run_id: str,
+    current_user_id: str,
+    db: AsyncSession,
+) -> dict[str, str]:
+    """取消当前用户的 Agent Run，并返回接口所需的运行信息。"""
+
+    run = await request_cancel_agent_run(
+        run_id=run_id,
+        current_uid=current_user_id,
+        db=db,
     )
-    await redis.set(
-        agent_run_cancel_key(run_id),
-        json.dumps(payload, ensure_ascii=False),
-        ex=RUN_REDIS_TTL_SECONDS,
+    return {
+        "run_id": str(run.id),
+        "thread_id": str(run.thread_id),
+        "agent_id": str(run.agent_id),
+        "status": str(run.agent_status),
+    }
+
+
+async def request_cancel_agent_run(
+    *,
+    run_id: str,
+    current_uid: str,
+    db: AsyncSession,
+) -> AgentRun:
+    """持久化目标 Agent Run 及其活跃子 Run 的取消请求。"""
+
+    signal_run_ids: list[str] = []
+    run_repository = AgentRunRepository(db)
+    run = await run_repository.get_by_id_for_user(
+        run_id=run_id,
+        uid=current_uid,
     )
-    await write_queue_event(run_id, payload, ttl_seconds=RUN_REDIS_TTL_SECONDS)
+    if run is None:
+        raise ValueError(f"Agent Run 不存在或不属于当前用户：{run_id}")
 
+    child_runs = await run_repository.list_active_child_runs(
+        parent_run_id=run_id,
+        uid=current_uid,
+    )
+    for child_run in child_runs:
+        child_run = await run_repository.request_cancel(str(child_run.id))
+        if (
+            child_run is not None
+            and str(child_run.agent_status) == "cancel_requested"
+        ):
+            signal_run_ids.append(str(child_run.id))
 
-async def is_agent_run_cancelled(run_id: str) -> bool:
-    redis = await get_async_redis_client()
-    return bool(await redis.exists(agent_run_cancel_key(run_id)))
+    run = await run_repository.request_cancel(run_id)
+    if run is None:
+        raise ValueError(f"Agent Run 不存在：{run_id}")
+    if str(run.agent_status) == "cancel_requested":
+        signal_run_ids.append(run_id)
 
+    # Redis 信号只能在取消状态持久化成功后发布，避免 Worker 先收到信号。
+    await db.commit()
 
-def agent_run_event_stream_key(run_id: str) -> str:
-    return queue_event_stream_key(run_id)
-
-
-def agent_run_cancel_key(run_id: str) -> str:
-    return f"run:cancel:{run_id}"
+    await asyncio.gather(
+        *(
+            publish_agent_run_cancel_signal(signal_run_id)
+            for signal_run_id in signal_run_ids
+        )
+    )
+    return run
 
 
 def _build_agent_run_event(run_id: str, event: dict[str, Any]) -> dict[str, Any]:

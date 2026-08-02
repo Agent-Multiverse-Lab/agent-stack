@@ -11,6 +11,7 @@ class AgentManager:
         self._instances: dict[str, BaseAgent] = {}
         # FIXME: 单独记录顶层 Agent，避免把内部 subagent 暴露为可创建会话的 Agent。
         self._top_level_ids: set[str] = set()
+        self._subagent_ids: set[str] = set()
         self._setup_agent()
 
     def _setup_agent(self) -> None:
@@ -47,7 +48,9 @@ class AgentManager:
                 and issubclass(obj, BaseAgent)
             ):
                 self._instances[name] = obj()
-                if not is_subagent:
+                if is_subagent:
+                    self._subagent_ids.add(name)
+                else:
                     self._top_level_ids.add(name)
 
     def get_agent(self, agent_id: str) -> BaseAgent:
@@ -74,6 +77,18 @@ class AgentManager:
                 "description": self._instances[agent_id].description,
             }
             for agent_id in sorted(self._top_level_ids)
+        ]
+
+    def list_subagents(self) -> list[dict[str, str]]:
+        """返回内部子智能体注册信息，供启动同步和 Worker 解析使用。"""
+
+        return [
+            {
+                "id": agent_id,
+                "name": self._instances[agent_id].name,
+                "description": self._instances[agent_id].description,
+            }
+            for agent_id in sorted(self._subagent_ids)
         ]
 
 

@@ -1,4 +1,7 @@
-﻿from .layoutagent import LayoutAgent
+from .outlineagent import OutlineAgent
 from .searchagent import SearchAgent
 
-__all__ = ["LayoutAgent", "SearchAgent"]
+__all__ = [
+    "OutlineAgent",
+    "SearchAgent",
+]

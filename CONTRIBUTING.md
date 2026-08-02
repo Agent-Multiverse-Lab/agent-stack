@@ -13,19 +13,19 @@ Format:
 Examples:
 
 ```text
-feat(agent): add stream response endpoint
-fix(chat): handle empty message payload
-refactor(config): split model options
-doc(readme): add backend startup steps
-chore(deps): update dependencies
+feat(agent): 接入流式响应接口
+fix(thread): 处理空消息请求
+refactor(config): 拆分模型配置
+doc(readme): 补充后端启动步骤
+chore(deps): 更新项目依赖
 ```
 
 Rules:
 
 - `type` should be one of: `feat`, `fix`, `refactor`, `doc`, `test`, `chore`, `build`, `ci`.
-- `scope` is recommended and should describe the changed module, such as `agent`, `chat`, `web`, `deps`.
-- `subject` uses lowercase imperative form and should be concise (recommended <= 72 characters).
-- Commit messages must be written in English.
+- `scope` is recommended and should describe the changed module, such as `agent`, `thread`, `worker`, `web`, or `deps`.
+- Keep `type` and `scope` as lowercase English Conventional Commit tokens.
+- Write the `subject` and optional commit body in Chinese. Keep the subject concise (recommended <= 72 characters) and do not end it with punctuation.
 - Do not wrap commit messages, subjects, or scopes with `@` characters.
 - Keep one commit focused on one change.
 

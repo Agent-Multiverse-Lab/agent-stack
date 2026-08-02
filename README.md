@@ -1,10 +1,10 @@
 # multi-agent-s2c
 
-类 GPT 的通用多智能体对话系统，支持多轮对话、多智能体协作、知识库检索、工具调用与流式响应。
+A general-purpose multi-agent system for exploring agent orchestration, interaction, and application development. 面向智能体编排、交互与应用开发的通用多智能体系统。
 
-leejuju 智能体宇宙的第一步。
+## 项目定位
 
-本仓库是用于技术学习与工程实践的阶段性项目，目前处于第一阶段。项目定位为通用多智能体系统，聚焦 Web 应用形态，构建类似 ChatGPT 的交互体验，并验证多智能体编排、任务协作与工具调用等核心能力。
+本仓库是用于技术学习与工程实践的阶段性项目，目前处于第一阶段。项目定位为通用多智能体系统。第一阶段聚焦 Web 应用形态，构建类似 ChatGPT 的交互体验，并验证多智能体编排、任务协作与工具调用等核心能力。
 
 后续阶段将依次探索以下产品形态：
 
@@ -14,38 +14,28 @@ leejuju 智能体宇宙的第一步。
 
 项目将在上述形态演进的基础上，持续扩展智能体协作、知识检索、工具调用、内容生成、任务自动化及其他通用能力。
 
-## 项目描述
-
-multi-agent-s2c 是一个从零构建的类 ChatGPT Web 应用，后端基于 FastAPI + LangChain/LangGraph 多智能体框架，前端使用 Vue 3，目标构建类似 Mulerun 的 Web 端交互体验。
-
-系统支持多智能体协作编排，主 Agent 可动态调度搜索 Agent、大纲 Agent 等子 Agent 完成复杂任务，后台通过异步队列执行并支持任务取消。知识库模块支持文档上传、解析、分块与向量索引，结合 Embedding 模型实现语义检索与 RAG 问答。
-
-## 主要功能
-
-- 用户注册登录（JWT 认证）
-- 多轮对话管理与流式响应（SSE）
-- 多智能体协作（任务编排、子 Agent 调度与取消）
-- 知识库管理（文档解析、向量索引、语义搜索）
-- 工具调用（联网搜索、MCP 工具集成）
-
-## 技术栈
+## 主要技术栈
 
 | 领域 | 技术 |
 | --- | --- |
-| 后端框架 | Python 3.13、FastAPI、Uvicorn |
-| 智能体框架 | LangChain、LangGraph、Deep Agents |
-| 数据库 | PostgreSQL、SQLAlchemy、Alembic |
-| 异步任务 | Redis、ARQ |
-| 实时通信 | Server-Sent Events（SSE） |
-| 向量数据库 | Milvus |
-| 对象存储 | MinIO |
-| 模型集成 | OpenAI-compatible API、MCP、Tavily |
-| 前端 | Vue 3、TypeScript、Vite 7、Vue Router 4 |
-| 工程工具 | uv、Docker Compose、Ruff |
+| 后端服务 | Python 3.13、FastAPI、Pydantic、Uvicorn |
+| 智能体与工作流 | LangChain、LangGraph、Deep Agents |
+| 数据持久化 | PostgreSQL、SQLAlchemy、Alembic |
+| 异步任务与事件流 | Redis、ARQ、Server-Sent Events（SSE） |
+| 知识与文件存储 | Milvus、MinIO |
+| 模型与工具集成 | OpenAI-compatible API、MCP、A2A、Tavily |
+| Web 前端 | Vue 3、TypeScript、Vite 7、Vue Router 4 |
+| 工程与部署 | uv、Docker Compose、Ruff |
 
 ## 系统架构
 
 ![multi-agent-s2c 系统架构图](./doc/image.png)
+![multi-agent-s2c 系统架构图](./doc/image.png)
+
+## 数据库迁移样例
+
+仓库当前只提供不包含真实 Schema 变更的 Alembic 迁移样例。目录边界和
+`upgrade()`、`downgrade()` 使用方式见 [`migrate/README.md`](./migrate/README.md)。
 
 ## Contributing
 

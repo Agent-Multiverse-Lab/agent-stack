@@ -54,15 +54,27 @@
 
 ## 5. Schema 初始化
 
-`create_schema()` 用当前 SQLAlchemy model 元数据创建缺失结构：
+`ensure_tables_exist()` 用当前 SQLAlchemy model 元数据创建缺失表，并对已有
+`agent_run` 表补充非破坏性的 `run_type` 字段和索引：
 
 ```python
-async def create_schema(self) -> None:
+async def ensure_tables_exist(self) -> None:
     async with self.engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+        await connection.run_sync(
+            lambda sync_connection: Base.metadata.create_all(
+                bind=sync_connection,
+                checkfirst=True,
+            )
+        )
 ```
 
-当前阶段一个 `create_schema()` 就够。不要提前拆 `create_business_table()`、`create_knowledge_table()` 之类的方法，除非后面真的有多套 metadata 或多库隔离。
+该操作不删除、重建或清空已有表，也不填充用户、会话等业务数据。旧 Run 的
+`run_type` 会按照已注册 Agent 的 `role` 回填为 `chat` 或 `subagent`，不会再根据
+`parent_run_id` 推断。现阶段一个 `ensure_tables_exist()` 就够；不要提前拆
+`create_business_table()`、`create_knowledge_table()` 之类的方法，除非后面真的有
+多套 metadata 或多库隔离。
+
+当前由 ARQ worker startup 单点调用该方法；FastAPI lifespan 只初始化自身数据库连接，不重复执行 schema bootstrap。Worker shutdown 只释放资源，不执行任何建表或固定数据写入。
 
 ## 6. Session 上下文
 
@@ -120,7 +132,7 @@ postgres_manager = PostgreManger()
 外部代码优先通过这个实例调用：
 
 - `initialize()`
-- `create_schema()`
+- `ensure_tables_exist()`
 - `get_async_session_context()`
 - `dispose()`
 

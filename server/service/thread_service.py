@@ -1,12 +1,11 @@
-import json
 import uuid
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
 from langchain.messages import HumanMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from server.service.input_message_service import AgentInputMsg
 from server.utils.auth import AuthenticatedUser
 from src.agents import agent_manager
 from src.agents.base_agent import BaseAgent
@@ -14,40 +13,12 @@ from src.database import Agent, User
 from src.database.repositories import AgentRepository, ConversationRepository
 
 
-@dataclass(frozen=True)
-class AgentInputMsg:
-    content: str
-    msg_type: str
-    image_content: str | None
-    msg_metadata: dict[str, Any] = field(default_factory=dict)
-
-    @property
-    def langchain_msg(self) -> HumanMessage:
-        """构建输入消息转化为langchain标准格式"""
-        if not self.image_content:
-            return HumanMessage(content=self.content)
-        return HumanMessage(
-            content=[
-                {
-                    "type": "text",
-                    "text": self.content,
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": self.image_content,
-                    },
-                },
-            ]
-        )
-
-
 async def _build_agent_runtime(
     agent_slug: str,
     user: User,
     thread_id: str | None,
     db: AsyncSession,
-    agent_type: Literal["father", "son"] = "father",
+    run_type: str = "chat",
 ) -> tuple[Any, BaseAgent]:
     """根据传递的参数，构建 agent 基础以及实例
 
@@ -55,7 +26,7 @@ async def _build_agent_runtime(
         agent_id (str): agent name
         user (User): 当前用户可访问的agent
         thread_id (str | None): _description_
-        agent_type (Literal["father";, "sub"]): 父agent还是子agennt
+        run_type: Agent Run 类型，当前为 chat 或 subagent
 
     Returns:
         tuple[Any, Any, Any]: _description_
@@ -65,8 +36,8 @@ async def _build_agent_runtime(
     if not agent_slug:
         raise ValueError("未配置agent")
 
-    agent = await agent_repo.get_agent_by_slug(
-        agent_slug=agent_slug, agent_type=agent_type
+    agent = await agent_repo.get_by_slug_for_run_type(
+        slug=agent_slug, run_type=run_type
     )
 
     if not agent:
@@ -83,8 +54,12 @@ async def _build_agent_runtime(
 
 
 async def _build_agent_runtime_context(
-    agent_instance:BaseAgent, uid: str, run_id: str, thread_id: str, request_id: str
-) -> dict[str, str]:
+    agent_instance: BaseAgent,
+    uid: str,
+    run_id: str,
+    thread_id: str,
+    request_id: str,
+):
     """结合前端传递构建 agent 运行的固有参数的上下文
 
     Args:
@@ -97,12 +72,13 @@ async def _build_agent_runtime_context(
     Returns:
         dict[str, str]: 上下文结构
     """
+    agent_runtime_context = {}
     
     # 构建固有上下文元素
-    agent_runtime_context = agent_instance.agent_context()
-    
+    # agent_runtime_context = agent_instance.agent_context()
+
     # 根据当前用户的传递内容填填充上下文
-    agent_runtime_context.update_context(
+    agent_runtime_context.update(
         {
             "uid": uid,
             "run_id": run_id,
@@ -156,16 +132,6 @@ async def stream_agent_response(
     if not thread_id:
         thread_id = str(uuid.uuid4())
 
-    def stream_agent_chunk(content=None, **kwargs):
-        """封装agent产生的chunk"""
-        return json.dumps(
-            obj={
-                "thread_id": thread_id,
-                "request_id": runtime_metadata.get("request_id", "") ** kwargs,
-            },
-            ensure_ascii=False,
-        ).encode("utf-8")
-
     runtime_metadata = dict(runtime_metadata or {})
 
     # 设置单次 request_id 作为单次断联的标志以及附件的隔离归属
@@ -184,8 +150,7 @@ async def stream_agent_response(
         user=current_user,
         thread_id=thread_id,
         db=db,
-        # FIXME: 当前 Worker 只执行顶层 Agent；缺省值必须能命中 father 查询分支。
-        agent_type=runtime_metadata.get("run_type") or "father",
+        run_type=runtime_metadata.get("run_type") or "chat",
     )
 
     runtime_metadata.update(
@@ -226,23 +191,9 @@ async def stream_agent_response(
     async for method, payload in agent_instacne.stream_messages_with_event(
         messages,  # ty:ignore[invalid-argument-type]
         runtime_context=agent_runtime_context,
-    ):  
-        # 多种不同和的状态
-        if method == "messages":
-            pass
-            
-        elif method == "values":
-            print(method, payload)
-
-        elif method == "agent_execute_event":
-            # 比如 tool， 子图的生命周期，都是agent执行种会额外触发的任务执行态
-            yield stream_agent_chunk(
-                status="agent_execute_event",
-                runtime_metadata=runtime_metadata,
-                event=payload,
-            )
-        
-        
+    ):
+        if method in {"messages", "values", "agent_execute_event"}:
+            yield method, payload
 
         #  if mode == "values":
         #         agent_state = extract_agent_state(payload if isinstance(payload, dict) else {})

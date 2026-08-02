@@ -61,9 +61,9 @@ async def create_thread(
     # OPTIMIZE
     agent_repo = AgentRepository(db)
     # FIXME: 创建顶层对话时显式按 father 类型解析 Agent。
-    agent_result = await agent_repo.get_agent_by_slug(
-        agent_slug=thread.agent_id,
-        agent_type="father",
+    agent_result = await agent_repo.get_by_slug_for_run_type(
+        slug=thread.agent_id,
+        run_type="chat",
     )
     
     if not agent_result:
@@ -86,7 +86,7 @@ async def create_thread(
     conversation = await conv_repo.create_conversation(
         uid=current_user.uid,
         thread_id=thread_id,
-        agent_id=agent_id,
+        agent_slug=agent_id,
         title = title,
         summary=summary,
         conversation_metadata=thead_meatadata)
