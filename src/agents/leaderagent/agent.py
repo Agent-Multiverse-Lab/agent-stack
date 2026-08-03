@@ -14,6 +14,7 @@ from src.agents.backends.composite_backend import (
 )
 from src.agents.base_agent import BaseAgent
 from src.agents.middlewares.subagent_middlware import create_subagent_middleware
+from src.agents.subagents.citationagent import CitationAgent
 from src.agents.subagents.outlineagent import OutlineAgent
 from src.agents.subagents.searchagent import SearchAgent
 from src.configs import config as sys_config
@@ -40,6 +41,7 @@ class LeaderAgent(BaseAgent):
             create_subagent_middleware(
                 subagents=[
                     SearchAgent(),
+                    CitationAgent(),
                     OutlineAgent(),
                 ],
                 parent_context=context,
@@ -67,5 +69,6 @@ class LeaderAgent(BaseAgent):
             system_prompt=build_prompt(runtime_context),
             context_schema=type(runtime_context),
             checkpointer=self.get_checkpointer(),
+            store=self.get_store(),
             middleware=self._create_middlewares(runtime_context),
         )  # ty:ignore[invalid-return-type]
