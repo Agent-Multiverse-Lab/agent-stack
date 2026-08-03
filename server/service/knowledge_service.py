@@ -1,12 +1,13 @@
-"""知识库向量化与存储用例。"""
+"""知识库向量化、检索重排与存储用例。"""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from hashlib import sha256
 from typing import Any
 from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.configs import config as sys_config
 from src.database.models import (
     KnowledgeBase,
     KnowledgeEmbeddingBinding,
@@ -23,10 +24,14 @@ from src.knowledge.factory import KnowledgeFactory
 from src.knowledge.flow import Pipeline
 from src.knowledge.store.milvus.milvus import MilvusKnowledge
 from src.model import (
+    BaseReranker,
+    RerankDocument,
     load_embedding_model,
+    load_reranker,
     resolve_embedding_model,
 )
 from src.storage import MinioStorage, get_storage, sanitize_filename
+from src.utils import logger
 
 _KNOWLEDGE_BUCKET = "knowledgebases"
 
@@ -49,6 +54,7 @@ class KnowledgeService:
         self.db = db
         self.knowledge_type = knowledge_type
         self._knowledge: MilvusKnowledge | None = None
+        self._reranker: BaseReranker | None = None
         self.storage = storage or get_storage()
         self.pipeline = pipeline or Pipeline()
         self.knowledge_bases = KnowledgeBaseRepository(db)
@@ -124,6 +130,25 @@ class KnowledgeService:
             )
             raise
         return knowledge_file
+
+    async def list_file_names(
+        self,
+        *,
+        uid: str,
+        kb_id: str,
+    ) -> list[str]:
+        """列出当前用户指定知识库中的原始文件名。"""
+        knowledge_base = await self.knowledge_bases.get_for_user(
+            uid=uid,
+            kb_id=kb_id,
+        )
+        if knowledge_base is None:
+            raise LookupError(f"知识库不存在：{kb_id}")
+
+        return await self.knowledge_files.list_names_for_user(
+            uid=uid,
+            kb_id=kb_id,
+        )
 
     async def parse_file(
         self,
@@ -355,7 +380,10 @@ class KnowledgeService:
         query: str,
         limit: int,
     ) -> dict[str, Any]:
-        """始终使用知识库绑定模型生成查询向量。"""
+        """使用绑定 Embedding 初召回，并按配置执行查询时重排。"""
+        if limit <= 0:
+            raise ValueError("知识库检索 limit 必须大于 0")
+
         binding = await self._require_binding(uid, kb_id)
         embedding, _, _ = self._create_embedding_service(
             binding.embedding_model_spec,
@@ -363,12 +391,58 @@ class KnowledgeService:
             batch_size=binding.embedding_batch_size,
         )
         vector = await embedding.embed_query(query)
+        rerank_model_spec = sys_config.rerank_model.strip()
+        candidate_limit = (
+            max(limit, sys_config.rerank_candidate_limit)
+            if rerank_model_spec
+            else limit
+        )
         hits = await self._get_knowledge().search(
             collection_name=binding.collection_name,
             vector=vector,
-            limit=limit,
+            limit=candidate_limit,
         )
-        return self._binding_result(binding, hits=hits)
+        if not rerank_model_spec:
+            return self._binding_result(binding, hits=hits)
+        if not hits:
+            return self._binding_result(
+                binding,
+                hits=[],
+                rerank={
+                    "applied": False,
+                    "model_spec": rerank_model_spec,
+                    "candidate_count": 0,
+                    "result_count": 0,
+                },
+            )
+
+        try:
+            reranked_hits = await self._rerank_hits(
+                query=query,
+                hits=hits,
+                limit=limit,
+            )
+        except Exception:
+            logger.exception(
+                "知识库 Rerank 失败：uid=%s kb_id=%s model=%s "
+                "candidate_count=%s",
+                uid,
+                kb_id,
+                rerank_model_spec,
+                len(hits),
+            )
+            raise
+
+        return self._binding_result(
+            binding,
+            hits=reranked_hits,
+            rerank={
+                "applied": True,
+                "model_spec": rerank_model_spec,
+                "candidate_count": len(hits),
+                "result_count": len(reranked_hits),
+            },
+        )
 
     async def delete_records(
         self,
@@ -406,6 +480,87 @@ class KnowledgeService:
                 )
             self._knowledge = knowledge
         return self._knowledge
+
+    def _get_reranker(self) -> BaseReranker:
+        """按需创建当前进程使用的 Reranker。"""
+        if self._reranker is None:
+            self._reranker = load_reranker()
+        return self._reranker
+
+    async def _rerank_hits(
+        self,
+        *,
+        query: str,
+        hits: Sequence[Mapping[str, Any]],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """重排 Milvus 命中并保留原始业务字段和向量分数。"""
+        documents, hits_by_id = self._prepare_rerank_documents(hits)
+        results = await self._get_reranker().arerank(
+            query,
+            documents,
+            top_n=limit,
+        )
+
+        reranked_hits: list[dict[str, Any]] = []
+        for result in results:
+            hit = dict(hits_by_id[result.document.id])
+            hit["retrieval_rank"] = result.document.original_rank
+            hit["rerank_score"] = result.relevance_score
+            hit["rerank_rank"] = result.rerank_rank
+            reranked_hits.append(hit)
+        return reranked_hits
+
+    @staticmethod
+    def _prepare_rerank_documents(
+        hits: Sequence[Mapping[str, Any]],
+    ) -> tuple[list[RerankDocument], dict[str, dict[str, Any]]]:
+        """将 Milvus 命中转换为通用 Rerank 候选。"""
+        documents: list[RerankDocument] = []
+        hits_by_id: dict[str, dict[str, Any]] = {}
+
+        for original_rank, raw_hit in enumerate(hits, start=1):
+            hit = dict(raw_hit)
+            raw_entity = hit.get("entity")
+            entity = raw_entity if isinstance(raw_entity, Mapping) else hit
+
+            document_id = str(
+                entity.get("chunk_id") or hit.get("id") or ""
+            ).strip()
+            if not document_id:
+                raise ValueError("Milvus 命中缺少 chunk_id")
+            if document_id in hits_by_id:
+                raise ValueError(f"Milvus 命中 chunk_id 重复：{document_id}")
+
+            text = entity.get("chunk")
+            if not isinstance(text, str) or not text.strip():
+                raise ValueError(
+                    f"Milvus 命中缺少分块正文：{document_id}"
+                )
+
+            raw_metadata = entity.get("metadata")
+            metadata = (
+                dict(raw_metadata)
+                if isinstance(raw_metadata, Mapping)
+                else {}
+            )
+            for key in ("file_id", "chunk_index"):
+                value = entity.get(key)
+                if value is not None:
+                    metadata.setdefault(key, value)
+
+            documents.append(
+                RerankDocument(
+                    id=document_id,
+                    text=text,
+                    original_rank=original_rank,
+                    retrieval_score=hit.get("distance"),
+                    metadata=metadata,
+                )
+            )
+            hits_by_id[document_id] = hit
+
+        return documents, hits_by_id
 
     async def _require_binding(
         self,
