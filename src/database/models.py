@@ -7,6 +7,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -35,6 +36,16 @@ class User(Base):
 
 class Conversation(Base):
     __tablename__ = "conversation"
+    __table_args__ = (
+        Index(
+            "ix_conversation_thread_list",
+            "uid",
+            "parent_conversation_id",
+            "deleted_at",
+            "updated_at",
+            "id",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="会话表主键")
     uid = Column(String(64), index=True, nullable=False, comment="uid")
@@ -52,6 +63,7 @@ class Conversation(Base):
     conversation_metadata = Column(JSON, nullable=False, default=dict, comment="会话元数据")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), comment="更新时间")
+    deleted_at = Column(DateTime(timezone=True), nullable=True, comment="软删除时间")
 
     parent = relationship(
         "Conversation",
@@ -69,6 +81,9 @@ class Conversation(Base):
 
 class Message(Base):
     __tablename__ = "message"
+    __table_args__ = (
+        Index("ix_message_conversation_id_id", "conversation_id", "id"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="消息ID")
     conversation_id = Column(Integer, ForeignKey("conversation.id", ondelete="CASCADE"), nullable=False, comment="会话ID")
@@ -108,6 +123,13 @@ class ToolCall(Base):
 
 class AgentRun(Base):
     __tablename__ = "agent_run"
+    __table_args__ = (
+        Index(
+            "ix_agent_run_conversation_status",
+            "conversation_id",
+            "agent_status",
+        ),
+    )
 
     id = Column(String(64), primary_key=True, comment="运行ID")
     thread_id = Column(String(64), index=True, nullable=False, comment="会话ID")
@@ -127,6 +149,13 @@ class AgentRun(Base):
     trigger_message_id = Column(Integer, nullable=True, comment="Input message ID")
     request_id = Column(String(128), unique=True, index=True, nullable=True, comment="请求ID")
     parent_run_id = Column(String(64), nullable=True, index=True, comment="当前runid的父id")
+    run_metadata = Column(
+        JSON,
+        nullable=False,
+        default=dict,
+        server_default="{}",
+        comment="单次运行元数据",
+    )
 
     error = Column(Text, nullable=True, comment="错误信息")
     error_type = Column(String(64), nullable=True, comment="错误信息类型")
@@ -686,6 +715,9 @@ class Skill(Base):
 
 class Attachment(Base):
     __tablename__ = "attachment"
+    __table_args__ = (
+        Index("ix_attachment_conversation_id", "conversation_id"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="附件ID")
     uid = Column(Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, comment="用户ID")

@@ -3,8 +3,8 @@
 `migrate/` 只保存数据库结构的版本变更，不负责应用启动、数据库连接管理、
 业务数据初始化、Worker、Agent 或队列逻辑。
 
-当前目录只提供 Alembic 迁移骨架和空版本样例，不包含真实 Schema 变更，也不会
-由 FastAPI 或 ARQ Worker 自动执行。
+当前目录包含空基线版本和后续真实 Schema 变更；迁移不会由 FastAPI 或 ARQ Worker
+自动执行。
 
 ## 版本文件
 
@@ -13,9 +13,9 @@
 - `upgrade()`：把数据库升级到当前版本。
 - `downgrade()`：尽可能退回上一个版本。
 
-以后增加或修改 Schema 时，复制 `versions/0001_example.py`，更新版本号和
-`down_revision`，然后分别实现 `upgrade()` 和 `downgrade()`。普通业务数据修改
-不应放入迁移；只有与结构变更强绑定的数据回填才属于迁移范围。
+以后增加或修改 Schema 时，新增版本文件并把 `down_revision` 指向当前最新版本，
+然后分别实现 `upgrade()` 和 `downgrade()`。普通业务数据修改不应放入迁移；
+只有与结构变更强绑定的数据回填才属于迁移范围。
 
 ## 执行
 

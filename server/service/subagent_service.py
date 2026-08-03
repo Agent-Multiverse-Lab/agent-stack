@@ -220,6 +220,7 @@ class SubAgentRunService:
                 trigger_message_id=int(trigger_message.id),
                 run_type="subagent",
                 parent_run_id=parent_run_id,
+                run_metadata={"tool_call_id": tool_call_id},
             )
             trigger_message.agent_run_id = child_run.id
             await self.db.flush()

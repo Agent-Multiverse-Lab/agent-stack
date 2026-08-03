@@ -25,5 +25,6 @@ class OutlineAgent(BaseAgent):
             system_prompt=runtime_context.system_prompt,
             context_schema=type(runtime_context),
             checkpointer=self.get_checkpointer(),
+            store=self.get_store(),
             middleware=[ModelRetryMiddleware(max_retries=1, on_failure="continue")],  # ty:ignore[invalid-argument-type]
         )  # ty:ignore[invalid-return-type]

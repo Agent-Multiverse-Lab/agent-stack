@@ -31,6 +31,14 @@ class EmbeddingModelProvider(BaseModel):
     )
 
 
+class RerankModelProvider(BaseModel):
+    """定义 Rerank 模型提供商的配置字段。"""
+
+    name: str = Field(..., description="模型提供商名称")
+    api_key: str = Field(..., description="API 密钥配置字段")
+    endpoint: str = Field(..., description="Rerank URL 配置字段")
+
+
 DEFAULT_BASE_MODEL_PROVIER: dict[str, BaseModelProvider] = {
     # 阿里
     "dashscope": BaseModelProvider(
@@ -88,10 +96,20 @@ DEFAULT_EMBEDDING_MODEL_PROVIDER: dict[str, EmbeddingModelProvider] = {
     ),
 }
 
+DEFAULT_RERANK_MODEL_PROVIDER: dict[str, RerankModelProvider] = {
+    "dashscope": RerankModelProvider(
+        name="dashscope",
+        api_key="DASHSCOPE_API_KEY",
+        endpoint="DASHSCOPE_RERANK_URL",
+    ),
+}
+
 
 __all__ = [
     "BaseModelProvider",
     "DEFAULT_BASE_MODEL_PROVIER",
     "DEFAULT_EMBEDDING_MODEL_PROVIDER",
+    "DEFAULT_RERANK_MODEL_PROVIDER",
     "EmbeddingModelProvider",
+    "RerankModelProvider",
 ]

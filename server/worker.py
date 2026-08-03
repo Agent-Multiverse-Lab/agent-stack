@@ -71,8 +71,10 @@ async def startup(ctx) -> None:
     await postgres_manager.initialize()
     try:
         await postgres_manager.ensure_tables_exist()
+        await postgres_manager.setup_langgraph_persistence()
         await ensure_agents_exist()
     except Exception:
+        logger.exception('Worker 启动资源初始化失败')
         await postgres_manager.dispose()
         raise
 

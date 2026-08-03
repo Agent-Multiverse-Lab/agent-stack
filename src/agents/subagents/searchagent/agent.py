@@ -84,6 +84,7 @@ class SearchAgent(BaseAgent):
             tools=[knowledge_search, web_search_parallel, web_search_one],
             system_prompt=SEARCH_AGENT_SYSTEM_PROMPT,
             checkpointer=self.get_checkpointer(),
+            store=self.get_store(),
             middleware=[
                 ModelRetryMiddleware(max_retries=1, on_failure="continue"),
             ],

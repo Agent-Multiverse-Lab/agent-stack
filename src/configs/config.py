@@ -63,7 +63,25 @@ class Config(BaseSettings):
         default="",
         description="向量生成模型名称，格式为 provider/model",
     )
-    rerank_model: str = Field(default="", description="重排序模型名称")
+    rerank_model: str = Field(
+        default="",
+        description="重排序模型名称，格式为 provider/model",
+    )
+    dashscope_rerank_url: str = Field(
+        default="",
+        description="DashScope Rerank 完整请求地址",
+    )
+    rerank_request_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description="Rerank 单次请求超时秒数",
+    )
+    rerank_candidate_limit: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+        description="启用 Rerank 时的初召回候选数量",
+    )
 
     # ---------- Agent ----------
     hil_approval_tools: tuple[str, ...] = Field(
@@ -75,6 +93,9 @@ class Config(BaseSettings):
 
     # ---------- 数据库 ----------
     database_url: str = Field(default="", description="PostgreSQL 数据库连接地址")
+    langgraph_database_url: str = Field(
+        default="", description="LangGraph PostgreSQL 连接地址"
+    )
     redis_url: str = Field(default="redis://8.136.2.212:6379/0", description="Redis 连接地址")
     arq_queue_name: str = Field(default="agent-runs", description="ARQ 队列名称")
     arq_max_jobs: int = Field(default=64, description="ARQ worker 最大并发任务数")

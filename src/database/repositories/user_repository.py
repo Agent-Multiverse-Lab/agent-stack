@@ -13,6 +13,10 @@ class UserRepository:
     async def get_by_email(self, email: str) -> User | None:
         return await self.session.scalar(select(User).where(User.email == email))
 
+    async def get_by_uid(self, uid: str) -> User | None:
+        """按业务 UID 读取用户。"""
+        return await self.session.scalar(select(User).where(User.uid == uid))
+
     async def create(
         self,
         *,

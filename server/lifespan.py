@@ -16,7 +16,7 @@ from src.utils import logger
 async def lifespan(app: FastAPI):
     verify_required_auth_settings()
 
-    # 表结构和固定 Agent 注册由 ARQ worker startup 单点确保。
+    # 业务表、LangGraph 迁移和固定 Agent 注册由 ARQ worker startup 单点确保。
     await postgres_manager.initialize()
     try:
         init_sandbox_provider()
