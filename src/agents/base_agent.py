@@ -4,7 +4,9 @@ from typing import Any
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.store.postgres import AsyncPostgresStore
 
+from src.database import postgres_manager
 from src.utils.logger import logger
 
 from .base_context import BaseContext
@@ -47,10 +49,16 @@ class BaseAgent:
 
     def __init__(self, **kwargs):
         self.agent = None
-        self.checkpointer = None
 
-    def get_checkpointer(self) -> AsyncPostgresSaver | None:
-        pass
+    def get_store(self) -> AsyncPostgresStore:
+        '''获取当前进程已初始化的 LangGraph Store。'''
+
+        return postgres_manager.get_langgraph_store()
+
+    def get_checkpointer(self) -> AsyncPostgresSaver:
+        '''获取当前进程已初始化的 LangGraph Checkpointer。'''
+
+        return postgres_manager.get_langgraph_checkpointer()
 
     @property
     def module_name(self):

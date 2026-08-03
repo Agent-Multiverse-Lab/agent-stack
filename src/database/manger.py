@@ -1,7 +1,10 @@
+import asyncio
 import json
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.store.postgres import AsyncPostgresStore, PoolConfig
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -11,6 +14,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.sql import text
 
 from src.configs.config import config
+from src.utils.logger import logger
 
 from .base import Base
 
@@ -25,8 +29,9 @@ class PostgreManger:
         # engine 与 session_maker 通过 get_engine() / get_session_maker() 懒加载，不外部注入。
         self.engine: AsyncEngine | None = None
         self.session_maker: async_sessionmaker[AsyncSession] | None = None
-        # LangGraph checkpoint 连接池，接入前用 None 占位。
-        self.langgraph_checkpointer_pool: str = None
+        self.langgraph_store: AsyncPostgresStore | None = None
+        self.langgraph_checkpointer: AsyncPostgresSaver | None = None
+        self._langgraph_resource_stack: AsyncExitStack | None = None
         # 初始化标记，防止重复初始化，并作为依赖方法的显式前置条件。
         self.initialized: bool = False
 
@@ -62,13 +67,65 @@ class PostgreManger:
         """统一启动入口，只做资源准备，不做破坏性操作。"""
         if self.initialized:
             return
-        # 1. 准备或复用 engine / session factory。
-        self.get_engine()
-        self.get_session_maker()
-        # 2. 预留 LangGraph checkpoint pool 初始化位置（接入前保持 None）。
-        self.langgraph_checkpointer_pool = None
-        # 3. 标记初始化完成。
+
+        resource_stack = AsyncExitStack()
+        await resource_stack.__aenter__()
+        try:
+            langgraph_database_url = config.langgraph_database_url
+            if not langgraph_database_url:
+                raise RuntimeError("Missing LANGGRAPH_DATABASE_URL")
+
+            engine = self.get_engine()
+            resource_stack.push_async_callback(engine.dispose)
+            self.get_session_maker()
+
+            store_pool_config = PoolConfig(min_size=1, max_size=10)
+            langgraph_store = await resource_stack.enter_async_context(
+                AsyncPostgresStore.from_conn_string(
+                    langgraph_database_url,
+                    pool_config=store_pool_config,
+                )
+            )
+            langgraph_checkpointer = await resource_stack.enter_async_context(
+                AsyncPostgresSaver.from_conn_string(langgraph_database_url)
+            )
+        except asyncio.CancelledError:
+            await resource_stack.aclose()
+            self._reset_resource_references()
+            raise
+        except Exception:
+            logger.exception('PostgreSQL 运行时资源初始化失败')
+            try:
+                await resource_stack.aclose()
+            except Exception:
+                logger.exception('PostgreSQL 初始化失败后的资源清理失败')
+            self._reset_resource_references()
+            raise
+
+        self.langgraph_store = langgraph_store
+        self.langgraph_checkpointer = langgraph_checkpointer
+        self._langgraph_resource_stack = resource_stack
         self.initialized = True
+
+    def get_langgraph_store(self) -> AsyncPostgresStore:
+        '''获取当前进程已初始化的 LangGraph Store。'''
+
+        if not self.initialized or self.langgraph_store is None:
+            raise RuntimeError(_NOT_INITIALIZED_MSG)
+        return self.langgraph_store
+
+    def get_langgraph_checkpointer(self) -> AsyncPostgresSaver:
+        '''获取当前进程已初始化的 LangGraph Checkpointer。'''
+
+        if not self.initialized or self.langgraph_checkpointer is None:
+            raise RuntimeError(_NOT_INITIALIZED_MSG)
+        return self.langgraph_checkpointer
+
+    async def setup_langgraph_persistence(self) -> None:
+        '''创建或迁移 LangGraph Store 与 Checkpointer 表。'''
+
+        await self.get_langgraph_store().setup()
+        await self.get_langgraph_checkpointer().setup()
 
     async def ensure_tables_exist(self) -> None:
         """创建缺失表，并补充 Agent Run 的非破坏性类型字段。"""
@@ -121,11 +178,27 @@ class PostgreManger:
 
     async def dispose(self) -> None:
         """释放所有持有的资源，并重置到未初始化状态。"""
-        if self.langgraph_checkpointer_pool is not None:
-            await self.langgraph_checkpointer_pool.close()
-            self.langgraph_checkpointer_pool = None
-        if self.engine is not None:
-            await self.engine.dispose()
+        resource_stack = self._langgraph_resource_stack
+        engine = self.engine
+        try:
+            if resource_stack is not None:
+                await resource_stack.aclose()
+            elif engine is not None:
+                await engine.dispose()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception('PostgreSQL 运行时资源释放失败')
+            raise
+        finally:
+            self._reset_resource_references()
+
+    def _reset_resource_references(self) -> None:
+        '''清空当前进程持有的 PostgreSQL 资源引用。'''
+
+        self.langgraph_store = None
+        self.langgraph_checkpointer = None
+        self._langgraph_resource_stack = None
         self.engine = None
         self.session_maker = None
         self.initialized = False

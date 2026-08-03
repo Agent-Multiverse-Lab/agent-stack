@@ -18,7 +18,7 @@ class AttachmentRepository:
         attachment_path: str,
     ) -> Attachment:
         attachment = Attachment(
-            user_id=int(user_id),
+            uid=int(user_id),
             conversation_id=None,
             status="pending",
             attachment_name=attachment_name,
@@ -43,7 +43,7 @@ class AttachmentRepository:
         result = await self.session.execute(
             select(Attachment).where(
                 Attachment.id == attachment_pk,
-                Attachment.user_id == int(user_id),
+                Attachment.uid == int(user_id),
             )
         )
         return result.scalar_one_or_none()

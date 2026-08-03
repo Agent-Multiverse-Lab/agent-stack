@@ -102,6 +102,27 @@ class KnowledgeFileRepository:
         )
         return result.scalar_one_or_none()
 
+    async def list_names_for_user(
+        self,
+        *,
+        uid: str,
+        kb_id: str,
+    ) -> list[str]:
+        """按上传时间倒序列出用户知识库中的原始文件名。"""
+        result = await self.session.execute(
+            select(KnowledgeFile.original_file_name)
+            .join(
+                KnowledgeBase,
+                KnowledgeFile.kb_id == KnowledgeBase.kb_id,
+            )
+            .where(
+                KnowledgeFile.kb_id == kb_id,
+                KnowledgeBase.uid == uid,
+            )
+            .order_by(KnowledgeFile.created_at.desc())
+        )
+        return list(result.scalars().all())
+
     async def update_status(
         self,
         knowledge_file: KnowledgeFile,

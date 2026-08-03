@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -60,6 +61,7 @@ class AgentRunRepository:
                 Conversation.uid == uid,
                 AgentRun.run_type == "subagent",
                 AgentRun.agent_status.not_in(AGENT_RUN_TERMINAL_STATUSES),
+                Conversation.deleted_at.is_(None),
             )
             .execution_options(populate_existing=True)
         )
@@ -78,7 +80,9 @@ class AgentRunRepository:
         agent_status: str = "pending",
         run_type: str = "chat",
         parent_run_id: str | None = None,
+        run_metadata: dict | None = None,
     ) -> AgentRun:
+        """创建持久化 Agent Run。"""
         run = AgentRun(
             id=run_id,
             thread_id=thread_id,
@@ -90,6 +94,7 @@ class AgentRunRepository:
             run_type=run_type,
             agent_status=agent_status,
             parent_run_id=parent_run_id,
+            run_metadata=dict(run_metadata or {}),
         )
         self.session.add(run)
         await self.session.flush()
@@ -110,6 +115,7 @@ class AgentRunRepository:
                 AgentRun.id == run_id,
                 AgentRun.uid == uid,
                 Conversation.uid == uid,
+                Conversation.deleted_at.is_(None),
             )
             .execution_options(populate_existing=True)
         )
@@ -132,10 +138,51 @@ class AgentRunRepository:
                 AgentRun.thread_id == thread_id,
                 Conversation.uid == uid,
                 Conversation.thread_id == thread_id,
+                Conversation.deleted_at.is_(None),
             )
             .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
+
+    async def get_by_ids_for_conversation(
+        self,
+        *,
+        run_ids: Sequence[str],
+        conversation_id: int,
+    ) -> dict[str, AgentRun]:
+        """批量读取一页消息在当前对话中关联的 Agent Run。"""
+        if not run_ids:
+            return {}
+
+        result = await self.session.execute(
+            select(AgentRun).where(
+                AgentRun.id.in_(run_ids),
+                AgentRun.conversation_id == conversation_id,
+            )
+        )
+        runs = result.scalars().all()
+        return {str(run.id): run for run in runs}
+
+    async def has_active_for_conversations(
+        self,
+        *,
+        conversation_ids: Sequence[int],
+        uid: str,
+    ) -> bool:
+        """判断当前用户的一组对话是否仍有未终止的 Run。"""
+        if not conversation_ids:
+            return False
+
+        result = await self.session.execute(
+            select(AgentRun.id)
+            .where(
+                AgentRun.conversation_id.in_(conversation_ids),
+                AgentRun.uid == uid,
+                AgentRun.agent_status.not_in(AGENT_RUN_TERMINAL_STATUSES),
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
 
     async def _get_for_update(self, run_id: str) -> AgentRun | None:
         result = await self.session.execute(

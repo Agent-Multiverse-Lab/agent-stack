@@ -65,6 +65,7 @@ services:
     environment:
       # FIXME: 容器内不能用 localhost 访问 Compose 中的 PostgreSQL 和 Redis。
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/multi_agent_s2c
+      LANGGRAPH_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/multi_agent_s2c
       REDIS_URL: redis://redis:6379/0
       ENABLE_RUN_QUEUE: "true"
       # 父 Run 等待子 Run 时仍需给子任务保留并发槽位。
