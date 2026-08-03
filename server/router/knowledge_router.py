@@ -9,71 +9,21 @@ from fastapi import (
     UploadFile,
     status,
 )
-from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from server.entities.knowledge import (
+    KnowledgeBaseCreateRequest,
+    KnowledgeBaseResponse,
+    KnowledgeDeleteRequest,
+    KnowledgeFileResponse,
+    KnowledgeIndexResponse,
+    KnowledgeSearchRequest,
+)
 from server.service.knowledge_service import KnowledgeService
 from server.utils.auth import AuthenticatedUser
 from src.database import get_db
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
-
-
-class KnowledgeBaseCreateRequest(BaseModel):
-    """知识库创建请求。"""
-
-    name: str = Field(min_length=1, max_length=255)
-    description: str = ""
-
-
-class KnowledgeBaseResponse(BaseModel):
-    """知识库基础信息。"""
-
-    kb_id: str
-    name: str
-    description: str
-    status: str
-
-
-class KnowledgeFileResponse(BaseModel):
-    """知识文件解析信息。"""
-
-    file_id: str
-    kb_id: str
-    original_file_name: str
-    original_object_name: str
-    markdown_object_name: str | None
-    content_type: str
-    file_size: int
-    status: str
-    error_message: str | None
-
-
-class KnowledgeIndexResponse(BaseModel):
-    """知识文件索引结果。"""
-
-    kb_id: str
-    file_id: str
-    status: str
-    chunk_count: int
-    collection_name: str
-    embedding_model_spec: str
-    embedding_dimension: int
-
-
-class KnowledgeSearchRequest(BaseModel):
-    """知识库检索请求。"""
-
-    kb_id: str = Field(min_length=1, max_length=128)
-    query: str = Field(min_length=1)
-    limit: int = Field(default=10, ge=1, le=100)
-
-
-class KnowledgeDeleteRequest(BaseModel):
-    """知识记录删除请求。"""
-
-    kb_id: str = Field(min_length=1, max_length=128)
-    record_ids: list[str] = Field(min_length=1)
 
 
 @router.post("/bases", response_model=KnowledgeBaseResponse)
@@ -94,6 +44,25 @@ async def create_knowledge_base(
         description=knowledge_base.description,
         status=knowledge_base.status,
     )
+
+
+@router.get("/bases/{kb_id}/files", response_model=list[str])
+async def list_knowledge_files(
+    kb_id: str,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+) -> list[str]:
+    """列出当前用户知识库中的原始文件名。"""
+    try:
+        return await KnowledgeService(db).list_file_names(
+            uid=current_user.uid,
+            kb_id=kb_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
 
 
 @router.post("/bases/{kb_id}/files", response_model=KnowledgeFileResponse)

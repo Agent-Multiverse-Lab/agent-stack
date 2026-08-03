@@ -1,7 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from server.entities.auth import (
+    LoginRequest,
+    RegisterRequest,
+    TokenResponse,
+    UserResponse,
+)
 from server.utils.auth import (
     AuthenticatedUser,
     create_access_token,
@@ -13,31 +18,6 @@ from src.database.repositories import UserRepository
 from src.utils import logger
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-
-class RegisterRequest(BaseModel):
-    email: EmailStr = Field(max_length=255)
-    password: str = Field(min_length=6, max_length=128)
-
-
-class LoginRequest(BaseModel):
-    email: EmailStr = Field(max_length=255)
-    password: str = Field(min_length=6, max_length=128)
-
-
-class UserResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    uid: str
-    email: EmailStr
-    is_active: bool
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    user: UserResponse
 
 
 @router.post(

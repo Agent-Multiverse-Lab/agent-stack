@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from server.entities.agent import AgentRunCreateRequest
 from server.service.agent_run_service import (
     cancel_run_service,
     enqueue_agent_run,
@@ -21,22 +20,6 @@ from src.database.models import Message, User
 from src.database.repositories import AgentRunRepository, ConversationRepository
 
 agent_router = APIRouter(prefix="/agent", tags=["agent_router"])
-
-
-class AgentCreateRequest(BaseModel):
-    # TODO 根据Agent字段创建 Agent创建实例
-    pass
-    
-
-class AgentRunCreateRequest(BaseModel):
-    query: str | None = Field(default=None, description="问题")
-    agent_id: str = Field(default=..., description="agent的name")
-    thread_id: str = Field(default=..., description="对话thraed_id")
-    thread_metadata: dict = Field(default_factory=dict, description="附带参数")
-    image_content: str | None = Field(None, description="图像文件")
-    # model: str = Field(None, description="自选模型")
-    is_resume: Any | None = Field(None, description="resume选项，用于特殊如Hil")
-    parent_run_id: str | None = Field(None, description="父事件id,没有就自己的id")
     
 
 @agent_router.post("")
@@ -65,7 +48,7 @@ async def create_agent_run(agentrun_request: AgentRunCreateRequest,
     query = agentrun_request.query
     thread_id = agentrun_request.thread_id
     agent_id = agentrun_request.agent_id 
-    thread_meatadata = agentrun_request.thread_metadata
+    run_metadata = dict(agentrun_request.thread_metadata)
     parent_run_id = agentrun_request.parent_run_id
     
     current_uid = current_user.uid
@@ -74,8 +57,8 @@ async def create_agent_run(agentrun_request: AgentRunCreateRequest,
     
     # FIXME: 统一使用 request_id；兼容旧拼写键，避免现有调用立即失效。
     request_id = (
-        thread_meatadata.get("request_id")
-        or thread_meatadata.get("reuqest_id")
+        run_metadata.get("request_id")
+        or run_metadata.get("reuqest_id")
         or str(uuid.uuid4())
     )
         
@@ -124,6 +107,7 @@ async def create_agent_run(agentrun_request: AgentRunCreateRequest,
             trigger_message_id=msg.id,  # ty:ignore[invalid-argument-type]
             run_type="chat",
             parent_run_id=parent_run_id,
+            run_metadata=run_metadata,
         )
         # FIXME: 同时建立 Message -> AgentRun 关联，便于按 run 查询本次输入消息。
         msg.agent_run_id = run.id
