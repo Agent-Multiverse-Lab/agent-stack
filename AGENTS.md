@@ -16,7 +16,9 @@ Current top-level responsibilities and construction rules:
   and worker lifecycle entrypoints. Routers own HTTP validation and response
   shaping; services own use-case coordination; lifespan and worker hooks own
   process resources. Do not put SQL queries, agent reasoning, or storage-client
-  construction in routers.
+  construction in routers. Router request and response Pydantic models live in
+  `server/schemas/`, grouped by API domain. Keep SQLAlchemy models and
+  service-internal dataclasses or TypedDicts in their owning layers.
 - `src/agents/`: shared agent contracts, concrete top-level and internal agents,
   middleware, model helpers, MCP integration, and sandbox backends. Construct
   agents as context-driven `BaseAgent` packages, expose each concrete class from
@@ -26,9 +28,11 @@ Current top-level responsibilities and construction rules:
   `.env`. Keep parsing, defaults, and validation centralized here. Configuration
   modules must not perform business orchestration or introduce mutable runtime
   state outside the concrete agent context.
-- `src/model/`: shared LangChain chat and Embedding model construction. Resolve
-  `provider/model` specifications from `src/configs/model.py` here so Agents,
-  Knowledge services, and other callers do not depend on each other.
+- `src/model/`: shared LangChain chat and Embedding model construction plus
+  provider-neutral Reranker contracts and adapters. Resolve `provider/model`
+  specifications from `src/configs/model.py` here so Agents, Knowledge
+  services, and other callers do not depend on each other. Rerankers score only
+  caller-supplied candidates; they must not query databases or vector stores.
 - `src/database/`: SQLAlchemy models, PostgreSQL lifecycle/session helpers, and
   repositories. Define schema and relationships in models, centralize engine and
   session lifecycle, and place all persistence queries in responsibility-named
@@ -75,21 +79,44 @@ belongs in `server/service/`; format-specific processing belongs in
 `src/knowledge/flow/`.
 
 The public top-level agent is `LeaderAgent` in `src/agents/leaderagent/`. Current
-internal subagents are `SearchAgent` and `OutlineAgent` under
-`src/agents/subagents/`.
+internal subagents are `SearchAgent`, `CitationAgent`, and `OutlineAgent`
+under `src/agents/subagents/`.
 
 ## Backend Architecture
 
 - Shared agent primitives live in `src/agents/base_agent.py` and `src/agents/base_context.py`.
 - Top-level agents live in `src/agents/<agentname>/`; internal agents live in `src/agents/subagents/<agentname>/`. Each package should expose its agent class from `__init__.py`.
+- Every internal subagent package under `src/agents/subagents/<agentname>/` must
+  use the following responsibility-based structure:
+  - `__init__.py` exposes only the concrete Agent class required by discovery.
+  - `agent.py` defines the concrete Agent and assembles its model, Prompt,
+    Context, State, tools, and middleware. Do not place long Prompt bodies or
+    State schemas here.
+  - `prompt.py` owns the subagent system Prompt and Prompt-construction logic.
+  - `context.py` owns runtime configuration by extending `BaseContext`; it must
+    not carry per-invocation messages, evidence, drafts, or other State payloads.
+  - `state.py` owns the subagent graph State and structured input/output
+    contracts. Keep it minimal, but do not replace it with an empty placeholder.
+  - Add `tools.py`, `middleware.py`, or other modules only when that subagent has
+    real package-local behavior that belongs there.
+- A subagent directory must map to a real compiled-Agent boundary with its own
+  responsibility. Do not create package-shaped placeholders for helpers,
+  prompts, or future ideas.
+- `SearchAgent` and `OutlineAgent` predate the standard package structure and
+  are transitional. Migrate them in a dedicated structural refactor before
+  adding substantial new behavior; do not opportunistically add empty files.
 - `AgentManager` in `src/agents/manager.py` discovers both groups, instantiates `BaseAgent` subclasses, and separately records top-level IDs so internal subagents are not exposed as public conversation agents.
 - `LeaderAgent` replaced the former `DesignAgent`. Worker startup registration migrates the old database slug and its `Conversation.agent_id` / `AgentRun.agent_id` references; `AgentManager` keeps `DesignAgent` only as a non-public runtime compatibility alias for already-loaded work.
 - `BaseAgent.stream_messages(...)` uses LangGraph `astream(...)`. `BaseAgent.stream_messages_with_event(...)` consumes `astream_events(version="v3")` and currently forwards the `messages` channel's `params.data` payload.
-- `LeaderAgent` delegates search through the local `SubAgentMiddleware`. The middleware exposes Run-backed tools for `SearchAgent`; it does not execute an embedded runnable in the parent graph. Keep orchestration in `LeaderAgent`; do not move database, queue, or storage behavior into an agent.
+- `LeaderAgent` delegates bounded search, citation validation, and outline work
+  through the local `SubAgentMiddleware`. The middleware exposes Run-backed
+  tools for registered internal agents; it does not execute an embedded
+  runnable in the parent graph. Keep orchestration in `LeaderAgent`; do not move
+  database, queue, or storage behavior into an agent.
 - FastAPI application setup lives in `server/main.py`. Startup and shutdown live in `server/lifespan.py`.
 - Lifespan startup verifies JWT configuration and initializes the API process's PostgreSQL resources. It does not create tables or seed records. Shutdown closes the shared async Redis client before disposing PostgreSQL.
 - HTTP routes live under `server/router/`: `auth_router.py`, `thread_router.py`, `agent_router.py`, `knowledge_router.py`, `library_router.py`, and `model_router.py`.
-- Thread creation, public agent listing, and temporary attachment upload live in `server/router/thread_router.py`. Thread-level agent execution helpers live in `server/service/thread_service.py`.
+- Thread creation, public agent listing, and temporary attachment upload live in `server/router/thread_router.py`. Thread and Conversation are one service boundary: thread-level execution and attachment helpers live in `server/service/thread_service.py`; do not recreate a parallel `conversation_service.py`.
 - Agent Run creation, cancellation, and SSE exposure live in `server/router/agent_router.py`. The cancellation endpoint calls `cancel_run_service(...)`, while the shared `request_cancel_agent_run(...)` path handles top-level and child Runs in `server/service/agent_run_service.py`.
 - `server/service/arq_queue_servcie.py` owns ARQ pool access, direct Redis Stream `XADD`/`XREAD` operations, Agent Run cancellation-key `SET`/`EXISTS`/`DELETE` operations, and cancellation Pub/Sub `PUBLISH`/blocking `get_message` operations. Keep the existing filename spelling unless a dedicated rename is requested.
 - `server/service/subagent_service.py` owns child conversation/message/Run persistence, parent-child ownership checks, and enqueue handoff. It does not own generic Agent Run cancellation; `SubAgentMiddleware` verifies parent-child scope there before calling `request_cancel_agent_run(...)`.
@@ -109,6 +136,12 @@ internal subagents are `SearchAgent` and `OutlineAgent` under
   accepts only already embedded file records and owns Collection creation plus
   Milvus CRUD. It must not read object storage, select Chunkers, load Embedding
   models, generate vectors, or update PostgreSQL file state.
+- Query-time Rerank contracts and Provider adapters live in `src/model/`.
+  `KnowledgeService.search(...)` owns the two-stage flow: retrieve
+  `candidate_limit` Milvus hits, rerank their text, and return the final
+  `limit`. Keep Milvus `distance` separate from `rerank_score`; changing a
+  Reranker does not change the persisted Embedding binding or require
+  reindexing.
 - `src/knowledge/flow/pipeline.py` exposes parsing and chunking as separate
   stages. `parse_document(...)` returns a `ParsedDocument` whose Markdown may be
   persisted for user review; `chunk_document(...)` runs only after the caller
@@ -237,6 +270,17 @@ Keep search opt-in through `LeaderAgent`; do not add automatic pre-retrieval
 middleware around every request. `SearchAgent` owns query planning, retrieval,
 source comparison, and evidence synthesis. It must not take over the parent
 agent's final user response.
+
+### CitationAgent
+
+`CitationAgent` is an internal citation verifier. It receives an answer draft,
+claim-to-source mappings, and the actual retrieved excerpts, then returns a
+structured `pass`, `revise`, or `needs_retrieval` report to `LeaderAgent`.
+
+Keep CitationAgent tool-free in the initial implementation. It must validate
+only the supplied evidence, must not perform retrieval, invent sources, or
+produce the final user response. The current integration is Prompt-driven and
+must not be described as a deterministic final-output gate.
 
 ### OutlineAgent
 
