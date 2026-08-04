@@ -5,7 +5,6 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
-from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException, status
@@ -88,11 +87,11 @@ class MinioStorage:
         self._client.set_bucket_policy(bucket_name=bucket_name, policy=policy)
 
     def _check_file_type(self, object_name: str) -> str:
-
-        if object_type := mimetypes.guess_type(object_name):
+        object_type, _ = mimetypes.guess_type(object_name)
+        if object_type:
             return object_type
 
-        object_suffix = object_name.split(".")[-1].lower
+        object_suffix = object_name.split(".")[-1].lower()
 
         object_type_collection = {
             "md": "text/markdown",
@@ -125,12 +124,12 @@ class MinioStorage:
 
     def check_file_exist(self, bucket_name: str, object_name: str) -> bool:
         client = self.get_client()
-        if result := client.stat_object(
-            bucket_name=bucket_name, object_name=object_name
-        ):
-            return True
-        else:
-            return False
+        return bool(
+            client.stat_object(
+                bucket_name=bucket_name,
+                object_name=object_name,
+            )
+        )
 
     def upload_file(
         self,
@@ -138,7 +137,7 @@ class MinioStorage:
         object_name: str,
         content_data: bytes,
         content_type: str | None = None,
-    ) -> None:
+    ) -> MinIOUploadResult:
         """上传文件内容到存储。"""
 
         self.check_buckets_status(bucket_name)
@@ -167,7 +166,7 @@ class MinioStorage:
         object_name: str,
         content_data: bytes,
         content_type: str | None = None,
-    ):
+    ) -> MinIOUploadResult:
         """upload的异步方法"""
         kwargs = {
             "bucket_name": bucket_name,
