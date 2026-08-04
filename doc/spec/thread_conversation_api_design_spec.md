@@ -1,7 +1,9 @@
 # Thread（对话）管理 API 设计
 
-状态：已实现。已完成目标单元测试、Ruff、Repository PostgreSQL SQL 编译及
-Alembic upgrade/downgrade 离线 SQL 验证；真实 PostgreSQL 环境仍需在部署时执行迁移。
+状态：Thread CRUD 已实现。已完成目标单元测试、Ruff、Repository PostgreSQL SQL
+编译及 Alembic upgrade/downgrade 离线 SQL 验证；真实 PostgreSQL 环境仍需在部署时
+执行迁移。消息附件扩展以
+`doc/spec/library_attachment_api_design_spec.md` 为准，尚待实现。
 
 相关代码：
 
@@ -40,6 +42,8 @@ Alembic upgrade/downgrade 离线 SQL 验证；真实 PostgreSQL 环境仍需在�
   用例协调放在 `server/service/thread_service.py`，SQL 只放在 Repository。
 - 首期删除采用软删除。HTTP 请求只让对话立即不可见，不在一个请求中同时硬删除
   PostgreSQL、MinIO、Redis、Sandbox 和 LangGraph Checkpoint。
+- Attachment 是 User 资源，不属于 Conversation；Message 只通过 MessageAttachment
+  保存引用。删除 Thread 不删除 Attachment 或其 MinIO 对象。
 - “附带的元数据”必须区分对话元数据和单次 Run 元数据，不能继续用一个
   `thread_metadata` 名称混合两种含义。
 
@@ -69,13 +73,13 @@ Alembic upgrade/downgrade 离线 SQL 验证；真实 PostgreSQL 环境仍需在�
 - 消息对应 AgentRun 的批量装配，以及请求 Run metadata 的持久化。
 - `Conversation.deleted_at`、`AgentRun.run_metadata` 和查询索引迁移。
 - 根对话及内部子对话树软删除，并在存在活动 Run 时拒绝删除。
-- `AttachmentRepository` 与真实 `Attachment.uid` 字段对齐。
 
 以下边界仍然保留：
 
-- `Attachment` 只能关联到 Conversation，不能准确指出属于哪一条 Message。
-- `prepare_attachments_for_conversation(...)` 返回的 `parser`、`parse_status`、
-  `parse_error`、`parse_metadata` 和 `parsed_text` 当前没有持久化。
+- 当前实现尚未增加 MessageAttachment，消息附件加载按
+  `library_attachment_api_design_spec.md` 实施。
+- 当前 Conversation 级附件关系和
+  `prepare_attachments_for_conversation(...)` 是待删除的旧路径，不能继续扩展。
 - `ToolCall` 虽有表定义，但当前主 Run 链路没有稳定的写入闭环，不能承诺历史详情中
   一定存在完整工具调用记录。
 - MinIO、Redis、Checkpoint 和 Sandbox 等跨存储资源的物理清理仍未实现。
@@ -138,16 +142,14 @@ AgentRun 组成：
 
 ### 3.4 附件元数据
 
-当前 Attachment 只能作为对话级附件返回，不能挂到具体消息下面。首期详情接口可以
-返回数据库已持久化的文件名、MIME、大小、状态和临时访问地址，但不返回未持久化的
-解析元数据。
+目标结构通过 MessageAttachment 关联表恢复“某条消息使用了哪些附件”，不在
+Attachment 增加 `conversation_id` 或 `message_id`。Thread 详情只在每条 Message
+下返回已持久化的文件名、MIME、大小、处理状态和临时访问地址，不返回 MinIO object
+name 或 Markdown 正文。
 
-如果产品要求恢复“某条消息的附件及解析状态”，必须先增加：
-
-- `Attachment.message_id -> Message.id`
-- 持久化的附件解析元数据字段或独立解析结果表
-
-完成该迁移前，响应不得根据文件时间或数组位置猜测消息与附件关系。
+MessageAttachment 表、Attachment 处理字段和完整生命周期以
+`library_attachment_api_design_spec.md` 为准。完成该迁移前，响应不得根据文件时间、
+Conversation ID 或数组位置猜测消息与附件关系。
 
 ## 4. API 总览
 
@@ -166,9 +168,9 @@ AgentRun 组成：
 
 ## 5. 响应实体
 
-Thread 请求与响应实体统一放在 `server/schemas/thread.py`，Router 只导入并使用
-这些 Pydantic 模型。公开 Agent 摘要放在 `server/schemas/agent.py`。
-`server/schemas/` 只承载 Router 的 HTTP 契约，不接收 SQLAlchemy 模型或 Service
+Thread 请求与响应实体统一放在 `server/entities/thread.py`，Router 只导入并使用
+这些 Pydantic 模型。公开 Agent 摘要放在 `server/entities/agent.py`。
+`server/entities/` 只承载 Router 的 HTTP 契约，不接收 SQLAlchemy 模型或 Service
 内部 dataclass、TypedDict。
 
 ```python
@@ -197,6 +199,18 @@ class ThreadRunMetadataResponse(BaseModel):
     finished_at: datetime | None
 
 
+class ThreadMessageAttachmentResponse(BaseModel):
+    """历史消息引用的用户附件。"""
+
+    id: str
+    file_name: str
+    content_type: str
+    file_size: int
+    status: str
+    available: bool
+    access_url: str | None
+
+
 class ThreadMessageResponse(BaseModel):
     """指定对话中的持久化消息。"""
 
@@ -208,6 +222,7 @@ class ThreadMessageResponse(BaseModel):
     status: str
     request_id: str | None
     run: ThreadRunMetadataResponse | None
+    attachments: list[ThreadMessageAttachmentResponse]
     created_at: datetime
     updated_at: datetime
 
@@ -445,7 +460,7 @@ Agent Run 创建都必须按未删除条件查询，对外统一表现为 404。
 一个 Thread 可能同时拥有：
 
 - PostgreSQL Conversation、Message、AgentRun 和 ToolCall。
-- Conversation 级 Attachment 及 MinIO 对象。
+- MessageAttachment 引用行；其目标 Attachment 仍由 User 独立拥有。
 - LangGraph Checkpoint。
 - Redis Run 事件和取消键。
 - 会话 Sandbox 或本地 Workspace。
@@ -457,11 +472,14 @@ Agent Run 创建都必须按未删除条件查询，对外统一表现为 404。
 后续物理清理任务至少需要：
 
 1. 读取根 Conversation 及所有子 Conversation 的 `thread_id`。
-2. 删除附件对象和 Attachment 行。
-3. 对每个 thread 调用 `AsyncPostgresSaver.adelete_thread(thread_id)`。
-4. 清理对应 Run 的 Redis Stream 和取消键。
-5. 通过 Sandbox Provider 的公开接口销毁会话沙箱和 Workspace。
-6. 最后硬删除 Conversation；数据库外键级联删除 Message、ToolCall、AgentRun 和子对话。
+2. 对每个 thread 调用 `AsyncPostgresSaver.adelete_thread(thread_id)`。
+3. 清理对应 Run 的 Redis Stream 和取消键。
+4. 通过 Sandbox Provider 的公开接口销毁会话沙箱和 Workspace。
+5. 最后硬删除 Conversation；数据库外键级联删除 Message、MessageAttachment、
+   ToolCall、AgentRun 和子对话。
+
+物理清理不删除 Attachment 行、原文件或 Markdown；同一 Attachment 可能仍被其他
+Message 或 Thread 引用，也可以继续存在于用户 Library。
 
 `AsyncPostgresStore` 可能保存跨 Thread 的用户记忆，不能因为删除一个对话就按 UID
 整体删除 Store namespace。
@@ -493,9 +511,10 @@ Agent Run 创建都必须按未删除条件查询，对外统一表现为 404。
 - 批量读取一页 Message 对应的 Run。
 - 检查一个 Conversation 树中的活动 Run。
 
-### 10.3 ThreadService
+### 10.3 Thread Service 函数
 
-`server/service/thread_service.py` 统一承载 Thread/Conversation 服务边界，负责：
+`server/service/thread_service.py` 通过模块级异步函数承载 Thread/Conversation 服务边界，
+不定义无状态 `ThreadService` 类，负责：
 
 - 列表游标解析和结果组装。
 - 详情消息页与 Run 元数据批量装配。
@@ -508,9 +527,9 @@ Agent Run 创建都必须按未删除条件查询，对外统一表现为 404。
 
 `thread_router.py` 只负责：
 
-- 引用 `server/schemas/` 中的请求与响应实体。
+- 引用 `server/entities/` 中的请求与响应实体。
 - 查询参数和 Path 参数接收。
-- 调用 ThreadService。
+- 直接调用 `thread_service.create_thread(...)` 等模块函数。
 - 把未找到转换为 404、活动 Run 冲突转换为 409、输入错误转换为 422。
 
 当前创建接口中的 User、Agent 和 Conversation 查询也应在实施时移到 Service，避免
@@ -532,11 +551,12 @@ agent_run.run_metadata           JSON NOT NULL DEFAULT '{}'
 conversation(uid, parent_conversation_id, deleted_at, updated_at, id)
 message(conversation_id, id)
 agent_run(conversation_id, agent_status)
-attachment(conversation_id)
+message_attachment(message_id, position)
 ```
 
-`Message.conversation_id` 和 `Attachment.conversation_id` 当前只是外键；PostgreSQL 不会
-因为外键自动创建查询索引。
+`Message.conversation_id` 只是外键；PostgreSQL 不会因为外键自动创建查询索引。
+`0002_thread_query_metadata.py` 中旧的 `attachment(conversation_id)` 索引由附件
+设计对应迁移删除，MessageAttachment 索引由附件迁移创建。
 
 首期搜索使用标题和摘要的普通 `ILIKE`。只有真实数据量证明需要时，再单独评估
 `pg_trgm` 或全文检索索引，不在本次 revision 中提前启用扩展。
@@ -564,8 +584,8 @@ attachment(conversation_id)
 4. `src/database/repositories/agent_run_repository.py`
    - 持久化 Run metadata，增加详情批量查询和活动 Run 检查。
 5. `server/service/thread_service.py`
-   - 实现对话读写用例、附件处理、Agent 执行辅助和响应所需数据装配。
-6. `server/schemas/thread.py`
+   - 实现对话读写用例、Agent 执行辅助和响应所需数据装配。
+6. `server/entities/thread.py`
    - 保存 Thread Router 使用的请求与响应实体。
 7. `server/router/thread_router.py`
    - 增加 GET/PATCH/DELETE 路由，并收薄现有创建入口。
@@ -573,10 +593,11 @@ attachment(conversation_id)
    - 把现有 `thread_metadata` 持久化为 `AgentRun.run_metadata`。
 9. `server/service/subagent_service.py`
    - 子 Run 明确写入自己的 Run metadata，并拒绝已删除的父 Conversation。
-10. `src/database/repositories/attachment_repository.py`
-   - 统一 `Attachment.uid` 字段后再接入对话级附件加载。
-11. `test/test_thread_conversation_service.py`
+10. `test/test_thread_conversation_service.py`
     - 增加不依赖网络和真实基础设施的确定性测试。
+
+MessageAttachment、附件批量装配和 Attachment 表调整不在此历史清单重复定义，统一
+按 `library_attachment_api_design_spec.md` 的文件级计划实施。
 
 ## 14. 验证要求
 
@@ -589,12 +610,14 @@ attachment(conversation_id)
 - 详情首屏返回最新消息且响应按正序排列。
 - `before_message_id` 只能在当前对话范围内使用。
 - 一页消息的 Run 元数据使用批量查询，不产生 N+1。
+- 一页消息的附件同样使用批量查询，并按 MessageAttachment.position 返回。
 - 旧 Message 没有 AgentRun 时仍正常返回。
 - 请求中的 Run metadata 落库后可通过详情接口恢复。
 - 更新可以清空摘要、替换用户 metadata，并保留 `backend_id`。
 - 空标题、空 Patch 和越权更新被拒绝。
 - 有活动主 Run 或子 Run 时删除返回 409。
 - 软删除后列表、详情、更新和新 Run 创建均视为不存在。
+- 删除 Conversation 不删除用户 Attachment。
 - Alembic upgrade/downgrade、目标单元测试、Ruff 和 `git diff --check` 通过。
 
 涉及真实 PostgreSQL、MinIO、Redis、Checkpointer 和 Sandbox 的物理清理只能由集成测试
@@ -608,5 +631,5 @@ attachment(conversation_id)
 - 不实现对话恢复或回收站。
 - 不在 DELETE HTTP 请求中同步硬删所有外部资源。
 - 不为 Message 增加尚无真实写入者的通用 metadata JSON。
-- 不承诺恢复当前没有持久化的附件解析信息或工具调用事件。
+- 不把 Attachment 生命周期并入 Conversation 更新或删除接口。
 - 不允许更新对话的 `thread_id`、`uid`、`agent_id` 或父子关系。

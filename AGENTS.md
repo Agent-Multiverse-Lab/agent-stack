@@ -2,6 +2,33 @@
 
 This file is the single source of repository guidance for Claude/Codex-style coding agents. `CLAUDE.md` imports this file directly, so update `AGENTS.md` whenever architecture or workflow guidance changes.
 
+## Working Rules
+
+- Before changing implementation code, provide a concrete file-level
+  modification plan and wait for the user's explicit approval.
+- Preserve the existing directory structure, module boundaries, and public
+  contracts whenever possible. If a task requires moving or deleting existing
+  files, changing established ownership, or restructuring existing modules,
+  stop first, explain why the structural change is necessary and what it
+  affects, then wait for the user's explicit approval before proceeding.
+- Do not preserve backward compatibility. Remove obsolete paths instead of
+  adding compatibility layers, fallbacks, or migrations.
+- Choose the simplest implementation that fully meets the current requirements.
+  Avoid speculative abstractions, configuration, and indirection.
+- Grow the system in layers. Start from the smallest version that works end to
+  end, and add each new capability on top of a product that already works.
+  Never trade a working product for unfinished complexity.
+- Keep components modular and concerns clearly separated.
+- Prefer established, well-maintained libraries when they reduce overall
+  complexity or improve reliability. Do not reimplement common functionality
+  without a clear reason.
+- Lean on the dependencies already in the project before writing your own
+  implementation or adding packages. Do not assume a library lacks a capability
+  without checking its documentation and types.
+- Make architectural decisions for the long term. Do not accept a stopgap that
+  only works for now and is meant to be replaced later.
+- Before submitting, ask whether a senior engineer would consider the implementation over-designed, over-defensive, excessively nested, or overly fragmented. If so, simplify it first.
+
 ## Current Project Shape
 
 `multi-agent-s2c` is a general-purpose multi-agent system for technical learning
@@ -16,9 +43,9 @@ Current top-level responsibilities and construction rules:
   and worker lifecycle entrypoints. Routers own HTTP validation and response
   shaping; services own use-case coordination; lifespan and worker hooks own
   process resources. Do not put SQL queries, agent reasoning, or storage-client
-  construction in routers. Router request and response Pydantic models live in
-  `server/schemas/`, grouped by API domain. Keep SQLAlchemy models and
-  service-internal dataclasses or TypedDicts in their owning layers.
+  construction in routers. Router request and response Pydantic models live
+  only in `server/entities/`, grouped by API domain. Keep SQLAlchemy models
+  and service-internal dataclasses or TypedDicts in their owning layers.
 - `src/agents/`: shared agent contracts, concrete top-level and internal agents,
   middleware, model helpers, MCP integration, and sandbox backends. Construct
   agents as context-driven `BaseAgent` packages, expose each concrete class from
@@ -117,6 +144,11 @@ under `src/agents/subagents/`.
 - Lifespan startup verifies JWT configuration and initializes the API process's PostgreSQL resources. It does not create tables or seed records. Shutdown closes the shared async Redis client before disposing PostgreSQL.
 - HTTP routes live under `server/router/`: `auth_router.py`, `thread_router.py`, `agent_router.py`, `knowledge_router.py`, `library_router.py`, and `model_router.py`.
 - Thread creation, public agent listing, and temporary attachment upload live in `server/router/thread_router.py`. Thread and Conversation are one service boundary: thread-level execution and attachment helpers live in `server/service/thread_service.py`; do not recreate a parallel `conversation_service.py`.
+- Treat `server/router/library_router.py` as the user attachment-library
+  boundary. Its initial scope is attachment list/query, detail, display-name
+  update, and deletion. Read only uploaded files persisted as `Attachment`
+  rows; generated files are outside the initial scope. Keep its request and
+  response models in `server/entities/library.py`.
 - Agent Run creation, cancellation, and SSE exposure live in `server/router/agent_router.py`. The cancellation endpoint calls `cancel_run_service(...)`, while the shared `request_cancel_agent_run(...)` path handles top-level and child Runs in `server/service/agent_run_service.py`.
 - `server/service/arq_queue_servcie.py` owns ARQ pool access, direct Redis Stream `XADD`/`XREAD` operations, Agent Run cancellation-key `SET`/`EXISTS`/`DELETE` operations, and cancellation Pub/Sub `PUBLISH`/blocking `get_message` operations. Keep the existing filename spelling unless a dedicated rename is requested.
 - `server/service/subagent_service.py` owns child conversation/message/Run persistence, parent-child ownership checks, and enqueue handoff. It does not own generic Agent Run cancellation; `SubAgentMiddleware` verifies parent-child scope there before calling `request_cancel_agent_run(...)`.
@@ -166,8 +198,13 @@ under `src/agents/subagents/`.
   reject model or dimension drift.
 - `KnowledgeBase` owns logical knowledge-base metadata. `KnowledgeFile` belongs
   to exactly one KnowledgeBase and tracks `uploaded`, `parsing`, `parsed`,
-  `indexing`, `indexed`, or `failed`. Conversation `Attachment` rows must never
-  be reused for knowledge files.
+  `indexing`, `indexed`, or `failed`.
+- `Attachment` is a user-owned file resource and must not carry a Conversation
+  foreign key. `MessageAttachment` records only that a Message used an
+  Attachment; deleting a Conversation removes message references, not the
+  Attachment. Attachment files use the private `attachments` MinIO bucket,
+  stop after Parser-to-Markdown conversion, and must never create or reuse
+  `KnowledgeFile`, Chunk, Embedding, or Milvus records.
 - `server/service/knowledge_service.py` assembles the configured model and
   owns the parsing boundary: original files and parsed Markdown use
   `knowledge-files/{uid}/{kb_id}/{file_id}/...` MinIO paths, and parsing stops
@@ -227,10 +264,6 @@ Important current boundary:
 ## Persistence and ID Boundaries
 
 - PostgreSQL is the source of truth for users, agents, conversations, messages, attachments, knowledge records, and Agent Run lifecycle state.
-- The content schema now includes `ScriptProject`, `Episode`, `EpisodeOutline`, `EpisodeScript`, `Character`, `ScriptScene`, `ScriptLine`, and `StoryboardFrame`. At this stage these are table definitions only; no repository, HTTP API, or application binding exists yet.
-- Outlines use Markdown text in `EpisodeOutline`. Screenplays use relational scene and semantic-line rows instead of whole-document JSON: `ScriptScene` stores scene structure and `ScriptLine` stores ordered action, character, parenthetical, dialogue, beat, and transition content.
-- `ScriptLine.position` is the stable semantic order inside a scene, not a rendered line or page number. Physical wrapping and pagination must be derived from screenplay layout settings.
-- `ScriptProject.workspace_key` is unique per user. Episode numbers are unique per project, character names are unique per project, scene positions and assigned scene numbers are unique per Episode script, semantic-line positions are unique per scene, and storyboard positions are unique per Episode.
 - `Conversation.id` is the internal database primary key; `Conversation.thread_id` is the external conversation/runtime identifier.
 - `Message.id` identifies the persisted triggering input. `AgentRun.trigger_message_id` lets the worker reconstruct input from only `run_id`.
 - `AgentRun.run_type` is the execution-kind flag: `chat` for a main conversation Run and `subagent` for an internally delegated Run. `AgentRun.parent_run_id` remains a relationship field and may also link consecutive main conversation Runs.
@@ -345,37 +378,3 @@ git diff --check
 - Do not wrap commit messages, subjects, or scopes with `@` characters.
 - Before every push, especially after committing from PowerShell, inspect all outgoing commit subjects and bodies for accidental `@` characters or wrappers. Do not push until malformed commit messages are corrected.
 - Keep one commit focused on one coherent change.
-
-## Working Rules
-
-- Before changing implementation code, provide a concrete file-level
-  modification plan and wait for the user's explicit approval.
-- Preserve the existing directory structure, module boundaries, and public
-  contracts whenever possible. If a task requires moving or deleting existing
-  files, changing established ownership, or restructuring existing modules,
-  stop first, explain why the structural change is necessary and what it
-  affects, then wait for the user's explicit approval before proceeding.
-- Prefer existing local patterns over new abstractions.
-- Keep agent responsibilities narrow.
-- Keep API/service orchestration outside agents.
-- Keep database reads and writes in repositories.
-- Keep ARQ enqueueing, raw Redis Stream I/O, Agent Run semantics, worker execution, and SSE consumption as distinct layers.
-- Read project source and config files using UTF-8 unless another encoding is explicitly required.
-- Preserve user changes in the working tree; never revert unrelated modifications.
-- Add tests or compile checks for behavior changes with non-trivial blast radius.
-- Worker jobs, long-running async loops, and infrastructure I/O boundaries must catch unexpected `Exception`s with `try/except`, call the existing `logger.exception(...)` with relevant IDs and context, and re-raise unless the use case explicitly defines recovery. Do not silently swallow errors or log normal `asyncio.CancelledError` as a failure.
-- Treat current FIXME/TODO comments as incomplete work, not proof that the described behavior already exists.
-- If implementing run-event delivery, wire and verify worker event production and backend SSE reading.
-- Do not create an abstraction for logic used only once, and do not reserve flexibility or configurability for hypothetical future requirements.
-- Do not split simple linear logic into a collection of tiny helpers. Extract a function only for clear reuse, side-effect isolation, or a substantial reduction in cognitive load.
-- Follow the Stepdown Rule: place public, high-level methods first and move implementation details progressively downward. A reader should be able to follow the call relationships continuously from top to bottom.
-- Prefer early returns and a clear main path. Avoid unnecessary nesting, indirect jumps, aggregation layers, priority systems, protocol interpreters, and multi-level fallbacks.
-- Place constants and named values in the smallest reasonable scope. Use module-level constants for cross-function reuse, protocol identifiers, configuration constraints, or values that require centralized maintenance. Prefer function-local named values for error messages and rules used by only one function, even when repeated locally. Do not force values inline merely to reduce variable count, and do not promote local implementation details to global state.
-- Names should express business intent. Comments should explain reasons, constraints, and non-obvious trade-offs rather than restating visible code behavior.
-- Match the existing file style when modifying code. Do not opportunistically improve adjacent implementations. Unrelated code smells may be reported, but must not be changed without authorization.
-- Remove unused imports, variables, functions, and branches introduced by the current change. Do not clean up unrelated dead code that existed before the change unless explicitly requested.
-- For small status, progress, or summary requirements, read the source directly, select only the necessary fields, and return the smallest useful result. Do not reconstruct event streams or debugging views.
-- If an implementation is clearly longer than the problem itself, or 200 lines could be expressed clearly in 50, stop extending it and simplify first.
-- New functions and classes must have clear, concise Chinese docstrings. Important or critical locations should include additional comments explaining reasons, constraints, or trade-offs.
-- Code should prioritize readability and have clear paragraph-like structure. Leave one blank line between semantically distinct blocks when it improves continuous reading.
-- Before submitting, ask whether a senior engineer would consider the implementation over-designed, over-defensive, excessively nested, or overly fragmented. If so, simplify it first.
