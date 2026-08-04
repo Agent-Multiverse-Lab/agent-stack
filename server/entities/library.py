@@ -1,19 +1,34 @@
-"""知识条目接口的响应 Schema。"""
+"""附件 Library Router 使用的请求与响应实体。"""
 
-from pydantic import BaseModel
+from datetime import datetime
+
+from pydantic import BaseModel, Field
 
 
-class KnowledgeItem(BaseModel):
-    """知识条目响应。"""
+class LibraryAttachmentItem(BaseModel):
+    """附件页面中的一个文件。"""
 
     id: str
-    kind: str
-    title: str
-    summary: str
-    content_text: str | None = None
-    file_name: str | None = None
-    path: str | None = None
-    minio_url: str | None = None
-    markdown_file: str | None = None
-    created_at: str
-    updated_at: str
+    file_name: str
+    suffix: str
+    content_type: str
+    file_size: int
+    category: str
+    status: str
+    parse_error: str | None
+    access_url: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class LibraryAttachmentListResponse(BaseModel):
+    """附件列表的一页数据。"""
+
+    items: list[LibraryAttachmentItem]
+    next_before_id: int | None
+
+
+class LibraryAttachmentRenameRequest(BaseModel):
+    """修改附件展示文件名。"""
+
+    file_name: str = Field(min_length=1, max_length=255)
