@@ -19,7 +19,7 @@ from server.entities.knowledge import (
     KnowledgeIndexResponse,
     KnowledgeSearchRequest,
 )
-from server.service.knowledge_service import KnowledgeService
+from server.service import knowledge_service
 from server.utils.auth import AuthenticatedUser
 from src.database import get_db
 
@@ -33,7 +33,8 @@ async def create_knowledge_base(
     db: AsyncSession = Depends(get_db),
 ):
     """创建当前用户的逻辑知识库。"""
-    knowledge_base = await KnowledgeService(db).create_knowledge_base(
+    knowledge_base = await knowledge_service.create_knowledge_base(
+        db,
         uid=current_user.uid,
         name=payload.name,
         description=payload.description,
@@ -54,7 +55,8 @@ async def list_knowledge_files(
 ) -> list[str]:
     """列出当前用户知识库中的原始文件名。"""
     try:
-        return await KnowledgeService(db).list_file_names(
+        return await knowledge_service.list_file_names(
+            db,
             uid=current_user.uid,
             kb_id=kb_id,
         )
@@ -75,7 +77,8 @@ async def upload_knowledge_file(
     """上传知识库原文件，不触发解析和索引。"""
     try:
         content = await file.read()
-        knowledge_file = await KnowledgeService(db).upload_file(
+        knowledge_file = await knowledge_service.upload_file(
+            db,
             uid=current_user.uid,
             kb_id=kb_id,
             file_name=file.filename or "file",
@@ -107,7 +110,8 @@ async def parse_knowledge_file(
 ):
     """解析原文件并保存 Markdown，等待用户确认索引。"""
     try:
-        knowledge_file = await KnowledgeService(db).parse_file(
+        knowledge_file = await knowledge_service.parse_file(
+            db,
             uid=current_user.uid,
             kb_id=kb_id,
             file_id=file_id,
@@ -137,7 +141,8 @@ async def index_knowledge_file(
 ) -> KnowledgeIndexResponse:
     """确认解析结果后执行分块、向量化和 Milvus 入库。"""
     try:
-        result = await KnowledgeService(db).index_file(
+        result = await knowledge_service.index_file(
+            db,
             uid=current_user.uid,
             kb_id=kb_id,
             file_id=file_id,
@@ -164,11 +169,13 @@ async def search_knowledge_records(
 ):
     """按知识库绑定模型执行向量检索。"""
     try:
-        return await KnowledgeService(db, knowledge_type).search(
+        return await knowledge_service.search(
+            db,
             uid=current_user.uid,
             kb_id=payload.kb_id,
             query=payload.query,
             limit=payload.limit,
+            knowledge_type=knowledge_type,
         )
     except LookupError as exc:
         raise HTTPException(
@@ -191,10 +198,12 @@ async def delete_knowledge_records(
 ):
     """删除绑定知识库中的指定记录。"""
     try:
-        return await KnowledgeService(db, knowledge_type).delete_records(
+        return await knowledge_service.delete_records(
+            db,
             uid=current_user.uid,
             kb_id=payload.kb_id,
             record_ids=payload.record_ids,
+            knowledge_type=knowledge_type,
         )
     except LookupError as exc:
         raise HTTPException(
@@ -217,9 +226,11 @@ async def get_knowledge_status(
 ):
     """读取当前用户绑定知识库的集合状态。"""
     try:
-        return await KnowledgeService(db, knowledge_type).status(
+        return await knowledge_service.status(
+            db,
             uid=current_user.uid,
             kb_id=kb_id,
+            knowledge_type=knowledge_type,
         )
     except LookupError as exc:
         raise HTTPException(

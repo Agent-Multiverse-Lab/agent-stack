@@ -6,9 +6,12 @@ from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.configs import config
 from src.database.repositories import AttachmentRepository
-from src.storage import MinioStorage, get_storage, sanitize_filename
+from src.storage.minio import (
+    ATTACHMENT_BUCKET_NAME,
+    get_storage,
+    sanitize_filename,
+)
 from src.utils import logger
 
 
@@ -39,10 +42,9 @@ async def upload_pending_attachments(
     *,
     user_id: int | str,
     uploads: Sequence[PendingAttachmentUpload],
-    storage: MinioStorage | None = None,
 ) -> list[dict[str, object]]:
     """上传临时对象并创建使用同一 file_id 的 pending 记录。"""
-    attachment_storage = storage or get_storage()
+    attachment_storage = get_storage()
     repository = AttachmentRepository(db)
     uploaded_object_names: list[str] = []
     responses: list[dict[str, object]] = []
@@ -56,7 +58,7 @@ async def upload_pending_attachments(
                 upload.file_name,
             )
             await attachment_storage.aupload_file(
-                config.attachment_bucket,
+                ATTACHMENT_BUCKET_NAME,
                 object_name,
                 upload.content,
                 upload.content_type,
@@ -72,7 +74,7 @@ async def upload_pending_attachments(
                 original_object_name=object_name,
             )
             access_url = await attachment_storage.create_file_access_url(
-                config.attachment_bucket,
+                ATTACHMENT_BUCKET_NAME,
                 object_name,
             )
             responses.append(
@@ -94,7 +96,7 @@ async def upload_pending_attachments(
         for object_name in uploaded_object_names:
             try:
                 await attachment_storage.adelete_file(
-                    config.attachment_bucket,
+                    ATTACHMENT_BUCKET_NAME,
                     object_name,
                 )
             except Exception:

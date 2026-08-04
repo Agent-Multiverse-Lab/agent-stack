@@ -181,7 +181,7 @@ class LibraryAttachmentUseCaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("thread_id", item)
         self.assertNotIn("original_object_name", item)
         self.assertEqual(
-            [("attachments", first.original_object_name)],
+            [("attachment", first.original_object_name)],
             self.storage.access_calls,
         )
         self.assertEqual("需求", self.repository.list_arguments["query"])

@@ -6,10 +6,9 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.configs import config
 from src.database.models import Attachment
 from src.database.repositories import AttachmentRepository
-from src.storage import MinioStorage, get_storage
+from src.storage.minio import ATTACHMENT_BUCKET_NAME, get_storage
 
 
 async def list_library_attachments(
@@ -40,10 +39,9 @@ async def list_library_attachments(
     )
     has_more = len(attachments) > limit
     page = attachments[:limit]
-    storage = get_storage()
     return {
         "items": [
-            await _attachment_payload(attachment, storage)
+            await _attachment_payload(attachment)
             for attachment in page
         ],
         "next_before_id": int(page[-1].id) if has_more and page else None,
@@ -62,7 +60,7 @@ async def get_library_attachment(
         user_id,
         attachment_id,
     )
-    return await _attachment_payload(attachment, get_storage())
+    return await _attachment_payload(attachment)
 
 
 async def rename_library_attachment(
@@ -94,7 +92,7 @@ async def rename_library_attachment(
         attachment,
         attachment_name=normalized_name,
     )
-    return await _attachment_payload(attachment, get_storage())
+    return await _attachment_payload(attachment)
 
 
 async def delete_library_attachment(
@@ -136,10 +134,9 @@ async def _require_attachment(
 
 async def _attachment_payload(
     attachment: Attachment,
-    storage: MinioStorage,
 ) -> dict[str, Any]:
-    access_url = await storage.create_file_access_url(
-        config.attachment_bucket,
+    access_url = await get_storage().create_file_access_url(
+        ATTACHMENT_BUCKET_NAME,
         str(attachment.original_object_name),
     )
     content_type = str(attachment.attachment_type)

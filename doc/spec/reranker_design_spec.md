@@ -37,7 +37,7 @@ query
   -> 通用 BaseReranker
   -> DashScopeReranker
   -> final top_k 条
-  -> KnowledgeService 返回结果
+  -> knowledge_service.search(...) 返回结果
 ```
 
 Reranker 不生成向量，也不参与知识库索引。即使 Embedding Provider 以后切换为
@@ -52,7 +52,7 @@ OpenAI，本项目仍可独立使用 DashScope Reranker；反过来也一样。
 - `src/model/model_tool.py` 已按 `provider/model` 解析和构造聊天模型及
   Embedding 模型。
 - `src/configs/model.py` 已有独立的 `EmbeddingModelProvider` 配置。
-- `KnowledgeService.search(...)` 会使用知识库绑定的 Embedding 模型生成查询
+- `knowledge_service.search(db, ...)` 会使用知识库绑定的 Embedding 模型生成查询
   向量，再调用 `MilvusKnowledge.search(...)`。
 - Milvus 命中包含 `chunk_id`、`chunk`、`file_id`、`chunk_index` 和向量
   `distance`，能够无损转换为 Rerank 候选。
@@ -170,12 +170,12 @@ def load_reranker(model: str | None = None) -> BaseReranker:
 - `resolve_rerank_model` 从显式参数或 `config.rerank_model` 读取模型规格。
 - 模型为空、格式错误、Provider 未注册、API Key 或 URL 缺失时明确报错。
 - `load_reranker` 只负责模型构造，不查询数据库、不调用 Milvus。
-- 是否启用 Rerank 由 `KnowledgeService` 根据 `RERANK_MODEL` 是否为空显式判断；
+- 是否启用 Rerank 由 `knowledge_service.search(...)` 根据 `RERANK_MODEL` 是否为空显式判断；
   不创建 `NoOpReranker`。
 - 首期使用简单的 Provider 映射和显式分支，不建立插件系统或动态注册框架。
 
 以后新增 Provider 时，只需要增加 Provider 配置、一个适配器和一个构造分支，
-`KnowledgeService` 与 Rerank 数据结构保持不变。
+`knowledge_service.py` 的检索函数与 Rerank 数据结构保持不变。
 
 ## 6. DashScopeReranker
 
@@ -293,10 +293,10 @@ DASHSCOPE_API_KEY=
 
 `Config` 只负责读取和校验这些值，不构造 Reranker 或执行请求。
 
-## 8. KnowledgeService 接入
+## 8. knowledge_service 接入
 
 核心 Reranker 实现位于 `src/model/`，实际检索协调仍在
-`KnowledgeService.search(...)`：
+`knowledge_service.search(db, ...)`：
 
 ```text
 RERANK_MODEL 为空

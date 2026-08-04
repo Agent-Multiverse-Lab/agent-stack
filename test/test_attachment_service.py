@@ -72,8 +72,14 @@ class AttachmentUploadTest(unittest.IsolatedAsyncioTestCase):
             "server.service.attachment_service.AttachmentRepository",
             return_value=self.repository,
         )
+        self.storage_patch = patch(
+            "server.service.attachment_service.get_storage",
+            return_value=self.storage,
+        )
         self.repository_patch.start()
+        self.storage_patch.start()
         self.addCleanup(self.repository_patch.stop)
+        self.addCleanup(self.storage_patch.stop)
 
     async def test_upload_reuses_uuid_for_path_record_and_response(self):
         result = await attachment_service.upload_pending_attachments(
@@ -87,7 +93,6 @@ class AttachmentUploadTest(unittest.IsolatedAsyncioTestCase):
                     category="document",
                 )
             ],
-            storage=self.storage,
         )
 
         response = result[0]
@@ -102,7 +107,7 @@ class AttachmentUploadTest(unittest.IsolatedAsyncioTestCase):
             self.repository.rows[0].original_object_name,
         )
         self.assertEqual(
-            "attachments",
+            "attachment",
             self.storage.upload_calls[0][0],
         )
         self.assertEqual(
@@ -128,12 +133,11 @@ class AttachmentUploadTest(unittest.IsolatedAsyncioTestCase):
                             category="document",
                         )
                     ],
-                    storage=self.storage,
                 )
 
         self.assertEqual(1, self.db.rollbacks)
         self.assertEqual(
-            [("attachments", self.storage.upload_calls[0][1])],
+            [("attachment", self.storage.upload_calls[0][1])],
             self.storage.delete_calls,
         )
 

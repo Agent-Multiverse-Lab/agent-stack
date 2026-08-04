@@ -375,7 +375,7 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [
                 (
-                    "attachments",
+                    "attachment",
                     f"7/{FILE_ID_1}/original/requirements.pdf",
                 )
             ],

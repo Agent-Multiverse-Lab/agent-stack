@@ -18,9 +18,9 @@ RAG 负责把知识文件转换为可检索的知识，并为 Agent 提供检索
 
 ## 主要设施示例
 
-| 文件 / 类 | 角色 | 主要参数 |
+| 文件 / 接口 | 角色 | 主要参数 |
 | --- | --- | --- |
-| `server/service/knowledge_service.py::KnowledgeService` | 协调上传、解析、索引和检索 | `upload_file(uid, kb_id, file_name, content)`、`parse_file(uid, kb_id, file_id)`、`index_file(uid, kb_id, file_id)`、`search(uid, kb_id, query, limit)` |
+| `server/service/knowledge_service.py` | 以模块函数协调上传、解析、索引和检索 | `upload_file(db, uid, kb_id, file_name, content)`、`parse_file(db, uid, kb_id, file_id)`、`index_file(db, uid, kb_id, file_id)`、`search(db, uid, kb_id, query, limit)` |
 | `src/knowledge/flow/pipeline.py::Pipeline` | 连接 Parser 和 Chunker | `parse_document(file_source, file_name)`、`chunk_document(document, chunker, title_method, target_level, chunk_token_size)` |
 | `src/knowledge/flow/parser/parser.py::Parser` | 按 `file_name` 后缀选择格式解析器 | `parser_method="plain"` 或 `"ocr"`，`parse(file_source, file_name)` |
 | `src/knowledge/embedding_service.py::EmbeddingService` | 批量向量化并校验维度 | `embedding_model`、`model_spec`、`batch_size`、`expected_dimension` |

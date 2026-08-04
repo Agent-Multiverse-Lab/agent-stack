@@ -115,10 +115,6 @@ class Config(BaseSettings):
     minio_endpoint: str = Field(default="", description="MinIO 服务地址")
     minio_access_key: str = Field(default="", description="MinIO Access Key")
     minio_secret_key: str = Field(default="", description="MinIO Secret Key")
-    attachment_bucket: str = Field(
-        default="attachments",
-        description="用户附件私有 Bucket",
-    )
 
     # ---------- 知识库 ----------
     milvus: MilvusConfig = Field(

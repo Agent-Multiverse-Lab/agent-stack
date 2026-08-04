@@ -4,8 +4,15 @@ This file is the single source of repository guidance for Claude/Codex-style cod
 
 ## Working Rules
 
-- Before changing implementation code, provide a concrete file-level
-  modification plan and wait for the user's explicit approval.
+- Before implementing a new feature or a change that requires code, API, data
+  model, architecture, or interaction design, first create or update a design
+  specification under `doc/spec/`. The specification must include the intended
+  behavior, affected boundaries and public contracts, a concrete file-level
+  modification plan, and the validation approach. Present the specification to
+  the user, explicitly ask for confirmation, and wait for approval before
+  continuing with implementation. Routine operations that do not require
+  design, such as installing an explicitly requested dependency, do not require
+  a specification.
 - Preserve the existing directory structure, module boundaries, and public
   contracts whenever possible. If a task requires moving or deleting existing
   files, changing established ownership, or restructuring existing modules,
@@ -96,7 +103,9 @@ Current top-level responsibilities and construction rules:
 - `scripts/`: repeatable maintenance entrypoints. Require explicit inputs, keep
   operations observable, and avoid import-time side effects.
 - `doc/`: architecture diagrams and supporting project documentation. Keep
-  diagrams aligned with the boundaries defined in this guide.
+  diagrams aligned with the boundaries defined in this guide. Write design
+  documents under `doc/` by default, and use `doc/spec/` for design
+  specifications instead of scattering them through implementation packages.
 
 Dependencies should follow this ownership direction: routers call services, and
 services call repositories or infrastructure adapters. Agent and Knowledge Flow
@@ -169,7 +178,7 @@ under `src/agents/subagents/`.
   Milvus CRUD. It must not read object storage, select Chunkers, load Embedding
   models, generate vectors, or update PostgreSQL file state.
 - Query-time Rerank contracts and Provider adapters live in `src/model/`.
-  `KnowledgeService.search(...)` owns the two-stage flow: retrieve
+  `knowledge_service.search(db, ...)` owns the two-stage flow: retrieve
   `candidate_limit` Milvus hits, rerank their text, and return the final
   `limit`. Keep Milvus `distance` separate from `rerank_score`; changing a
   Reranker does not change the persisted Embedding binding or require
@@ -205,8 +214,9 @@ under `src/agents/subagents/`.
   Attachment. Attachment files use the private `attachments` MinIO bucket,
   stop after Parser-to-Markdown conversion, and must never create or reuse
   `KnowledgeFile`, Chunk, Embedding, or Milvus records.
-- `server/service/knowledge_service.py` assembles the configured model and
-  owns the parsing boundary: original files and parsed Markdown use
+- `server/service/knowledge_service.py` exposes module-level use-case functions;
+  do not wrap them in a Service class. The module assembles the configured model
+  and owns the parsing boundary: original files and parsed Markdown use
   `knowledge-files/{uid}/{kb_id}/{file_id}/...` MinIO paths, and parsing stops
   at `KnowledgeFile.status="parsed"`. Chunking, Embedding, and Milvus writes
   must not run before explicit user confirmation.

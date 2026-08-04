@@ -13,7 +13,6 @@ from server.service.input_message_service import AgentInputMsg
 from server.utils.auth import AuthenticatedUser
 from src.agents import agent_manager
 from src.agents.base_agent import BaseAgent
-from src.configs import config
 from src.database import (
     Agent,
     AgentRun,
@@ -31,6 +30,7 @@ from src.database.repositories import (
     UserRepository,
 )
 from src.storage import get_storage
+from src.storage.minio import ATTACHMENT_BUCKET_NAME
 
 _THREAD_CURSOR_VERSION = 1
 _SYSTEM_THREAD_METADATA_KEYS = frozenset({"backend_id"})
@@ -310,7 +310,7 @@ async def _message_attachment_payloads(
             access_url = access_urls.get(attachment_id)
             if access_url is None:
                 access_url = await storage.create_file_access_url(
-                    config.attachment_bucket,
+                    ATTACHMENT_BUCKET_NAME,
                     str(attachment.original_object_name),
                 )
                 access_urls[attachment_id] = access_url

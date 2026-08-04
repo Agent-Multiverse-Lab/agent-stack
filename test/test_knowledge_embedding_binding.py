@@ -6,10 +6,7 @@ from unittest.mock import patch
 
 from langchain_core.embeddings import Embeddings
 
-from server.service.knowledge_service import (
-    EmbeddingModelConflictError,
-    KnowledgeService,
-)
+from server.service import knowledge_service
 from src.configs import config as sys_config
 
 
@@ -78,6 +75,8 @@ class KnowledgeEmbeddingBindingTest(unittest.IsolatedAsyncioTestCase):
             embedding_dimension=3,
             embedding_batch_size=2,
         )
+        bindings = FakeBindingRepository(session)
+        bindings.binding = binding
 
         with (
             patch(
@@ -91,7 +90,7 @@ class KnowledgeEmbeddingBindingTest(unittest.IsolatedAsyncioTestCase):
             patch(
                 "server.service.knowledge_service."
                 "KnowledgeEmbeddingBindingRepository",
-                FakeBindingRepository,
+                return_value=bindings,
             ),
             patch(
                 "server.service.knowledge_service.resolve_embedding_model",
@@ -103,34 +102,19 @@ class KnowledgeEmbeddingBindingTest(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(sys_config, "rerank_model", ""),
         ):
-            service = KnowledgeService(session, "milvus")
-            service.bindings.binding = binding
-            result = await service.search(
+            result = await knowledge_service.search(
+                session,
                 uid="user-1",
                 kb_id="kb-1",
                 query="query",
                 limit=5,
+                knowledge_type="milvus",
             )
 
         resolve_model.assert_called_once_with("mock/bound")
         self.assertEqual([1.0, 2.0, 3.0], knowledge.search_vector)
         self.assertEqual("mock/bound", result["embedding_model_spec"])
         self.assertEqual(3, result["embedding_dimension"])
-
-    async def test_bound_model_cannot_be_replaced(self) -> None:
-        binding = SimpleNamespace(
-            embedding_model_spec="mock/original",
-        )
-
-        with patch(
-            "server.service.knowledge_service.resolve_embedding_model",
-            return_value=("mock/other", "other", SimpleNamespace()),
-        ):
-            with self.assertRaises(EmbeddingModelConflictError):
-                KnowledgeService._check_requested_model(
-                    binding,
-                    "mock/other",
-                )
 
 
 if __name__ == "__main__":

@@ -9,7 +9,6 @@ from unittest.mock import patch
 import httpx
 
 from server.service import knowledge_service as knowledge_service_module
-from server.service.knowledge_service import KnowledgeService
 from src.configs import config as sys_config
 from src.model import (
     BaseReranker,
@@ -272,7 +271,7 @@ class FakeBindingRepository:
         )
 
 
-class KnowledgeServiceRerankTest(unittest.IsolatedAsyncioTestCase):
+class KnowledgeRerankServiceTest(unittest.IsolatedAsyncioTestCase):
     """验证知识检索的初召回与最终重排边界。"""
 
     async def test_search_reranks_candidates_and_preserves_scores(
@@ -280,21 +279,31 @@ class KnowledgeServiceRerankTest(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         """服务应扩大初召回并返回带双分数的最终结果。"""
         knowledge = FakeKnowledge()
-        service = KnowledgeService(
-            SimpleNamespace(),
-            storage=SimpleNamespace(),
-            pipeline=SimpleNamespace(),
-        )
-        service.bindings = FakeBindingRepository()
-        service._knowledge = knowledge
-        service._reranker = FakeReranker([(0, 0.2), (1, 0.95)])
-        service._create_embedding_service = lambda *args, **kwargs: (
-            FakeEmbeddingService(),
-            "mock/embedding",
-            2,
-        )
-
         with (
+            patch.object(
+                knowledge_service_module,
+                "KnowledgeEmbeddingBindingRepository",
+                return_value=FakeBindingRepository(),
+            ),
+            patch.object(
+                knowledge_service_module,
+                "_get_knowledge",
+                return_value=knowledge,
+            ),
+            patch.object(
+                knowledge_service_module,
+                "_create_embedding_service",
+                return_value=(
+                    FakeEmbeddingService(),
+                    "mock/embedding",
+                    2,
+                ),
+            ),
+            patch.object(
+                knowledge_service_module,
+                "load_reranker",
+                return_value=FakeReranker([(0, 0.2), (1, 0.95)]),
+            ),
             patch.object(
                 knowledge_service_module.sys_config,
                 "rerank_model",
@@ -306,7 +315,8 @@ class KnowledgeServiceRerankTest(unittest.IsolatedAsyncioTestCase):
                 50,
             ),
         ):
-            result = await service.search(
+            result = await knowledge_service_module.search(
+                SimpleNamespace(),
                 uid="user-1",
                 kb_id="kb-1",
                 query="query",

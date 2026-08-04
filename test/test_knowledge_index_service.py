@@ -2,8 +2,9 @@
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from server.service.knowledge_service import KnowledgeService
+from server.service import knowledge_service
 
 
 class FakeSession:
@@ -129,26 +130,47 @@ class KnowledgeIndexServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_index_file_chunks_and_upserts_parsed_markdown(self) -> None:
         """索引成功后写入稳定分块 ID 并更新文件状态。"""
         session = FakeSession()
-        service = KnowledgeService(
-            session,
-            storage=FakeStorage(),
-            pipeline=FakePipeline(),
-        )
-        service.knowledge_files = FakeKnowledgeFileRepository()
-        service.bindings = FakeBindingRepository()
+        knowledge_files = FakeKnowledgeFileRepository()
+        bindings = FakeBindingRepository()
         knowledge = FakeKnowledge()
-        service._knowledge = knowledge
-        service._create_embedding_service = lambda *args, **kwargs: (
-            FakeEmbeddingService(),
-            "mock/model",
-            2,
-        )
-
-        result = await service.index_file(
-            uid="user-1",
-            kb_id="kb-1",
-            file_id="file-1",
-        )
+        with (
+            patch.object(
+                knowledge_service,
+                "get_storage",
+                return_value=FakeStorage(),
+            ),
+            patch.object(
+                knowledge_service,
+                "Pipeline",
+                return_value=FakePipeline(),
+            ),
+            patch.object(
+                knowledge_service,
+                "KnowledgeFileRepository",
+                return_value=knowledge_files,
+            ),
+            patch.object(
+                knowledge_service,
+                "KnowledgeEmbeddingBindingRepository",
+                return_value=bindings,
+            ),
+            patch.object(
+                knowledge_service,
+                "_get_knowledge",
+                return_value=knowledge,
+            ),
+            patch.object(
+                knowledge_service,
+                "_create_embedding_service",
+                return_value=(FakeEmbeddingService(), "mock/model", 2),
+            ),
+        ):
+            result = await knowledge_service.index_file(
+                session,
+                uid="user-1",
+                kb_id="kb-1",
+                file_id="file-1",
+            )
 
         self.assertEqual(
             ["file-1:0", "file-1:1"],
@@ -159,7 +181,7 @@ class KnowledgeIndexServiceTest(unittest.IsolatedAsyncioTestCase):
             "file-1",
             knowledge.records[0].metadata["file_id"],
         )
-        self.assertEqual("indexed", service.knowledge_files.file.status)
+        self.assertEqual("indexed", knowledge_files.file.status)
         self.assertEqual(2, result["chunk_count"])
         self.assertEqual(3, session.commits)
 

@@ -20,6 +20,7 @@ _storage_instance: "MinioStorage | None" = None
 _unsafe_filename_pattern = re.compile(r"[^A-Za-z0-9._-]+")
 
 PUBLIC_BUCKET_KEY = {"public"}
+ATTACHMENT_BUCKET_NAME = "attachment"
 
 
 @dataclass(slots=True)

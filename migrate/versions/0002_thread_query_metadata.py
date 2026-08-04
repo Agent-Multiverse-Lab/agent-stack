@@ -13,6 +13,23 @@ def upgrade() -> None:
     """增加 Thread 查询和软删除所需字段与索引。"""
     op.add_column(
         "conversation",
+        sa.Column("parent_conversation_id", sa.Integer(), nullable=True),
+    )
+    op.create_foreign_key(
+        "fk_conversation_parent_conversation_id",
+        "conversation",
+        "conversation",
+        ["parent_conversation_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_index(
+        "ix_conversation_parent_conversation_id",
+        "conversation",
+        ["parent_conversation_id"],
+    )
+    op.add_column(
+        "conversation",
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.add_column(
@@ -63,3 +80,13 @@ def downgrade() -> None:
     op.drop_index("ix_conversation_thread_list", table_name="conversation")
     op.drop_column("agent_run", "run_metadata")
     op.drop_column("conversation", "deleted_at")
+    op.drop_index(
+        "ix_conversation_parent_conversation_id",
+        table_name="conversation",
+    )
+    op.drop_constraint(
+        "fk_conversation_parent_conversation_id",
+        "conversation",
+        type_="foreignkey",
+    )
+    op.drop_column("conversation", "parent_conversation_id")

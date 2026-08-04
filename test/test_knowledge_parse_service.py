@@ -2,8 +2,9 @@
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from server.service.knowledge_service import KnowledgeService
+from server.service import knowledge_service
 from src.knowledge.flow import ParsedDocument
 
 
@@ -117,19 +118,41 @@ class FakePipeline:
 
 
 class KnowledgeParseServiceTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.storage = FakeStorage()
+        self.knowledge_bases = FakeKnowledgeBaseRepository()
+        self.knowledge_files = FakeKnowledgeFileRepository()
+        self.storage_patch = patch(
+            "server.service.knowledge_service.get_storage",
+            return_value=self.storage,
+        )
+        self.pipeline_patch = patch(
+            "server.service.knowledge_service.Pipeline",
+            return_value=FakePipeline(),
+        )
+        self.knowledge_base_repository_patch = patch(
+            "server.service.knowledge_service.KnowledgeBaseRepository",
+            return_value=self.knowledge_bases,
+        )
+        self.knowledge_file_repository_patch = patch(
+            "server.service.knowledge_service.KnowledgeFileRepository",
+            return_value=self.knowledge_files,
+        )
+        self.storage_patch.start()
+        self.pipeline_patch.start()
+        self.knowledge_base_repository_patch.start()
+        self.knowledge_file_repository_patch.start()
+        self.addCleanup(self.storage_patch.stop)
+        self.addCleanup(self.pipeline_patch.stop)
+        self.addCleanup(self.knowledge_base_repository_patch.stop)
+        self.addCleanup(self.knowledge_file_repository_patch.stop)
+
     async def test_list_file_names_for_current_knowledge_base(self) -> None:
         """只返回当前用户指定知识库中的原始文件名。"""
-        service = KnowledgeService(
-            FakeSession(),
-            storage=FakeStorage(),
-            pipeline=FakePipeline(),
-        )
-        service.knowledge_bases = FakeKnowledgeBaseRepository()
-        service.knowledge_files = FakeKnowledgeFileRepository(
-            file_names=["接口说明.md", "产品需求.pdf"]
-        )
+        self.knowledge_files.file_names = ["接口说明.md", "产品需求.pdf"]
 
-        result = await service.list_file_names(
+        result = await knowledge_service.list_file_names(
+            FakeSession(),
             uid="user-1",
             kb_id="kb-1",
         )
@@ -138,29 +161,20 @@ class KnowledgeParseServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_list_file_names_rejects_unknown_knowledge_base(self) -> None:
         """不存在或不属于当前用户的知识库不能读取文件列表。"""
-        service = KnowledgeService(
-            FakeSession(),
-            storage=FakeStorage(),
-            pipeline=FakePipeline(),
-        )
-        service.knowledge_bases = FakeKnowledgeBaseRepository(exists=False)
-        service.knowledge_files = FakeKnowledgeFileRepository()
+        self.knowledge_bases.exists = False
 
         with self.assertRaisesRegex(LookupError, "知识库不存在"):
-            await service.list_file_names(uid="user-1", kb_id="kb-1")
+            await knowledge_service.list_file_names(
+                FakeSession(),
+                uid="user-1",
+                kb_id="kb-1",
+            )
 
     async def test_upload_creates_knowledge_file_without_parsing(self) -> None:
         session = FakeSession()
-        storage = FakeStorage()
-        service = KnowledgeService(
-            session,
-            storage=storage,
-            pipeline=FakePipeline(),
-        )
-        service.knowledge_bases = FakeKnowledgeBaseRepository()
-        service.knowledge_files = FakeKnowledgeFileRepository()
 
-        knowledge_file = await service.upload_file(
+        knowledge_file = await knowledge_service.upload_file(
+            session,
             uid="user-1",
             kb_id="kb-1",
             file_name="guide.txt",
@@ -175,7 +189,6 @@ class KnowledgeParseServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_parse_file_saves_markdown_without_chunking(self) -> None:
         session = FakeSession()
-        storage = FakeStorage()
         knowledge_file = SimpleNamespace(
             file_id="file-1",
             kb_id="kb-1",
@@ -187,14 +200,10 @@ class KnowledgeParseServiceTest(unittest.IsolatedAsyncioTestCase):
             status="uploaded",
             error_message=None,
         )
-        service = KnowledgeService(
-            session,
-            storage=storage,
-            pipeline=FakePipeline(),
-        )
-        service.knowledge_files = FakeKnowledgeFileRepository(knowledge_file)
+        self.knowledge_files.knowledge_file = knowledge_file
 
-        result = await service.parse_file(
+        result = await knowledge_service.parse_file(
+            session,
             uid="user-1",
             kb_id="kb-1",
             file_id="file-1",
@@ -202,5 +211,8 @@ class KnowledgeParseServiceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("parsed", result.status)
         self.assertTrue(result.markdown_object_name.endswith("/document.md"))
-        self.assertEqual(b"# Parsed\n\ncontent", storage.uploads[0][2])
+        self.assertEqual(
+            b"# Parsed\n\ncontent",
+            self.storage.uploads[0][2],
+        )
         self.assertEqual(2, session.commits)

@@ -27,7 +27,7 @@
 
 ```text
 人工标注查询
-  -> KnowledgeService.search(uid, kb_id, query, limit=max_k)
+  -> knowledge_service.search(db, uid, kb_id, query, limit=max_k)
   -> 使用 KnowledgeEmbeddingBinding 指定的 Embedding 模型生成查询向量
   -> MilvusKnowledge.search(...)
   -> COSINE 排序后的分块结果
@@ -46,8 +46,8 @@
 不可比较的结果。
 
 `src/knowledge/rag_eval/` 不直接导入 `server/service/knowledge_service.py`。
-未来由 `scripts/` 下的入口创建数据库会话和 `KnowledgeService`，再把一个异步
-检索函数传给评估器，保持现有依赖方向。
+未来由 `scripts/` 下的入口创建数据库会话并调用 `knowledge_service.search(...)`，
+再把一个异步检索函数传给评估器，保持现有依赖方向。
 
 ## 3. 真实评测集
 
@@ -227,8 +227,8 @@ scripts/
 - `types.py`：数据集、逐查询结果、K 汇总和最终报告的数据结构。
 - `metrics.py`：无 I/O 的 `RetrievalMetrics` 指标类，计算 `Hit/Precision/Recall/F1@K`。
 - `evaluator.py`：`RetrievalEvaluator` 负责校验输入、调用异步检索函数、聚合指标并选择 K。
-- `scripts/evaluate_rag_retrieval.py`：创建数据库会话和
-  `KnowledgeService`，读取真实数据集并把 JSON 报告写到显式指定路径。
+- `scripts/evaluate_rag_retrieval.py`：创建数据库会话，调用
+  `knowledge_service.search(...)`，读取真实数据集并把 JSON 报告写到显式指定路径。
 
 首期不拆分额外的工厂、注册表、指标插件或报告渲染层。
 
@@ -243,8 +243,9 @@ evaluator = RetrievalEvaluator(
 report = await evaluator.evaluate(dataset)
 ```
 
-其中 `retrieve(query, limit)` 由脚本闭包绑定当前数据集的 `uid`、`kb_id` 和
-`KnowledgeService`。评估器只消费排序后的检索命中，不读取数据库配置。
+其中 `retrieve(query, limit)` 由脚本闭包绑定当前数据集的 `db`、`uid` 和
+`kb_id`，并调用 `knowledge_service.search(...)`。评估器只消费排序后的检索命中，
+不读取数据库配置。
 
 ## 8. 报告格式
 
