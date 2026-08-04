@@ -389,6 +389,7 @@ async def process_agent_run(ctx, run_id: str):
         # FIXME: 恢复数据库里记录的输入消息类型，而不是传空字符串。
         msg_type=agent_input_message.message_type,  # ty:ignore[invalid-argument-type]
         image_content=image_content,  # ty:ignore[invalid-argument-type]
+        msg_metadata=dict(agent_input_message.msg_metadata or {}),
     )
 
     # 配置整体metadata

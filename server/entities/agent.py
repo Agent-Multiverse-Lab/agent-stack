@@ -19,6 +19,10 @@ class AgentRunCreateRequest(BaseModel):
         default_factory=dict,
         description="单次 Agent Run 元数据",
     )
+    msg_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="单次输入消息元数据",
+    )
     image_content: str | None = Field(None, description="图像文件")
     is_resume: Any | None = Field(None, description="resume选项，用于特殊如Hil")
     parent_run_id: str | None = Field(None, description="父事件id,没有就自己的id")

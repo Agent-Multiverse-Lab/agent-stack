@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
@@ -16,14 +17,86 @@ from server.service.arq_queue_servcie import (
     read_recent_agent_run_stream_events,
     write_agent_run_stream_event,
 )
+from server.service.input_message_service import build_agent_input_msg
 from src.configs import config
-from src.database.models import AgentRun
-from src.database.repositories import AgentRunRepository, ConversationRepository
+from src.database.models import AgentRun, User
+from src.database.repositories import (
+    AgentRunRepository,
+    ConversationRepository,
+)
 from src.database.session import session_context
 from src.utils import logger
 
 _TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
 SUBAGENT_PROGRESS_EVENT_COUNT = 5
+
+
+async def create_agent_run_service(
+    *,
+    db: AsyncSession,
+    current_user: User,
+    query: str | None,
+    agent_id: str,
+    thread_id: str,
+    thread_metadata: dict[str, Any],
+    image_content: str | None,
+    parent_run_id: str | None,
+    msg_metadata: dict[str, Any],
+) -> AgentRun:
+    """原子创建用户消息和 Agent Run，提交后入队。"""
+    if not thread_id:
+        raise ValueError("会话 ID 不能为空")
+
+    input_message = build_agent_input_msg(
+        query=query or "",
+        image_content=image_content,
+        msg_metadata=msg_metadata,
+    )
+
+    conversation_repository = ConversationRepository(db)
+    conversation = (
+        await conversation_repository.get_conversation_by_thread_id_for_user(
+            thread_id=thread_id,
+            user_id=str(current_user.uid),
+        )
+    )
+    if conversation is None:
+        raise LookupError("当前会话不存在或已删除")
+
+    run_metadata = dict(thread_metadata)
+    request_id = str(run_metadata.get("request_id") or uuid.uuid4())
+    run_id = str(uuid.uuid4())
+
+    try:
+        message = await conversation_repository.create_agent_input_message(
+            conversation_id=int(conversation.id),
+            content=input_message.content,
+            image_content=input_message.image_content,
+            message_type=input_message.msg_type,
+            request_id=request_id,
+            msg_metadata=input_message.msg_metadata,
+        )
+        run = await AgentRunRepository(db).create_run(
+            run_id=run_id,
+            thread_id=thread_id,
+            conversation_id=int(conversation.id),
+            uid=str(current_user.uid),
+            agent_slug=agent_id,
+            request_id=request_id,
+            trigger_message_id=int(message.id),
+            run_type="chat",
+            parent_run_id=parent_run_id,
+            run_metadata=run_metadata,
+        )
+        message.agent_run_id = run.id
+        await db.flush()
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+    await enqueue_agent_run(str(run.id))
+    return run
 
 
 async def enqueue_agent_run(run_id: str) -> None:
