@@ -272,6 +272,8 @@ class ConversationRepository:
         content: str,
         image_content: str | None = None,
         message_type: str = "text",
+        request_id: str | None = None,
+        msg_metadata: dict | None = None,
     ) -> Message:
         """创建用户输入消息。"""
         return await self._create_message(
@@ -280,6 +282,8 @@ class ConversationRepository:
             content=content,
             image_content=image_content,
             message_type=message_type,
+            request_id=request_id,
+            msg_metadata=msg_metadata,
         )
 
     async def create_agent_output_message(
@@ -325,6 +329,7 @@ class ConversationRepository:
         image_content: str | None = None,
         message_type: str = "text",
         status: str = "completed",
+        msg_metadata: dict | None = None,
     ) -> Message:
         """创建一条持久化消息。"""
         message = Message(
@@ -336,6 +341,7 @@ class ConversationRepository:
             request_id=request_id,
             message_type=message_type,
             status=status,
+            msg_metadata=dict(msg_metadata or {}),
         )
         self.session.add(message)
         await self.session.flush()

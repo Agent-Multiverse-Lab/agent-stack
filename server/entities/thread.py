@@ -52,6 +52,18 @@ class ThreadRunMetadataResponse(BaseModel):
     finished_at: datetime | None
 
 
+class ThreadMessageAttachmentResponse(BaseModel):
+    """历史消息引用的附件。"""
+
+    id: str
+    file_name: str
+    content_type: str
+    file_size: int
+    status: str
+    available: bool
+    access_url: str | None
+
+
 class ThreadMessageResponse(BaseModel):
     """指定对话中的持久化消息。"""
 
@@ -63,6 +75,9 @@ class ThreadMessageResponse(BaseModel):
     status: str
     request_id: str | None
     run: ThreadRunMetadataResponse | None
+    attachments: list[ThreadMessageAttachmentResponse] = Field(
+        default_factory=list
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -91,18 +106,12 @@ class ThreadUpdateRequest(BaseModel):
 
 
 class UploadedAttachmentResponse(BaseModel):
-    """上传成功后的附件响应。"""
+    """临时上传成功的用户附件。"""
 
     id: str
     file_name: str
     content_type: str
     file_size: int
-    file_key: str
     category: str
+    status: str
     access_url: str
-    thumb_url: str | None = None
-    parser: str | None = None
-    parse_status: str | None = None
-    parse_error: str | None = None
-    parsed_text: str | None = None
-    parse_metadata: dict[str, Any] = Field(default_factory=dict)
