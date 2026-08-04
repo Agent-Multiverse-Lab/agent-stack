@@ -8,6 +8,7 @@ import {
   watch
 } from "vue"
 import {
+  BookOpenCheck,
   Bot,
   Image as ImageIcon,
   Layers,
@@ -46,11 +47,12 @@ const isNarrowViewport = ref(false)
 let viewportQuery: MediaQueryList | null = null
 
 const featureLinks: Array<{
-  id: FeatureId
+  id: FeatureId | "knowledge"
   label: string
   icon: Component
 }> = [
   { id: "library", label: "Library", icon: Library },
+  { id: "knowledge", label: "Knowledge", icon: BookOpenCheck },
   { id: "agent", label: "Agent", icon: Bot },
   { id: "image", label: "Image", icon: ImageIcon },
   { id: "static", label: "Static", icon: Layers },
@@ -79,8 +81,10 @@ const selectedConversationId = computed(() =>
   route.name === "conversation" ? activeConversationId.value : null
 )
 
-const isFeatureActive = (featureId: FeatureId) =>
-  route.name === "feature" && route.params.featureId === featureId
+const isFeatureActive = (featureId: FeatureId | "knowledge") =>
+  featureId === "knowledge"
+    ? route.name === "knowledge"
+    : route.name === "feature" && route.params.featureId === featureId
 
 const formatUpdatedAt = (value: string) => {
   const date = new Date(value)
@@ -240,10 +244,14 @@ const openSettings = () => {
               :class="{
                 'is-active': isFeatureActive(featureLink.id)
               }"
-              :to="{
-                name: 'feature',
-                params: { featureId: featureLink.id }
-              }"
+              :to="
+                featureLink.id === 'knowledge'
+                  ? { name: 'knowledge' }
+                  : {
+                    name: 'feature',
+                    params: { featureId: featureLink.id }
+                  }
+              "
               @click="mobileSidebarOpen = false"
             >
               <component

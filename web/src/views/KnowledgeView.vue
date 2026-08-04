@@ -1,28 +1,108 @@
 <script setup lang="ts">
-import {
-  nextTick,
-  onBeforeUnmount,
-  onMounted,
-  ref
-} from "vue"
-import { useRouter } from "vue-router"
+import { nextTick, onMounted, onUnmounted, ref } from "vue"
+import { gsap } from "gsap"
 
-import KnowledgeChatComponent from "@/components/KnowledgeChatComponent.vue"
-import KnowledgeFileActionsComponent from "@/components/KnowledgeFileActionsComponent.vue"
-import KnowledgeFilesComponent from "@/components/KnowledgeFilesComponent.vue"
-import KnowledgeNavigationComponent from "@/components/KnowledgeNavigationComponent.vue"
+import KnowledgeChatComponent from "@/components/knowledge/KnowledgeChatComponent.vue"
+import KnowledgeFileActionsComponent from "@/components/knowledge/KnowledgeFileActionsComponent.vue"
+import KnowledgeFilesComponent from "@/components/knowledge/KnowledgeFilesComponent.vue"
 import type { KnowledgeFileItem } from "@/types/knowledge"
-
-type OpenKnowledgeDrawer = "files" | "actions" | null
-
-const router = useRouter()
 
 const files = ref<KnowledgeFileItem[]>([])
 const selectedFileId = ref<string | null>(null)
-const compactMode = ref(false)
-const openDrawer = ref<OpenKnowledgeDrawer>(null)
+const filesCollapsed = ref(false)
+const toolsCollapsed = ref(false)
+const knowledgeView = ref<HTMLElement | null>(null)
 
-let compactViewportQuery: MediaQueryList | null = null
+let collapseMotionEnabled = false
+let layoutTween: ReturnType<typeof gsap.fromTo> | null = null
+let motionMatcher: ReturnType<typeof gsap.matchMedia> | null = null
+
+/** 终止当前布局动画，并让 CSS 收纳状态重新接管列宽。 */
+function clearLayoutTween() {
+  layoutTween?.kill()
+  layoutTween = null
+  knowledgeView.value?.style.removeProperty("grid-template-columns")
+}
+
+/** 在状态切换前后读取真实列宽，并从当前画面过渡到最新布局。 */
+async function animateLayoutChange(updateState: () => void) {
+  const view = knowledgeView.value
+  if (!view || !collapseMotionEnabled) {
+    clearLayoutTween()
+    updateState()
+    return
+  }
+
+  const startColumns = getComputedStyle(view).gridTemplateColumns
+  clearLayoutTween()
+  updateState()
+  await nextTick()
+
+  if (knowledgeView.value !== view || !view.isConnected) return
+
+  const endColumns = getComputedStyle(view).gridTemplateColumns
+  if (startColumns === endColumns) return
+
+  layoutTween = gsap.fromTo(
+    view,
+    { gridTemplateColumns: startColumns },
+    {
+      gridTemplateColumns: endColumns,
+      duration: 0.24,
+      ease: "power2.inOut",
+      overwrite: "auto",
+      onComplete: () => {
+        view.style.removeProperty("grid-template-columns")
+        layoutTween = null
+      }
+    }
+  )
+}
+
+/** 切换 Files 面板的桌面收纳状态。 */
+function toggleFilesCollapsed() {
+  void animateLayoutChange(() => {
+    filesCollapsed.value = !filesCollapsed.value
+  })
+}
+
+/** 切换 Tools 面板的桌面收纳状态。 */
+function toggleToolsCollapsed() {
+  void animateLayoutChange(() => {
+    toolsCollapsed.value = !toolsCollapsed.value
+  })
+}
+
+onMounted(() => {
+  motionMatcher = gsap.matchMedia()
+  motionMatcher.add(
+    {
+      isDesktop: "(min-width: 721px)",
+      reduceMotion: "(prefers-reduced-motion: reduce)"
+    },
+    (context) => {
+      const conditions = context.conditions as {
+        isDesktop: boolean
+        reduceMotion: boolean
+      }
+      collapseMotionEnabled =
+        conditions.isDesktop && !conditions.reduceMotion
+
+      if (!collapseMotionEnabled) clearLayoutTween()
+
+      return () => {
+        collapseMotionEnabled = false
+        clearLayoutTween()
+      }
+    }
+  )
+})
+
+onUnmounted(() => {
+  clearLayoutTween()
+  motionMatcher?.revert()
+  motionMatcher = null
+})
 
 /** 生成只用于本地页面状态的文件标识。 */
 function createLocalFileId(): string {
@@ -76,86 +156,42 @@ function removeLocalFile(fileId: string) {
 
   selectedFileId.value =
     files.value[fileIndex]?.id ?? files.value[fileIndex - 1]?.id ?? null
-
-  if (!selectedFileId.value) openDrawer.value = null
 }
-
-/** 同步桌面与抽屉布局，并阻止两个抽屉重叠。 */
-function updateCompactMode(event?: MediaQueryListEvent) {
-  compactMode.value =
-    event?.matches ?? compactViewportQuery?.matches ?? false
-
-  if (!compactMode.value) openDrawer.value = null
-}
-
-/** 聚焦桌面区域，或在紧凑布局中打开对应抽屉。 */
-async function openRegion(
-  region: Exclude<OpenKnowledgeDrawer, null>,
-  elementId: string
-) {
-  if (compactMode.value) {
-    openDrawer.value = region
-    return
-  }
-
-  await nextTick()
-  document.querySelector<HTMLElement>(`#${elementId}`)?.focus()
-}
-
-/** 关闭侧栏抽屉并将焦点送回知识对话区。 */
-async function focusChat() {
-  openDrawer.value = null
-  await nextTick()
-  document.querySelector<HTMLElement>("#knowledge-chat-region")?.focus()
-}
-
-/** 返回常驻导航中的新对话页面。 */
-async function returnToChat() {
-  await router.push({ name: "chat" })
-}
-
-onMounted(() => {
-  compactViewportQuery = window.matchMedia("(max-width: 1279px)")
-  updateCompactMode()
-  compactViewportQuery.addEventListener("change", updateCompactMode)
-})
-
-onBeforeUnmount(() => {
-  compactViewportQuery?.removeEventListener("change", updateCompactMode)
-})
 </script>
 
 <template>
-  <main class="knowledge-view">
-    <KnowledgeNavigationComponent
-      :compact-mode="compactMode"
-      :files-open="openDrawer === 'files'"
-      :actions-open="openDrawer === 'actions'"
-      @back="returnToChat"
-      @files="openRegion('files', 'knowledge-files-region')"
-      @chat="focusChat"
-      @actions="openRegion('actions', 'knowledge-actions-region')"
-    />
-
+  <main
+    ref="knowledgeView"
+    class="knowledge-view"
+    :class="{
+      'is-files-collapsed': filesCollapsed,
+      'is-tools-collapsed': toolsCollapsed
+    }"
+  >
     <KnowledgeFilesComponent
+      class="knowledge-view-files"
       :files="files"
       :selected-file-id="selectedFileId"
-      :presentation="compactMode ? 'drawer' : 'panel'"
-      :open="openDrawer === 'files'"
+      :collapsed="filesCollapsed"
+      presentation="panel"
+      :open="false"
       @files-selected="addLocalFiles"
       @select="selectedFileId = $event"
       @remove="removeLocalFile"
-      @close="openDrawer = null"
+      @toggle-collapse="toggleFilesCollapsed"
     />
 
     <KnowledgeChatComponent
+      class="knowledge-view-chat"
       :files="files"
     />
 
     <KnowledgeFileActionsComponent
-      :presentation="compactMode ? 'drawer' : 'panel'"
-      :open="openDrawer === 'actions'"
-      @close="openDrawer = null"
+      class="knowledge-view-actions"
+      :collapsed="toolsCollapsed"
+      presentation="panel"
+      :open="false"
+      @toggle-collapse="toggleToolsCollapsed"
     />
   </main>
 </template>
@@ -167,29 +203,71 @@ onBeforeUnmount(() => {
   @apply grid h-dvh w-full min-h-0 min-w-0 overflow-hidden;
 
   grid-template-columns:
-    4.5rem
-    minmax(0, 2fr)
-    minmax(0, 5fr)
-    minmax(0, 2fr);
-  gap: 0.75rem;
-  padding: 0.75rem;
+    minmax(0, 1fr)
+    minmax(0, 1.92fr)
+    minmax(0, 1fr);
+  grid-template-areas: "files chat actions";
+  grid-template-rows: minmax(0, 1fr);
+  gap: 16px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 16px;
+  caret-color: transparent;
   color: var(--color-text);
   background: var(--color-surface-muted);
+  font-size: 14px;
 }
 
-@media (max-width: 1279px) {
-  .knowledge-view {
-    grid-template-columns: 4.5rem minmax(0, 1fr);
-  }
+.knowledge-view.is-files-collapsed {
+  grid-template-columns:
+    56px
+    minmax(0, 1.92fr)
+    minmax(0, 1fr);
+}
+
+.knowledge-view.is-tools-collapsed {
+  grid-template-columns:
+    minmax(0, 1fr)
+    minmax(0, 1.92fr)
+    56px;
+}
+
+.knowledge-view.is-files-collapsed.is-tools-collapsed {
+  grid-template-columns: 56px minmax(0, 1fr) 56px;
+}
+
+.knowledge-view-files {
+  grid-area: files;
+}
+
+.knowledge-view-chat {
+  grid-area: chat;
+}
+
+.knowledge-view-actions {
+  grid-area: actions;
+}
+
+.knowledge-view :deep(input),
+.knowledge-view :deep(textarea),
+.knowledge-view :deep([contenteditable="true"]) {
+  user-select: text;
+  caret-color: auto;
 }
 
 @media (max-width: 720px) {
-  .knowledge-view {
+  .knowledge-view,
+  .knowledge-view.is-files-collapsed,
+  .knowledge-view.is-tools-collapsed,
+  .knowledge-view.is-files-collapsed.is-tools-collapsed {
+    overflow-y: auto;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-    gap: 0;
-    padding: 0;
-    background: var(--color-surface);
+    grid-template-areas:
+      "chat"
+      "files"
+      "actions";
+    grid-template-rows: none;
+    grid-auto-rows: calc(100dvh - 32px);
   }
 }
 </style>

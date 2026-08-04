@@ -46,7 +46,7 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
-@reference "../styles/index.css";
+@reference "../../styles/index.css";
 
 .knowledge-file-row {
   @apply grid min-w-0 items-center;
@@ -56,7 +56,7 @@ const emit = defineEmits<{
   min-height: 3.5rem;
   padding: 0.3rem 0.35rem 0.3rem 0.5rem;
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-knowledge-container);
   transition:
     border-color 120ms ease,
     background-color 120ms ease;
@@ -84,7 +84,7 @@ const emit = defineEmits<{
   width: 2rem;
   height: 2rem;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-knowledge-container);
   color: var(--color-text-muted);
   background: var(--color-surface);
 }
@@ -100,7 +100,5 @@ const emit = defineEmits<{
 
 .knowledge-file-name {
   @apply overflow-hidden text-ellipsis whitespace-nowrap font-medium;
-
-  font-size: 0.86rem;
 }
 </style>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { h } from "vue"
 import {
   Button as AButton,
   Dropdown as ADropdown,
@@ -6,7 +7,7 @@ import {
   Modal,
   type MenuProps
 } from "ant-design-vue"
-import { MoreHorizontal } from "@lucide/vue"
+import { MoreHorizontal, TriangleAlert } from "@lucide/vue"
 
 import type { KnowledgeFileItem } from "@/types/knowledge"
 
@@ -51,6 +52,12 @@ const confirmRemoval = () => {
   Modal.confirm({
     title: "Remove this file?",
     content: `${props.file.name} will be removed from this local list.`,
+    icon: h(TriangleAlert, {
+      size: 20,
+      strokeWidth: 1.8,
+      color: "var(--color-danger)",
+      "aria-hidden": "true"
+    }),
     okText: "Remove",
     okType: "danger",
     cancelText: "Keep file",
@@ -98,7 +105,7 @@ const selectMenuItem: MenuProps["onClick"] = ({ key }) => {
 </template>
 
 <style scoped>
-@reference "../styles/index.css";
+@reference "../../styles/index.css";
 
 .knowledge-file-menu-trigger {
   @apply grid shrink-0 place-items-center;

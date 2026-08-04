@@ -36,7 +36,9 @@ const emit = defineEmits<{
 
   <AEmpty v-else class="knowledge-file-list-empty">
     <template #image>
-      <Files :size="25" :stroke-width="1.5" aria-hidden="true" />
+      <span class="knowledge-file-list-empty-mark" aria-hidden="true">
+        <Files :size="25" :stroke-width="1.5" />
+      </span>
     </template>
     <template #description>
       <span>No files</span>
@@ -45,7 +47,7 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
-@reference "../styles/index.css";
+@reference "../../styles/index.css";
 
 .knowledge-file-list {
   @apply min-h-0;
@@ -68,13 +70,23 @@ const emit = defineEmits<{
 .knowledge-file-list-empty :deep(.ant-empty-image) {
   @apply grid place-items-center;
 
-  height: 2.25rem;
-  margin-bottom: 0.45rem;
+  height: auto;
+  margin-bottom: 0.9rem;
   color: var(--color-text-muted);
+}
+
+.knowledge-file-list-empty-mark {
+  @apply grid place-items-center;
+
+  width: 3.4rem;
+  height: 3.4rem;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-knowledge-container);
+  color: var(--color-text-muted);
+  background: var(--color-surface);
 }
 
 .knowledge-file-list-empty :deep(.ant-empty-description) {
   color: var(--color-text-muted);
-  font-size: 0.88rem;
 }
 </style>

@@ -14,6 +14,10 @@ const props = defineProps<{
 const chatEnabled = computed(() =>
   props.files.some((file) => file.status === "indexed")
 )
+
+const emptyStateCopy = computed(() =>
+  props.files.length ? "No indexed files" : "Add a file to start"
+)
 </script>
 
 <template>
@@ -35,7 +39,9 @@ const chatEnabled = computed(() =>
           </span>
         </template>
         <template #description>
-          <strong class="knowledge-chat-empty-copy">No indexed files</strong>
+          <strong class="knowledge-chat-empty-copy">
+            {{ emptyStateCopy }}
+          </strong>
         </template>
       </AEmpty>
     </div>
@@ -47,14 +53,16 @@ const chatEnabled = computed(() =>
 </template>
 
 <style scoped>
-@reference "../styles/index.css";
+@reference "../../styles/index.css";
 
 .knowledge-chat {
   @apply grid h-full min-h-0 min-w-0 overflow-hidden border;
 
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: 48px minmax(0, 1fr) auto;
+  width: 100%;
+  caret-color: transparent;
   border-color: var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-knowledge-container);
   background: var(--color-surface);
 }
 
@@ -65,14 +73,22 @@ const chatEnabled = computed(() =>
 .knowledge-chat-header {
   @apply flex min-w-0 items-center;
 
-  min-height: 4.5rem;
-  padding: 0.85rem 1.2rem;
+  box-sizing: border-box;
+  height: 48px;
+  min-height: 48px;
+  max-height: 48px;
+  padding-inline: 16px;
   border-bottom: 1px solid var(--color-border-subtle);
+  user-select: none;
+  caret-color: transparent;
 }
 
 .knowledge-chat-header h1 {
   @apply m-0 overflow-hidden text-ellipsis whitespace-nowrap font-semibold;
 
+  user-select: none;
+  caret-color: transparent;
+  cursor: default;
   font-size: 1rem;
   letter-spacing: -0.03em;
 }
@@ -105,28 +121,14 @@ const chatEnabled = computed(() =>
   width: 3.4rem;
   height: 3.4rem;
   border: 1px solid var(--color-border-control);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-knowledge-container);
   color: var(--color-text-muted);
   background: var(--color-surface);
 }
 
 .knowledge-chat-empty-copy {
   color: var(--color-text);
-  font-size: 0.96rem;
   letter-spacing: -0.02em;
 }
 
-@media (max-width: 720px) {
-  .knowledge-chat-header {
-    min-height: 4.15rem;
-    padding-inline: 1rem;
-  }
-
-  .knowledge-chat {
-    border-right: 0;
-    border-bottom: 0;
-    border-left: 0;
-    border-radius: 0;
-  }
-}
 </style>

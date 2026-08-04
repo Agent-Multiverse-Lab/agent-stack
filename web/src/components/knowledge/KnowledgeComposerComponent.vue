@@ -83,7 +83,7 @@ const handleKeydown = (event: KeyboardEvent) => {
 </template>
 
 <style scoped>
-@reference "../styles/index.css";
+@reference "../../styles/index.css";
 
 .knowledge-composer {
   padding: 0.8rem;
@@ -98,7 +98,7 @@ const handleKeydown = (event: KeyboardEvent) => {
   gap: 0.5rem;
   padding: 0.45rem 0.5rem 0.45rem 0.8rem;
   border-color: var(--color-border-control);
-  border-radius: var(--radius-composer);
+  border-radius: var(--radius-knowledge-container);
   background: var(--color-surface-muted);
 }
 
@@ -118,9 +118,10 @@ const handleKeydown = (event: KeyboardEvent) => {
   color: var(--color-text);
   background: transparent !important;
   box-shadow: none !important;
-  font-size: 0.86rem;
   line-height: 1.5;
   resize: none;
+  user-select: text;
+  caret-color: auto;
 }
 
 .knowledge-composer-input.ant-input-disabled {
@@ -157,5 +158,12 @@ const handleKeydown = (event: KeyboardEvent) => {
   border-color: var(--color-border);
   color: var(--color-text-subtle);
   background: var(--color-surface-emphasis);
+}
+
+@media (max-width: 720px) {
+  .knowledge-composer-input :deep(textarea),
+  .knowledge-composer-input.ant-input {
+    font-size: 1rem;
+  }
 }
 </style>

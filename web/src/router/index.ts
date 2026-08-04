@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from "vue-router"
 
 import AuthenticationView from "@/views/AuthenticationView.vue"
 import ChatView from "@/views/ChatView.vue"
+import KnowledgeView from "@/views/KnowledgeView.vue"
 import NavigationView from "@/views/NavigationView.vue"
 import UnavailableFeatureView from "@/views/UnavailableFeatureView.vue"
 
@@ -37,6 +38,12 @@ const router = createRouter({
           props: true
         }
       ]
+    },
+    {
+      path: "/knowledge",
+      name: "knowledge",
+      component: KnowledgeView,
+      meta: { title: "Knowledge" }
     },
     {
       path: "/login",
