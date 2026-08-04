@@ -1,24 +1,211 @@
-from server.service.agent_run_service import (
-    _build_agent_run_event,
-    _decode_event_fields,
-    agent_run_cancel_key,
-    agent_run_event_stream_key,
-)
+"""Agent Run 创建事务与事件辅助函数测试。"""
+
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from server.entities.agent import AgentRunCreateRequest
+from server.service import agent_run_service
+
+FILE_ID_1 = "759b114e-90d6-42d2-a052-bdccaa40c7b6"
+FILE_ID_2 = "123e4567-e89b-42d3-a456-426614174000"
 
 
-def test_agent_run_keys_and_event_payload():
-    assert agent_run_event_stream_key("r1") == "run:events:r1"
-    assert agent_run_cancel_key("r1") == "run:cancel:r1"
+class FakeSession:
+    def __init__(self, events) -> None:
+        self.events = events
 
-    payload = _build_agent_run_event("r1", {"type": "status"})
+    async def flush(self):
+        self.events.append("flush")
 
-    assert payload["scope"] == "agent_run"
-    assert payload["run_id"] == "r1"
-    assert payload["type"] == "status"
-    assert "created_at" in payload
+    async def commit(self):
+        self.events.append("commit")
+
+    async def rollback(self):
+        self.events.append("rollback")
 
 
-def test_decode_event_fields_from_redis_bytes():
-    payload = _decode_event_fields({b"event": b'{"type":"done"}'})
+class FakeConversationRepository:
+    def __init__(self, events) -> None:
+        self.events = events
+        self.conversation = SimpleNamespace(id=9, agent_id="leaderagent")
+        self.lookup_arguments = None
+        self.message_arguments = None
 
-    assert payload == {"type": "done"}
+    async def get_conversation_by_thread_id_for_user(self, **values):
+        self.lookup_arguments = values
+        return self.conversation
+
+    async def create_agent_input_message(self, **values):
+        self.events.append("message")
+        self.message_arguments = values
+        return SimpleNamespace(id=21, agent_run_id=None)
+
+
+class FakeAgentRunRepository:
+    def __init__(self, events) -> None:
+        self.events = events
+        self.arguments = None
+        self.error = None
+
+    async def create_run(self, **values):
+        self.events.append("run")
+        if self.error is not None:
+            raise self.error
+        self.arguments = values
+        return SimpleNamespace(
+            id=values["run_id"],
+            thread_id=values["thread_id"],
+            request_id=values["request_id"],
+            agent_status="pending",
+        )
+
+
+class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.events = []
+        self.db = FakeSession(self.events)
+        self.conversations = FakeConversationRepository(self.events)
+        self.runs = FakeAgentRunRepository(self.events)
+
+        patches = (
+            patch(
+                "server.service.agent_run_service.ConversationRepository",
+                return_value=self.conversations,
+            ),
+            patch(
+                "server.service.agent_run_service.AgentRunRepository",
+                return_value=self.runs,
+            ),
+        )
+        for current_patch in patches:
+            current_patch.start()
+            self.addCleanup(current_patch.stop)
+
+    async def create_run(self, **overrides):
+        values = {
+            "db": self.db,
+            "current_user": SimpleNamespace(id=7, uid="user-1"),
+            "query": "分析附件",
+            "agent_id": "leaderagent",
+            "thread_id": "thread-1",
+            "thread_metadata": {"request_id": "request-1"},
+            "msg_metadata": {
+                "file_ids": [str(FILE_ID_1), str(FILE_ID_2)],
+                "source": "web",
+            },
+            "image_content": None,
+            "parent_run_id": None,
+        }
+        values.update(overrides)
+        return await agent_run_service.create_agent_run_service(**values)
+
+    async def test_create_commits_message_and_run_before_enqueue(self):
+        async def enqueue(run_id):
+            self.events.append(("enqueue", run_id))
+
+        with patch(
+            "server.service.agent_run_service.enqueue_agent_run",
+            side_effect=enqueue,
+        ):
+            run = await self.create_run()
+
+        self.assertEqual(
+            {
+                "file_ids": [str(FILE_ID_1), str(FILE_ID_2)],
+                "source": "web",
+            },
+            self.conversations.message_arguments["msg_metadata"],
+        )
+        self.assertEqual(
+            "multimodal",
+            self.conversations.message_arguments["message_type"],
+        )
+        self.assertEqual(21, self.runs.arguments["trigger_message_id"])
+        self.assertEqual(
+            [
+                "message",
+                "run",
+                "flush",
+                "commit",
+                ("enqueue", str(run.id)),
+            ],
+            self.events,
+        )
+
+    async def test_transaction_error_rolls_back_without_enqueue(self):
+        self.runs.error = RuntimeError("run failed")
+
+        with patch(
+            "server.service.agent_run_service.enqueue_agent_run"
+        ) as enqueue:
+            with self.assertRaisesRegex(RuntimeError, "run failed"):
+                await self.create_run()
+
+        enqueue.assert_not_called()
+        self.assertEqual(["message", "run", "rollback"], self.events)
+
+    async def test_file_only_message_uses_attachment_type(self):
+        async def enqueue(_):
+            return None
+
+        with patch(
+            "server.service.agent_run_service.enqueue_agent_run",
+            side_effect=enqueue,
+        ):
+            await self.create_run(
+                query=None,
+                msg_metadata={"file_ids": [str(FILE_ID_1)]},
+            )
+
+        self.assertEqual(
+            "attachment",
+            self.conversations.message_arguments["message_type"],
+        )
+
+    async def test_file_metadata_is_forwarded_without_attachment_validation(
+        self,
+    ):
+        async def enqueue(_):
+            return None
+
+        with patch(
+            "server.service.agent_run_service.enqueue_agent_run",
+            side_effect=enqueue,
+        ):
+            await self.create_run(
+                msg_metadata={"file_ids": ["opaque-file-id"]},
+            )
+
+        self.assertEqual(
+            {"file_ids": ["opaque-file-id"]},
+            self.conversations.message_arguments["msg_metadata"],
+        )
+
+
+class AgentRunEventTest(unittest.TestCase):
+    def test_request_uses_message_metadata_without_attachment_field(self):
+        self.assertIn("msg_metadata", AgentRunCreateRequest.model_fields)
+        self.assertNotIn("attachment_ids", AgentRunCreateRequest.model_fields)
+
+    def test_build_event_payload(self):
+        payload = agent_run_service._build_agent_run_event(
+            "r1",
+            {"type": "status"},
+        )
+
+        self.assertEqual("agent_run", payload["scope"])
+        self.assertEqual("r1", payload["run_id"])
+        self.assertEqual("status", payload["type"])
+        self.assertIn("created_at", payload)
+
+    def test_decode_event_fields_from_redis_bytes(self):
+        payload = agent_run_service._decode_event_fields(
+            {b"event": b'{"type":"done"}'}
+        )
+
+        self.assertEqual({"type": "done"}, payload)
+
+
+if __name__ == "__main__":
+    unittest.main()

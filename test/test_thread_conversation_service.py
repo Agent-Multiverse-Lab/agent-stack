@@ -3,9 +3,13 @@
 import unittest
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from server.router.thread_router import router
-from server.service.thread_service import ThreadConflictError, ThreadService
+from server.service import thread_service
+
+FILE_ID_1 = "759b114e-90d6-42d2-a052-bdccaa40c7b6"
+FILE_ID_2 = "123e4567-e89b-42d3-a456-426614174000"
 
 
 class FakeSession:
@@ -101,6 +105,29 @@ class FakeAgentRunRepository:
         return self.has_active
 
 
+class FakeMessageAttachmentRepository:
+    """在内存中模拟 MessageAttachment Repository。"""
+
+    def __init__(self) -> None:
+        self.rows = []
+        self.requested_message_ids = None
+
+    async def list_attachments_by_message_ids(self, message_ids):
+        self.requested_message_ids = list(message_ids)
+        return self.rows
+
+
+class FakeStorage:
+    """记录 Thread 详情生成附件访问 URL 的调用。"""
+
+    def __init__(self) -> None:
+        self.access_calls = []
+
+    async def create_file_access_url(self, bucket_name, object_name):
+        self.access_calls.append((bucket_name, object_name))
+        return f"https://files/{object_name}"
+
+
 class FakeUserRepository:
     """返回固定用户。"""
 
@@ -164,25 +191,51 @@ def make_message(
     )
 
 
-class ThreadServiceTest(unittest.IsolatedAsyncioTestCase):
-    """验证 ThreadService 的公开用例契约。"""
+class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
+    """验证 thread_service 模块函数的公开用例契约。"""
 
-    def build_service(self, conversation=None):
-        """构造注入 Fake Repository 的 Service。"""
-        service = ThreadService(FakeSession())
-        conversations = FakeConversationRepository(conversation)
-        runs = FakeAgentRunRepository()
-        service.conversations = conversations
-        service.runs = runs
-        return service, conversations, runs
+    def setUp(self) -> None:
+        self.db = FakeSession()
+        self.conversations = FakeConversationRepository()
+        self.runs = FakeAgentRunRepository()
+        self.message_attachments = FakeMessageAttachmentRepository()
+        self.users = FakeUserRepository()
+        self.agents = FakeAgentRepository()
+        self.storage = FakeStorage()
+        patches = (
+            patch(
+                "server.service.thread_service.ConversationRepository",
+                return_value=self.conversations,
+            ),
+            patch(
+                "server.service.thread_service.AgentRunRepository",
+                return_value=self.runs,
+            ),
+            patch(
+                "server.service.thread_service.MessageAttachmentRepository",
+                return_value=self.message_attachments,
+            ),
+            patch(
+                "server.service.thread_service.UserRepository",
+                return_value=self.users,
+            ),
+            patch(
+                "server.service.thread_service.AgentRepository",
+                return_value=self.agents,
+            ),
+            patch(
+                "server.service.thread_service.get_storage",
+                return_value=self.storage,
+            ),
+        )
+        for current_patch in patches:
+            current_patch.start()
+            self.addCleanup(current_patch.stop)
 
     async def test_create_thread_protects_backend_metadata(self) -> None:
         """创建对话时由服务端覆盖 backend_id。"""
-        service, conversations, _ = self.build_service()
-        service.users = FakeUserRepository()
-        service.agents = FakeAgentRepository()
-
-        conversation = await service.create_thread(
+        conversation = await thread_service.create_thread(
+            self.db,
             uid="user-1",
             agent_id="leaderagent",
             title="  新会话  ",
@@ -199,15 +252,15 @@ class ThreadServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_list_threads_returns_stable_cursor(self) -> None:
         """列表只返回 limit 条并按最后一项生成游标。"""
-        service, conversations, _ = self.build_service()
         first = make_conversation(2)
         second = make_conversation(1)
-        conversations.rows = [
+        self.conversations.rows = [
             (first, NOW + timedelta(minutes=2), NOW + timedelta(minutes=2)),
             (second, NOW + timedelta(minutes=1), NOW + timedelta(minutes=1)),
         ]
 
-        result = await service.list_threads(
+        result = await thread_service.list_threads(
+            self.db,
             uid="user-1",
             limit=1,
             query="  检索  ",
@@ -215,29 +268,28 @@ class ThreadServiceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(["thread-2"], [item["thread_id"] for item in result["items"]])
         self.assertIsNotNone(result["next_cursor"])
-        activity_at, conversation_id = service._decode_cursor(
+        activity_at, conversation_id = thread_service._decode_cursor(
             result["next_cursor"]
         )
         self.assertEqual(NOW + timedelta(minutes=2), activity_at)
         self.assertEqual(2, conversation_id)
-        self.assertEqual("检索", conversations.list_arguments["query"])
+        self.assertEqual("检索", self.conversations.list_arguments["query"])
 
     def test_list_cursor_rejects_non_object_payload(self) -> None:
         """列表游标必须包含约定的 JSON 对象。"""
         with self.assertRaisesRegex(ValueError, "无效的对话列表游标"):
-            ThreadService._decode_cursor("W10")
+            thread_service._decode_cursor("W10")
 
     async def test_detail_returns_messages_in_display_order_with_run(self) -> None:
         """详情返回最新消息页并在响应中恢复为正序。"""
-        conversation = make_conversation(1)
-        service, conversations, runs = self.build_service(conversation)
-        conversations.messages = [
+        self.conversations.conversation = make_conversation(1)
+        self.conversations.messages = [
             make_message(3, role="assistant", run_id="run-1"),
             make_message(2, role="user", run_id="run-1"),
             make_message(1, role="user", run_id=None),
         ]
-        conversations.last_message_at = NOW + timedelta(minutes=3)
-        runs.runs["run-1"] = SimpleNamespace(
+        self.conversations.last_message_at = NOW + timedelta(minutes=3)
+        self.runs.runs["run-1"] = SimpleNamespace(
             id="run-1",
             run_type="chat",
             agent_status="completed",
@@ -247,7 +299,8 @@ class ThreadServiceTest(unittest.IsolatedAsyncioTestCase):
             finished_at=NOW + timedelta(minutes=3),
         )
 
-        result = await service.get_thread_detail(
+        result = await thread_service.get_thread_detail(
+            self.db,
             uid="user-1",
             thread_id="thread-1",
             message_limit=2,
@@ -259,6 +312,75 @@ class ThreadServiceTest(unittest.IsolatedAsyncioTestCase):
             {"source": "web"},
             result["messages"][0]["run"]["metadata"],
         )
+        self.assertEqual([], result["messages"][0]["attachments"])
+        self.assertEqual(
+            [3, 2],
+            self.message_attachments.requested_message_ids,
+        )
+
+    async def test_detail_batch_loads_ordered_message_attachments(self) -> None:
+        """详情按消息和 position 回读附件，并复用同一附件 URL。"""
+        self.conversations.conversation = make_conversation(1)
+        self.conversations.messages = [
+            make_message(2, role="assistant", run_id=None),
+            make_message(1, role="user", run_id=None),
+        ]
+        available = SimpleNamespace(
+            id=5,
+            file_id=FILE_ID_1,
+            attachment_name="需求.pdf",
+            attachment_type="application/pdf",
+            attachment_size=1024,
+            original_object_name=(
+                f"7/{FILE_ID_1}/original/requirements.pdf"
+            ),
+            status="parsed",
+            deleted_at=None,
+        )
+        deleted = SimpleNamespace(
+            id=6,
+            file_id=FILE_ID_2,
+            attachment_name="旧图.png",
+            attachment_type="image/png",
+            attachment_size=2048,
+            original_object_name=f"7/{FILE_ID_2}/original/old.png",
+            status="parsed",
+            deleted_at=NOW,
+        )
+        self.message_attachments.rows = [
+            (SimpleNamespace(message_id=1, position=0), available),
+            (SimpleNamespace(message_id=1, position=1), deleted),
+            (SimpleNamespace(message_id=2, position=0), available),
+        ]
+
+        result = await thread_service.get_thread_detail(
+            self.db,
+            uid="user-1",
+            thread_id="thread-1",
+            message_limit=10,
+        )
+
+        first, second = result["messages"]
+        self.assertEqual(
+            [str(FILE_ID_1), str(FILE_ID_2)],
+            [item["id"] for item in first["attachments"]],
+        )
+        self.assertTrue(first["attachments"][0]["available"])
+        self.assertFalse(first["attachments"][1]["available"])
+        self.assertIsNone(first["attachments"][1]["access_url"])
+        self.assertEqual(
+            [str(FILE_ID_1)],
+            [item["id"] for item in second["attachments"]],
+        )
+        self.assertEqual(
+            [
+                (
+                    "attachments",
+                    f"7/{FILE_ID_1}/original/requirements.pdf",
+                )
+            ],
+            self.storage.access_calls,
+        )
 
     async def test_update_replaces_user_metadata_and_preserves_backend(self) -> None:
         """更新 metadata 时保留系统 backend_id。"""
@@ -266,9 +388,10 @@ class ThreadServiceTest(unittest.IsolatedAsyncioTestCase):
             1,
             metadata={"backend_id": "system-backend", "old": True},
         )
-        service, _, _ = self.build_service(conversation)
+        self.conversations.conversation = conversation
 
-        result = await service.update_thread(
+        result = await thread_service.update_thread(
+            self.db,
             uid="user-1",
             thread_id="thread-1",
             fields={"summary", "metadata"},
@@ -287,17 +410,25 @@ class ThreadServiceTest(unittest.IsolatedAsyncioTestCase):
         """活动 Run 阻止删除，终态后删除根子对话。"""
         conversation = make_conversation(1)
         child = make_conversation(2)
-        service, conversations, runs = self.build_service(conversation)
-        conversations.tree = [conversation, child]
-        runs.has_active = True
+        self.conversations.conversation = conversation
+        self.conversations.tree = [conversation, child]
+        self.runs.has_active = True
 
-        with self.assertRaises(ThreadConflictError):
-            await service.delete_thread(uid="user-1", thread_id="thread-1")
-        self.assertEqual([], conversations.deleted_ids)
+        with self.assertRaises(thread_service.ThreadConflictError):
+            await thread_service.delete_thread(
+                self.db,
+                uid="user-1",
+                thread_id="thread-1",
+            )
+        self.assertEqual([], self.conversations.deleted_ids)
 
-        runs.has_active = False
-        await service.delete_thread(uid="user-1", thread_id="thread-1")
-        self.assertEqual([1, 2], conversations.deleted_ids)
+        self.runs.has_active = False
+        await thread_service.delete_thread(
+            self.db,
+            uid="user-1",
+            thread_id="thread-1",
+        )
+        self.assertEqual([1, 2], self.conversations.deleted_ids)
 
     def test_router_exposes_thread_crud(self) -> None:
         """Router 暴露统一 Thread 资源的 CRUD 方法。"""
