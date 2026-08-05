@@ -13,6 +13,10 @@ This file is the single source of repository guidance for Claude/Codex-style cod
   continuing with implementation. Routine operations that do not require
   design, such as installing an explicitly requested dependency, do not require
   a specification.
+- When creating or revising a design specification, use the `ponytail` skill
+  before presenting it. Challenge every proposed file, component, abstraction,
+  and compatibility path; remove anything that is not required for the smallest
+  end-to-end implementation that satisfies the confirmed requirement.
 - Preserve the existing directory structure, module boundaries, and public
   contracts whenever possible. If a task requires moving or deleting existing
   files, changing established ownership, or restructuring existing modules,
@@ -106,6 +110,10 @@ Current top-level responsibilities and construction rules:
   diagrams aligned with the boundaries defined in this guide. Write design
   documents under `doc/` by default, and use `doc/spec/` for design
   specifications instead of scattering them through implementation packages.
+  Within `doc/spec/`, mirror the primary owning source path, use at most
+  four subdirectory levels, create only populated branches, keep each
+  cross-layer specification once under its primary owner, and place its assets
+  in the nearest `assets/` directory.
 
 Dependencies should follow this ownership direction: routers call services, and
 services call repositories or infrastructure adapters. Agent and Knowledge Flow
