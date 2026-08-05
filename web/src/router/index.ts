@@ -4,7 +4,10 @@ import AuthenticationView from "@/views/AuthenticationView.vue"
 import ChatView from "@/views/ChatView.vue"
 import KnowledgeView from "@/views/KnowledgeView.vue"
 import NavigationView from "@/views/NavigationView.vue"
-import UnavailableFeatureView from "@/views/UnavailableFeatureView.vue"
+import AgentView from "@/views/AgentView.vue"
+import LibraryView from "@/views/LibraryView.vue"
+import SandboxView from "@/views/SandboxView.vue"
+import StaticView from "@/views/StaticView.vue"
 
 const router = createRouter({
   history: createWebHistory(),
@@ -32,10 +35,28 @@ const router = createRouter({
           meta: { title: "Chat" }
         },
         {
-          path: ":featureId(library|agent|image|static|sandbox)",
-          name: "feature",
-          component: UnavailableFeatureView,
-          props: true
+          path: "library",
+          name: "library",
+          component: LibraryView,
+          meta: { title: "Library" }
+        },
+        {
+          path: "agent",
+          name: "agent",
+          component: AgentView,
+          meta: { title: "Agent" }
+        },
+        {
+          path: "static",
+          name: "static",
+          component: StaticView,
+          meta: { title: "Static" }
+        },
+        {
+          path: "sandbox",
+          name: "sandbox",
+          component: SandboxView,
+          meta: { title: "Sandbox" }
         }
       ]
     },

@@ -11,7 +11,7 @@ import { ArrowUp, Plus } from "@lucide/vue"
 
 import type { LocalAttachment } from "@/types/conversation"
 
-import PendingAttachmentComponent from "./PendingAttachmentComponent.vue"
+import AttachmentComponent from "./AttachmentComponent.vue"
 
 const props = defineProps<{
   draft: string
@@ -156,9 +156,9 @@ onBeforeUnmount(() => {
     <ul
       v-if="props.attachments.length"
       class="message-input-attachment-region"
-      aria-label="Pending local attachments"
+      aria-label="Attachments"
     >
-      <PendingAttachmentComponent
+      <AttachmentComponent
         v-for="attachment in props.attachments"
         :key="attachment.id"
         :attachment="attachment"

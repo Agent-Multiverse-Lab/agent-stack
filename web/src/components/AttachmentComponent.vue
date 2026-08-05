@@ -34,9 +34,9 @@ const attachmentMeta = computed(
 </script>
 
 <template>
-  <li class="pending-attachment">
+  <li class="attachment">
     <span
-      class="pending-attachment-icon"
+      class="attachment-icon"
       aria-hidden="true"
     >
       <FileIcon
@@ -45,20 +45,20 @@ const attachmentMeta = computed(
       />
     </span>
 
-    <span class="pending-attachment-details">
+    <span class="attachment-details">
       <strong
-        class="pending-attachment-name"
+        class="attachment-name"
         :title="props.attachment.name"
       >
         {{ props.attachment.name }}
       </strong>
-      <span class="pending-attachment-meta">
+      <span class="attachment-meta">
         {{ attachmentMeta }}
       </span>
     </span>
 
     <button
-      class="pending-attachment-remove"
+      class="attachment-remove"
       type="button"
       :aria-label="`Remove attachment ${props.attachment.name}`"
       :title="`Remove ${props.attachment.name}`"
@@ -76,7 +76,7 @@ const attachmentMeta = computed(
 <style scoped>
 @reference "../styles/index.css";
 
-.pending-attachment {
+.attachment {
   @apply grid shrink-0 items-center border;
 
   width: 208px;
@@ -91,32 +91,32 @@ const attachmentMeta = computed(
   background: var(--color-surface);
 }
 
-.pending-attachment-icon,
-.pending-attachment-remove {
+.attachment-icon,
+.attachment-remove {
   @apply grid size-7 shrink-0 place-items-center;
 
   border-radius: var(--radius-pill);
 }
 
-.pending-attachment-icon {
+.attachment-icon {
   color: var(--color-text-muted);
   background: var(--color-surface-emphasis);
 }
 
-.pending-attachment-details {
+.attachment-details {
   @apply grid min-w-0;
 
   gap: 0.05rem;
 }
 
-.pending-attachment-name {
+.attachment-name {
   @apply overflow-hidden text-ellipsis whitespace-nowrap font-medium;
 
   font-size: 0.75rem;
   line-height: 1.15;
 }
 
-.pending-attachment-meta {
+.attachment-meta {
   @apply overflow-hidden text-ellipsis whitespace-nowrap;
 
   color: var(--color-text-subtle);
@@ -126,7 +126,7 @@ const attachmentMeta = computed(
   letter-spacing: 0.01em;
 }
 
-.pending-attachment-remove {
+.attachment-remove {
   @apply bg-transparent;
 
   color: var(--color-text-subtle);
@@ -135,13 +135,13 @@ const attachmentMeta = computed(
     background-color 120ms ease;
 }
 
-.pending-attachment-remove:hover {
+.attachment-remove:hover {
   color: var(--color-on-action);
   background: var(--color-action-primary);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pending-attachment-remove {
+  .attachment-remove {
     transition: none;
   }
 }

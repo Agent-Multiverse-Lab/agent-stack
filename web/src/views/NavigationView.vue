@@ -10,7 +10,6 @@ import {
 import {
   BookOpenCheck,
   Bot,
-  Image as ImageIcon,
   Layers,
   Library,
   LogIn,
@@ -54,21 +53,13 @@ const featureLinks: Array<{
   { id: "library", label: "Library", icon: Library },
   { id: "knowledge", label: "Knowledge", icon: BookOpenCheck },
   { id: "agent", label: "Agent", icon: Bot },
-  { id: "image", label: "Image", icon: ImageIcon },
   { id: "static", label: "Static", icon: Layers },
   { id: "sandbox", label: "Sandbox", icon: SquareTerminal }
 ]
 
-const pageTitle = computed(() => {
-  if (route.name === "feature") {
-    return (
-      featureLinks.find((feature) => feature.id === route.params.featureId)
-        ?.label ?? "Feature"
-    )
-  }
-
-  return typeof route.meta.title === "string" ? route.meta.title : "Chat"
-})
+const pageTitle = computed(() =>
+  typeof route.meta.title === "string" ? route.meta.title : "Chat"
+)
 const isChatRoute = computed(
   () => route.name === "chat" || route.name === "conversation"
 )
@@ -82,9 +73,7 @@ const selectedConversationId = computed(() =>
 )
 
 const isFeatureActive = (featureId: FeatureId | "knowledge") =>
-  featureId === "knowledge"
-    ? route.name === "knowledge"
-    : route.name === "feature" && route.params.featureId === featureId
+  route.name === featureId
 
 const formatUpdatedAt = (value: string) => {
   const date = new Date(value)
@@ -244,14 +233,7 @@ const openSettings = () => {
               :class="{
                 'is-active': isFeatureActive(featureLink.id)
               }"
-              :to="
-                featureLink.id === 'knowledge'
-                  ? { name: 'knowledge' }
-                  : {
-                    name: 'feature',
-                    params: { featureId: featureLink.id }
-                  }
-              "
+              :to="{ name: featureLink.id }"
               @click="mobileSidebarOpen = false"
             >
               <component
