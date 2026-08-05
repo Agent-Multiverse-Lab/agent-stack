@@ -2,8 +2,8 @@
 
 状态：Thread CRUD 已实现。已完成目标单元测试、Ruff、Repository PostgreSQL SQL
 编译及 Alembic upgrade/downgrade 离线 SQL 验证；真实 PostgreSQL 环境仍需在部署时
-执行迁移。消息附件扩展以
-`doc/spec/library_attachment_api_design_spec.md` 为准，尚待实现。
+执行迁移。消息附件扩展以 [Library Attachment API 规格](./library-attachment.md)
+为准，尚待实现。
 
 相关代码：
 
@@ -77,7 +77,7 @@
 以下边界仍然保留：
 
 - 当前实现尚未增加 MessageAttachment，消息附件加载按
-  `library_attachment_api_design_spec.md` 实施。
+  [Library Attachment API 规格](./library-attachment.md) 实施。
 - 当前 Conversation 级附件关系和
   `prepare_attachments_for_conversation(...)` 是待删除的旧路径，不能继续扩展。
 - `ToolCall` 虽有表定义，但当前主 Run 链路没有稳定的写入闭环，不能承诺历史详情中
@@ -148,7 +148,7 @@ Attachment 增加 `conversation_id` 或 `message_id`。Thread 详情只在每条
 name 或 Markdown 正文。
 
 MessageAttachment 表、Attachment 处理字段和完整生命周期以
-`library_attachment_api_design_spec.md` 为准。完成该迁移前，响应不得根据文件时间、
+[Library Attachment API 规格](./library-attachment.md) 为准。完成该迁移前，响应不得根据文件时间、
 Conversation ID 或数组位置猜测消息与附件关系。
 
 ## 4. API 总览
@@ -597,7 +597,7 @@ message_attachment(message_id, position)
     - 增加不依赖网络和真实基础设施的确定性测试。
 
 MessageAttachment、附件批量装配和 Attachment 表调整不在此历史清单重复定义，统一
-按 `library_attachment_api_design_spec.md` 的文件级计划实施。
+按 [Library Attachment API 规格](./library-attachment.md) 的文件级计划实施。
 
 ## 14. 验证要求
 

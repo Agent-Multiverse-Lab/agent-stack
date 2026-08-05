@@ -375,7 +375,7 @@ Agent 和工具不得直接构造 `DashScopeReranker`；后续接入知识检索
 
 ## 10. 与 RAG 评估工具联动
 
-`doc/spec/retrieval_eval_design_spec.md` 中的检索评估应分别运行：
+[RAG 检索评估规格](../../knowledge/rag_eval/retrieval-evaluation.md) 中的检索评估应分别运行：
 
 1. 仅向量检索的 Baseline。
 2. 相同初召回候选上的 Rerank 结果。
@@ -401,8 +401,8 @@ Agent 和工具不得直接构造 `DashScopeReranker`；后续接入知识检索
 ## 11. 实现文件
 
 ```text
-doc/spec/
-└── reranker_design_spec.md
+doc/spec/src/model/reranker/
+└── reranker.md
 
 src/model/
 ├── __init__.py

@@ -211,12 +211,14 @@ Macro Metric@K = sum(Metric@K(q)) / query_count
 ## 7. 最小模块
 
 ```text
+doc/spec/src/knowledge/rag_eval/
+└── retrieval-evaluation.md
+
 src/knowledge/rag_eval/
 ├── __init__.py
 ├── types.py
 ├── metrics.py
-├── evaluator.py
-└── retrieval_eval_design_spec.md
+└── evaluator.py
 
 scripts/
 └── evaluate_rag_retrieval.py

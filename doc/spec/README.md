@@ -1,18 +1,67 @@
-# 统一设计文档
+# 设计规格目录
 
-`doc/spec/` 只保留当前最主要的设计文件和整体结构，不展开次要实现细节。
+`doc/spec/` 按主要代码所有者镜像当前仓库结构。每份规格只保存一份；跨层改动仍在
+该规格内列出受影响文件，不复制到多个目录。
 
-## 当前文件
+## 归档规则
 
-- [Agent](agent.md)：Agent、Middleware、Subagent 的整体组织方式。
-- [Queue](queue.md)：Agent Run 的异步队列和事件传递链路。
-- [Sandbox](sandbox.md)：Agent 与隔离执行环境之间的边界。
-- [RAG](rag.md)：知识文件从解析到检索的主链路。
-- [Knowledge 页面](knowledge-page.md)：独立知识库工作台的布局和区域职责。
+1. 以 `doc/spec/` 为根，最多使用四层子目录。
+2. 目录名使用仓库中的真实路径，例如 `server/router/`、`src/agents/`、
+   `web/src/views/`；不增加 `frontend/`、`backend/` 等虚拟分层。
+3. 规格放在主要实现所有者下。跨层规格不重复保存，其他边界通过文档内的文件计划表达。
+4. 只创建已有规格需要的目录，不为未来功能预建空目录。
+5. 页面规格放在 `web/src/views/`；仅涉及组件的规格才放在
+   `web/src/components/<area>/`。
+6. 图片等规格资产放在所属区域最近的 `assets/`，不得散落回 `doc/spec/` 根目录。
+7. 移动或重命名后直接更新引用并删除旧路径，不保留兼容副本。
 
-## 总体设计原则
+## 当前结构
 
-1. 按职责划分边界：Agent 负责推理和工具编排，队列负责异步交付，Sandbox 负责隔离执行，RAG 负责知识处理和检索。
-2. 跨部分通过明确的运行标识、上下文和结果传递，不把其他部分的业务逻辑塞进当前部分。
-3. 主链路保持单向：请求进入运行时，运行时按需调用队列、Sandbox 或 RAG，结果再返回调用方。
-4. 文档只记录当前主要文件和整体结构；具体接口、字段、配置和存储实现以源码为准。
+```text
+doc/spec/
+├── README.md
+├── server/
+│   ├── router/
+│   │   ├── library-attachment.md
+│   │   └── thread-conversation.md
+│   └── service/
+│       └── queue.md
+├── src/
+│   ├── agents/
+│   │   ├── agent.md
+│   │   ├── backends/
+│   │   │   └── sandbox.md
+│   │   └── subagents/
+│   │       └── citation-agent.md
+│   ├── database/
+│   │   └── async-postgres-store.md
+│   ├── knowledge/
+│   │   ├── rag.md
+│   │   └── rag_eval/
+│   │       └── retrieval-evaluation.md
+│   └── model/
+│       └── reranker/
+│           └── reranker.md
+└── web/
+    └── src/
+        └── views/
+            ├── ChatView.md
+            ├── FeatureViews.md
+            ├── KnowledgeView.md
+            └── assets/
+                ├── chat-agent-execution-states.png
+                ├── chat-agent-tool-chain.png
+                └── chat-attachment-capsule.png
+```
+
+## 规格索引
+
+| 主要代码区域 | 规格 |
+| --- | --- |
+| `server/router/` | [Thread API](server/router/thread-conversation.md)、[Library Attachment API](server/router/library-attachment.md) |
+| `server/service/` | [Agent Run Queue](server/service/queue.md) |
+| `src/agents/` | [Agent 总体结构](src/agents/agent.md)、[Sandbox Backend](src/agents/backends/sandbox.md)、[CitationAgent](src/agents/subagents/citation-agent.md) |
+| `src/database/` | [AsyncPostgresStore 与 Saver](src/database/async-postgres-store.md) |
+| `src/knowledge/` | [RAG 主链路](src/knowledge/rag.md)、[检索评估](src/knowledge/rag_eval/retrieval-evaluation.md) |
+| `src/model/` | [Reranker](src/model/reranker/reranker.md) |
+| `web/src/views/` | [ChatView](web/src/views/ChatView.md)、[功能 View 拆分](web/src/views/FeatureViews.md)、[KnowledgeView](web/src/views/KnowledgeView.md) |
