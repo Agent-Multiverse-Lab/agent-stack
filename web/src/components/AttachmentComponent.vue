@@ -2,67 +2,61 @@
 import { computed } from "vue"
 import { File as FileIcon, X } from "@lucide/vue"
 
-import type { LocalAttachment } from "@/types/conversation"
+import type { ChatAttachment } from "@/types/attachment"
 
 const props = defineProps<{
-  attachment: LocalAttachment
+  attachment: ChatAttachment
+  removable?: boolean
 }>()
 
 const emit = defineEmits<{
-  remove: [id: string]
+  remove: [fileId: string]
 }>()
 
-function formatFileSize(size: number): string {
-  if (size < 1024) {
-    return `${size} B`
-  }
-  if (size < 1024 * 1024) {
-    return `${(size / 1024).toFixed(1)} KB`
-  }
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function getFileType(name: string): string {
-  const extension = name.match(/\.([^.]+)$/)?.[1]
-  return extension ? extension.toUpperCase() : "FILE"
-}
-
-const attachmentMeta = computed(
-  () =>
-    `${getFileType(props.attachment.name)} · ${formatFileSize(props.attachment.size)}`,
+const isImage = computed(() =>
+  props.attachment.content_type.startsWith("image/") &&
+  Boolean(props.attachment.access_url)
 )
 </script>
 
 <template>
-  <li class="attachment">
+  <li
+    class="grid h-11 max-w-[17rem] min-w-0 shrink-0 items-center gap-2 rounded-full border border-graphite/12 bg-paper p-1 text-graphite"
+    :class="removable
+      ? 'grid-cols-[2rem_minmax(0,1fr)_2rem]'
+      : 'grid-cols-[2rem_minmax(0,1fr)] pr-3'"
+  >
     <span
-      class="attachment-icon"
+      class="grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-graphite/6 text-slate"
       aria-hidden="true"
     >
+      <img
+        v-if="isImage"
+        class="size-full object-cover"
+        :src="props.attachment.access_url ?? undefined"
+        alt=""
+      >
       <FileIcon
+        v-else
         :size="15"
         :stroke-width="1.8"
       />
     </span>
 
-    <span class="attachment-details">
-      <strong
-        class="attachment-name"
-        :title="props.attachment.name"
-      >
-        {{ props.attachment.name }}
-      </strong>
-      <span class="attachment-meta">
-        {{ attachmentMeta }}
-      </span>
-    </span>
+    <strong
+      class="min-w-0 truncate font-medium text-sm"
+      :title="props.attachment.file_name"
+    >
+      {{ props.attachment.file_name }}
+    </strong>
 
     <button
-      class="attachment-remove"
+      v-if="removable"
+      class="grid size-7 shrink-0 place-items-center rounded-full bg-transparent text-graphite/58 transition-colors duration-120 hover:bg-graphite hover:text-paper motion-reduce:transition-none"
       type="button"
-      :aria-label="`Remove attachment ${props.attachment.name}`"
-      :title="`Remove ${props.attachment.name}`"
-      @click="emit('remove', props.attachment.id)"
+      :aria-label="`Remove attachment ${props.attachment.file_name}`"
+      :title="`Remove ${props.attachment.file_name}`"
+      @click="emit('remove', props.attachment.file_id)"
     >
       <X
         :size="14"
@@ -72,77 +66,3 @@ const attachmentMeta = computed(
     </button>
   </li>
 </template>
-
-<style scoped>
-@reference "../styles/index.css";
-
-.attachment {
-  @apply grid shrink-0 items-center border;
-
-  width: 208px;
-  min-width: 208px;
-  height: 44px;
-  grid-template-columns: 28px minmax(0, 1fr) 28px;
-  gap: 0.4rem;
-  padding: 0.25rem 0.35rem;
-  border-color: var(--color-border-subtle);
-  border-radius: var(--radius-pill);
-  color: var(--color-text);
-  background: var(--color-surface);
-}
-
-.attachment-icon,
-.attachment-remove {
-  @apply grid size-7 shrink-0 place-items-center;
-
-  border-radius: var(--radius-pill);
-}
-
-.attachment-icon {
-  color: var(--color-text-muted);
-  background: var(--color-surface-emphasis);
-}
-
-.attachment-details {
-  @apply grid min-w-0;
-
-  gap: 0.05rem;
-}
-
-.attachment-name {
-  @apply overflow-hidden text-ellipsis whitespace-nowrap font-medium;
-
-  font-size: 0.75rem;
-  line-height: 1.15;
-}
-
-.attachment-meta {
-  @apply overflow-hidden text-ellipsis whitespace-nowrap;
-
-  color: var(--color-text-subtle);
-  font-family: var(--font-utility);
-  font-size: 0.61rem;
-  line-height: 1.15;
-  letter-spacing: 0.01em;
-}
-
-.attachment-remove {
-  @apply bg-transparent;
-
-  color: var(--color-text-subtle);
-  transition:
-    color 120ms ease,
-    background-color 120ms ease;
-}
-
-.attachment-remove:hover {
-  color: var(--color-on-action);
-  background: var(--color-action-primary);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .attachment-remove {
-    transition: none;
-  }
-}
-</style>
