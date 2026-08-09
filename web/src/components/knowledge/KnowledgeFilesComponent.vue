@@ -64,11 +64,11 @@ const searchQuery = ref("")
 const appliedSearchQuery = ref("")
 
 const visibleFiles = computed(() => {
-  const query = appliedSearchQuery.value.toLocaleLowerCase()
+  const query = appliedSearchQuery.value.toLowerCase()
   if (!query) return props.files
 
   return props.files.filter((file) =>
-    file.name.toLocaleLowerCase().includes(query)
+    file.name.toLowerCase().includes(query)
   )
 })
 
@@ -107,9 +107,9 @@ function restoreTriggerFocus(open: boolean) {
   document.querySelector<HTMLElement>("#knowledge-files-trigger")?.focus()
 }
 
-/** 接收本地文件，但阻止组件发起尚未接通的上传请求。 */
-const selectLocalFile: UploadProps["beforeUpload"] = (file) => {
-  const extension = file.name.split(".").pop()?.toLocaleLowerCase() ?? ""
+/** 接收浏览器选择的文件，但阻止组件发起尚未接通的上传请求。 */
+const selectFile: UploadProps["beforeUpload"] = (file) => {
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? ""
   if (!acceptedExtensions.has(extension)) {
     void message.warning({
       content: `${file.name} is not a supported source type.`,
@@ -139,22 +139,39 @@ function submitSearch() {
   <component
     :is="regionComponent"
     v-bind="regionBindings"
-    class="knowledge-files-host"
+    class="min-h-0 min-w-0"
   >
     <div
       id="knowledge-files-region"
-      class="knowledge-files"
+      class="knowledge-files grid h-full min-h-0 min-w-0 overflow-hidden border border-graphite/10 rounded-[16px] bg-paper caret-transparent [grid-template-rows:48px_minmax(0,1fr)] focus-visible:outline-offset-[-3px]"
       :class="{
-        'is-collapsed': props.presentation === 'panel' && props.collapsed,
-        'is-drawer': props.presentation === 'drawer'
+        'min-h-[calc(100dvh-1.3rem)]': props.presentation === 'drawer'
       }"
       tabindex="-1"
     >
-      <header class="knowledge-files-header">
-        <h2 id="knowledge-files-title">Files</h2>
+      <header
+        class="flex h-12 min-h-12 max-h-12 min-w-0 items-center justify-between border-b border-graphite/6 select-none caret-transparent transition-[padding-inline] duration-[240ms] ease-[cubic-bezier(0.65,0,0.35,1)] motion-reduce:transition-none"
+        :class="{
+          'px-4': !(props.presentation === 'panel' && props.collapsed),
+          'px-[7px] max-[720px]:px-4':
+            props.presentation === 'panel' && props.collapsed
+        }"
+      >
+        <h2
+          id="knowledge-files-title"
+          class="m-0 min-w-0 flex-1 cursor-default overflow-hidden whitespace-nowrap font-semibold text-base tracking-[-0.025em] select-none caret-transparent motion-reduce:transition-none"
+          :class="{
+            'opacity-100 visible transition-opacity duration-140 delay-100':
+              !(props.presentation === 'panel' && props.collapsed),
+            'opacity-0 invisible pointer-events-none transition-[opacity,visibility] duration-[80ms,0s] delay-[0ms,80ms] max-[720px]:opacity-100 max-[720px]:visible max-[720px]:pointer-events-auto max-[720px]:transition-none':
+              props.presentation === 'panel' && props.collapsed
+          }"
+        >
+          Files
+        </h2>
         <AButton
           v-if="props.presentation === 'panel'"
-          class="knowledge-panel-collapse"
+          class="knowledge-panel-collapse grid! h-10! w-10! min-w-10! shrink-0 place-items-center p-0! text-slate! hover:bg-graphite/8! hover:text-graphite! focus-visible:bg-graphite/8! focus-visible:text-graphite! max-[720px]:hidden"
           type="text"
           shape="circle"
           :aria-label="props.collapsed ? 'Expand files' : 'Collapse files'"
@@ -163,7 +180,7 @@ function submitSearch() {
           :title="props.collapsed ? 'Expand files' : 'Collapse files'"
           @click="emit('toggle-collapse')"
         >
-          <span class="knowledge-panel-collapse-icon" aria-hidden="true">
+          <span class="grid h-[18px] w-[18px] place-items-center" aria-hidden="true">
             <PanelLeftOpen
               v-if="props.collapsed"
               :size="18"
@@ -178,7 +195,7 @@ function submitSearch() {
         </AButton>
         <AButton
           v-else
-          class="knowledge-panel-close"
+          class="knowledge-panel-close grid! h-11! w-11! min-w-11! shrink-0 place-items-center text-slate! hover:bg-graphite/8! hover:text-graphite! focus-visible:bg-graphite/8! focus-visible:text-graphite!"
           type="text"
           shape="circle"
           aria-label="Close files"
@@ -188,31 +205,40 @@ function submitSearch() {
         </AButton>
       </header>
 
-      <div id="knowledge-files-body" class="knowledge-files-body">
+      <div
+        id="knowledge-files-body"
+        class="grid min-h-0 min-w-0 gap-[0.8rem] p-[0.9rem] [grid-template-rows:auto_auto_minmax(0,1fr)] motion-reduce:transition-none"
+        :class="{
+          'opacity-100 visible transition-opacity duration-140 delay-100':
+            !(props.presentation === 'panel' && props.collapsed),
+          'opacity-0 invisible pointer-events-none transition-[opacity,visibility] duration-[80ms,0s] delay-[0ms,80ms] max-[720px]:opacity-100 max-[720px]:visible max-[720px]:pointer-events-auto max-[720px]:transition-none':
+            props.presentation === 'panel' && props.collapsed
+        }"
+      >
         <UploadDragger
-          class="knowledge-file-add"
+          class="knowledge-file-add block"
           name="knowledge-file"
           accept=".pdf,.doc,.docx,.txt,.md,.markdown,.csv,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.webp"
           multiple
-          :before-upload="selectLocalFile"
+          :before-upload="selectFile"
           :show-upload-list="false"
         >
-          <div class="knowledge-file-add-content">
-            <span class="knowledge-file-add-icon" aria-hidden="true">
+          <div class="flex items-center gap-[0.65rem] text-left">
+            <span class="grid h-[2.15rem] w-[2.15rem] shrink-0 place-items-center rounded-[16px] border border-graphite/10 bg-paper text-graphite" aria-hidden="true">
               <Plus :size="18" :stroke-width="1.8" />
             </span>
-            <strong class="knowledge-file-add-copy">Add Sources</strong>
+            <strong class="flex min-w-0 items-center self-stretch font-semibold leading-none tracking-[-0.01em] text-graphite">Add Sources</strong>
           </div>
         </UploadDragger>
 
         <form
-          class="knowledge-file-search"
+          class="grid min-w-0 gap-1 rounded-[16px] border border-graphite/16 bg-paper p-[0.45rem] [grid-template-rows:minmax(2.4rem,auto)_2rem] transition-colors duration-140 focus-within:border-graphite/22"
           role="search"
           @submit.prevent="submitSearch"
         >
           <AInput
             v-model:value="searchQuery"
-            class="knowledge-file-search-input"
+            class="knowledge-file-search-input max-[720px]:text-base"
             type="text"
             inputmode="text"
             :bordered="false"
@@ -220,13 +246,13 @@ function submitSearch() {
             placeholder="Search files"
           />
 
-          <div class="knowledge-file-search-actions">
-            <span class="knowledge-file-search-web-mark" aria-hidden="true">
+          <div class="flex min-w-0 items-center justify-between">
+            <span class="grid h-8 w-8 shrink-0 place-items-center text-slate" aria-hidden="true">
               <Globe :size="18" :stroke-width="1.8" />
             </span>
 
             <AButton
-              class="knowledge-file-search-submit"
+              class="grid! h-8! w-8! min-w-8! shrink-0 place-items-center border-graphite! bg-graphite! p-0! text-paper! shadow-none! hover:border-graphite/86! hover:bg-graphite/86! hover:text-paper! focus-visible:border-graphite/86! focus-visible:bg-graphite/86! focus-visible:text-paper!"
               type="primary"
               shape="circle"
               html-type="submit"
@@ -237,7 +263,7 @@ function submitSearch() {
           </div>
         </form>
 
-        <div class="knowledge-files-list-region">
+        <div class="min-h-0 overflow-y-auto overscroll-contain">
           <KnowledgeFileListComponent
             :files="visibleFiles"
             :selected-file-id="props.selectedFileId"
@@ -249,295 +275,3 @@ function submitSearch() {
     </div>
   </component>
 </template>
-
-<style scoped>
-@reference "../../styles/index.css";
-
-.knowledge-files-host {
-  @apply min-h-0 min-w-0;
-}
-
-.knowledge-files {
-  @apply grid h-full min-h-0 min-w-0 overflow-hidden border;
-
-  grid-template-rows: 48px minmax(0, 1fr);
-  caret-color: transparent;
-  border-color: var(--color-border);
-  border-radius: var(--radius-knowledge-container);
-  background: var(--color-surface);
-}
-
-.knowledge-files:focus-visible {
-  outline-offset: -3px;
-}
-
-.knowledge-files-header {
-  @apply flex min-w-0 items-center justify-between;
-
-  box-sizing: border-box;
-  height: 48px;
-  min-height: 48px;
-  max-height: 48px;
-  padding-inline: 16px;
-  border-bottom: 1px solid var(--color-border-subtle);
-  user-select: none;
-  caret-color: transparent;
-  transition: padding-inline 240ms cubic-bezier(0.65, 0, 0.35, 1);
-}
-
-.knowledge-files-header h2 {
-  @apply m-0 min-w-0 flex-1 overflow-hidden whitespace-nowrap font-semibold;
-
-  opacity: 1;
-  visibility: visible;
-  user-select: none;
-  caret-color: transparent;
-  cursor: default;
-  font-size: 1rem;
-  letter-spacing: -0.025em;
-  transition:
-    opacity 140ms ease 100ms,
-    visibility 0s linear;
-}
-
-.knowledge-panel-collapse {
-  @apply grid shrink-0 place-items-center p-0;
-
-  width: 40px;
-  min-width: 40px;
-  height: 40px;
-  color: var(--color-text-muted);
-}
-
-.knowledge-panel-collapse:hover,
-.knowledge-panel-collapse:focus-visible {
-  color: var(--color-text);
-  background: var(--color-surface-hover);
-}
-
-.knowledge-panel-collapse-icon {
-  @apply grid place-items-center;
-
-  width: 18px;
-  height: 18px;
-}
-
-.knowledge-panel-collapse-icon :deep(svg) {
-  display: block;
-  width: 18px;
-  height: 18px;
-}
-
-.knowledge-files.is-collapsed .knowledge-files-header {
-  padding-inline: 7px;
-}
-
-.knowledge-files.is-collapsed .knowledge-files-header h2,
-.knowledge-files.is-collapsed .knowledge-files-body {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transition:
-    opacity 80ms ease,
-    visibility 0s linear 80ms;
-}
-
-.knowledge-panel-close {
-  @apply grid shrink-0 place-items-center;
-
-  width: 2.75rem;
-  min-width: 2.75rem;
-  height: 2.75rem;
-  color: var(--color-text-muted);
-}
-
-.knowledge-panel-close:hover,
-.knowledge-panel-close:focus-visible {
-  color: var(--color-text);
-  background: var(--color-surface-hover);
-}
-
-.knowledge-files-body {
-  @apply grid min-h-0 min-w-0;
-
-  grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 0.8rem;
-  padding: 0.9rem;
-  opacity: 1;
-  visibility: visible;
-  transition:
-    opacity 140ms ease 100ms,
-    visibility 0s linear;
-}
-
-.knowledge-file-add {
-  @apply block;
-}
-
-.knowledge-file-add :deep(.ant-upload-drag) {
-  box-sizing: border-box;
-  height: 48px;
-  min-height: 48px;
-  max-height: 48px;
-  overflow: hidden;
-  border: 1px dashed var(--color-border-control);
-  border-radius: 96px;
-  background: var(--color-surface-muted);
-  transition:
-    border-color 140ms ease,
-    background-color 140ms ease;
-}
-
-.knowledge-file-add :deep(.ant-upload-drag:hover),
-.knowledge-file-add :deep(.ant-upload-drag-hover) {
-  border-color: var(--color-border-focus);
-  background: var(--color-surface-emphasis);
-}
-
-.knowledge-file-add :deep(.ant-upload-btn) {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 0.65rem !important;
-}
-
-.knowledge-file-add-content {
-  @apply flex items-center text-left;
-
-  gap: 0.65rem;
-}
-
-.knowledge-file-add-icon {
-  @apply grid shrink-0 place-items-center;
-
-  width: 2.15rem;
-  height: 2.15rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-knowledge-container);
-  color: var(--color-text);
-  background: var(--color-surface);
-}
-
-.knowledge-file-add-copy {
-  @apply flex min-w-0 items-center self-stretch font-semibold;
-
-  color: var(--color-text);
-  line-height: 1;
-  letter-spacing: -0.01em;
-}
-
-.knowledge-file-search {
-  @apply grid min-w-0 border;
-
-  grid-template-rows: minmax(2.4rem, auto) 2rem;
-  gap: 0.25rem;
-  padding: 0.45rem;
-  border-color: var(--color-border-control);
-  border-radius: var(--radius-knowledge-container);
-  background: var(--color-surface);
-  transition: border-color 140ms ease;
-}
-
-.knowledge-file-search:focus-within {
-  border-color: var(--color-border-focus);
-}
-
-.knowledge-file-search-input.ant-input {
-  min-width: 0;
-  padding: 0.25rem 0.35rem;
-  border: 0;
-  user-select: text;
-  caret-color: auto;
-  color: var(--color-text);
-  background: transparent;
-  box-shadow: none;
-}
-
-.knowledge-file-search-input.ant-input:hover,
-.knowledge-file-search-input.ant-input:focus {
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.knowledge-file-search-input.ant-input::placeholder {
-  color: var(--color-text-subtle);
-}
-
-.knowledge-file-search-actions {
-  @apply flex min-w-0 items-center justify-between;
-}
-
-.knowledge-file-search-web-mark {
-  @apply grid shrink-0 place-items-center;
-
-  width: 32px;
-  height: 32px;
-  color: var(--color-text-muted);
-}
-
-.knowledge-file-search-submit {
-  @apply grid shrink-0 place-items-center p-0;
-
-  width: 32px;
-  min-width: 32px;
-  height: 32px;
-  border-color: var(--color-action-primary);
-  color: var(--color-on-action);
-  background: var(--color-action-primary);
-  box-shadow: none;
-}
-
-.knowledge-file-search-submit:hover,
-.knowledge-file-search-submit:focus-visible {
-  border-color: var(--color-action-primary-hover);
-  color: var(--color-on-action);
-  background: var(--color-action-primary-hover);
-}
-
-.knowledge-files-list-region {
-  @apply min-h-0 overflow-y-auto overscroll-contain;
-}
-
-:global(.knowledge-files-drawer .ant-drawer-content) {
-  background: var(--color-surface-muted);
-}
-
-:global(.knowledge-files-drawer .ant-drawer-body) {
-  padding: 0.65rem;
-}
-
-.knowledge-files.is-drawer {
-  min-height: calc(100dvh - 1.3rem);
-}
-
-@media (max-width: 720px) {
-  .knowledge-files.is-collapsed .knowledge-files-header {
-    padding-inline: 16px;
-  }
-
-  .knowledge-files.is-collapsed .knowledge-files-header h2,
-  .knowledge-files.is-collapsed .knowledge-files-body {
-    opacity: 1;
-    visibility: visible;
-    pointer-events: auto;
-    transition: none;
-  }
-
-  .knowledge-panel-collapse {
-    display: none;
-  }
-
-  .knowledge-file-search-input.ant-input {
-    font-size: 1rem;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .knowledge-files-header,
-  .knowledge-files-header h2,
-  .knowledge-files-body {
-    transition: none;
-  }
-}
-</style>

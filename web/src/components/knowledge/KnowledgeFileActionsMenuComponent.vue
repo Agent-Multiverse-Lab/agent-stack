@@ -20,7 +20,7 @@ const emit = defineEmits<{
 }>()
 
 const menuItems: MenuProps["items"] = [
-  { key: "open", label: "Open local file" },
+  { key: "open", label: "Open file" },
   { key: "download", label: "Download a copy" },
   { key: "rename", label: "Rename", disabled: true },
   { type: "divider" },
@@ -30,15 +30,15 @@ const menuItems: MenuProps["items"] = [
   { key: "remove", label: "Remove from list", danger: true }
 ]
 
-/** 在新的浏览器标签中打开本地文件。 */
-const openLocalFile = () => {
+/** 在新的浏览器标签中打开文件。 */
+const openFile = () => {
   const objectUrl = URL.createObjectURL(props.file.source)
   window.open(objectUrl, "_blank", "noopener,noreferrer")
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
 }
 
-/** 通过浏览器下载当前本地文件的副本。 */
-const downloadLocalFile = () => {
+/** 通过浏览器下载当前文件的副本。 */
+const downloadFile = () => {
   const objectUrl = URL.createObjectURL(props.file.source)
   const link = document.createElement("a")
   link.href = objectUrl
@@ -47,11 +47,11 @@ const downloadLocalFile = () => {
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
 }
 
-/** 在本地列表移除文件前显示明确确认。 */
+/** 在列表移除文件前显示明确确认。 */
 const confirmRemoval = () => {
   Modal.confirm({
     title: "Remove this file?",
-    content: `${props.file.name} will be removed from this local list.`,
+    content: `${props.file.name} will be removed from this list.`,
     icon: h(TriangleAlert, {
       size: 20,
       strokeWidth: 1.8,
@@ -69,12 +69,12 @@ const confirmRemoval = () => {
 /** 分发当前已具备真实行为的文件菜单操作。 */
 const selectMenuItem: MenuProps["onClick"] = ({ key }) => {
   if (key === "open") {
-    openLocalFile()
+    openFile()
     return
   }
 
   if (key === "download") {
-    downloadLocalFile()
+    downloadFile()
     return
   }
 
@@ -88,7 +88,7 @@ const selectMenuItem: MenuProps["onClick"] = ({ key }) => {
     :trigger="['click']"
   >
     <AButton
-      class="knowledge-file-menu-trigger"
+      class="knowledge-file-menu-trigger grid! h-11! w-11! min-w-11! shrink-0 place-items-center text-slate! hover:bg-graphite/8! hover:text-graphite! focus-visible:bg-graphite/8! focus-visible:text-graphite!"
       type="text"
       shape="circle"
       aria-label="Open file actions"
@@ -103,22 +103,3 @@ const selectMenuItem: MenuProps["onClick"] = ({ key }) => {
     </template>
   </ADropdown>
 </template>
-
-<style scoped>
-@reference "../../styles/index.css";
-
-.knowledge-file-menu-trigger {
-  @apply grid shrink-0 place-items-center;
-
-  width: 2.75rem;
-  min-width: 2.75rem;
-  height: 2.75rem;
-  color: var(--color-text-muted);
-}
-
-.knowledge-file-menu-trigger:hover,
-.knowledge-file-menu-trigger:focus-visible {
-  color: var(--color-text);
-  background: var(--color-surface-hover);
-}
-</style>

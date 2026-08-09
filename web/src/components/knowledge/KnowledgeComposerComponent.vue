@@ -39,11 +39,16 @@ const handleKeydown = (event: KeyboardEvent) => {
 </script>
 
 <template>
-  <form class="knowledge-composer" @submit.prevent="submitQuestion">
-    <div class="knowledge-composer-controls">
+  <form
+    class="border-t border-graphite/6 bg-paper p-[0.8rem]"
+    @submit.prevent="submitQuestion"
+  >
+    <div
+      class="grid items-end gap-2 rounded-[16px] border border-graphite/16 bg-mist py-[0.45rem] pr-2 pl-[0.8rem] [grid-template-columns:minmax(0,1fr)_auto] focus-within:border-graphite/22"
+    >
       <ATextarea
         v-model:value="draft"
-        class="knowledge-composer-input"
+        class="knowledge-composer-input max-[720px]:text-base"
         :disabled="!props.enabled"
         :auto-size="{ minRows: 1, maxRows: 5 }"
         placeholder="Ask a question"
@@ -54,9 +59,9 @@ const handleKeydown = (event: KeyboardEvent) => {
       <ATooltip
         :title="props.enabled ? 'Send' : 'Unavailable'"
       >
-        <span class="knowledge-composer-submit-wrap">
+        <span class="inline-grid">
           <AButton
-            class="knowledge-composer-submit"
+            class="knowledge-composer-submit grid! h-11! w-11! min-w-11! place-items-center border-graphite! bg-graphite! text-paper! shadow-none! enabled:hover:border-graphite/86! enabled:hover:bg-graphite/86! disabled:border-graphite/10! disabled:bg-graphite/6! disabled:text-graphite/58!"
             type="primary"
             shape="circle"
             html-type="submit"
@@ -81,89 +86,3 @@ const handleKeydown = (event: KeyboardEvent) => {
     </div>
   </form>
 </template>
-
-<style scoped>
-@reference "../../styles/index.css";
-
-.knowledge-composer {
-  padding: 0.8rem;
-  border-top: 1px solid var(--color-border-subtle);
-  background: var(--color-surface);
-}
-
-.knowledge-composer-controls {
-  @apply grid items-end border;
-
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.5rem;
-  padding: 0.45rem 0.5rem 0.45rem 0.8rem;
-  border-color: var(--color-border-control);
-  border-radius: var(--radius-knowledge-container);
-  background: var(--color-surface-muted);
-}
-
-.knowledge-composer-controls:focus-within {
-  border-color: var(--color-border-focus);
-}
-
-.knowledge-composer-input {
-  @apply p-0;
-}
-
-.knowledge-composer-input :deep(textarea),
-.knowledge-composer-input.ant-input {
-  min-height: 2.1rem !important;
-  padding: 0.38rem 0 !important;
-  border: 0 !important;
-  color: var(--color-text);
-  background: transparent !important;
-  box-shadow: none !important;
-  line-height: 1.5;
-  resize: none;
-  user-select: text;
-  caret-color: auto;
-}
-
-.knowledge-composer-input.ant-input-disabled {
-  color: var(--color-text-subtle);
-}
-
-.knowledge-composer-input::placeholder,
-.knowledge-composer-input :deep(textarea::placeholder) {
-  color: var(--color-text-subtle);
-}
-
-.knowledge-composer-submit-wrap {
-  @apply inline-grid;
-}
-
-.knowledge-composer-submit {
-  @apply grid place-items-center;
-
-  width: 2.75rem;
-  min-width: 2.75rem;
-  height: 2.75rem;
-  border-color: var(--color-action-primary);
-  color: var(--color-on-action);
-  background: var(--color-action-primary);
-  box-shadow: none;
-}
-
-.knowledge-composer-submit:not(:disabled):hover {
-  border-color: var(--color-action-primary-hover);
-  background: var(--color-action-primary-hover);
-}
-
-.knowledge-composer-submit:disabled {
-  border-color: var(--color-border);
-  color: var(--color-text-subtle);
-  background: var(--color-surface-emphasis);
-}
-
-@media (max-width: 720px) {
-  .knowledge-composer-input :deep(textarea),
-  .knowledge-composer-input.ant-input {
-    font-size: 1rem;
-  }
-}
-</style>

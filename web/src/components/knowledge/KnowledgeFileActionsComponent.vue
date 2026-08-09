@@ -90,22 +90,39 @@ function openTool(label: string) {
   <component
     :is="regionComponent"
     v-bind="regionBindings"
-    class="knowledge-actions-host"
+    class="min-h-0 min-w-0"
   >
     <div
       id="knowledge-actions-region"
-      class="knowledge-actions"
+      class="knowledge-actions grid h-full min-h-0 min-w-0 overflow-hidden border border-graphite/10 bg-paper rounded-[16px] caret-transparent [grid-template-rows:48px_minmax(0,1fr)] focus-visible:outline-offset-[-3px]"
       :class="{
-        'is-collapsed': props.presentation === 'panel' && props.collapsed,
-        'is-drawer': props.presentation === 'drawer'
+        'min-h-[calc(100dvh-1.3rem)]': props.presentation === 'drawer'
       }"
       tabindex="-1"
     >
-      <header class="knowledge-actions-header">
-        <h2 id="knowledge-actions-title">Tools</h2>
+      <header
+        class="flex min-w-0 items-center justify-between h-12 min-h-12 max-h-12 border-b border-graphite/10 select-none caret-transparent transition-[padding-inline] duration-[240ms] ease-[cubic-bezier(0.65,0,0.35,1)] motion-reduce:transition-none"
+        :class="{
+          'px-4': !(props.presentation === 'panel' && props.collapsed),
+          'px-[7px] max-[720px]:px-4':
+            props.presentation === 'panel' && props.collapsed
+        }"
+      >
+        <h2
+          id="knowledge-actions-title"
+          class="m-0 min-w-0 flex-1 overflow-hidden whitespace-nowrap font-semibold text-base tracking-[-0.025em] cursor-default select-none caret-transparent motion-reduce:transition-none"
+          :class="{
+            '[transition:opacity_140ms_ease_100ms,visibility_0s_linear]':
+              !(props.presentation === 'panel' && props.collapsed),
+            'opacity-0 invisible pointer-events-none [transition:opacity_80ms_ease,visibility_0s_linear_80ms] max-[720px]:opacity-100 max-[720px]:visible max-[720px]:pointer-events-auto max-[720px]:[transition:none]':
+              props.presentation === 'panel' && props.collapsed
+          }"
+        >
+          Tools
+        </h2>
         <AButton
           v-if="props.presentation === 'panel'"
-          class="knowledge-panel-collapse"
+          class="knowledge-panel-collapse grid! shrink-0 place-items-center h-10! min-w-10! w-10! p-0! text-slate! hover:bg-graphite/8! hover:text-graphite! focus-visible:bg-graphite/8! focus-visible:text-graphite! max-[720px]:hidden"
           type="text"
           shape="circle"
           :aria-label="props.collapsed ? 'Expand tools' : 'Collapse tools'"
@@ -114,7 +131,10 @@ function openTool(label: string) {
           :title="props.collapsed ? 'Expand tools' : 'Collapse tools'"
           @click="emit('toggle-collapse')"
         >
-          <span class="knowledge-panel-collapse-icon" aria-hidden="true">
+          <span
+            class="grid place-items-center h-[18px] w-[18px] [&_svg]:block [&_svg]:h-[18px] [&_svg]:w-[18px]"
+            aria-hidden="true"
+          >
             <PanelRightOpen
               v-if="props.collapsed"
               :size="18"
@@ -129,7 +149,7 @@ function openTool(label: string) {
         </AButton>
         <AButton
           v-else
-          class="knowledge-panel-close"
+          class="knowledge-panel-close grid! shrink-0 place-items-center h-11! min-w-11! w-11! text-slate! hover:bg-graphite/8! hover:text-graphite! focus-visible:bg-graphite/8! focus-visible:text-graphite!"
           type="text"
           shape="circle"
           aria-label="Close tools"
@@ -139,8 +159,19 @@ function openTool(label: string) {
         </AButton>
       </header>
 
-      <div id="knowledge-actions-body" class="knowledge-actions-body">
-        <div class="knowledge-actions-section knowledge-actions-section-tools">
+      <div
+        id="knowledge-actions-body"
+        class="grid min-h-0 min-w-0 overflow-hidden [grid-template-rows:repeat(2,minmax(0,1fr))] motion-reduce:transition-none"
+        :class="{
+          '[transition:opacity_140ms_ease_100ms,visibility_0s_linear]':
+            !(props.presentation === 'panel' && props.collapsed),
+          'opacity-0 invisible pointer-events-none [transition:opacity_80ms_ease,visibility_0s_linear_80ms] max-[720px]:opacity-100 max-[720px]:visible max-[720px]:pointer-events-auto max-[720px]:[transition:none]':
+            props.presentation === 'panel' && props.collapsed
+        }"
+      >
+        <div
+          class="grid content-start overflow-y-auto overscroll-contain min-w-0 min-h-0 p-4 [grid-template-columns:repeat(3,minmax(0,1fr))] [grid-auto-rows:74px] gap-2"
+        >
           <KnowledgeToolComponent
             v-for="tool in tools"
             :key="tool.id"
@@ -152,187 +183,10 @@ function openTool(label: string) {
         </div>
 
         <div
-          class="knowledge-actions-section knowledge-actions-section-empty"
+          class="min-w-0 min-h-0 p-4 overflow-hidden border-t border-graphite/10"
           aria-hidden="true"
         />
       </div>
     </div>
   </component>
 </template>
-
-<style scoped>
-@reference "../../styles/index.css";
-
-.knowledge-actions-host {
-  @apply min-h-0 min-w-0;
-}
-
-.knowledge-actions {
-  @apply grid h-full min-h-0 min-w-0 overflow-hidden border;
-
-  grid-template-rows: 48px minmax(0, 1fr);
-  caret-color: transparent;
-  border-color: var(--color-border);
-  border-radius: var(--radius-knowledge-container);
-  background: var(--color-surface);
-}
-
-.knowledge-actions:focus-visible {
-  outline-offset: -3px;
-}
-
-.knowledge-actions-header {
-  @apply flex min-w-0 items-center justify-between;
-
-  box-sizing: border-box;
-  height: 48px;
-  min-height: 48px;
-  max-height: 48px;
-  padding-inline: 16px;
-  border-bottom: 1px solid var(--color-border-subtle);
-  user-select: none;
-  caret-color: transparent;
-  transition: padding-inline 240ms cubic-bezier(0.65, 0, 0.35, 1);
-}
-
-.knowledge-actions-header h2 {
-  @apply m-0 min-w-0 flex-1 overflow-hidden whitespace-nowrap font-semibold;
-
-  opacity: 1;
-  visibility: visible;
-  user-select: none;
-  caret-color: transparent;
-  cursor: default;
-  font-size: 1rem;
-  letter-spacing: -0.025em;
-  transition:
-    opacity 140ms ease 100ms,
-    visibility 0s linear;
-}
-
-.knowledge-panel-collapse {
-  @apply grid shrink-0 place-items-center p-0;
-
-  width: 40px;
-  min-width: 40px;
-  height: 40px;
-  color: var(--color-text-muted);
-}
-
-.knowledge-panel-collapse:hover,
-.knowledge-panel-collapse:focus-visible {
-  color: var(--color-text);
-  background: var(--color-surface-hover);
-}
-
-.knowledge-panel-collapse-icon {
-  @apply grid place-items-center;
-
-  width: 18px;
-  height: 18px;
-}
-
-.knowledge-panel-collapse-icon :deep(svg) {
-  display: block;
-  width: 18px;
-  height: 18px;
-}
-
-.knowledge-actions.is-collapsed .knowledge-actions-header {
-  padding-inline: 7px;
-}
-
-.knowledge-actions.is-collapsed .knowledge-actions-header h2,
-.knowledge-actions.is-collapsed .knowledge-actions-body {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transition:
-    opacity 80ms ease,
-    visibility 0s linear 80ms;
-}
-
-.knowledge-panel-close {
-  @apply grid shrink-0 place-items-center;
-
-  width: 2.75rem;
-  min-width: 2.75rem;
-  height: 2.75rem;
-  color: var(--color-text-muted);
-}
-
-.knowledge-panel-close:hover,
-.knowledge-panel-close:focus-visible {
-  color: var(--color-text);
-  background: var(--color-surface-hover);
-}
-
-.knowledge-actions-body {
-  @apply grid min-h-0 min-w-0 overflow-hidden;
-
-  grid-template-rows: repeat(2, minmax(0, 1fr));
-  opacity: 1;
-  visibility: visible;
-  transition:
-    opacity 140ms ease 100ms,
-    visibility 0s linear;
-}
-
-.knowledge-actions-section {
-  box-sizing: border-box;
-  min-width: 0;
-  min-height: 0;
-  padding: 16px;
-}
-
-.knowledge-actions-section-tools {
-  @apply grid content-start overflow-y-auto overscroll-contain;
-
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-auto-rows: 74px;
-  gap: 8px;
-}
-
-.knowledge-actions-section-empty {
-  overflow: hidden;
-  border-top: 1px solid var(--color-border-subtle);
-}
-
-:global(.knowledge-actions-drawer .ant-drawer-content) {
-  background: var(--color-surface-muted);
-}
-
-:global(.knowledge-actions-drawer .ant-drawer-body) {
-  padding: 0.65rem;
-}
-
-.knowledge-actions.is-drawer {
-  min-height: calc(100dvh - 1.3rem);
-}
-
-@media (max-width: 720px) {
-  .knowledge-actions.is-collapsed .knowledge-actions-header {
-    padding-inline: 16px;
-  }
-
-  .knowledge-actions.is-collapsed .knowledge-actions-header h2,
-  .knowledge-actions.is-collapsed .knowledge-actions-body {
-    opacity: 1;
-    visibility: visible;
-    pointer-events: auto;
-    transition: none;
-  }
-
-  .knowledge-panel-collapse {
-    display: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .knowledge-actions-header,
-  .knowledge-actions-header h2,
-  .knowledge-actions-body {
-    transition: none;
-  }
-}
-</style>

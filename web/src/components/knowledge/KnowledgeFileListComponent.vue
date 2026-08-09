@@ -20,7 +20,7 @@ const emit = defineEmits<{
 <template>
   <AList
     v-if="props.files.length"
-    class="knowledge-file-list"
+    class="knowledge-file-list min-h-0"
     :data-source="props.files"
     :split="false"
   >
@@ -34,9 +34,15 @@ const emit = defineEmits<{
     </template>
   </AList>
 
-  <AEmpty v-else class="knowledge-file-list-empty">
+  <AEmpty
+    v-else
+    class="knowledge-file-list-empty grid place-content-center min-h-48 m-0 text-graphite/58"
+  >
     <template #image>
-      <span class="knowledge-file-list-empty-mark" aria-hidden="true">
+      <span
+        class="grid place-items-center h-[3.4rem] w-[3.4rem] border border-graphite/16 rounded-[16px] text-slate bg-paper"
+        aria-hidden="true"
+      >
         <Files :size="25" :stroke-width="1.5" />
       </span>
     </template>
@@ -45,48 +51,3 @@ const emit = defineEmits<{
     </template>
   </AEmpty>
 </template>
-
-<style scoped>
-@reference "../../styles/index.css";
-
-.knowledge-file-list {
-  @apply min-h-0;
-}
-
-.knowledge-file-list :deep(.ant-list-items) {
-  @apply grid;
-
-  gap: 0.25rem;
-}
-
-.knowledge-file-list-empty {
-  @apply grid place-content-center;
-
-  min-height: 12rem;
-  margin: 0;
-  color: var(--color-text-subtle);
-}
-
-.knowledge-file-list-empty :deep(.ant-empty-image) {
-  @apply grid place-items-center;
-
-  height: auto;
-  margin-bottom: 0.9rem;
-  color: var(--color-text-muted);
-}
-
-.knowledge-file-list-empty-mark {
-  @apply grid place-items-center;
-
-  width: 3.4rem;
-  height: 3.4rem;
-  border: 1px solid var(--color-border-control);
-  border-radius: var(--radius-knowledge-container);
-  color: var(--color-text-muted);
-  background: var(--color-surface);
-}
-
-.knowledge-file-list-empty :deep(.ant-empty-description) {
-  color: var(--color-text-muted);
-}
-</style>
