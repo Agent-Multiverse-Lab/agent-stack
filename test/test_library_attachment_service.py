@@ -64,14 +64,14 @@ class FakeAttachmentRepository:
         self.get_arguments = values
         return self.attachment
 
-    async def update_attachment_name(
+    async def update_file_name(
         self,
         attachment,
         *,
-        attachment_name,
+        file_name,
     ):
-        self.renamed_to = attachment_name
-        attachment.attachment_name = attachment_name
+        self.renamed_to = file_name
+        attachment.file_name = file_name
         attachment.updated_at = NOW
         return attachment
 
@@ -85,21 +85,16 @@ def make_attachment(
     attachment_id: int,
     *,
     file_name: str = "需求.PDF",
-    status: str = "parsed",
-    error_message: str | None = None,
 ) -> SimpleNamespace:
     file_id = FILE_ID_1 if attachment_id == 3 else FILE_ID_2
     return SimpleNamespace(
         id=attachment_id,
         file_id=file_id,
         user_id=7,
-        attachment_name=file_name,
-        attachment_type="application/pdf",
-        attachment_size=1024,
-        original_object_name=f"7/{file_id}/original/{file_name}",
-        markdown_object_name=f"7/{file_id}/parsed/document.md",
-        status=status,
-        error_message=error_message,
+        file_name=file_name,
+        content_type="application/pdf",
+        file_size=1024,
+        object_name=f"save/attachments/{file_id}",
         deleted_at=None,
         created_at=NOW,
         updated_at=NOW,
@@ -107,7 +102,7 @@ def make_attachment(
 
 
 class AttachmentRepositoryTest(unittest.IsolatedAsyncioTestCase):
-    async def test_library_query_excludes_pending_and_deleted_rows(self):
+    async def test_library_query_excludes_deleted_rows(self):
         session = CaptureSession()
         await AttachmentRepository(
             session
@@ -126,10 +121,7 @@ class AttachmentRepositoryTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("attachment.user_id = 7", sql)
         self.assertIn("attachment.deleted_at IS NULL", sql)
-        self.assertIn("attachment.status IN", sql)
-        for attachment_status in ("failed", "parsed", "parsing", "uploaded"):
-            self.assertIn(f"'{attachment_status}'", sql)
-        self.assertNotIn("'pending'", sql)
+        self.assertNotIn("attachment.status", sql)
         self.assertIn("attachment.id < 120", sql)
         self.assertIn("ORDER BY attachment.id DESC", sql)
 
@@ -163,7 +155,7 @@ class LibraryAttachmentUseCaseTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.storage_patch.stop)
 
     async def test_list_returns_cursor_without_thread_id(self):
-        first = make_attachment(3, error_message="解析失败")
+        first = make_attachment(3)
         self.repository.rows = [first, make_attachment(2)]
 
         result = await library_service.list_library_attachments(
@@ -176,12 +168,11 @@ class LibraryAttachmentUseCaseTest(unittest.IsolatedAsyncioTestCase):
         item = result["items"][0]
         self.assertEqual(3, result["next_before_id"])
         self.assertEqual(".pdf", item["suffix"])
-        self.assertEqual(str(FILE_ID_1), item["id"])
-        self.assertEqual("解析失败", item["parse_error"])
+        self.assertEqual(str(FILE_ID_1), item["file_id"])
         self.assertNotIn("thread_id", item)
-        self.assertNotIn("original_object_name", item)
+        self.assertNotIn("object_name", item)
         self.assertEqual(
-            [("attachment", first.original_object_name)],
+            [("attachment", first.object_name)],
             self.storage.access_calls,
         )
         self.assertEqual("需求", self.repository.list_arguments["query"])
@@ -194,10 +185,10 @@ class LibraryAttachmentUseCaseTest(unittest.IsolatedAsyncioTestCase):
                 attachment_id=str(FILE_ID_1),
             )
 
-    async def test_rename_keeps_original_object_name(self):
+    async def test_rename_keeps_object_name(self):
         attachment = make_attachment(3)
         self.repository.attachment = attachment
-        original_object_name = attachment.original_object_name
+        object_name = attachment.object_name
 
         result = await library_service.rename_library_attachment(
             SimpleNamespace(),
@@ -210,8 +201,8 @@ class LibraryAttachmentUseCaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("新需求.pdf", self.repository.renamed_to)
         self.assertEqual(FILE_ID_1, self.repository.get_arguments["file_id"])
         self.assertEqual(
-            original_object_name,
-            attachment.original_object_name,
+            object_name,
+            attachment.object_name,
         )
 
     async def test_rename_rejects_path_and_suffix_change(self):

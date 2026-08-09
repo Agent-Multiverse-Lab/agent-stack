@@ -47,18 +47,37 @@ class FakeAgentRunRepository:
         self.events = events
         self.arguments = None
         self.error = None
+        self.run = None
 
     async def create_run(self, **values):
         self.events.append("run")
         if self.error is not None:
             raise self.error
         self.arguments = values
-        return SimpleNamespace(
+        self.run = SimpleNamespace(
             id=values["run_id"],
             thread_id=values["thread_id"],
             request_id=values["request_id"],
             agent_status="pending",
+            error=None,
         )
+        return self.run
+
+    async def set_failed(self, run_id, error):
+        self.events.append(("set_failed", run_id))
+        self.run.agent_status = "failed"
+        self.run.error = error
+        return self.run
+
+
+class FakeMessageAttachmentRepository:
+    def __init__(self, events) -> None:
+        self.events = events
+        self.arguments = None
+
+    async def create_links(self, **values):
+        self.events.append("links")
+        self.arguments = values
 
 
 class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
@@ -67,6 +86,34 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
         self.db = FakeSession(self.events)
         self.conversations = FakeConversationRepository(self.events)
         self.runs = FakeAgentRunRepository(self.events)
+        self.links = FakeMessageAttachmentRepository(self.events)
+        self.attachments = [
+            SimpleNamespace(id=31, file_id=FILE_ID_1),
+            SimpleNamespace(id=32, file_id=FILE_ID_2),
+        ]
+        self.copied_objects = [
+            (
+                f"save/attachments/{FILE_ID_1}",
+                f"save/thread-1/attachments/{FILE_ID_1}",
+            )
+        ]
+
+        async def prepare_message_attachments(_db, **values):
+            self.events.append("prepare")
+            self.prepare_arguments = values
+            file_ids = values["file_ids"]
+            attachments = [
+                attachment
+                for attachment in self.attachments
+                if attachment.file_id in file_ids
+            ]
+            return attachments, self.copied_objects if attachments else []
+
+        async def delete_copied_sources(copied_objects):
+            self.events.append(("delete_sources", copied_objects))
+
+        async def delete_copied_targets(copied_objects):
+            self.events.append(("delete_targets", copied_objects))
 
         patches = (
             patch(
@@ -76,6 +123,22 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
             patch(
                 "server.service.agent_run_service.AgentRunRepository",
                 return_value=self.runs,
+            ),
+            patch(
+                "server.service.agent_run_service.MessageAttachmentRepository",
+                return_value=self.links,
+            ),
+            patch(
+                "server.service.agent_run_service.prepare_message_attachments",
+                side_effect=prepare_message_attachments,
+            ),
+            patch(
+                "server.service.agent_run_service.delete_copied_sources",
+                side_effect=delete_copied_sources,
+            ),
+            patch(
+                "server.service.agent_run_service.delete_copied_targets",
+                side_effect=delete_copied_targets,
             ),
         )
         for current_patch in patches:
@@ -91,7 +154,7 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
             "thread_id": "thread-1",
             "thread_metadata": {"request_id": "request-1"},
             "msg_metadata": {
-                "file_ids": [str(FILE_ID_1), str(FILE_ID_2)],
+                "attachment_file_ids": [str(FILE_ID_1), str(FILE_ID_2)],
                 "source": "web",
             },
             "image_content": None,
@@ -112,7 +175,7 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             {
-                "file_ids": [str(FILE_ID_1), str(FILE_ID_2)],
+                "attachment_file_ids": [str(FILE_ID_1), str(FILE_ID_2)],
                 "source": "web",
             },
             self.conversations.message_arguments["msg_metadata"],
@@ -124,10 +187,13 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(21, self.runs.arguments["trigger_message_id"])
         self.assertEqual(
             [
+                "prepare",
                 "message",
+                "links",
                 "run",
                 "flush",
                 "commit",
+                ("delete_sources", self.copied_objects),
                 ("enqueue", str(run.id)),
             ],
             self.events,
@@ -143,7 +209,49 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
                 await self.create_run()
 
         enqueue.assert_not_called()
-        self.assertEqual(["message", "run", "rollback"], self.events)
+        self.assertEqual(
+            [
+                "prepare",
+                "message",
+                "links",
+                "run",
+                "rollback",
+                ("delete_targets", self.copied_objects),
+            ],
+            self.events,
+        )
+
+    async def test_enqueue_failure_returns_persisted_failed_run(self):
+        async def enqueue(run_id):
+            self.events.append(("enqueue", run_id))
+            raise RuntimeError("redis unavailable")
+
+        with (
+            patch(
+                "server.service.agent_run_service.enqueue_agent_run",
+                side_effect=enqueue,
+            ),
+            patch.object(agent_run_service.logger, "exception"),
+        ):
+            run = await self.create_run(msg_metadata={})
+
+        self.assertEqual("failed", run.agent_status)
+        self.assertIn("redis unavailable", run.error)
+        self.assertEqual(
+            [
+                "prepare",
+                "message",
+                "links",
+                "run",
+                "flush",
+                "commit",
+                ("delete_sources", []),
+                ("enqueue", str(run.id)),
+                ("set_failed", str(run.id)),
+                "commit",
+            ],
+            self.events,
+        )
 
     async def test_file_only_message_uses_attachment_type(self):
         async def enqueue(_):
@@ -155,7 +263,7 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
         ):
             await self.create_run(
                 query=None,
-                msg_metadata={"file_ids": [str(FILE_ID_1)]},
+                msg_metadata={"attachment_file_ids": [str(FILE_ID_1)]},
             )
 
         self.assertEqual(
@@ -163,24 +271,40 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
             self.conversations.message_arguments["message_type"],
         )
 
-    async def test_file_metadata_is_forwarded_without_attachment_validation(
-        self,
-    ):
+    async def test_duplicate_ids_are_deduplicated_only_for_relations(self):
         async def enqueue(_):
             return None
 
+        metadata = {
+            "attachment_file_ids": [str(FILE_ID_1), str(FILE_ID_1)],
+            "source": "web",
+        }
         with patch(
             "server.service.agent_run_service.enqueue_agent_run",
             side_effect=enqueue,
         ):
-            await self.create_run(
-                msg_metadata={"file_ids": ["opaque-file-id"]},
-            )
+            await self.create_run(msg_metadata=metadata)
 
         self.assertEqual(
-            {"file_ids": ["opaque-file-id"]},
+            [str(FILE_ID_1)],
+            self.prepare_arguments["file_ids"],
+        )
+        self.assertEqual(
+            metadata,
             self.conversations.message_arguments["msg_metadata"],
         )
+        self.assertEqual(
+            [31],
+            [attachment.id for attachment in self.links.arguments["attachments"]],
+        )
+
+    async def test_invalid_attachment_file_id_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "UUID4"):
+            await self.create_run(
+                msg_metadata={"attachment_file_ids": ["opaque-file-id"]},
+            )
+
+        self.assertEqual([], self.events)
 
 
 class AgentRunEventTest(unittest.TestCase):

@@ -328,23 +328,19 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
         available = SimpleNamespace(
             id=5,
             file_id=FILE_ID_1,
-            attachment_name="需求.pdf",
-            attachment_type="application/pdf",
-            attachment_size=1024,
-            original_object_name=(
-                f"7/{FILE_ID_1}/original/requirements.pdf"
-            ),
-            status="parsed",
+            file_name="需求.pdf",
+            content_type="application/pdf",
+            file_size=1024,
+            object_name=f"save/attachments/{FILE_ID_1}",
             deleted_at=None,
         )
         deleted = SimpleNamespace(
             id=6,
             file_id=FILE_ID_2,
-            attachment_name="旧图.png",
-            attachment_type="image/png",
-            attachment_size=2048,
-            original_object_name=f"7/{FILE_ID_2}/original/old.png",
-            status="parsed",
+            file_name="旧图.png",
+            content_type="image/png",
+            file_size=2048,
+            object_name=f"save/attachments/{FILE_ID_2}",
             deleted_at=NOW,
         )
         self.message_attachments.rows = [
@@ -363,20 +359,20 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
         first, second = result["messages"]
         self.assertEqual(
             [str(FILE_ID_1), str(FILE_ID_2)],
-            [item["id"] for item in first["attachments"]],
+            [item["file_id"] for item in first["attachments"]],
         )
         self.assertTrue(first["attachments"][0]["available"])
         self.assertFalse(first["attachments"][1]["available"])
         self.assertIsNone(first["attachments"][1]["access_url"])
         self.assertEqual(
             [str(FILE_ID_1)],
-            [item["id"] for item in second["attachments"]],
+            [item["file_id"] for item in second["attachments"]],
         )
         self.assertEqual(
             [
                 (
                     "attachment",
-                    f"7/{FILE_ID_1}/original/requirements.pdf",
+                    f"save/attachments/{FILE_ID_1}",
                 )
             ],
             self.storage.access_calls,
