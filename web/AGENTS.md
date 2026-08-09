@@ -18,6 +18,8 @@
 - Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
 - Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
+- 前端数据合同以后端公开协议为准，前端样式优先使用 Tailwind CSS v4；具体字段映射和组件
+  样式写入对应 `doc/spec/`，不在本文件展开。
 
 补充执行原则：
 
@@ -41,23 +43,20 @@ src/main.ts
   -> src/components/**/*Component.vue
 ```
 
-状态和数据调用遵循：
+职责按以下顺序判断：
 
-```text
-View
-  -> Component（props 向下，emits 向上）
-  -> Composable（可复用响应式状态与行为）
-  -> API adapter（HTTP、上传、流式传输）
-```
+1. Router 直接挂载的页面使用 View，负责路由参数、页面状态和功能组合。
+2. 有模板且能描述为独立界面功能的部分使用 Component，通过 props 和 emits 通信。
+3. 无模板且需要复用的响应式状态与行为使用 Composable。
+4. 多个路由或无共同所有者的功能需要共享同一份客户端状态时使用 Store。
+
+状态默认留在最近的使用者；同一组件树共享时提升到最近的共同所有者，跨树共享时才进入 Store。
 
 约束如下：
 
 - `main.ts` 只负责创建应用、安装应用级插件并挂载根节点。
 - `App.vue` 只保留应用根出口，不承接页面业务。
 - Router 只定义 URL、路由名、参数、页面组件、元数据和重定向。
-- View 是路由页入口，负责页面级状态、路由参数和功能协调。
-- Component 负责一个可命名的界面功能，通过 props 和 emits 与所有者交互。
-- Composable 负责不含模板的响应式状态、持久化或跨组件行为。
 - API adapter 只负责传输和协议转换，不持有界面状态。
 - `types/`、`styles/` 和 `assets/` 是叶子边界，不反向协调业务。
 - 从 `src/` 导入时使用 `@/` 别名；同一功能目录内部可使用相对导入。
@@ -73,17 +72,11 @@ View
 | `src/components/knowledge/` | Knowledge 页面内部的文件区、聊天区、工具区及其子组件 | Chat、认证、导航或其他页面逻辑 |
 | `src/composables/` | 可复用的 Vue 响应式状态、watcher、持久化和无模板行为 | HTML、CSS、图标、页面布局 |
 | `src/router/` | 路由表、路由参数绑定、元数据、滚动行为和兜底跳转 | 页面实现、请求逻辑、领域状态 |
-| `src/styles/` | Tailwind 入口、设计 Token、字体声明、Reset 和必须全局生效的规则 | 单个组件专用样式、业务状态 |
+| `src/stores/` | 跨路由或跨功能共享的 Pinia 状态和修改动作 | DOM、路由定义、组件局部状态 |
 | `src/types/` | 跨文件共享的 TypeScript 数据契约和联合类型 | 请求执行、状态修改、格式化函数 |
 | `src/views/` | 与路由一一对应的页面入口和页面级编排 | 可跨页面复用的通用组件、底层传输实现 |
 | `src/main.ts` | Vue 应用启动 | 页面或领域逻辑 |
 | `src/App.vue` | 根级 RouterView | 导航、业务布局或页面状态 |
-| `vite.config.ts` | Vite 插件、别名、开发代理和构建配置 | 业务配置、接口调用 |
-| `eslint.config.js`、`tsconfig.json` | 静态检查与编译约束 | 针对单一功能的例外规则 |
-
-`node_modules/` 和 `dist/` 是生成目录，不是代码任务归属区域，不得手工修改。
-
-
 
 ## 任务归属规则
 
@@ -111,36 +104,35 @@ View
 
 ```text
 main/App -> router -> views -> components
-                         -> composables -> api
-                         -> types
-components -> feature-local components -> types
-styles/assets <- views and components
+views/components -> composables/stores -> api
+views/components -> types
+components -> 功能内 components
+styles/assets <- views/components
 ```
 
 禁止的反向依赖：
 
 - Component 不导入 View。
-- Router 不导入 Component、Composable 或 API adapter。
+- Router 不导入 Component、Composable、Store 或 API adapter。
 - API adapter 不导入 View、Component、Router 或界面状态。
 - Type 文件不导入运行时代码。
 - Style 和 Asset 文件不协调业务行为。
 - 一个功能目录不直接修改另一个功能目录的内部状态。
 
-跨层用例由 View 或明确的 Composable 协调。传输层返回数据或抛出协议错误；界面层决定加载、失败、空状态和用户反馈如何呈现。
+跨层用例由 View、Composable 或 Store action 协调。传输层返回数据或抛出协议错误；界面层决定加载、失败、空状态和用户反馈如何呈现。
 
 ## 路由与 View 契约
 
 | URL | 路由名 | View | 布局所有者 |
 | --- | --- | --- | --- |
 | `/` | `chat` | `ChatView.vue` | `NavigationView.vue` |
-| `/c/:conversationId` | `conversation` | `ChatView.vue` | `NavigationView.vue` |
+| `/c/:threadId` | `conversation` | `ChatView.vue` | `NavigationView.vue` |
 | `/library` | `library` | `LibraryView.vue` | `NavigationView.vue` |
 | `/agent` | `agent` | `AgentView.vue` | `NavigationView.vue` |
 | `/static` | `static` | `StaticView.vue` | `NavigationView.vue` |
 | `/sandbox` | `sandbox` | `SandboxView.vue` | `NavigationView.vue` |
 | `/knowledge` | `knowledge` | `KnowledgeView.vue` | `KnowledgeView.vue` |
 | `/login` | `login` | `AuthenticationView.vue` | `AuthenticationView.vue` |
-| `/register` | `register` | `AuthenticationView.vue` | `AuthenticationView.vue` |
 
 - View 文件使用 PascalCase，并以 `View.vue` 结尾。
 - 每个功能 URL 直接绑定职责同名的 View，不使用通用 unavailable/fallback View 伪装多个页面。
@@ -161,10 +153,10 @@ styles/assets <- views and components
 
 ## 状态、持久化与传输
 
-- 状态放在最接近其使用者的 View 或 Component；只有真实复用或跨组件协调时才提取 Composable。
-- 只有明确、持续的跨路由状态需要时才引入 Pinia；不得因为依赖已安装就创建 Store。
-- 只把耐久、可序列化、由用户产生且允许留在浏览器的数据写入 `localStorage`。
-- File、AbortController、临时错误、弹窗开关、请求中状态和流式缓冲不得写入 `localStorage`。
+- Store 负责共享客户端状态和修改动作；它不是浏览器存储 API，也不是后端数据源。
+- Pinia Store 统一命名为 `use<Feature>Store`，例如 `useChatStore`。
+- 只把耐久、可序列化、由用户产生且允许留在浏览器的数据写入浏览器存储。
+- File、AbortController、临时错误、弹窗开关、请求中状态和流式缓冲不得写入浏览器存储。
 - 文件被浏览器选择不等于已经上传；界面文案和状态必须与真实传输阶段一致。
 - HTTP、上传、下载、认证和流式事件归 `src/api/`；视觉组件不得直接执行这些协议。
 - 需要认证头的 SSE 使用支持请求头和取消控制的流式 `fetch`，不使用无法满足契约的裸 `EventSource`。
@@ -175,12 +167,12 @@ styles/assets <- views and components
 - 使用 `<script setup lang="ts">` 和 Composition API。
 - 使用 2 空格缩进，保持 TypeScript 严格类型。
 - imports 按外部依赖、`@/` 路径、相对路径分组。
-- Vue 模板使用语义化 kebab-case class；不把成串 Tailwind utility 直接写进模板。
-- 在 SFC 的 `<style scoped>` 中通过 `@reference` 引用样式入口，并使用 `@apply` 组合 Tailwind utility。
-- 全局 CSS 只包含 Token、字体、Reset 和必须跨组件生效的规则。
-- 优先使用 `tokens.css` 中已有的语义变量，不在组件中建立第二套颜色、圆角或间距系统。
+- Vue 样式默认直接写成模板内联 Tailwind utility；组件默认不写 `<style scoped>` 和 `@apply`。
+- `class` 写固定、交互和响应式样式，`:class` 写 Vue 状态样式；工具类必须完整写出，不动态拼接类名。
+- 重复的完整界面提取 Component，不为复用样式创建语义 CSS 类。
+- `src/styles/index.css` 只保留 Tailwind 入口、主题、全局基础规则和第三方组件覆盖；运行时数值使用 `:style`，不引入 Less 或 Sass。
 - 常用控件优先检查 Ant Design Vue；常用图标使用 Lucide，不增加第二套图标库。
-- 简单交互使用 CSS；只有协调动画和时间线才使用 GSAP，并在卸载时清理且尊重 `prefers-reduced-motion`。
+- 简单过渡使用 Tailwind/CSS；只有协调动画和时间线才使用 GSAP，并在卸载时清理且尊重 `prefers-reduced-motion`。
 - Markdown 使用项目已有依赖能力，不自行实现 Markdown 解析器，也不对不可信内容使用 `v-html`。
 - 保留语义 HTML、键盘操作、清晰焦点、ARIA 标签和移动端可用性；最小实现不能删掉可访问性要求。
 
