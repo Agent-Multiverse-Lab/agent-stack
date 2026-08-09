@@ -23,13 +23,13 @@ const router = createRouter({
           meta: { title: "Chat" }
         },
         {
-          path: "c/:conversationId",
+          path: "c/:threadId",
           name: "conversation",
           component: ChatView,
           props: (route) => ({
-            conversationId:
-              typeof route.params.conversationId === "string"
-                ? route.params.conversationId
+            threadId:
+              typeof route.params.threadId === "string"
+                ? route.params.threadId
                 : undefined
           }),
           meta: { title: "Chat" }
@@ -69,14 +69,7 @@ const router = createRouter({
     {
       path: "/login",
       name: "login",
-      component: AuthenticationView,
-      props: { mode: "login" }
-    },
-    {
-      path: "/register",
-      name: "register",
-      component: AuthenticationView,
-      props: { mode: "register" }
+      component: AuthenticationView
     },
     {
       path: "/:pathMatch(.*)*",

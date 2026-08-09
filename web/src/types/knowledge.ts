@@ -1,5 +1,5 @@
 export type KnowledgeFileStatus =
-  | "local"
+  | "selected"
   | "uploaded"
   | "parsing"
   | "parsed"

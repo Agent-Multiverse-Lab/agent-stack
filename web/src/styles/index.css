@@ -1,3 +1,289 @@
 @import "tailwindcss";
-@import "./tokens.css";
-@import "./base.css";
+@import "markstream-vue/index.css";
+
+/* ============================================================
+   Design tokens
+   将原 tokens.css 的调色板/字体/圆角注册为 Tailwind v4 @theme 令牌,
+   模板通过 bg-paper、text-graphite、border-graphite/10、rounded-sm 等直接使用。
+   ============================================================ */
+@theme {
+  --color-paper: #ffffff;
+  --color-mist: #f7f7f7;
+  --color-graphite: #0d0d0d;
+  --color-slate: #6b6b6b;
+  --color-danger: #d00e17;
+
+  --color-tool-road-map: #edf4ff;
+  --color-tool-road-map-hover: #e2edff;
+  --color-tool-ppt: #fff1e8;
+  --color-tool-ppt-hover: #ffe7d8;
+  --color-tool-slides: #f3efff;
+  --color-tool-slides-hover: #eae3ff;
+
+  --font-sans:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif, "Noto Sans SC Variable", "Noto Sans SC", "PingFang SC",
+    "Microsoft YaHei";
+  --font-utility: "Inspire Mono", ui-monospace, SFMono-Regular, Consolas,
+    monospace;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-knowledge-container: 16px;
+  --radius-composer: 28px;
+  --radius-pill: 999px;
+}
+
+/* ============================================================
+   Base layer
+   从原 base.css 迁移:字体声明、全局尺寸、正文样式、选择、焦点、
+   滚动条、reduced-motion 兜底。
+   ============================================================ */
+@font-face {
+  font-family: "Inspire Mono";
+  src: url("@/assets/fonts/InspireMono-Regular.otf") format("opentype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inspire Mono";
+  src: url("@/assets/fonts/InspireMono-Bold.otf") format("opentype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #app {
+    width: 100%;
+    min-width: 320px;
+    height: 100%;
+    margin: 0;
+  }
+
+  html {
+    background: var(--color-paper);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    overflow: hidden;
+    color: var(--color-graphite);
+    background: var(--color-paper);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+
+  button,
+  input,
+  textarea {
+    color: inherit;
+    font: inherit;
+  }
+
+  button,
+  a,
+  input,
+  textarea {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button {
+    border: 0;
+  }
+
+  button:not(:disabled),
+  a {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  ::selection {
+    color: var(--color-paper);
+    background: var(--color-graphite);
+  }
+
+  :focus {
+    outline: none;
+  }
+
+  :focus-visible {
+    outline: 3px solid color-mix(
+      in srgb,
+      var(--color-graphite) 72%,
+      transparent
+    );
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: var(--radius-pill);
+    background: color-mix(
+      in srgb,
+      var(--color-graphite) 18%,
+      transparent
+    );
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      scroll-behavior: auto !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* ============================================================
+   antd integration
+   原组件中 :deep() 穿透的 antd 内部类样式,收敛到这一节。
+   这些类由 antd 运行时生成,无法用内联工具类表达。
+   组件模板中的 antd 组件保留各自的 hook 类名供此处定位。
+   ============================================================ */
+
+/* 空状态:自定义图片占位与描述 */
+.ant-empty-image {
+  display: grid;
+  place-items: center;
+  height: auto;
+  margin-bottom: 0.9rem;
+}
+
+.ant-empty-description {
+  color: var(--color-slate);
+}
+
+/* 文件列表:去掉 antd List 默认行距 */
+.ant-list-items {
+  display: grid;
+  gap: 0.25rem;
+}
+
+/* 抽屉(content/body 通过 Teleport 渲染到 body,无法 scoped 命中) */
+.knowledge-actions-drawer .ant-drawer-content,
+.knowledge-files-drawer .ant-drawer-content {
+  background: var(--color-mist);
+}
+
+.knowledge-actions-drawer .ant-drawer-body,
+.knowledge-files-drawer .ant-drawer-body {
+  padding: 0.65rem;
+}
+
+/* 输入控件重置:antd 的 unlayered 样式会压过 Tailwind utilities,
+   因此在全局层显式覆盖,避免在每个 antd 组件上追加 !important。 */
+.knowledge-composer-input.ant-input,
+.knowledge-composer-input textarea {
+  min-height: 2.1rem;
+  padding: 0.38rem 0;
+  border: 0;
+  color: var(--color-graphite);
+  background: transparent;
+  box-shadow: none;
+  line-height: 1.5;
+  resize: none;
+  user-select: text;
+  caret-color: auto;
+}
+
+.knowledge-composer-input.ant-input-disabled {
+  color: var(--color-slate);
+}
+
+.knowledge-composer-input::placeholder,
+.knowledge-composer-input textarea::placeholder {
+  color: var(--color-graphite);
+  opacity: 0.42;
+}
+
+.knowledge-file-search-input.ant-input {
+  min-width: 0;
+  padding: 0.25rem 0.35rem;
+  border: 0;
+  user-select: text;
+  caret-color: auto;
+  color: var(--color-graphite);
+  background: transparent;
+  box-shadow: none;
+}
+
+.knowledge-file-search-input.ant-input:hover,
+.knowledge-file-search-input.ant-input:focus {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.knowledge-file-search-input.ant-input::placeholder {
+  color: var(--color-graphite);
+  opacity: 0.42;
+}
+
+/* 上传拖拽区:统一 48px 高度与虚线框 */
+.knowledge-file-add .ant-upload-drag {
+  box-sizing: border-box;
+  height: 48px;
+  min-height: 48px;
+  max-height: 48px;
+  overflow: hidden;
+  border: 1px dashed
+    color-mix(in srgb, var(--color-graphite) 16%, transparent);
+  border-radius: 96px;
+  background: var(--color-mist);
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+
+.knowledge-file-add .ant-upload-drag:hover,
+.knowledge-file-add .ant-upload-drag-hover {
+  border-color: color-mix(
+    in srgb,
+    var(--color-graphite) 22%,
+    transparent
+  );
+  background: color-mix(in srgb, var(--color-graphite) 6%, var(--color-paper));
+}
+
+.knowledge-file-add .ant-upload-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.65rem;
+}

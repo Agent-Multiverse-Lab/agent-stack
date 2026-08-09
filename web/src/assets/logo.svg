@@ -1,16 +1,39 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <path
-    d="M43.2 18.8A19 19 0 1 0 48.8 41"
-    stroke="#0d0d0d"
-    stroke-width="5.5"
-    stroke-linecap="round"
-  />
-  <path
-    d="M45.2 14.8L43.8 24.5L53.4 22.8"
-    stroke="#0d0d0d"
-    stroke-width="4.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
-  <circle cx="32" cy="32" r="5" fill="#0d0d0d" />
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="597 291 854 535"
+     role="img"
+     aria-label="AU logo">
+  <g fill="#1D4267">
+    <!-- A: left diagonal stroke -->
+    <path d="
+      M 996 311
+      L 977 311
+      L 617 798
+      L 691 798
+      L 997 383
+      L 997 311
+      Z"/>
+
+    <!-- U: clean geometric reconstruction -->
+    <path d="
+      M 1028 311
+      L 1028 620
+      C 1028 742, 1115 806, 1235 806
+      C 1353 806, 1431 742, 1431 620
+      L 1431 311
+      L 1372 311
+      L 1372 613
+      C 1372 697, 1322 750, 1245 750
+      C 1153 750, 1086 700, 1086 613
+      L 1086 311
+      Z"/>
+
+    <!-- Lower fragment of A, separated by the U curve -->
+    <path d="
+      M 1028 712
+      L 1028 798
+      L 1086 798
+      L 1086 783
+      C 1062 764, 1042 740, 1028 712
+      Z"/>
+  </g>
 </svg>
