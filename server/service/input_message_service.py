@@ -39,11 +39,11 @@ def build_agent_input_msg(
 ) -> AgentInputMsg:
     """集中构建 Agent 输入消息，并保留已持久化的消息类型。"""
     metadata = dict(msg_metadata or {})
-    file_ids = metadata.get("file_ids", [])
+    file_ids = metadata.get("attachment_file_ids", [])
     if file_ids is None:
         file_ids = []
     if not isinstance(file_ids, list):
-        raise ValueError("msg_metadata.file_ids 必须是列表")
+        raise ValueError("msg_metadata.attachment_file_ids 必须是列表")
     if not query and not image_content and not file_ids:
         raise ValueError("Agent 输入不能为空")
 

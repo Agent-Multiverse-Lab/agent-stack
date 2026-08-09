@@ -125,7 +125,7 @@ class BaseAgent:
 
         # 以 v3 的形式返回，主要是看看效果啥样
         async with await agent.astream_events(
-            {"messages": messages},
+            input={"messages": messages},
             config=input_config,
             version="v3",
             context=context,
@@ -137,7 +137,11 @@ class BaseAgent:
                 stream_data = stream_params.get("data") #此处根据方法不同，内容也不同, 具体得自己debug看下，随便写个就知道了
                 stream_namesapce = stream_params.get("namespace", []) # 当有旁路子图或者agent执行时，namespace会有东西
                 
-                
+                if stream_methods == "values":
+                    # 返回直接参数，由于values的特殊性，其返回的时候，只有完全参数提取的时候才出现 value,即是一个完整消息，
+                    # 输出的时候，直接返回就可跳过了，只有values是完整的，其他的都是流式的
+                    yield stream_methods, stream_data
+                    continue
                 
 
                 if stream_methods == "messages":
@@ -157,12 +161,6 @@ class BaseAgent:
                     # 返回的数据可能都会有用
                     yield stream_methods, (stream_msg, stream_agent_run_metadata)
                     
-                    
-                    
-                if stream_methods == "values":
-                    # 返回直接参数，由于values的特殊性，其返回的时候，只有完全参数提取的时候才出现 value
-                    yield stream_methods, stream_data
-         
                     
                 if stream_methods == "tool":
                     # 对 tool 消息进行清洗

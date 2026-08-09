@@ -17,12 +17,19 @@ from server.service.arq_queue_servcie import (
     read_recent_agent_run_stream_events,
     write_agent_run_stream_event,
 )
+from server.service.attachment_service import (
+    attachment_file_ids,
+    delete_copied_sources,
+    delete_copied_targets,
+    prepare_message_attachments,
+)
 from server.service.input_message_service import build_agent_input_msg
 from src.configs import config
 from src.database.models import AgentRun, User
 from src.database.repositories import (
     AgentRunRepository,
     ConversationRepository,
+    MessageAttachmentRepository,
 )
 from src.database.session import session_context
 from src.utils import logger
@@ -47,6 +54,7 @@ async def create_agent_run_service(
     if not thread_id:
         raise ValueError("会话 ID 不能为空")
 
+    file_ids = attachment_file_ids(msg_metadata)
     input_message = build_agent_input_msg(
         query=query or "",
         image_content=image_content,
@@ -66,8 +74,15 @@ async def create_agent_run_service(
     run_metadata = dict(thread_metadata)
     request_id = str(run_metadata.get("request_id") or uuid.uuid4())
     run_id = str(uuid.uuid4())
+    copied_objects: list[tuple[str, str]] = []
 
     try:
+        attachments, copied_objects = await prepare_message_attachments(
+            db,
+            user_id=int(current_user.id),
+            thread_id=thread_id,
+            file_ids=file_ids,
+        )
         message = await conversation_repository.create_agent_input_message(
             conversation_id=int(conversation.id),
             content=input_message.content,
@@ -75,6 +90,10 @@ async def create_agent_run_service(
             message_type=input_message.msg_type,
             request_id=request_id,
             msg_metadata=input_message.msg_metadata,
+        )
+        await MessageAttachmentRepository(db).create_links(
+            message_id=int(message.id),
+            attachments=attachments,
         )
         run = await AgentRunRepository(db).create_run(
             run_id=run_id,
@@ -93,9 +112,21 @@ async def create_agent_run_service(
         await db.commit()
     except Exception:
         await db.rollback()
+        await delete_copied_targets(copied_objects)
         raise
 
-    await enqueue_agent_run(str(run.id))
+    await delete_copied_sources(copied_objects)
+    try:
+        await enqueue_agent_run(str(run.id))
+    except Exception as exc:
+        logger.exception("Agent Run 入队失败：run_id=%s", run.id)
+        failed_run = await AgentRunRepository(db).set_failed(
+            str(run.id),
+            f"Agent Run 入队失败：{exc}",
+        )
+        if failed_run is not None:
+            run = failed_run
+        await db.commit()
     return run
 
 

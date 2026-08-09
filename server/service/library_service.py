@@ -85,12 +85,12 @@ async def rename_library_attachment(
         user_id,
         attachment_id,
     )
-    if _suffix(normalized_name) != _suffix(str(attachment.attachment_name)):
+    if _suffix(normalized_name) != _suffix(str(attachment.file_name)):
         raise ValueError("附件改名不能修改文件后缀")
 
-    attachment = await repository.update_attachment_name(
+    attachment = await repository.update_file_name(
         attachment,
-        attachment_name=normalized_name,
+        file_name=normalized_name,
     )
     return await _attachment_payload(attachment)
 
@@ -137,9 +137,9 @@ async def _attachment_payload(
 ) -> dict[str, Any]:
     access_url = await get_storage().create_file_access_url(
         ATTACHMENT_BUCKET_NAME,
-        str(attachment.original_object_name),
+        str(attachment.object_name),
     )
-    content_type = str(attachment.attachment_type)
+    content_type = str(attachment.content_type)
     if content_type.startswith("image/"):
         category = "image"
     elif content_type.startswith(("application/", "text/")):
@@ -148,18 +148,12 @@ async def _attachment_payload(
         category = "other"
 
     return {
-        "id": str(attachment.file_id),
-        "file_name": str(attachment.attachment_name),
-        "suffix": _suffix(str(attachment.attachment_name)),
+        "file_id": str(attachment.file_id),
+        "file_name": str(attachment.file_name),
+        "suffix": _suffix(str(attachment.file_name)),
         "content_type": content_type,
-        "file_size": int(attachment.attachment_size),
+        "file_size": int(attachment.file_size),
         "category": category,
-        "status": str(attachment.status),
-        "parse_error": (
-            str(attachment.error_message)
-            if attachment.error_message is not None
-            else None
-        ),
         "access_url": access_url,
         "created_at": attachment.created_at,
         "updated_at": attachment.updated_at,

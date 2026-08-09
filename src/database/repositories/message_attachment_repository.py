@@ -12,6 +12,28 @@ class MessageAttachmentRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def create_links(
+        self,
+        *,
+        message_id: int,
+        attachments: Sequence[Attachment],
+    ) -> None:
+        """按输入顺序创建 Message 对 Attachment 的引用。"""
+        if not attachments:
+            return
+
+        self.session.add_all(
+            [
+                MessageAttachment(
+                    message_id=message_id,
+                    attachment_id=int(attachment.id),
+                    position=position,
+                )
+                for position, attachment in enumerate(attachments)
+            ]
+        )
+        await self.session.flush()
+
     async def list_attachments_by_message_ids(
         self,
         message_ids: Sequence[int],

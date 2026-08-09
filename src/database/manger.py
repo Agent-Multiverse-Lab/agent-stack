@@ -74,6 +74,7 @@ class PostgreManger:
             langgraph_database_url = config.langgraph_database_url
             if not langgraph_database_url:
                 raise RuntimeError("Missing LANGGRAPH_DATABASE_URL")
+                
 
             engine = self.get_engine()
             resource_stack.push_async_callback(engine.dispose)

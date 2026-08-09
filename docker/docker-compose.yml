@@ -1,5 +1,12 @@
 name: multi-agent-s2c
 
+x-api-worker-env: &api-worker-env
+  DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/multi_agent_s2c
+  LANGGRAPH_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/multi_agent_s2c
+  REDIS_URL: redis://redis:6379/0
+  ENABLE_RUN_QUEUE: "true"
+  ARQ_MAX_JOBS: "${ARQ_MAX_JOBS:-64}"
+
 services:
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
@@ -48,11 +55,32 @@ services:
       - s2c-network
     restart: unless-stopped
 
-  # FIXME: ARQ 必须作为独立进程运行，复用 API 镜像但覆盖启动命令。
+  api:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+    image: multi-agent-s2c:${VERSION:-0.1.0}
+    container_name: s2c-api
+    ports:
+      - "5050:5050"
+    env_file:
+      - ../.env
+    environment:
+      <<: *api-worker-env
+    depends_on:
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - s2c-network
+    restart: unless-stopped
+
   worker:
     build:
       context: ..
       dockerfile: docker/api.Dockerfile
+    image: multi-agent-s2c:${VERSION:-0.1.0}
     container_name: s2c-arq-worker
     command:
       - uv
@@ -63,13 +91,7 @@ services:
     env_file:
       - ../.env
     environment:
-      # FIXME: 容器内不能用 localhost 访问 Compose 中的 PostgreSQL 和 Redis。
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/multi_agent_s2c
-      LANGGRAPH_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/multi_agent_s2c
-      REDIS_URL: redis://redis:6379/0
-      ENABLE_RUN_QUEUE: "true"
-      # 父 Run 等待子 Run 时仍需给子任务保留并发槽位。
-      ARQ_MAX_JOBS: "${ARQ_MAX_JOBS:-64}"
+      <<: *api-worker-env
     depends_on:
       postgres:
         condition: service_started

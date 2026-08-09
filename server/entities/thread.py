@@ -55,11 +55,10 @@ class ThreadRunMetadataResponse(BaseModel):
 class ThreadMessageAttachmentResponse(BaseModel):
     """历史消息引用的附件。"""
 
-    id: str
+    file_id: str
     file_name: str
     content_type: str
     file_size: int
-    status: str
     available: bool
     access_url: str | None
 
@@ -106,12 +105,12 @@ class ThreadUpdateRequest(BaseModel):
 
 
 class UploadedAttachmentResponse(BaseModel):
-    """临时上传成功的用户附件。"""
+    """上传成功的用户附件。"""
 
-    id: str
+    file_id: str
     file_name: str
     content_type: str
     file_size: int
-    category: str
-    status: str
+    bucket_name: str
+    object_name: str
     access_url: str

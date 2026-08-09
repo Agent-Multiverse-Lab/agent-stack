@@ -10,6 +10,7 @@ from uuid import uuid4
 from fastapi import HTTPException, status
 from fastapi.concurrency import run_in_threadpool
 from minio import Minio
+from minio.commonconfig import CopySource
 from minio.error import S3Error
 
 from src.configs.config import config
@@ -176,6 +177,33 @@ class MinioStorage:
             "content_type": content_type,
         }
         return await asyncio.to_thread(self.upload_file, **kwargs)
+
+    def copy_file(
+        self,
+        bucket_name: str,
+        source_object_name: str,
+        target_object_name: str,
+    ) -> None:
+        """在同一 Bucket 内复制对象。"""
+        self.get_client().copy_object(
+            bucket_name,
+            target_object_name,
+            CopySource(bucket_name, source_object_name),
+        )
+
+    async def acopy_file(
+        self,
+        bucket_name: str,
+        source_object_name: str,
+        target_object_name: str,
+    ) -> None:
+        """异步复制对象。"""
+        await asyncio.to_thread(
+            self.copy_file,
+            bucket_name,
+            source_object_name,
+            target_object_name,
+        )
 
     def delete_file(self, bucket_name: str, object_name: str) -> bool:
         """从存储中删除文件。"""

@@ -23,8 +23,8 @@ from server.entities.thread import (
 )
 from server.service import thread_service
 from server.service.attachment_service import (
-    PendingAttachmentUpload,
-    upload_pending_attachments,
+    AttachmentUpload,
+    upload_attachments,
 )
 from server.utils.auth import AuthenticatedUser
 from src.agents import agent_manager
@@ -245,15 +245,15 @@ async def list_agent_summaries(
 
 
 @router.post(
-    "/attachment/tmp/upload",
+    "/attachment/upload",
     response_model=list[UploadedAttachmentResponse],
 )
-async def upload_tmp_attachments(
+async def upload_chat_attachments(
     current_user: AuthenticatedUser,
     files: list[UploadFile] = File(...),
     db: AsyncSession = Depends(get_db),
 ) -> list[UploadedAttachmentResponse]:
-    """附件上传到临时路径，不触发对话。"""
+    """上传用户附件，不触发对话。"""
     return await _upload_attachments(
         db=db,
         files=files,
@@ -296,7 +296,7 @@ async def _upload_attachments(
             detail=f"单次上传文件数量不能超过 {MAX_FILES_PER_REQUEST} 个。",
         )
 
-    uploads: list[PendingAttachmentUpload] = []
+    uploads: list[AttachmentUpload] = []
     for upload in files:
         content_type = (
             upload.content_type or "application/octet-stream"
@@ -307,7 +307,6 @@ async def _upload_attachments(
             allowed_types=ALLOWED_IMAGE_TYPES,
             allowed_extensions=ALLOWED_IMAGE_EXTENSIONS,
         ):
-            category = "image"
             max_file_size = MAX_IMAGE_SIZE
         elif _is_allowed_file(
             filename=upload.filename,
@@ -315,7 +314,6 @@ async def _upload_attachments(
             allowed_types=ALLOWED_DOCUMENT_TYPES,
             allowed_extensions=ALLOWED_DOCUMENT_EXTENSIONS,
         ):
-            category = "document"
             max_file_size = MAX_DOCUMENT_SIZE
         else:
             raise HTTPException(
@@ -339,15 +337,14 @@ async def _upload_attachments(
             )
 
         uploads.append(
-            PendingAttachmentUpload(
+            AttachmentUpload(
                 file_name=upload.filename or "file",
                 content_type=content_type,
                 content=content,
-                category=category,
             )
         )
 
-    responses = await upload_pending_attachments(
+    responses = await upload_attachments(
         db,
         user_id=int(current_user.id),
         uploads=uploads,

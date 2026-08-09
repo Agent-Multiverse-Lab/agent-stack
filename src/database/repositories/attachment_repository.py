@@ -1,13 +1,10 @@
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models import Attachment
-
-LIBRARY_ATTACHMENT_STATUSES = frozenset(
-    {"uploaded", "parsing", "parsed", "failed"}
-)
 
 
 class AttachmentRepository:
@@ -16,25 +13,24 @@ class AttachmentRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def create_pending_attachment(
+    async def create_attachment(
         self,
         *,
         file_id: str,
         user_id: int | str,
-        attachment_name: str,
-        attachment_type: str,
-        attachment_size: int,
-        original_object_name: str,
+        file_name: str,
+        content_type: str,
+        file_size: int,
+        object_name: str,
     ) -> Attachment:
-        """创建尚未被消息正式使用的上传附件。"""
+        """创建已上传成功的用户附件。"""
         attachment = Attachment(
             file_id=file_id,
             user_id=int(user_id),
-            status="pending",
-            attachment_name=attachment_name,
-            attachment_type=attachment_type,
-            attachment_size=attachment_size,
-            original_object_name=original_object_name,
+            file_name=file_name,
+            content_type=content_type,
+            file_size=file_size,
+            object_name=object_name,
         )
         self.session.add(attachment)
         await self.session.flush()
@@ -52,13 +48,12 @@ class AttachmentRepository:
         statement = select(Attachment).where(
             Attachment.user_id == int(user_id),
             Attachment.deleted_at.is_(None),
-            Attachment.status.in_(LIBRARY_ATTACHMENT_STATUSES),
         )
         if before_id is not None:
             statement = statement.where(Attachment.id < before_id)
         if query is not None:
             statement = statement.where(
-                Attachment.attachment_name.ilike(f"%{query}%")
+                Attachment.file_name.ilike(f"%{query}%")
             )
 
         result = await self.session.execute(
@@ -78,22 +73,53 @@ class AttachmentRepository:
                 Attachment.file_id == file_id,
                 Attachment.user_id == int(user_id),
                 Attachment.deleted_at.is_(None),
-                Attachment.status.in_(LIBRARY_ATTACHMENT_STATUSES),
             )
         )
         return result.scalar_one_or_none()
 
-    async def update_attachment_name(
+    async def list_by_file_ids_for_user(
+        self,
+        *,
+        file_ids: Sequence[str],
+        user_id: int | str,
+    ) -> list[Attachment]:
+        """批量读取当前用户未删除的附件。"""
+        if not file_ids:
+            return []
+
+        result = await self.session.execute(
+            select(Attachment)
+            .where(
+                Attachment.file_id.in_(file_ids),
+                Attachment.user_id == int(user_id),
+                Attachment.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        return list(result.scalars().all())
+
+    async def update_file_name(
         self,
         attachment: Attachment,
         *,
-        attachment_name: str,
+        file_name: str,
     ) -> Attachment:
         """修改附件展示文件名。"""
-        attachment.attachment_name = attachment_name
+        attachment.file_name = file_name
         attachment.updated_at = datetime.now(UTC)
         await self.session.flush()
         return attachment
+
+    async def update_object_name(
+        self,
+        attachment: Attachment,
+        *,
+        object_name: str,
+    ) -> None:
+        """记录附件当前所在的 MinIO 对象名。"""
+        attachment.object_name = object_name
+        attachment.updated_at = datetime.now(UTC)
+        await self.session.flush()
 
     async def soft_delete_attachment(self, attachment: Attachment) -> None:
         """软删除正式附件。"""

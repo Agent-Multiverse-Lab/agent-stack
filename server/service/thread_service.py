@@ -1,3 +1,4 @@
+from rich.abc import t
 import base64
 import binascii
 import json
@@ -140,9 +141,7 @@ async def get_thread_detail(
     )
     has_more = len(messages_desc) > message_limit
     page_desc = messages_desc[:message_limit]
-    next_before_message_id = (
-        int(page_desc[-1].id) if has_more and page_desc else None
-    )
+    next_before_message_id = int(page_desc[-1].id) if has_more and page_desc else None
 
     run_ids = list(
         {
@@ -157,9 +156,7 @@ async def get_thread_detail(
     )
     attachment_rows = await MessageAttachmentRepository(
         db
-    ).list_attachments_by_message_ids(
-        [int(message.id) for message in page_desc]
-    )
+    ).list_attachments_by_message_ids([int(message.id) for message in page_desc])
     message_attachments = await _message_attachment_payloads(attachment_rows)
     last_message_at = await conversations.get_last_message_at(
         conversation_id=int(conversation.id)
@@ -198,9 +195,7 @@ async def update_thread(
     conversation = await _require_thread(conversations, uid, thread_id)
     title_text = str(conversation.title)
     summary_text = (
-        str(conversation.summary)
-        if conversation.summary is not None
-        else None
+        str(conversation.summary) if conversation.summary is not None else None
     )
     existing_metadata = dict(conversation.conversation_metadata or {})
     thread_metadata = dict(existing_metadata)
@@ -283,9 +278,7 @@ def _thread_summary(
         "thread_id": str(conversation.thread_id),
         "title": str(conversation.title),
         "summary": (
-            str(conversation.summary)
-            if conversation.summary is not None
-            else None
+            str(conversation.summary) if conversation.summary is not None else None
         ),
         "agent_id": str(conversation.agent_id),
         "metadata": dict(conversation.conversation_metadata or {}),
@@ -311,17 +304,16 @@ async def _message_attachment_payloads(
             if access_url is None:
                 access_url = await storage.create_file_access_url(
                     ATTACHMENT_BUCKET_NAME,
-                    str(attachment.original_object_name),
+                    str(attachment.object_name),
                 )
                 access_urls[attachment_id] = access_url
 
         grouped.setdefault(int(link.message_id), []).append(
             {
-                "id": str(attachment.file_id),
-                "file_name": str(attachment.attachment_name),
-                "content_type": str(attachment.attachment_type),
-                "file_size": int(attachment.attachment_size),
-                "status": str(attachment.status),
+                "file_id": str(attachment.file_id),
+                "file_name": str(attachment.file_name),
+                "content_type": str(attachment.content_type),
+                "file_size": int(attachment.file_size),
                 "available": available,
                 "access_url": access_url,
             }
@@ -347,9 +339,7 @@ def _message_response(
             "run_type": str(run.run_type),
             "status": str(run.agent_status),
             "parent_run_id": (
-                str(run.parent_run_id)
-                if run.parent_run_id is not None
-                else None
+                str(run.parent_run_id) if run.parent_run_id is not None else None
             ),
             "metadata": dict(run.run_metadata or {}),
             "started_at": run.started_at,
@@ -361,16 +351,12 @@ def _message_response(
         "role": str(message.role),
         "content": str(message.content),
         "image_content": (
-            str(message.image_content)
-            if message.image_content is not None
-            else None
+            str(message.image_content) if message.image_content is not None else None
         ),
         "message_type": str(message.message_type or "text"),
         "status": str(message.status),
         "request_id": (
-            str(message.request_id)
-            if message.request_id is not None
-            else None
+            str(message.request_id) if message.request_id is not None else None
         ),
         "run": run_payload,
         "attachments": attachments,
@@ -484,7 +470,7 @@ async def _build_agent_runtime_context(
         dict[str, str]: 上下文结构
     """
     agent_runtime_context = {}
-    
+
     # 构建固有上下文元素
     # agent_runtime_context = agent_instance.agent_context()
 
@@ -517,6 +503,184 @@ async def _check_conv_status(
     # TODO 其他的错点
 
 
+def _make_stream_msg_key(
+    agent_metadata: dict | None, thread_id: str | None
+) -> tuple[str, str]:
+    if not isinstance(agent_metadata, dict):
+        return thread_id or "", ""
+    return thread_id or "", str(agent_metadata.get("run_id", ""))
+
+
+def _assign_stream_msg_id(
+    message_ids: dict[tuple[str, str], str],
+    key: tuple[str, str],
+    llm_og_msg_id: str | None = None,
+) -> str:
+    if llm_og_msg_id:
+        message_ids[key] = llm_og_msg_id
+        return llm_og_msg_id
+    return message_ids.setdefault(key, str(uuid.uuid4()))
+
+
+def _lc_message_v2_dispather(
+    agent_msg: dict[str, Any], *, message_id: str, thread_id: str | None
+) -> list[dict[str, Any]]:
+    """将 langchain v2 的消息事件转换为标准化的消息事件"""
+    events = []
+    content = agent_msg.get("content")
+    reasoning_content = agent_msg.get("reasoning_content")
+    additional_kwargs = (
+        agent_msg.get("additional_kwargs")
+        if isinstance(agent_msg.get("additional_kwargs"), dict)
+        else {}
+    )
+    additional_kwargs_reasoning_content = additional_kwargs.get("reasoning_content")
+
+    message_event: dict[str, Any] = {
+        "type": "message_delta",
+        "message_id": message_id,
+        "thread_id": thread_id,
+    }
+    message_event["cotent_delta"] = content if isinstance(content, str) else None
+    message_event["reasoning_content_delta"] = (
+        reasoning_content
+        if isinstance(reasoning_content, str) and reasoning_content
+        else None
+    )
+    message_event["additional_kwargs_reasoning_content"] = (
+        additional_kwargs_reasoning_content
+        if isinstance(additional_kwargs_reasoning_content, str)
+        and additional_kwargs_reasoning_content
+        else None
+    )
+
+    if tool_call_chunks := agent_msg.get("tool_call_chunks"):
+        if isinstance(tool_call_chunks, list):
+            for tool_call_chunk in tool_call_chunks:
+                if not isinstance(tool_call_chunk, dict):
+                    continue
+                if tool_call_chunk.get("args") is not None and isinstance(
+                    tool_call_chunk.get("args"), str
+                ):
+                    args = json.dumps(tool_call_chunk.get("args"), ensure_ascii=False)
+                else:
+                    args = None
+
+                if (
+                    not tool_call_chunk.get("id")
+                    and not tool_call_chunk.get("name")
+                    and not args
+                ):
+                    continue
+
+                events.append(
+                    {
+                        "type": "tool_call",
+                        "message_id": message_id,
+                        "thread_id": thread_id,
+                        "tool_call_id": str(tool_call_chunk.get("id")),
+                        "name": str(tool_call_chunk.get("name")),
+                        "args": args,
+                        "index": int(tool_call_chunk.get("index", 0)),
+                    }
+                )
+
+
+def _lc_message_v3_dispather(
+    event: dict[str, Any], *, message_id: str, thread_id: str | None
+) -> dict[str, Any] | None:
+
+    # v3版本尚未稳定，后续会将整套消息协议直接迁移，
+    # 按照目前的设计方式来说，大家好像现在也不执着于
+    # to show the reasoning process, because a lot of agent products prefer directly showing the input state and the output state，Maybe with some summary
+
+    event_type = event.get("event")
+    if (
+        event_type in ("message-start", "content-block-start", "message-finish")
+        or not message_id
+    ):
+        return None
+
+    if event_type == "content-block-delta":
+        delta = event.get("delta") if isinstance(event.get("delta"), dict) else None
+        text = delta.get("text")
+        if delta.get("type") == "text_delta" and isinstance(text, str) and text:
+            return {
+                "type": "message_delta",
+                "message_id": message_id,
+                "content_delta": text,
+                "thread_id": thread_id,
+            }
+        return None
+
+    if event_type == "content-block-finish":
+        # 专门处理工具的调用完成的事件， 这个时候，event里面会有一个content字段，里面包含了工具调用的结果
+        content = (
+            event.get("content") if isinstance(event.get("content"), str) else None
+        )
+        if (
+            event.get("type") != "tool_call"
+            or not event.get("id")
+            and content.get("name")
+        ):
+            return None
+
+        return {
+            "type": "tool_call",
+            "message_id": message_id,
+            "thread_id": thread_id,
+            "tool_call_id": content.get("id"),
+            "name": content.get("name"),
+            "args": content.get("args") if content.get("args") else {},
+            "index": event.get("index") if event.get("index") is not None else 0,
+        }
+
+
+def _make_lc_message_to_standard(
+    agent_msg: dict[str, Any] | Any,
+    *,
+    agent_metadata: dict[str, Any] | None,
+    thread_id: str | None,
+    message_ids: dict[tuple[str, str], str],
+) -> list[dict[str, Any]]:
+    event_envolope: list[dict[str, Any]] = []
+
+    # 构建消息ID
+    stream_msg_key = _make_stream_msg_key(agent_metadata, thread_id)
+
+    # 兼容v3的格式
+    if isinstance(agent_msg, dict) and isinstance(agent_msg.get("event"), str):
+        # message-start', 'role': 'ai', 'id': 'lc_run--019fe66c-12dd-7e33-9785-49084a241a6e' start的id会串联整个执行周期的整体文件
+        if agent_msg.get("event") == "message-start" and agent_msg.get("id"):
+            llm_og_msg_id = str(agent_msg.get("id"))
+        else:
+            llm_og_msg_id = None
+        message_id: str = _assign_stream_msg_id(
+            message_ids, stream_msg_key, llm_og_msg_id
+        )
+        standard_stream_event = _lc_message_v3_dispather(
+            event=agent_msg, message_id=message_id, thread_id=thread_id
+        )
+        return (
+            [standard_stream_event] if standard_stream_event else []
+        )  # ty: ignore[invalid-return-type]
+
+    # 初始的v2的格式
+    if isinstance(agent_msg, AIMessageChunk):
+        agent_msg_dict = agent_msg.model_dump()
+    elif isinstance(agent_msg, dict):
+        agent_msg_dict = dict(agent_msg)
+    else:
+        agent_msg_dict = {"content": str(agent_msg)}
+
+    message_id: str = str(agent_msg_dict.get("id")) or _assign_stream_msg_id(
+        message_ids, stream_msg_key
+    )
+    return _lc_message_v2_dispather(
+        agent_msg=agent_msg_dict, message_id=message_id, thread_id=thread_id
+    )
+
+
 async def stream_agent_response(
     *,
     agent_slug: str,
@@ -539,6 +703,33 @@ async def stream_agent_response(
     Returns:
         AsyncIterator[bytes]: _description_
     """
+
+    # 统一消息传递格式
+    def make_agent_stream_event(
+        status: str | None = None,
+        content: Any = None,
+        **kwargs: Any,
+    ) -> bytes:
+        """构建 agent 流式输出的事件格式"""
+        thread_id = (
+            kwargs.pop("thread_id", None)
+            or runtime_metadata.get("thread_id")
+            or thread_id
+        )
+        return (
+            json.dumps(
+                {
+                    "request_id": runtime_metadata.get("request_id"),
+                    "response": content,
+                    "thread_id": thread_id,
+                    "status": status,
+                    **kwargs,
+                },
+                ensure_ascii=False,
+            ).encode("utf-8")
+            + b"\n"
+        )
+
     # guard
     if not thread_id:
         thread_id = str(uuid.uuid4())
@@ -586,6 +777,10 @@ async def stream_agent_response(
         ),  # ty:ignore[invalid-argument-type]
     )
 
+    # agent任务执行任务状态
+    current_agent_state = ""
+    message_ids: dict[tuple[str, str], str] = {}
+
     # 确保当前的会话存在
     conv_repo = ConversationRepository(db)
 
@@ -603,13 +798,74 @@ async def stream_agent_response(
         messages,  # ty:ignore[invalid-argument-type]
         runtime_context=agent_runtime_context,
     ):
-        if method in {"messages", "values", "agent_execute_event"}:
-            yield method, payload
+        if method == "values":
+            agent_state = payload
+            yield make_agent_stream_event(
+                status="agent_state",
+                content=agent_state,
+                runtime_metadata=runtime_metadata,
+            )
+            continue
 
-        #  if mode == "values":
-        #         agent_state = extract_agent_state(payload if isinstance(payload, dict) else {})
-        #         signature = _agent_state_signature(agent_state)
-        #         if signature and signature != last_agent_state_signature:
-        #             last_agent_state_signature = signature
-        #             yield make_chunk(status="agent_state", agent_state=agent_state, meta=meta)
-        #         continue
+        if method == "agent_execute_state":
+            yield make_agent_stream_event(
+                status="agent_execute_state",
+                event=payload,
+                namespace=payload.get("namespace") if isinstance(payload, dict) else [],
+                thread_id=(
+                    payload.get("thread_id") if isinstance(payload, dict) else thread_id
+                ),
+                runtime_metadata=runtime_metadata,
+            )
+            continue
+
+        # 走messages methods下的消息输出流，上面俩只是个例罢了。以下是message输出流中的具体内容
+        # message的payload下，输出的整体内容应该返回的是具体的data,可能还需要附属的metadata
+
+        # {'namespace': [], 'timestamp': 1786266457150,
+        # 'data': (
+        #     {
+        #     'event': 'content-block-delta', 'index': 0,
+        #     'delta': {
+        #         'type': 'reasoning-delta',
+        #         'reasoning': '要求'
+        #         }
+        #     },
+        # {'ls_integration': 'langchain_chat_model',
+        #  'langgraph_step': 1,
+        #  'langgraph_node': 'model',
+        #  'langgraph_triggers': ('branch:to:model',),
+        #  'langgraph_path': ('__pregel_pull', 'model'),
+        #  'langgraph_checkpoint_ns': 'model:41e8ae3b-894e-75e1-f0c0-bd10eef8787f',
+        #  'checkpoint_ns': 'model:41e8ae3b-894e-75e1-f0c0-bd10eef8787f',
+        #  'ls_provider': 'deepseek',
+        #  'ls_model_name': 'deepseek-v4-pro',
+        #  'ls_model_type': 'chat',
+        #  'ls_temperature': None,
+        #  'lc_versions': {'langchain-core': '1.4.9', 'langchain': '1.3.14'},
+        #  'run_id': '019fe5c7-121f-7c13-ad86-86862d2c8f2b'
+        #  })}
+        agent_msg, agent_metadata = payload
+        standard_stream_events = _make_lc_message_to_standard(
+            agent_msg=agent_msg,
+            agent_metadata=agent_metadata,
+            thread_id=thread_id,
+            message_ids=message_ids,
+        )
+
+        for standard_stream_event in standard_stream_events:
+            if standard_stream_event.get("type") !="message_delta":
+                content = ""
+            else:
+                content = standard_stream_event.get("content", "")
+            
+            yield make_agent_stream_event(
+                status = "loading",
+                content = content,
+                stream_event = standard_stream_events,
+                metadata = agent_metadata,
+                thread_id = thread_id
+            )
+            
+
+

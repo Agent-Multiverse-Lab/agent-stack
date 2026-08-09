@@ -220,19 +220,15 @@ class Attachment(Base):
     __table_args__ = (
         UniqueConstraint("file_id", name="uq_attachment_file_id"),
         Index("ix_attachment_user_library", "user_id", "deleted_at", "id"),
-        Index("ix_attachment_status_created_at", "status", "created_at"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="附件ID")
     file_id = Column(String(36), nullable=False, comment="附件业务标识")
     user_id = Column(Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, comment="所属用户ID")
-    status = Column(String(16), nullable=False, default="pending", comment="附件状态")
-    attachment_name = Column(String(255), nullable=False, comment="文件名")
-    attachment_type = Column(String(128), nullable=False, comment="文件类型")
-    attachment_size = Column(Integer, nullable=False, comment="文件大小")
-    original_object_name = Column(String(1024), nullable=False, comment="原文件 MinIO 对象名")
-    markdown_object_name = Column(String(1024), nullable=True, comment="解析后 Markdown 对象名")
-    error_message = Column(Text, nullable=True, comment="最近一次附件处理错误")
+    file_name = Column(String(255), nullable=False, comment="文件名")
+    content_type = Column(String(128), nullable=False, comment="文件 MIME 类型")
+    file_size = Column(Integer, nullable=False, comment="文件字节数")
+    object_name = Column(String(1024), nullable=False, comment="当前 MinIO 对象名")
     deleted_at = Column(DateTime(timezone=True), nullable=True, comment="删除时间")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), comment="更新时间")

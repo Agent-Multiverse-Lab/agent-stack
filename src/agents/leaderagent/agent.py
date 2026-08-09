@@ -28,7 +28,7 @@ class LeaderAgent(BaseAgent):
     """负责规划、委派的顶层 Agent。"""
 
     name = "leader_agent"
-    description = "总设计师"
+    description = "通用多智能体编排器"
     context = LeaderAgentContext
     agent_context = LeaderAgentContext
 
@@ -37,7 +37,7 @@ class LeaderAgent(BaseAgent):
 
     def _create_middlewares(self, context):
         return [
-            create_custom_filesystem_middleware(context=context),
+            # create_custom_filesystem_middleware(context=context),
             create_subagent_middleware(
                 subagents=[
                     SearchAgent(),

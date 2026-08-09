@@ -8,14 +8,12 @@ from pydantic import BaseModel, Field
 class LibraryAttachmentItem(BaseModel):
     """附件页面中的一个文件。"""
 
-    id: str
+    file_id: str
     file_name: str
     suffix: str
     content_type: str
     file_size: int
     category: str
-    status: str
-    parse_error: str | None
     access_url: str
     created_at: datetime
     updated_at: datetime

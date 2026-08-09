@@ -13,6 +13,11 @@ This file is the single source of repository guidance for Claude/Codex-style cod
   continuing with implementation. Routine operations that do not require
   design, such as installing an explicitly requested dependency, do not require
   a specification.
+- Write design specifications and implementation plans as positive, executable
+  scope. Specify only the behavior to implement, affected boundaries and public
+  contracts, concrete file modifications, and validation steps required by the
+  current request. Every listed item must correspond to work that will actually
+  be performed.
 - When creating or revising a design specification, use the `ponytail` skill
   before presenting it. Challenge every proposed file, component, abstraction,
   and compatibility path; remove anything that is not required for the smallest
@@ -150,7 +155,6 @@ under `src/agents/subagents/`.
   are transitional. Migrate them in a dedicated structural refactor before
   adding substantial new behavior; do not opportunistically add empty files.
 - `AgentManager` in `src/agents/manager.py` discovers both groups, instantiates `BaseAgent` subclasses, and separately records top-level IDs so internal subagents are not exposed as public conversation agents.
-- `LeaderAgent` replaced the former `DesignAgent`. Worker startup registration migrates the old database slug and its `Conversation.agent_id` / `AgentRun.agent_id` references; `AgentManager` keeps `DesignAgent` only as a non-public runtime compatibility alias for already-loaded work.
 - `BaseAgent.stream_messages(...)` uses LangGraph `astream(...)`. `BaseAgent.stream_messages_with_event(...)` consumes `astream_events(version="v3")` and currently forwards the `messages` channel's `params.data` payload.
 - `LeaderAgent` delegates bounded search, citation validation, and outline work
   through the local `SubAgentMiddleware`. The middleware exposes Run-backed
@@ -219,9 +223,10 @@ under `src/agents/subagents/`.
 - `Attachment` is a user-owned file resource and must not carry a Conversation
   foreign key. `MessageAttachment` records only that a Message used an
   Attachment; deleting a Conversation removes message references, not the
-  Attachment. Attachment files use the private `attachments` MinIO bucket,
-  stop after Parser-to-Markdown conversion, and must never create or reuse
-  `KnowledgeFile`, Chunk, Embedding, or Milvus records.
+  Attachment. Attachment files use the private `attachment` MinIO bucket and
+  remain uploaded originals; the Worker must not query, move, parse, or clean
+  them, and they must never create or reuse `KnowledgeFile`, Chunk, Embedding,
+  or Milvus records.
 - `server/service/knowledge_service.py` exposes module-level use-case functions;
   do not wrap them in a Service class. The module assembles the configured model
   and owns the parsing boundary: original files and parsed Markdown use
