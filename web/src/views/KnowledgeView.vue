@@ -104,29 +104,29 @@ onUnmounted(() => {
   motionMatcher = null
 })
 
-/** 生成只用于本地页面状态的文件标识。 */
-function createLocalFileId(): string {
+/** 生成只用于当前页面状态的文件标识。 */
+function createFileId(): string {
   return crypto.randomUUID()
 }
 
-/** 将浏览器文件选择结果转换为知识页的本地文件记录。 */
+/** 将浏览器文件选择结果转换为知识页文件记录。 */
 function createKnowledgeFile(file: File): KnowledgeFileItem {
-  const extension = file.name.split(".").pop()?.toLocaleUpperCase() || "FILE"
+  const extension = file.name.split(".").pop()?.toUpperCase() || "FILE"
 
   return {
-    id: createLocalFileId(),
+    id: createFileId(),
     source: file,
     name: file.name,
     size: file.size,
     mimeType: file.type,
     extension,
     lastModified: file.lastModified,
-    status: "local"
+    status: "selected"
   }
 }
 
-/** 合并新选择的本地文件，并保持当前选择稳定。 */
-function addLocalFiles(selectedFiles: File[]) {
+/** 合并新选择的文件，并保持当前选择稳定。 */
+function addFiles(selectedFiles: File[]) {
   const existingFiles = new Set(
     files.value.map((file) =>
       [file.name, file.size, file.lastModified].join(":")
@@ -145,8 +145,8 @@ function addLocalFiles(selectedFiles: File[]) {
   selectedFileId.value ??= additions[0]?.id ?? null
 }
 
-/** 从本地文件集合移除一项，并选择最接近的剩余文件。 */
-function removeLocalFile(fileId: string) {
+/** 从文件集合移除一项，并选择最接近的剩余文件。 */
+function removeFile(fileId: string) {
   const fileIndex = files.value.findIndex((file) => file.id === fileId)
   if (fileIndex < 0) return
 
@@ -162,32 +162,38 @@ function removeLocalFile(fileId: string) {
 <template>
   <main
     ref="knowledgeView"
-    class="knowledge-view"
+    class="grid h-dvh w-full min-h-0 min-w-0 overflow-hidden gap-4 bg-mist p-4 text-sm text-graphite [grid-template-rows:minmax(0,1fr)] [grid-template-areas:'files_chat_actions'] max-[720px]:overflow-y-auto max-[720px]:grid-cols-[minmax(0,1fr)] max-[720px]:[grid-template-areas:'chat'_'files'_'actions'] max-[720px]:grid-rows-none max-[720px]:[grid-auto-rows:calc(100dvh_-_32px)]"
     :class="{
-      'is-files-collapsed': filesCollapsed,
-      'is-tools-collapsed': toolsCollapsed
+      '[grid-template-columns:minmax(0,1fr)_minmax(0,1.92fr)_minmax(0,1fr)]':
+        !filesCollapsed && !toolsCollapsed,
+      '[grid-template-columns:56px_minmax(0,1.92fr)_minmax(0,1fr)]':
+        filesCollapsed && !toolsCollapsed,
+      '[grid-template-columns:minmax(0,1fr)_minmax(0,1.92fr)_56px]':
+        !filesCollapsed && toolsCollapsed,
+      '[grid-template-columns:56px_minmax(0,1fr)_56px]':
+        filesCollapsed && toolsCollapsed
     }"
   >
     <KnowledgeFilesComponent
-      class="knowledge-view-files"
+      class="[grid-area:files]"
       :files="files"
       :selected-file-id="selectedFileId"
       :collapsed="filesCollapsed"
       presentation="panel"
       :open="false"
-      @files-selected="addLocalFiles"
+      @files-selected="addFiles"
       @select="selectedFileId = $event"
-      @remove="removeLocalFile"
+      @remove="removeFile"
       @toggle-collapse="toggleFilesCollapsed"
     />
 
     <KnowledgeChatComponent
-      class="knowledge-view-chat"
+      class="[grid-area:chat]"
       :files="files"
     />
 
     <KnowledgeFileActionsComponent
-      class="knowledge-view-actions"
+      class="[grid-area:actions]"
       :collapsed="toolsCollapsed"
       presentation="panel"
       :open="false"
@@ -195,79 +201,3 @@ function removeLocalFile(fileId: string) {
     />
   </main>
 </template>
-
-<style scoped>
-@reference "../styles/index.css";
-
-.knowledge-view {
-  @apply grid h-dvh w-full min-h-0 min-w-0 overflow-hidden;
-
-  grid-template-columns:
-    minmax(0, 1fr)
-    minmax(0, 1.92fr)
-    minmax(0, 1fr);
-  grid-template-areas: "files chat actions";
-  grid-template-rows: minmax(0, 1fr);
-  gap: 16px;
-  width: 100%;
-  box-sizing: border-box;
-  padding: 16px;
-  caret-color: transparent;
-  color: var(--color-text);
-  background: var(--color-surface-muted);
-  font-size: 14px;
-}
-
-.knowledge-view.is-files-collapsed {
-  grid-template-columns:
-    56px
-    minmax(0, 1.92fr)
-    minmax(0, 1fr);
-}
-
-.knowledge-view.is-tools-collapsed {
-  grid-template-columns:
-    minmax(0, 1fr)
-    minmax(0, 1.92fr)
-    56px;
-}
-
-.knowledge-view.is-files-collapsed.is-tools-collapsed {
-  grid-template-columns: 56px minmax(0, 1fr) 56px;
-}
-
-.knowledge-view-files {
-  grid-area: files;
-}
-
-.knowledge-view-chat {
-  grid-area: chat;
-}
-
-.knowledge-view-actions {
-  grid-area: actions;
-}
-
-.knowledge-view :deep(input),
-.knowledge-view :deep(textarea),
-.knowledge-view :deep([contenteditable="true"]) {
-  user-select: text;
-  caret-color: auto;
-}
-
-@media (max-width: 720px) {
-  .knowledge-view,
-  .knowledge-view.is-files-collapsed,
-  .knowledge-view.is-tools-collapsed,
-  .knowledge-view.is-files-collapsed.is-tools-collapsed {
-    overflow-y: auto;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas:
-      "chat"
-      "files"
-      "actions";
-    grid-template-rows: none;
-    grid-auto-rows: calc(100dvh - 32px);
-  }
-}
-</style>
