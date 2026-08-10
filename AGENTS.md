@@ -370,7 +370,7 @@ uv run --no-sync alembic downgrade -1
 Local infrastructure and worker through Compose:
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d postgres redis minio worker
+docker compose -f docker/docker-compose.yml up -d postgres redis minio sandbox worker
 ```
 
 Targeted backend validation:

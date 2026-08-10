@@ -6,6 +6,7 @@ x-api-worker-env: &api-worker-env
   REDIS_URL: redis://redis:6379/0
   ENABLE_RUN_QUEUE: "true"
   ARQ_MAX_JOBS: "${ARQ_MAX_JOBS:-64}"
+  SANDBOX_PROVISIONER_URL: http://sandbox:8002
 
 services:
   minio:
@@ -55,6 +56,32 @@ services:
       - s2c-network
     restart: unless-stopped
 
+  sandbox:
+    build:
+      context: ../sandbox_server
+      dockerfile: Dockerfile
+    image: multi-agent-s2c-sandbox:${VERSION:-0.1.0}
+    container_name: s2c-sandbox
+    environment:
+      PROVISIONER_BACKEND: docker
+      DOCKER_SANDBOX_HOST: host.docker.internal
+    ports:
+      - "${SANDBOX_PROVISIONER_PORT:-8002}:8002"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./volume/sandbox:/app/saves
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; response = urlopen('http://localhost:8002/health', timeout=3); raise SystemExit(0 if response.status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - s2c-network
+    restart: unless-stopped
+
   api:
     build:
       context: ..
@@ -72,6 +99,10 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+      sandbox:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - s2c-network
     restart: unless-stopped
@@ -97,22 +128,10 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
-    networks:
-      - s2c-network
-    restart: unless-stopped
-
-  mongodb:
-    image: mongo:8
-    container_name: s2c-mongodb
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-mongo}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-mongo}
-      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-multi_agent_s2c}
-    ports:
-      - "${MONGODB_PORT:-27017}:27017"
-    volumes:
-      - ./volume/mongodb/data:/data/db
-      - ./volume/mongodb/configdb:/data/configdb
+      sandbox:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - s2c-network
     restart: unless-stopped
