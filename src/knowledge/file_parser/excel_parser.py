@@ -10,8 +10,8 @@ from typing import Any, BinaryIO
 import pandas as pd
 
 
-class TableParser:
-    name = "table"
+class ExcelParser:
+    name = "excel"
 
     async def to_markdown(
         self,

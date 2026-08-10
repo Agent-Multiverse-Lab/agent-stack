@@ -1,4 +1,3 @@
-from rich.abc import t
 import base64
 import binascii
 import json
@@ -8,12 +7,13 @@ from datetime import datetime
 from typing import Any
 
 from langchain.messages import HumanMessage
+from langchain_core.messages import AIMessageChunk
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.service.input_message_service import AgentInputMsg
 from server.utils.auth import AuthenticatedUser
-from src.agents import agent_manager
-from src.agents.base_agent import BaseAgent
+from src.agents import BaseAgent, agent_manager
+from src.agents import CustomAgentState as AgentState
 from src.database import (
     Agent,
     AgentRun,
@@ -506,6 +506,7 @@ async def _check_conv_status(
 def _make_stream_msg_key(
     agent_metadata: dict | None, thread_id: str | None
 ) -> tuple[str, str]:
+    # 从langchain的原生消息拿到生成的id,如果没有就直接拿thread_id替代
     if not isinstance(agent_metadata, dict):
         return thread_id or "", ""
     return thread_id or "", str(agent_metadata.get("run_id", ""))
@@ -520,6 +521,12 @@ def _assign_stream_msg_id(
         message_ids[key] = llm_og_msg_id
         return llm_og_msg_id
     return message_ids.setdefault(key, str(uuid.uuid4()))
+
+
+def _reslove_agent_state(agent_state: dict):
+    agent_todo = agent_state.get("todos")
+    agent_result: AgentState = {"agent_todo": list(agent_todo)}
+    return agent_result
 
 
 def _lc_message_v2_dispather(
@@ -643,8 +650,6 @@ def _make_lc_message_to_standard(
     thread_id: str | None,
     message_ids: dict[tuple[str, str], str],
 ) -> list[dict[str, Any]]:
-    event_envolope: list[dict[str, Any]] = []
-
     # 构建消息ID
     stream_msg_key = _make_stream_msg_key(agent_metadata, thread_id)
 
@@ -703,6 +708,9 @@ async def stream_agent_response(
     Returns:
         AsyncIterator[bytes]: _description_
     """
+    
+    # 构建运行中所需的repo
+    conv_repo = ConversationRepository(db)
 
     # 统一消息传递格式
     def make_agent_stream_event(
@@ -745,8 +753,7 @@ async def stream_agent_response(
     image_content: str | None = thread_input_message.image_content
     human_msg: HumanMessage = thread_input_message.langchain_msg
 
-    # 根据agent_id解析 agent 的运行配置
-
+    # 根据agent_id解析 agent 的运行配置，构建agent实例
     agent_item, agent_instacne = await _build_agent_runtime(
         agent_slug=agent_slug,
         user=current_user,
@@ -766,6 +773,7 @@ async def stream_agent_response(
         }
     )
 
+    # 构建构建agentu运行所需的上下文
     messages = [human_msg]
     agent_runtime_context = await _build_agent_runtime_context(
         agent_instance=agent_instacne,
@@ -778,11 +786,10 @@ async def stream_agent_response(
     )
 
     # agent任务执行任务状态
-    current_agent_state = ""
+    last_agent_state = ""
     message_ids: dict[tuple[str, str], str] = {}
 
-    # 确保当前的会话存在
-    conv_repo = ConversationRepository(db)
+    
 
     await _check_conv_status(
         conv_repo=conv_repo,
@@ -799,12 +806,24 @@ async def stream_agent_response(
         runtime_context=agent_runtime_context,
     ):
         if method == "values":
-            agent_state = payload
-            yield make_agent_stream_event(
-                status="agent_state",
-                content=agent_state,
-                runtime_metadata=runtime_metadata,
-            )
+            try:
+                agent_state = _reslove_agent_state(payload)
+                if not agent_state:
+                    agent_state = ""
+                else:
+                    agent_state = json.dumps(
+                        agent_state, ensure_ascii=False, sort_keys=True
+                    )
+            except Exception:
+                agent_state = str(agent_state)
+
+            if agent_state and agent_state != last_agent_state:
+                last_agent_state = agent_state
+                yield make_agent_stream_event(
+                    status="agent_state",
+                    content=agent_state,
+                    runtime_metadata=runtime_metadata,
+                )
             continue
 
         if method == "agent_execute_state":
@@ -845,6 +864,8 @@ async def stream_agent_response(
         #  'lc_versions': {'langchain-core': '1.4.9', 'langchain': '1.3.14'},
         #  'run_id': '019fe5c7-121f-7c13-ad86-86862d2c8f2b'
         #  })}
+        
+        # message输出的时候走的路径
         agent_msg, agent_metadata = payload
         standard_stream_events = _make_lc_message_to_standard(
             agent_msg=agent_msg,
@@ -854,18 +875,20 @@ async def stream_agent_response(
         )
 
         for standard_stream_event in standard_stream_events:
-            if standard_stream_event.get("type") !="message_delta":
+            if standard_stream_event.get("type") != "message_delta":
                 content = ""
             else:
                 content = standard_stream_event.get("content", "")
-            
+
             yield make_agent_stream_event(
-                status = "loading",
-                content = content,
-                stream_event = standard_stream_events,
-                metadata = agent_metadata,
-                thread_id = thread_id
+                status="loading",
+                content=content,
+                stream_event=standard_stream_events,
+                metadata=agent_metadata,
+                thread_id=thread_id,
             )
-            
 
 
+async def stream_resume_response():
+    # TODO interrupt后的断续重连
+    pass

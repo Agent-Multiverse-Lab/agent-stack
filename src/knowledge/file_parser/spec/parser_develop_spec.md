@@ -27,7 +27,7 @@ src/knowledge/file_parser/
 ├── markdown_parser.py
 ├── pdf_parser.py
 ├── pptx_parser.py
-├── table_parser.py
+├── excel_parser.py
 └── text_parser.py
 ```
 
@@ -48,7 +48,7 @@ src/knowledge/file_parser/
 | DOC | 不配置 | `DocParser` / Apache Tika | JSON HTML/文本中间态 |
 | Markdown | 不配置 | `MarkdownParser` / Python-Markdown | 原 Markdown |
 | TXT | 不配置 | `TextParser` / Python 文本读取 | JSON 文本中间态 |
-| CSV、XLSX | 不配置 | `TableParser` / pandas、openpyxl | Markdown 表格 |
+| CSV、XLSX | 不配置 | `ExcelParser` / pandas、openpyxl | Markdown 表格 |
 | PPTX | 不配置 | `PptxParser` / python-pptx | JSON 幻灯片中间态 |
 | HTML | 不配置 | `HtmlParser` / BeautifulSoup、markdownify | Markdown |
 

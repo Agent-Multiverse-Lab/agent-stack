@@ -1,11 +1,11 @@
 from .doc_parser import DocParser
 from .docx_parser import DoclingDocxParser, DocxParser
+from .excel_parser import ExcelParser
 from .html_parser import HtmlParser
 from .image_parser import ImageParser
 from .markdown_parser import MarkdownParser
 from .pdf_parser import DoclingPdfParser, OcrPdfParser, PlainPdfParser
 from .pptx_parser import PptxParser
-from .table_parser import TableParser
 from .text_parser import TextParser
 
 __all__ = [
@@ -13,12 +13,12 @@ __all__ = [
     "DoclingDocxParser",
     "DoclingPdfParser",
     "DocxParser",
+    "ExcelParser",
     "HtmlParser",
     "ImageParser",
     "MarkdownParser",
     "OcrPdfParser",
     "PlainPdfParser",
     "PptxParser",
-    "TableParser",
     "TextParser",
 ]

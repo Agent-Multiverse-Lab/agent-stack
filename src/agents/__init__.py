@@ -7,6 +7,7 @@ __all__ = [
     "BaseContext",
     "LeaderAgent",
     "agent_manager",
+    "CustomAgentState"
 ]
 
 
@@ -28,4 +29,8 @@ def __getattr__(name: str) -> Any:
         from .manager import agent_manager
 
         return agent_manager
+    if name == "CustomAgentState":
+            from .base_state import CustomAgentState
+    
+            return CustomAgentState
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

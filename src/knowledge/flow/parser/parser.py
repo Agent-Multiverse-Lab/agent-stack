@@ -11,11 +11,11 @@ from src.knowledge.file_parser import (
     DoclingDocxParser,
     DocParser,
     DocxParser,
+    ExcelParser,
     HtmlParser,
     ImageParser,
     MarkdownParser,
     PptxParser,
-    TableParser,
     TextParser,
 )
 from src.knowledge.file_parser.pdf_parser import (
@@ -86,7 +86,7 @@ class Parser:
                 "encoding": "utf-8-sig",
                 "normalize_newlines": True,
             },
-            "table": {
+            "excel": {
                 "suffix": [".csv", ".xlsx"],
                 "encoding": "utf-8-sig",
                 "delimiter": None,
@@ -258,7 +258,7 @@ class Parser:
         )
         return str(intermediate.get("text") or ""), parser, {}
 
-    async def _table(
+    async def _excel(
         self,
         file_source: str | Path | bytes | BinaryIO,
         *,
@@ -266,7 +266,7 @@ class Parser:
     ) -> tuple[str, object, dict[str, Any]]:
         suffix = Path(file_name).suffix.lower()
         config = self._config[suffix]
-        parser = TableParser()
+        parser = ExcelParser()
         markdown = await parser.to_markdown(
             file_source,
             file_name=file_name,
@@ -364,8 +364,8 @@ class Parser:
             ".md": self._markdown,
             ".markdown": self._markdown,
             ".txt": self._text,
-            ".csv": self._table,
-            ".xlsx": self._table,
+            ".csv": self._excel,
+            ".xlsx": self._excel,
             ".pptx": self._pptx,
             ".html": self._html,
             ".htm": self._html,
@@ -644,7 +644,7 @@ def _page_number(text: str) -> int | None:
 
 def _parser_name(suffix: str) -> str:
     if suffix in {".csv", ".xlsx"}:
-        return "table"
+        return "excel"
     if suffix in _IMAGE_SUFFIXES:
         return "image"
     if suffix in {".md", ".markdown"}:
