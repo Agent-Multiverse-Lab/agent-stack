@@ -4,6 +4,7 @@ import type {
   AgentRunEndEvent,
   AgentSummary,
   ThreadDetailResponse,
+  ThreadListResponse,
   ThreadResponse
 } from "@/types/chat"
 import type { UploadedAttachmentResponse } from "@/types/attachment"
@@ -46,6 +47,19 @@ const jsonPost = (payload: Record<string, unknown>): RequestInit => ({
 
 export const listChatAgents = (accessToken: string) =>
   authorizedJson<AgentSummary[]>("/api/chat/agents", accessToken)
+
+export const listThreads = (
+  accessToken: string,
+  options?: { query?: string; cursor?: string; limit?: number }
+) => {
+  const params = new URLSearchParams()
+  if (options?.query) params.set("q", options.query)
+  if (options?.cursor) params.set("cursor", options.cursor)
+  if (options?.limit) params.set("limit", String(options.limit))
+  const queryString = params.toString()
+  const path = queryString ? `/api/chat/thread?${queryString}` : "/api/chat/thread"
+  return authorizedJson<ThreadListResponse>(path, accessToken)
+}
 
 export const createThread = (agentId: string, accessToken: string) =>
   authorizedJson<ThreadResponse>(

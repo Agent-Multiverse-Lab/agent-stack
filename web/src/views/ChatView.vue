@@ -111,9 +111,21 @@ onBeforeUnmount(stop)
       class="inset-x-0 px-[clamp(0.75rem,4vw,2rem)]"
       :class="composerDocked
         ? 'shrink-0 bg-paper pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]'
-        : 'absolute top-1/2 -translate-y-1/2'"
+        : 'absolute top-[38%] -translate-y-1/2'"
     >
       <div class="mx-auto grid w-full max-w-[48rem] gap-2">
+        <div
+          v-if="!composerDocked && !loading"
+          class="mb-4 text-center select-none"
+        >
+          <h1 class="text-3xl font-semibold tracking-tight text-graphite sm:text-4xl">
+            Welcome to Multi-Agent S2C
+          </h1>
+          <p class="mt-2 text-sm text-slate sm:text-base">
+            What would you like to explore or build today?
+          </p>
+        </div>
+
         <p
           v-if="displayedError"
           class="m-0 rounded-md bg-danger/6 px-3 py-2 text-sm text-danger"

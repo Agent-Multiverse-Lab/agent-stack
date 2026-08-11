@@ -15,13 +15,16 @@ import {
   LogIn,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
   Settings,
   SquarePen,
   SquareTerminal
 } from "@lucide/vue"
+import { Tooltip as ATooltip } from "ant-design-vue"
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
 
 import logoUrl from "@/assets/logo.svg"
+import SearchChatComponent from "@/components/SearchChatComponent.vue"
 import SettingsComponent from "@/components/SettingsComponent.vue"
 import type { FeatureId } from "@/types/feature"
 
@@ -31,6 +34,7 @@ const router = useRouter()
 const sidebarCollapsed = ref(false)
 const mobileSidebarOpen = ref(false)
 const settingsOpen = ref(false)
+const searchOpen = ref(false)
 const isNarrowViewport = ref(false)
 
 let viewportQuery: MediaQueryList | null = null
@@ -50,14 +54,6 @@ const featureLinks: Array<{
 const pageTitle = computed(() =>
   typeof route.meta.title === "string" ? route.meta.title : "Chat"
 )
-const isChatRoute = computed(
-  () => route.name === "chat" || route.name === "conversation"
-)
-const sidebarVisible = computed(() =>
-  isNarrowViewport.value
-    ? mobileSidebarOpen.value
-    : !sidebarCollapsed.value
-)
 const isFeatureActive = (featureId: FeatureId | "knowledge") =>
   route.name === featureId
 
@@ -66,14 +62,23 @@ const updateViewport = (event?: MediaQueryListEvent) => {
   if (!isNarrowViewport.value) mobileSidebarOpen.value = false
 }
 
+const onGlobalKeydown = (event: KeyboardEvent) => {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault()
+    searchOpen.value = !searchOpen.value
+  }
+}
+
 onMounted(() => {
   viewportQuery = window.matchMedia("(max-width: 900px)")
   updateViewport()
   viewportQuery.addEventListener("change", updateViewport)
+  window.addEventListener("keydown", onGlobalKeydown)
 })
 
 onBeforeUnmount(() => {
   viewportQuery?.removeEventListener("change", updateViewport)
+  window.removeEventListener("keydown", onGlobalKeydown)
 })
 
 watch(
@@ -112,7 +117,7 @@ const openSettings = () => {
       :class="{
         'min-[900px]:w-[260px] min-[900px]:basis-[260px]':
           !isNarrowViewport && !sidebarCollapsed,
-        'min-[900px]:w-0 min-[900px]:basis-0':
+        'min-[900px]:w-[60px] min-[900px]:basis-[60px]':
           !isNarrowViewport && sidebarCollapsed,
         'max-[900px]:translate-x-0':
           isNarrowViewport && mobileSidebarOpen,
@@ -122,9 +127,16 @@ const openSettings = () => {
       aria-label="Application navigation"
     >
       <div
-        class="flex h-full w-[260px] min-w-[260px] flex-col overflow-hidden max-[900px]:w-[min(86vw,19rem)] max-[900px]:min-w-[min(86vw,19rem)]"
+        class="flex h-full flex-col overflow-hidden transition-[width] duration-200"
+        :class="sidebarCollapsed && !isNarrowViewport
+          ? 'w-[60px] min-w-[60px]'
+          : 'w-[260px] min-w-[260px] max-[900px]:w-[min(86vw,19rem)] max-[900px]:min-w-[min(86vw,19rem)]'"
       >
-        <header class="flex min-h-[3.25rem] items-center justify-between px-4 pt-3 pb-1">
+        <!-- Expanded Sidebar Header -->
+        <header
+          v-if="!sidebarCollapsed || isNarrowViewport"
+          class="flex min-h-[3.25rem] items-center justify-between px-4 pt-3 pb-1"
+        >
           <RouterLink
             class="inline-flex min-w-0 items-center gap-2 font-semibold tracking-[-0.02em]"
             :to="{ name: 'chat' }"
@@ -139,89 +151,159 @@ const openSettings = () => {
             <span class="truncate text-[0.95rem]">AU</span>
           </RouterLink>
 
-          <button
-            v-if="isNarrowViewport"
-            class="grid h-8 w-8 shrink-0 place-items-center rounded-sm bg-transparent text-slate hover:bg-graphite/8 hover:text-graphite"
-            type="button"
-            aria-label="Close sidebar"
-            @click="mobileSidebarOpen = false"
-          >
-            <PanelLeftClose
-              :size="18"
-              :stroke-width="1.8"
-              aria-hidden="true"
-            />
-          </button>
+          <div class="flex items-center gap-1">
+            <ATooltip placement="right" title="Search (Cmd+K)">
+              <button
+                class="grid h-8 w-8 shrink-0 place-items-center rounded-sm bg-transparent text-slate transition-colors hover:bg-graphite/8 hover:text-graphite"
+                type="button"
+                aria-label="Search conversations"
+                @click="searchOpen = true"
+              >
+                <Search
+                  :size="18"
+                  :stroke-width="1.8"
+                  aria-hidden="true"
+                />
+              </button>
+            </ATooltip>
+
+            <ATooltip placement="right" title="Collapse sidebar">
+              <button
+                class="grid h-8 w-8 shrink-0 place-items-center rounded-sm bg-transparent text-slate transition-colors hover:bg-graphite/8 hover:text-graphite"
+                type="button"
+                aria-label="Collapse sidebar"
+                @click="toggleSidebar"
+              >
+                <PanelLeftClose
+                  :size="18"
+                  :stroke-width="1.8"
+                  aria-hidden="true"
+                />
+              </button>
+            </ATooltip>
+          </div>
         </header>
 
-        <nav class="grid gap-2 px-1.5 pt-0.5 pb-2" aria-label="Primary navigation">
-          <div class="grid gap-px">
+        <!-- Mini Collapsed Sidebar Header -->
+        <header
+          v-else
+          class="flex min-h-[3.25rem] flex-col items-center justify-center gap-1 pt-3 pb-1"
+        >
+          <ATooltip placement="right" title="Expand sidebar">
             <button
-              class="grid min-h-9 w-full items-center gap-2 rounded-sm bg-transparent px-2.5 text-left text-sm [grid-template-columns:22px_minmax(0,1fr)] hover:bg-graphite/8"
+              class="grid h-8 w-8 shrink-0 place-items-center rounded-sm bg-transparent text-slate transition-colors hover:bg-graphite/8 hover:text-graphite"
               type="button"
-              @click="openNewConversation"
+              aria-label="Expand sidebar"
+              @click="toggleSidebar"
             >
-              <SquarePen
-                class="shrink-0"
+              <PanelLeftOpen
                 :size="18"
                 :stroke-width="1.8"
                 aria-hidden="true"
               />
-              <span class="truncate">New chat</span>
             </button>
+          </ATooltip>
+        </header>
+
+        <nav class="grid gap-2 px-1.5 pt-0.5 pb-2" aria-label="Primary navigation">
+          <div class="grid gap-px">
+            <ATooltip placement="right" :title="sidebarCollapsed && !isNarrowViewport ? 'New chat' : undefined">
+              <button
+                class="grid min-h-9 w-full items-center rounded-sm bg-transparent text-left text-sm hover:bg-graphite/8"
+                :class="sidebarCollapsed && !isNarrowViewport ? 'flex justify-center px-0' : '[grid-template-columns:22px_minmax(0,1fr)] gap-2 px-2.5'"
+                type="button"
+                @click="openNewConversation"
+              >
+                <SquarePen
+                  class="shrink-0"
+                  :size="18"
+                  :stroke-width="1.8"
+                  aria-hidden="true"
+                />
+                <span v-if="!sidebarCollapsed || isNarrowViewport" class="truncate">New chat</span>
+              </button>
+            </ATooltip>
           </div>
 
           <div class="grid gap-px" aria-label="Features">
-            <RouterLink
+            <ATooltip
               v-for="featureLink in featureLinks"
               :key="featureLink.id"
-              class="grid min-h-9 w-full items-center gap-2 rounded-sm bg-transparent px-2.5 text-sm [grid-template-columns:22px_minmax(0,1fr)] hover:bg-graphite/8"
-              :class="{
-                'bg-graphite/8 font-semibold': isFeatureActive(featureLink.id)
-              }"
-              :to="{ name: featureLink.id }"
-              @click="mobileSidebarOpen = false"
+              placement="right"
+              :title="sidebarCollapsed && !isNarrowViewport ? featureLink.label : undefined"
             >
-              <component
-                :is="featureLink.icon"
-                class="shrink-0"
-                :size="18"
-                :stroke-width="isFeatureActive(featureLink.id) ? 2 : 1.8"
-                aria-hidden="true"
-              />
-              <span class="truncate">
-                {{ featureLink.label }}
-              </span>
-            </RouterLink>
+              <RouterLink
+                class="grid min-h-9 w-full items-center rounded-sm bg-transparent text-sm hover:bg-graphite/8"
+                :class="[
+                  sidebarCollapsed && !isNarrowViewport ? 'flex justify-center px-0' : '[grid-template-columns:22px_minmax(0,1fr)] gap-2 px-2.5',
+                  { 'bg-graphite/8 font-semibold': isFeatureActive(featureLink.id) }
+                ]"
+                :to="{ name: featureLink.id }"
+                @click="mobileSidebarOpen = false"
+              >
+                <component
+                  :is="featureLink.icon"
+                  class="shrink-0"
+                  :size="18"
+                  :stroke-width="isFeatureActive(featureLink.id) ? 2 : 1.8"
+                  aria-hidden="true"
+                />
+                <span v-if="!sidebarCollapsed || isNarrowViewport" class="truncate">
+                  {{ featureLink.label }}
+                </span>
+              </RouterLink>
+            </ATooltip>
           </div>
         </nav>
 
         <div class="min-h-0 flex-1" />
 
         <footer class="grid gap-px px-1.5 pt-1 pb-3">
-          <RouterLink
-            class="flex min-h-9 items-center gap-2 rounded-sm bg-transparent px-2.5 text-left text-sm text-slate hover:bg-graphite/8 hover:text-graphite"
-            to="/login"
-          >
-            <LogIn
-              :size="17"
-              :stroke-width="1.8"
-              aria-hidden="true"
-            />
-            <span>Log in</span>
-          </RouterLink>
-          <button
-            class="flex min-h-9 items-center gap-2 rounded-sm bg-transparent px-2.5 text-left text-sm text-slate hover:bg-graphite/8 hover:text-graphite"
-            type="button"
-            @click="openSettings"
-          >
-            <Settings
-              :size="17"
-              :stroke-width="1.8"
-              aria-hidden="true"
-            />
-            <span>Settings</span>
-          </button>
+          <ATooltip v-if="sidebarCollapsed && !isNarrowViewport" placement="right" title="Search (Cmd+K)">
+            <button
+              class="flex min-h-9 items-center justify-center rounded-sm bg-transparent text-slate hover:bg-graphite/8 hover:text-graphite mb-1 w-full"
+              type="button"
+              aria-label="Search conversations"
+              @click="searchOpen = true"
+            >
+              <Search
+                :size="18"
+                :stroke-width="1.8"
+                aria-hidden="true"
+              />
+            </button>
+          </ATooltip>
+
+          <ATooltip placement="right" :title="sidebarCollapsed && !isNarrowViewport ? 'Log in' : undefined">
+            <RouterLink
+              class="flex min-h-9 items-center rounded-sm bg-transparent text-left text-sm text-slate hover:bg-graphite/8 hover:text-graphite"
+              :class="sidebarCollapsed && !isNarrowViewport ? 'justify-center px-0' : 'gap-2 px-2.5'"
+              to="/login"
+            >
+              <LogIn
+                :size="17"
+                :stroke-width="1.8"
+                aria-hidden="true"
+              />
+              <span v-if="!sidebarCollapsed || isNarrowViewport">Log in</span>
+            </RouterLink>
+          </ATooltip>
+
+          <ATooltip placement="right" :title="sidebarCollapsed && !isNarrowViewport ? 'Settings' : undefined">
+            <button
+              class="flex min-h-9 items-center rounded-sm bg-transparent text-left text-sm text-slate hover:bg-graphite/8 hover:text-graphite"
+              :class="sidebarCollapsed && !isNarrowViewport ? 'justify-center px-0' : 'gap-2 px-2.5'"
+              type="button"
+              @click="openSettings"
+            >
+              <Settings
+                :size="17"
+                :stroke-width="1.8"
+                aria-hidden="true"
+              />
+              <span v-if="!sidebarCollapsed || isNarrowViewport">Settings</span>
+            </button>
+          </ATooltip>
         </footer>
       </div>
     </aside>
@@ -237,45 +319,24 @@ const openSettings = () => {
     <main class="flex min-w-0 flex-1 flex-col overflow-hidden">
       <header class="group flex min-h-[52px] shrink-0 items-center justify-between gap-4 px-[clamp(0.75rem,2vw,1.25rem)] py-2">
         <div class="flex min-w-0 items-center gap-1.5">
-          <button
-            class="grid h-9 w-9 shrink-0 place-items-center rounded-sm bg-transparent text-slate hover:bg-mist hover:text-graphite"
-            type="button"
-            :aria-label="sidebarVisible ? 'Collapse sidebar' : 'Expand sidebar'"
-            :title="sidebarVisible ? 'Collapse sidebar' : 'Expand sidebar'"
-            @click="toggleSidebar"
-          >
-            <PanelLeftClose
-              v-if="sidebarVisible"
-              :size="19"
-              :stroke-width="1.8"
-              aria-hidden="true"
-            />
-            <PanelLeftOpen
-              v-else
-              :size="19"
-              :stroke-width="1.8"
-              aria-hidden="true"
-            />
-          </button>
           <h1 class="m-0 truncate text-base font-semibold tracking-[-0.02em]">
             {{ pageTitle }}
           </h1>
         </div>
 
         <nav
-          class="flex min-w-0 items-center gap-1.5"
-          aria-label="Account actions"
+          class="flex items-center gap-1"
+          aria-label="Secondary actions"
         >
           <button
-            v-if="isChatRoute"
-            class="grid h-9 w-9 shrink-0 place-items-center rounded-sm bg-transparent text-slate opacity-0 transition-colors duration-100 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-mist hover:text-graphite pointer-coarse:opacity-100"
+            class="grid h-9 w-9 place-items-center rounded-sm bg-transparent text-slate hover:bg-mist hover:text-graphite"
             type="button"
-            aria-label="New chat"
-            title="New chat"
+            aria-label="New conversation"
+            title="New conversation"
             @click="openNewConversation"
           >
             <SquarePen
-              :size="17"
+              :size="18"
               :stroke-width="1.8"
               aria-hidden="true"
             />
@@ -298,5 +359,10 @@ const openSettings = () => {
   <SettingsComponent
     :open="settingsOpen"
     @close="settingsOpen = false"
+  />
+
+  <SearchChatComponent
+    :open="searchOpen"
+    @close="searchOpen = false"
   />
 </template>

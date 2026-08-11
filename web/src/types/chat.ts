@@ -95,3 +95,9 @@ export interface AgentRunEndEvent {
   error?: string
   created_at: IsoDateTime
 }
+
+export interface ThreadListResponse {
+  items: ThreadSummaryResponse[]
+  next_cursor: string | null
+  has_more: boolean
+}

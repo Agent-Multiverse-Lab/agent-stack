@@ -7,9 +7,10 @@ import {
   ref,
   watch
 } from "vue"
-import { ArrowUp, Paperclip, Square } from "@lucide/vue"
+import { ArrowUp, Square } from "@lucide/vue"
 
 import AttachmentComponent from "@/components/AttachmentComponent.vue"
+import ChatActionMenuComponent from "@/components/chat/ChatActionMenuComponent.vue"
 import type { UploadedAttachmentResponse } from "@/types/attachment"
 
 const props = defineProps<{
@@ -139,7 +140,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
 
 <template>
   <form
-    class="flex w-full flex-col rounded-[1.7rem] border border-graphite/14 bg-paper p-2.5 shadow-[0_12px_36px_rgba(13,13,13,0.08)] transition-[border-color,box-shadow] duration-150 focus-within:border-graphite/24 focus-within:shadow-[0_14px_40px_rgba(13,13,13,0.11)] motion-reduce:transition-none"
+    class="relative flex w-full flex-col rounded-[1.7rem] border border-graphite/14 bg-paper p-2.5 shadow-[0_12px_36px_rgba(13,13,13,0.08)] transition-[border-color,box-shadow] duration-150 focus-within:border-graphite/24 focus-within:shadow-[0_14px_40px_rgba(13,13,13,0.11)] motion-reduce:transition-none"
     @submit.prevent="submit"
     @dragover.prevent
     @drop.prevent="handleDrop"
@@ -177,21 +178,11 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
         @change="handleFileInput"
       >
 
-      <button
-        class="grid size-10 shrink-0 place-items-center rounded-full bg-graphite/6 text-graphite transition-colors duration-150 hover:bg-graphite/10 disabled:cursor-not-allowed disabled:text-graphite/25 motion-reduce:transition-none"
+      <ChatActionMenuComponent
         :class="{ 'col-start-1 row-start-2': multiline }"
-        type="button"
         :disabled="disabled"
-        aria-label="Add attachments"
-        title="Add attachments"
-        @click="fileInput?.click()"
-      >
-        <Paperclip
-          :size="19"
-          :stroke-width="1.9"
-          aria-hidden="true"
-        />
-      </button>
+        @select-attachment="fileInput?.click()"
+      />
 
       <div
         ref="editor"

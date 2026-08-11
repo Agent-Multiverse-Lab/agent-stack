@@ -9,6 +9,8 @@ import LibraryView from "@/views/LibraryView.vue"
 import SandboxView from "@/views/SandboxView.vue"
 import StaticView from "@/views/StaticView.vue"
 
+import { useAuthStore } from "@/stores/useAuthStore"
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -77,6 +79,25 @@ const router = createRouter({
     }
   ],
   scrollBehavior: () => ({ top: 0 })
+})
+
+router.beforeEach((to, _from, next) => {
+  const authStore = useAuthStore()
+  const isAuthenticated = Boolean(authStore.accessToken)
+
+  if (to.name === "login") {
+    if (isAuthenticated) {
+      next({ name: "chat" })
+    } else {
+      next()
+    }
+  } else {
+    if (!isAuthenticated) {
+      next({ name: "login" })
+    } else {
+      next()
+    }
+  }
 })
 
 export default router

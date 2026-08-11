@@ -12,6 +12,8 @@ import {
 } from "ant-design-vue"
 import type { Rule } from "ant-design-vue/es/form"
 
+import { Lock, Mail } from "@lucide/vue"
+
 import { useAuthStore } from "@/stores/useAuthStore"
 
 interface AuthFormModel {
@@ -95,6 +97,50 @@ const showLogin = () => {
   formRef.value?.clearValidate("confirmPassword")
 }
 
+const onBeforeEnter = (el: Element) => {
+  const htmlEl = el as HTMLElement
+  htmlEl.style.height = "0px"
+  htmlEl.style.opacity = "0"
+  htmlEl.style.transform = "translateY(-12px)"
+  htmlEl.style.transition =
+    "height 520ms cubic-bezier(0.22, 1, 0.36, 1), opacity 420ms cubic-bezier(0.22, 1, 0.36, 1), transform 520ms cubic-bezier(0.22, 1, 0.36, 1)"
+}
+
+const onEnter = (el: Element) => {
+  const htmlEl = el as HTMLElement
+  htmlEl.getBoundingClientRect()
+  htmlEl.style.height = `${htmlEl.scrollHeight}px`
+  htmlEl.style.opacity = "1"
+  htmlEl.style.transform = "translateY(0)"
+}
+
+const onAfterEnter = (el: Element) => {
+  const htmlEl = el as HTMLElement
+  htmlEl.style.height = "auto"
+}
+
+const onBeforeLeave = (el: Element) => {
+  const htmlEl = el as HTMLElement
+  htmlEl.style.height = `${htmlEl.scrollHeight}px`
+  htmlEl.style.opacity = "1"
+  htmlEl.style.transform = "translateY(0)"
+  htmlEl.style.transition =
+    "height 460ms cubic-bezier(0.22, 1, 0.36, 1), opacity 360ms cubic-bezier(0.22, 1, 0.36, 1), transform 460ms cubic-bezier(0.22, 1, 0.36, 1)"
+}
+
+const onLeave = (el: Element) => {
+  const htmlEl = el as HTMLElement
+  htmlEl.getBoundingClientRect()
+  htmlEl.style.height = "0px"
+  htmlEl.style.opacity = "0"
+  htmlEl.style.transform = "translateY(-12px)"
+}
+
+const onAfterLeave = (el: Element) => {
+  const htmlEl = el as HTMLElement
+  htmlEl.style.height = ""
+}
+
 const submit = async () => {
   clearFeedback()
   submitting.value = true
@@ -128,17 +174,17 @@ const submit = async () => {
 <template>
   <AConfigProvider :theme="authTheme">
     <section
-      class="w-full max-w-[280px]"
+      class="w-full max-w-[310px]"
       aria-labelledby="authentication-title"
     >
-      <div class="mb-8">
+      <div class="mb-7">
         <h1
           id="authentication-title"
-          class="m-0 text-[30px] leading-[1.08] font-semibold tracking-[-0.04em] text-[#10272b]"
+          class="m-0 text-[32px] leading-[1.1] font-bold tracking-[-0.03em] text-[#10272b]"
         >
           {{ title }}
         </h1>
-        <p class="mb-0 mt-3 text-[13px] leading-5 text-[#66777a]">
+        <p class="mb-0 mt-2 text-[14px] leading-5 text-[#66777a]">
           {{ description }}
         </p>
       </div>
@@ -159,12 +205,16 @@ const submit = async () => {
             inputmode="email"
             :maxlength="255"
             name="email"
-            placeholder="Email"
+            placeholder="Enter your email"
             type="email"
             aria-label="Email"
             :disabled="submitting"
             @input="clearFeedback"
-          />
+          >
+            <template #prefix>
+              <Mail class="mr-1.5 h-4 w-4 text-[#748386]" aria-hidden="true" />
+            </template>
+          </AInput>
         </AFormItem>
 
         <AFormItem class="mb-4!" name="password">
@@ -173,22 +223,27 @@ const submit = async () => {
             :autocomplete="isRegister ? 'new-password' : 'current-password'"
             :maxlength="128"
             name="password"
-            placeholder="Password"
+            placeholder="Enter your password"
             aria-label="Password"
             :disabled="submitting"
             @input="clearFeedback"
-          />
+          >
+            <template #prefix>
+              <Lock class="mr-1.5 h-4 w-4 text-[#748386]" aria-hidden="true" />
+            </template>
+          </AInputPassword>
         </AFormItem>
 
         <Transition
-          enter-active-class="overflow-hidden transition-[max-height,opacity,transform] duration-[220ms] ease-out motion-reduce:transition-none"
-          enter-from-class="max-h-0 -translate-y-1.5 opacity-0"
-          enter-to-class="max-h-32 translate-y-0 opacity-100"
-          leave-active-class="overflow-hidden transition-[max-height,opacity,transform] duration-[220ms] ease-in motion-reduce:transition-none"
-          leave-from-class="max-h-32 translate-y-0 opacity-100"
-          leave-to-class="max-h-0 -translate-y-1.5 opacity-0"
+          :css="false"
+          @before-enter="onBeforeEnter"
+          @enter="onEnter"
+          @after-enter="onAfterEnter"
+          @before-leave="onBeforeLeave"
+          @leave="onLeave"
+          @after-leave="onAfterLeave"
         >
-          <div v-if="isRegister" class="max-h-32">
+          <div v-if="isRegister" class="overflow-hidden">
             <AFormItem class="mb-4!" name="confirmPassword">
               <AInputPassword
                 v-model:value="form.confirmPassword"
@@ -196,11 +251,15 @@ const submit = async () => {
                 autofocus
                 :maxlength="128"
                 name="confirmPassword"
-                placeholder="Confirm password"
-                aria-label="Confirm password"
+                placeholder="Ensure your password"
+                aria-label="Ensure your password"
                 :disabled="submitting"
                 @input="clearFeedback"
-              />
+              >
+                <template #prefix>
+                  <Lock class="mr-1.5 h-4 w-4 text-[#748386]" aria-hidden="true" />
+                </template>
+              </AInputPassword>
             </AFormItem>
           </div>
         </Transition>
@@ -208,7 +267,7 @@ const submit = async () => {
         <AAlert
           v-if="registrationComplete"
           class="mb-4"
-          message="Account created. Log in to continue."
+          message="Account created successfully. Please log in."
           show-icon
           type="success"
         />
@@ -220,28 +279,42 @@ const submit = async () => {
           type="error"
         />
 
-        <div class="grid gap-3">
+        <div class="mt-2 grid gap-4">
           <AButton
-            class="h-[42px]! w-full max-w-[240px] justify-self-center text-sm! font-semibold! shadow-[0_6px_16px_rgba(21,84,90,0.20)]!"
+            class="h-[44px]! w-full text-base! font-semibold! shadow-[0_6px_16px_rgba(21,84,90,0.18)]!"
             block
             html-type="submit"
             :loading="submitting"
             size="large"
             type="primary"
           >
-            {{ isRegister ? "Create Account" : "Login" }}
+            {{ isRegister ? "Create Account" : "Sign In" }}
           </AButton>
 
-          <AButton
-            class="h-[42px]! w-full max-w-[240px] justify-self-center text-sm! font-semibold!"
-            block
-            html-type="button"
-            size="large"
-            :disabled="submitting"
-            @click="isRegister ? showLogin() : showRegister()"
-          >
-            {{ isRegister ? "Back to Login" : "Create Account" }}
-          </AButton>
+          <div class="text-center text-sm text-[#66777a]">
+            <template v-if="isRegister">
+              Already have an account?
+              <button
+                type="button"
+                class="ml-1 font-semibold text-[#15545a] hover:underline focus:outline-none"
+                :disabled="submitting"
+                @click="showLogin"
+              >
+                Log in
+              </button>
+            </template>
+            <template v-else>
+              Don't have an account?
+              <button
+                type="button"
+                class="ml-1 font-semibold text-[#15545a] hover:underline focus:outline-none"
+                :disabled="submitting"
+                @click="showRegister"
+              >
+                Create one
+              </button>
+            </template>
+          </div>
         </div>
       </AForm>
     </section>
