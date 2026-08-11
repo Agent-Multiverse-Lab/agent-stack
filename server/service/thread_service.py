@@ -5,7 +5,7 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Any
-
+from src.utils import logger
 from langchain.messages import HumanMessage
 from langchain_core.messages import AIMessageChunk
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -524,8 +524,7 @@ def _assign_stream_msg_id(
 
 
 def _reslove_agent_state(agent_state: dict):
-    agent_todo = agent_state.get("todos")
-    agent_result: AgentState = {"agent_todo": list(agent_todo)}
+    agent_result: AgentState = {"agent_todo": list(agent_state.get("todos") or [])}
     return agent_result
 
 
@@ -686,6 +685,16 @@ def _make_lc_message_to_standard(
     )
 
 
+def _serialize_agent_state(agent_state: AgentState | None) -> str:
+    if not agent_state:
+        return ""
+    try:
+        agent_state = json.dumps(agent_state, ensure_ascii=False, sort_keys=True)
+        return agent_state
+    except Exception:
+        return str(agent_state)
+
+
 async def stream_agent_response(
     *,
     agent_slug: str,
@@ -708,9 +717,6 @@ async def stream_agent_response(
     Returns:
         AsyncIterator[bytes]: _description_
     """
-    
-    # 构建运行中所需的repo
-    conv_repo = ConversationRepository(db)
 
     # 统一消息传递格式
     def make_agent_stream_event(
@@ -766,7 +772,6 @@ async def stream_agent_response(
         {
             "query": query,
             "agent_slug": agent_item.slug,
-            "agent_instance": agent_instacne,
             "thread_id": thread_id,
             "uid": current_user.uid,
             "has_image": bool(image_content),
@@ -789,104 +794,85 @@ async def stream_agent_response(
     last_agent_state = ""
     message_ids: dict[tuple[str, str], str] = {}
 
-    
-
-    await _check_conv_status(
-        conv_repo=conv_repo,
-        thread_id=thread_id,
-        uid=current_user.uid,  # ty:ignore[invalid-argument-type]
-        agent_item=agent_item,
-    )
-
-    # TODO确保文件相关存在，此处按下不表
-
-    # FIXME: 通过 runtime_context 传值，避免把 context 重复透传给 astream_events。
-    async for method, payload in agent_instacne.stream_messages_with_event(
-        messages,  # ty:ignore[invalid-argument-type]
-        runtime_context=agent_runtime_context,
-    ):
-        if method == "values":
-            try:
-                agent_state = _reslove_agent_state(payload)
-                if not agent_state:
-                    agent_state = ""
-                else:
-                    agent_state = json.dumps(
-                        agent_state, ensure_ascii=False, sort_keys=True
-                    )
-            except Exception:
-                agent_state = str(agent_state)
-
-            if agent_state and agent_state != last_agent_state:
-                last_agent_state = agent_state
-                yield make_agent_stream_event(
-                    status="agent_state",
-                    content=agent_state,
-                    runtime_metadata=runtime_metadata,
-                )
-            continue
-
-        if method == "agent_execute_state":
-            yield make_agent_stream_event(
-                status="agent_execute_state",
-                event=payload,
-                namespace=payload.get("namespace") if isinstance(payload, dict) else [],
-                thread_id=(
-                    payload.get("thread_id") if isinstance(payload, dict) else thread_id
-                ),
-                runtime_metadata=runtime_metadata,
-            )
-            continue
-
-        # 走messages methods下的消息输出流，上面俩只是个例罢了。以下是message输出流中的具体内容
-        # message的payload下，输出的整体内容应该返回的是具体的data,可能还需要附属的metadata
-
-        # {'namespace': [], 'timestamp': 1786266457150,
-        # 'data': (
-        #     {
-        #     'event': 'content-block-delta', 'index': 0,
-        #     'delta': {
-        #         'type': 'reasoning-delta',
-        #         'reasoning': '要求'
-        #         }
-        #     },
-        # {'ls_integration': 'langchain_chat_model',
-        #  'langgraph_step': 1,
-        #  'langgraph_node': 'model',
-        #  'langgraph_triggers': ('branch:to:model',),
-        #  'langgraph_path': ('__pregel_pull', 'model'),
-        #  'langgraph_checkpoint_ns': 'model:41e8ae3b-894e-75e1-f0c0-bd10eef8787f',
-        #  'checkpoint_ns': 'model:41e8ae3b-894e-75e1-f0c0-bd10eef8787f',
-        #  'ls_provider': 'deepseek',
-        #  'ls_model_name': 'deepseek-v4-pro',
-        #  'ls_model_type': 'chat',
-        #  'ls_temperature': None,
-        #  'lc_versions': {'langchain-core': '1.4.9', 'langchain': '1.3.14'},
-        #  'run_id': '019fe5c7-121f-7c13-ad86-86862d2c8f2b'
-        #  })}
-        
-        # message输出的时候走的路径
-        agent_msg, agent_metadata = payload
-        standard_stream_events = _make_lc_message_to_standard(
-            agent_msg=agent_msg,
-            agent_metadata=agent_metadata,
+    try:
+        # 构建运行中所需的repo
+        conv_repo = ConversationRepository(db)
+        await _check_conv_status(
+            conv_repo=conv_repo,
             thread_id=thread_id,
-            message_ids=message_ids,
+            uid=current_user.uid,  # ty:ignore[invalid-argument-type]
+            agent_item=agent_item,
         )
 
-        for standard_stream_event in standard_stream_events:
-            if standard_stream_event.get("type") != "message_delta":
-                content = ""
-            else:
-                content = standard_stream_event.get("content", "")
+        # TODO确保文件相关存在，此处按下不表
 
-            yield make_agent_stream_event(
-                status="loading",
-                content=content,
-                stream_event=standard_stream_events,
-                metadata=agent_metadata,
+        # FIXME: 通过 runtime_context 传值，避免把 context 重复透传给 astream_events。
+        async for method, payload in agent_instacne.stream_messages_with_event(
+            messages,  # ty:ignore[invalid-argument-type]
+            runtime_context=agent_runtime_context,
+        ):
+            if method == "values":
+                try:
+                    agent_state = _reslove_agent_state(payload)
+                    currentr_agent_state = _serialize_agent_state(agent_state)
+                    if (
+                        currentr_agent_state
+                        and currentr_agent_state != last_agent_state
+                    ):
+                        last_agent_state = currentr_agent_state
+                        yield make_agent_stream_event(
+                            status="agent_state",
+                            content=agent_state,
+                            runtime_metadata=runtime_metadata,
+                        )
+                    continue
+                except Exception:
+                    import traceback
+
+                    print(traceback.print_exc())
+
+            if method == "agent_execute_state":
+                yield make_agent_stream_event(
+                    status="agent_execute_state",
+                    event=payload,
+                    namespace=(
+                        payload.get("namespace") if isinstance(payload, dict) else []
+                    ),
+                    thread_id=(
+                        payload.get("thread_id")
+                        if isinstance(payload, dict)
+                        else thread_id
+                    ),
+                    runtime_metadata=runtime_metadata,
+                )
+                continue
+
+            # message输出的时候走的路径
+            agent_msg, agent_metadata = payload
+            standard_stream_events = _make_lc_message_to_standard(
+                agent_msg=agent_msg,
+                agent_metadata=agent_metadata,
                 thread_id=thread_id,
+                message_ids=message_ids,
             )
+
+            for standard_stream_event in standard_stream_events:
+                if standard_stream_event.get("type") != "message_delta":
+                    content = ""
+                else:
+                    content = standard_stream_event.get("content", "")
+
+                yield make_agent_stream_event(
+                    status="loading",
+                    content=content,
+                    stream_event=standard_stream_events,
+                    metadata=agent_metadata,
+                    thread_id=thread_id,
+                )
+    except Exception as e:
+        import traceback
+
+        logger.exception(f"{traceback.print_exc()}")
 
 
 async def stream_resume_response():

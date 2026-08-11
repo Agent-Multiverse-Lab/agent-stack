@@ -147,7 +147,7 @@ async def _get_agent_run(run_id: str):
         return await agent_run_repo.get_by_id(run_id)
 
 
-async def _consume_stream_with_cancel(
+async def  _cancellable_stream(
     stream: AsyncIterator[tuple[str, Any]],
     *,
     run_id: str,
@@ -176,6 +176,8 @@ async def _consume_stream_with_cancel(
             try:
                 yield stream_task.result()
             except StopAsyncIteration:
+                import traceback
+                print(traceback.print_exc())
                 return
     finally:
         tasks = (stream_task, cancel_task, signal_task)
@@ -452,10 +454,11 @@ async def process_agent_run(ctx, run_id: str):
                     db=db,
                 )
 
-                async for event_type, payload in _consume_stream_with_cancel(
+                async for steam_agent_chunk in _cancellable_stream(
                     stream_thread_events,
                     run_id=run_id,
                 ):
+                    # TODO 这里需要过滤下会话，因为后端返回了一堆参数的dict  
                     if event_type == "values":
                         messages = payload["messages"]
                         if messages and isinstance(messages[-1], AIMessage):
