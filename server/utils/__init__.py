@@ -5,6 +5,7 @@ from .auth import (
     verify_password,
     verify_required_auth_settings,
 )
+from .woker_utils import reslove_thread_id
 
 __all__ = [
     "create_access_token",
@@ -12,4 +13,5 @@ __all__ = [
     "verify_password",
     "verify_required_auth_settings",
     "get_current_user"
+    "reslove_thread_id"
 ]

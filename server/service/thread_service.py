@@ -5,12 +5,13 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Any
-from src.utils import logger
+
 from langchain.messages import HumanMessage
 from langchain_core.messages import AIMessageChunk
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.service.input_message_service import AgentInputMsg
+from server.utils import reslove_thread_id
 from server.utils.auth import AuthenticatedUser
 from src.agents import BaseAgent, agent_manager
 from src.agents import CustomAgentState as AgentState
@@ -32,6 +33,7 @@ from src.database.repositories import (
 )
 from src.storage import get_storage
 from src.storage.minio import ATTACHMENT_BUCKET_NAME
+from src.utils import logger
 
 _THREAD_CURSOR_VERSION = 1
 _SYSTEM_THREAD_METADATA_KEYS = frozenset({"backend_id"})
@@ -869,6 +871,11 @@ async def stream_agent_response(
                     metadata=agent_metadata,
                     thread_id=thread_id,
                 )
+
+        yield make_agent_stream_event(
+            status="finished",
+            runtime_metadata=runtime_metadata,
+        )
     except Exception as e:
         import traceback
 

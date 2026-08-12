@@ -64,7 +64,7 @@ class PostgreManger:
         return self.session_maker
 
     async def initialize(self) -> None:
-        """统一启动入口，只做资源准备，不做破坏性操作。"""
+        """统一启动入口资源准备"""
         if self.initialized:
             return
 

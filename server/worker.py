@@ -1,10 +1,12 @@
 import asyncio
+import json
 import sys
 from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
 from typing import Any
 
 from arq.connections import RedisSettings
-from langchain_core.messages import AIMessage, BaseMessageChunk
+from langchain_core.messages import AIMessage
 from sqlalchemy import select
 
 from server.service.agent_run_service import publish_agent_run_event
@@ -15,6 +17,7 @@ from server.service.arq_queue_servcie import (
 )
 from server.service.input_message_service import build_agent_input_msg
 from server.service.thread_service import stream_agent_response
+from server.utils.woker_utils import reslove_thread_id
 from src.agents import agent_manager
 from src.configs import config
 from src.database import postgres_manager
@@ -264,7 +267,7 @@ async def write_agent_run_event(
     run_id: str,
     payload: Any,
     event_type: str,
-    thread_id: str,
+    thread_id: str | None,
 ) -> None:
     await publish_agent_run_event(
         run_id,
@@ -276,72 +279,92 @@ async def write_agent_run_event(
     )
 
 
+@dataclass
+class StreamEventBucket:
+    char_counts: int = 0
+    chunks: list[dict[str, Any]] = field(default_factory=list)
+
+
+def calculate_character_count(chunk: dict[str, Any]) -> int:
+    return 0
+
+
+def map_stream_event(chunk: dict[str, Any]) -> tuple[str, Any]:
+    # 映射具体的类型
+    status = chunk.get("status")
+    if status == "loading":
+        return "messages", chunk
+    if status == "agent_state":
+        return "custom", {
+            "name": "agent_state",
+            "chunk": chunk,
+            "agent_state": chunk.get("response"),
+        }
+    raise ValueError(f"不支持的流事件状态：{status}")
+
+
 class StreamEventSmoother:
-    """按字符阈值合并并发布连续的消息流事件。"""
+    """按 thread_id 分桶保存连续的消息流事件。"""
 
     def __init__(
         self,
         *,
-        thread_id: str,
         run_id: str,
         character_limit: int,
     ) -> None:
-        """初始化单个 Agent Run 的消息缓冲池。"""
+        """初始化单个 Agent Run 的消息缓冲。"""
 
         if character_limit < 1:
             raise ValueError("character_limit 必须大于 0")
 
-        self.thread_id = thread_id
         self.run_id = run_id
         self.character_limit = character_limit
-        self.buffer_pool: list[
-            tuple[BaseMessageChunk, dict[str, Any]]
-        ] = []
+        self.chunk_buckets: dict[str | None, StreamEventBucket] = {}
 
-    async def buffer(
+    async def append(
         self,
-        payload: tuple[BaseMessageChunk, dict[str, Any]],
+        chunk: dict[str, Any],
+        thread_id: str | None = None,
     ) -> None:
-        """缓冲消息 chunk，达到字符阈值后立即释放。"""
+        """把原始 chunk 保存到 thread_id 对应的 Bucket。"""
 
-        chunk, metadata = payload
-        if self.buffer_pool:
-            buffered_chunk, buffered_metadata = self.buffer_pool[-1]
-            if (
-                type(buffered_chunk) is not type(chunk)
-                or buffered_chunk.id != chunk.id
-                or buffered_metadata.get("namespace") != metadata.get("namespace")
-                or buffered_metadata.get("langgraph_node")
-                != metadata.get("langgraph_node")
-            ):
-                await self.release()
+        bucket = self.chunk_buckets.setdefault(thread_id, StreamEventBucket())
+        bucket.chunks.append(chunk)
+        bucket.char_counts += calculate_character_count(chunk)
 
-        self.buffer_pool.append(payload)
-        buffered_characters = sum(
-            len(message_chunk.text)
-            for message_chunk, _ in self.buffer_pool
-        )
-        if buffered_characters >= self.character_limit:
-            await self.release()
+        # FIXME 需要重写counts
+        if bucket.char_counts > self.character_limit:
+            await self.release(thread_id)
 
-    async def release(self) -> None:
-        """将缓冲池合并为一条 messages 事件并写入 Redis Stream。"""
+    async def release(self, thread_id: str | None = None) -> None:
+        """写入并清空 thread_id 对应的 Bucket。"""
 
-        if not self.buffer_pool:
+        bucket = self.chunk_buckets.get(thread_id)
+        if bucket is None or not bucket.chunks:
             return
-
-        merged_chunk, _ = self.buffer_pool[0]
-        for chunk, _ in self.buffer_pool[1:]:
-            merged_chunk = merged_chunk + chunk
-        metadata = self.buffer_pool[-1][1]
 
         await write_agent_run_event(
             run_id=self.run_id,
-            payload=(merged_chunk, metadata),
+            payload={"items": list(bucket.chunks)},
             event_type="messages",
-            thread_id=self.thread_id,
+            thread_id=thread_id,
         )
-        self.buffer_pool.clear()
+        bucket.chunks.clear()
+        bucket.char_counts = 0
+
+
+def _normalize_steam_agent_chunk(steam_agent_chunk_bytes: bytes) -> list[dict]:
+    steam_agent_chunk_text = steam_agent_chunk_bytes.decode("utf-8")
+    steam_agent_chunks:list[dict] = []
+    for line in steam_agent_chunk_text.splitlines():
+        line: str = line.strip()
+        if not line:
+            continue
+        try:
+            steam_agent_chunks.append(json.loads(line))
+        except Exception:
+            logger.warning(f"解析输出流失败{line}")
+    return steam_agent_chunks
 
 
 async def process_agent_run(ctx, run_id: str):
@@ -438,48 +461,67 @@ async def process_agent_run(ctx, run_id: str):
     )
     result_text = ""
     stream_event_smoother = StreamEventSmoother(
-        thread_id=str(thread_id),
         run_id=run_id,
         character_limit=20,
     )
     try:
-        try:
-            async with postgres_manager.get_async_session_context() as db:
-                stream_thread_events: AsyncIterator = stream_agent_response(
-                    agent_slug=agent_slug,  # ty:ignore[invalid-argument-type]
-                    thread_id=thread_id,  # ty:ignore[invalid-argument-type]
-                    runtime_metadata=metadata,
-                    thread_input_message=agent_input_message_formatted,
-                    current_user=user,
-                    db=db,
-                )
+        async with postgres_manager.get_async_session_context() as db:
+            stream_thread_events: AsyncIterator = stream_agent_response(
+                agent_slug=agent_slug,  # ty:ignore[invalid-argument-type]
+                thread_id=thread_id,  # ty:ignore[invalid-argument-type]
+                runtime_metadata=metadata,
+                thread_input_message=agent_input_message_formatted,
+                current_user=user,
+                db=db,
+            )
 
-                async for steam_agent_chunk in _cancellable_stream(
-                    stream_thread_events,
-                    run_id=run_id,
-                ):
-                    # TODO 这里需要过滤下会话，因为后端返回了一堆参数的dict  
-                    if event_type == "values":
-                        messages = payload["messages"]
-                        if messages and isinstance(messages[-1], AIMessage):
-                            result_text = str(messages[-1].text)
-                    logger.info(
-                        f"Agent run 事件输出：run_id={run_id}, "
-                        f"event_type={event_type}, payload={payload}"
-                    )
-                    if event_type == "messages":
-                        await stream_event_smoother.buffer(payload)
+            async for steam_agent_chunk in _cancellable_stream(
+                stream_thread_events,
+                run_id=run_id,
+            ):
+                for strem_agent_chunk in _normalize_steam_agent_chunk(steam_agent_chunk):  # ty: ignore[invalid-argument-type]
+                    current_thread_id = reslove_thread_id(
+                        strem_agent_chunk,
+                        str(thread_id),
+                    ) or str(thread_id)
+
+                    if strem_agent_chunk.get("status") == "loading":
+                        await stream_event_smoother.append(
+                            strem_agent_chunk,
+                            current_thread_id,
+                        )
                         continue
+                    
+                    await stream_event_smoother.release(thread_id=current_thread_id)
 
-                    await stream_event_smoother.release()
-                    await write_agent_run_event(
-                        run_id=run_id,
-                        payload=payload,
-                        event_type=event_type,
-                        thread_id=thread_id,  # ty:ignore[invalid-argument-type]
-                    )
-        finally:
-            await stream_event_smoother.release()
+                    status = strem_agent_chunk.get("status")
+
+                    method, payload = map_stream_event(strem_agent_chunk)
+
+                    
+
+
+                    
+
+                    # if event_type == "val ues":
+                    #     messages = payload["messages"]
+                    #     if messages and isinstance(messages[-1], AIMessage):
+                    #         result_text = str(messages[-1].text)
+                    # logger.info(
+                    #     f"Agent run 事件输出：run_id={run_id}, "
+                    #     f"event_type={event_type}, payload={payload}"
+                    # )
+                    # if event_type == "messages":
+                    #     await stream_event_smoother.buffer(payload)
+                    #     continue
+
+                    # await stream_event_smoother.release()
+                    # await write_agent_run_event(
+                    #     run_id=run_id,
+                    #     payload=payload,
+                    #     event_type=event_type,
+                    #     thread_id=thread_id,  # ty:ignore[invalid-argument-type]
+                    # )
     except AgentRunCancelRequested:
         logger.info(f"Agent run 收到取消请求：{run_id}")
         return await _finalize_cancelled_run(
