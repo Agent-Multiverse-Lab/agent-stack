@@ -120,9 +120,11 @@ async def create_agent_run_service(
         await enqueue_agent_run(str(run.id))
     except Exception as exc:
         logger.exception("Agent Run 入队失败：run_id=%s", run.id)
-        failed_run = await AgentRunRepository(db).set_failed(
+        failed_run = await AgentRunRepository(db).set_agent_terminal(
             str(run.id),
-            f"Agent Run 入队失败：{exc}",
+            status="failed",
+            error=f"Agent Run 入队失败：{exc}",
+            error_type=type(exc).__name__,
         )
         if failed_run is not None:
             run = failed_run

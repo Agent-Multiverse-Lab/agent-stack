@@ -208,33 +208,32 @@ class AgentRunRepository:
         await self.session.flush()
         return run
 
-    async def set_completed(self, run_id: str) -> AgentRun | None:
+    async def set_agent_terminal(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        error: str | None = None,
+        error_type: str | None = None,
+    ) -> AgentRun | None:
+        if status not in AGENT_RUN_TERMINAL_STATUSES:
+            raise ValueError(f"不支持的 Agent Run 终态：{status}")
+
         run = await self._get_for_update(run_id)
         if run is None:
             return None
-        if str(run.agent_status) in AGENT_RUN_TERMINAL_STATUSES | {
-            "cancel_requested"
-        }:
+        current_status = str(run.agent_status)
+        if current_status in AGENT_RUN_TERMINAL_STATUSES:
+            return run
+        if status == "cancelled" and current_status != "cancel_requested":
+            return run
+        if status != "cancelled" and current_status == "cancel_requested":
             return run
 
-        run.agent_status = "completed"
-        run.finished_at = datetime.now(UTC)
-        run.error = None
-        await self.session.flush()
-        return run
-
-    async def set_failed(self, run_id: str, error: str) -> AgentRun | None:
-        run = await self._get_for_update(run_id)
-        if run is None:
-            return None
-        if str(run.agent_status) in AGENT_RUN_TERMINAL_STATUSES | {
-            "cancel_requested"
-        }:
-            return run
-
-        run.agent_status = "failed"
-        run.finished_at = datetime.now(UTC)
-        run.error = error
+        run.agent_status = status  # ty: ignore[invalid-assignment]
+        run.finished_at = datetime.now(UTC)  # ty: ignore[invalid-assignment]
+        run.error = error  # ty: ignore[invalid-assignment]
+        run.error_type = error_type  # ty: ignore[invalid-assignment]
         await self.session.flush()
         return run
 
@@ -246,21 +245,5 @@ class AgentRunRepository:
             return run
 
         run.agent_status = "cancel_requested"
-        await self.session.flush()
-        return run
-
-    # 只有 Worker 确认停止消费后，才把 cancel_requested 收口为 cancelled。
-    async def set_cancelled(self, run_id: str) -> AgentRun | None:
-        run = await self._get_for_update(run_id)
-        if run is None:
-            return None
-        if str(run.agent_status) in AGENT_RUN_TERMINAL_STATUSES:
-            return run
-        if str(run.agent_status) != "cancel_requested":
-            return run
-
-        run.agent_status = "cancelled"
-        run.finished_at = datetime.now(UTC)
-        run.error = None
         await self.session.flush()
         return run

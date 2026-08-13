@@ -63,10 +63,18 @@ class FakeAgentRunRepository:
         )
         return self.run
 
-    async def set_failed(self, run_id, error):
-        self.events.append(("set_failed", run_id))
-        self.run.agent_status = "failed"
+    async def set_agent_terminal(
+        self,
+        run_id,
+        *,
+        status,
+        error=None,
+        error_type=None,
+    ):
+        self.events.append(("set_agent_terminal", run_id, status))
+        self.run.agent_status = status
         self.run.error = error
+        self.run.error_type = error_type
         return self.run
 
 
@@ -237,6 +245,7 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("failed", run.agent_status)
         self.assertIn("redis unavailable", run.error)
+        self.assertEqual("RuntimeError", run.error_type)
         self.assertEqual(
             [
                 "prepare",
@@ -247,7 +256,7 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
                 "commit",
                 ("delete_sources", []),
                 ("enqueue", str(run.id)),
-                ("set_failed", str(run.id)),
+                ("set_agent_terminal", str(run.id), "failed"),
                 "commit",
             ],
             self.events,
