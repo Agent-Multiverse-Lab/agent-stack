@@ -1,351 +1,405 @@
 # Repository Agent Guide
 
-This file is the single source of repository guidance for Claude/Codex-style coding agents. `CLAUDE.md` imports this file directly, so update `AGENTS.md` whenever architecture or workflow guidance changes.
+This file is the canonical project guide for Claude/Codex-style coding agents.
+It contains both repository-wide working rules and the current operational model
+of `multi-agent-s2c`. It must remain useful on its own; it is not merely an index
+to other documents.
 
-## Working Rules
+`CLAUDE.md` imports this file directly. Update `AGENTS.md` whenever the current
+module boundaries, runtime flows, ownership rules, development commands, or
+agent workflow change.
 
-- Before implementing a new feature or a change that requires code, API, data
-  model, architecture, or interaction design, first create or update a design
-  specification under `doc/spec/`. The specification must include the intended
-  behavior, affected boundaries and public contracts, a concrete file-level
-  modification plan, and the validation approach. Present the specification to
+## 1. Working Rules
+
+- Before implementing a new feature or a change that affects code, API, data
+  models, architecture, interaction design, cross-module behavior, or public
+  contracts, first identify the owning capability under `docs/spec/` and create
+  or update its specification artifacts. Present the proposed scope and plan to
   the user, explicitly ask for confirmation, and wait for approval before
-  continuing with implementation. Routine operations that do not require
-  design, such as installing an explicitly requested dependency, do not require
-  a specification.
-- Write design specifications and implementation plans as positive, executable
-  scope. Specify only the behavior to implement, affected boundaries and public
-  contracts, concrete file modifications, and validation steps required by the
-  current request. Every listed item must correspond to work that will actually
-  be performed.
-- When creating or revising a design specification, use the `ponytail` skill
-  before presenting it. Challenge every proposed file, component, abstraction,
-  and compatibility path; remove anything that is not required for the smallest
-  end-to-end implementation that satisfies the confirmed requirement.
+  modifying production code. Routine operations that do not require design,
+  such as installing an explicitly requested dependency, do not require a new
+  specification.
+- Organize specifications by capability rather than by source file. One
+  capability may span routers, services, workers, repositories, adapters,
+  frontend modules, and tests. Do not mirror the source tree under `docs/spec/`
+  and do not create one specification per file.
+- Use the artifacts as follows:
+  - `spec.md` defines intended behavior, goals, non-goals, invariants, contracts,
+    edge cases, and acceptance criteria.
+  - `plan.md` defines implementation design, concrete file modifications, code
+    examples, failure handling, and validation.
+  - `tasks.md` defines ordered, independently verifiable work items and the
+    requirements each task implements.
+- Write specifications and plans as positive, executable scope. Every listed
+  behavior, file modification, example, and validation step must correspond to
+  work that will actually be performed.
+- A non-trivial `plan.md` must include concrete examples for the core contracts
+  and control flow. Each example must name its target file and owning function,
+  class, method, or document section. Prose-only plans and unplaced snippets are
+  incomplete.
+- Reference related capabilities by canonical document path and stable
+  requirement IDs. Do not duplicate the same contract, invariant, or example in
+  multiple specifications.
+- When creating or revising a specification or plan, use the `ponytail` skill
+  before presenting it when that skill is available. Remove every proposed file,
+  abstraction, component, and compatibility path that is not required for the
+  smallest confirmed end-to-end implementation.
 - Preserve the existing directory structure, module boundaries, and public
   contracts whenever possible. If a task requires moving or deleting existing
   files, changing established ownership, or restructuring existing modules,
   stop first, explain why the structural change is necessary and what it
   affects, then wait for the user's explicit approval before proceeding.
-- Do not preserve backward compatibility. Remove obsolete paths instead of
-  adding compatibility layers, fallbacks, or migrations.
+- Do not preserve backward compatibility. Remove obsolete application paths
+  instead of adding compatibility layers, legacy fallbacks, duplicate old/new
+  implementations, or transitional compatibility migrations. Normal Alembic
+  schema migrations are still required for database schema changes.
 - Choose the simplest implementation that fully meets the current requirements.
-  Avoid speculative abstractions, configuration, and indirection.
+  Avoid speculative abstractions, configuration, extension points, and
+  indirection.
 - Grow the system in layers. Start from the smallest version that works end to
-  end, and add each new capability on top of a product that already works.
-  Never trade a working product for unfinished complexity.
+  end, and add each capability on top of a product that already works. Every
+  implementation step should leave the repository coherent and testable. Never
+  trade a working product for unfinished complexity.
 - Keep components modular and concerns clearly separated.
 - Prefer established, well-maintained libraries when they reduce overall
-  complexity or improve reliability. Do not reimplement common functionality
-  without a clear reason.
-- Lean on the dependencies already in the project before writing your own
-  implementation or adding packages. Do not assume a library lacks a capability
-  without checking its documentation and types.
+  complexity or improve reliability. Lean on existing dependencies before
+  writing custom implementations or adding packages. Check library
+  documentation and types before assuming a capability is missing.
 - Make architectural decisions for the long term. Do not accept a stopgap that
-  only works for now and is meant to be replaced later.
-- Before submitting, ask whether a senior engineer would consider the implementation over-designed, over-defensive, excessively nested, or overly fragmented. If so, simplify it first.
+  is explicitly intended to be replaced later.
+- Before submitting, ask whether a senior engineer would consider the result
+  over-designed, over-defensive, excessively nested, or overly fragmented. If
+  so, simplify it first.
 
-## Current Project Shape
+## 2. Documentation Ownership
+
+The repository documentation is organized as follows:
+
+```text
+docs/
+├── constitution.md       repository-wide engineering principles
+├── README.md             documentation index
+├── architecture/         long-lived boundaries, topology, and ownership
+├── spec/                 capability behavior, plans, and tasks
+└── adr/                  long-lived technical decisions and trade-offs
+```
+
+A capability normally uses:
+
+```text
+docs/spec/<domain>/<capability>/
+├── spec.md
+├── plan.md
+└── tasks.md
+```
+
+Create only populated artifacts. Small changes may omit `plan.md` or `tasks.md`
+when those files add no useful information.
+
+Document responsibilities are complementary:
+
+- `AGENTS.md` records the current project operating model and agent workflow.
+- `constitution.md` records stable repository-wide principles.
+- Architecture documents explain long-lived boundaries and ownership.
+- `spec.md` defines what a capability must do.
+- `plan.md` maps that capability to implementation.
+- `tasks.md` records the approved work breakdown.
+- ADRs explain why a long-lived technical decision was selected.
+- Code and tests implement and verify those documents.
+
+Do not duplicate full architecture or capability specifications in this file.
+However, keep the current project shape, critical boundaries, active runtime
+flows, and non-negotiable implementation rules here. When those current facts
+change, update both the owning detailed document and this guide.
+
+If the Constitution, this guide, architecture documents, specifications, ADRs,
+tests, and implementation disagree, do not silently choose whichever is easiest.
+Identify the conflict and resolve the authoritative documents before proceeding.
+
+## 3. Current Project Shape
 
 `multi-agent-s2c` is a general-purpose multi-agent system for technical learning
 and engineering practice. The backend is a FastAPI service built around
 LangChain/LangGraph agents, SQLAlchemy repositories, PostgreSQL, Redis/ARQ
-background work, and MinIO-backed uploads.
+background execution, MinIO-backed files, Milvus knowledge retrieval, and a
+standalone sandbox service.
 
-Current top-level responsibilities and construction rules:
+Current top-level responsibilities:
 
-- `server/`: FastAPI transport and application orchestration. Build it from thin
-  routers, responsibility-named services, explicit middleware, and separate API
-  and worker lifecycle entrypoints. Routers own HTTP validation and response
-  shaping; services own use-case coordination; lifespan and worker hooks own
-  process resources. Do not put SQL queries, agent reasoning, or storage-client
-  construction in routers. Router request and response Pydantic models live
-  only in `server/entities/`, grouped by API domain. Keep SQLAlchemy models
-  and service-internal dataclasses or TypedDicts in their owning layers.
-- `src/agents/`: shared agent contracts, concrete top-level and internal agents,
-  middleware, model helpers, MCP integration, and sandbox backends. Construct
-  agents as context-driven `BaseAgent` packages, expose each concrete class from
-  its package, and assemble tools and middleware at the concrete agent boundary.
-  Agents must not own HTTP, database, queue, or object-storage workflows.
-- `src/configs/`: typed Pydantic settings loaded from environment variables and
-  `.env`. Keep parsing, defaults, and validation centralized here. Configuration
-  modules must not perform business orchestration or introduce mutable runtime
-  state outside the concrete agent context.
-- `src/model/`: shared LangChain chat and Embedding model construction plus
-  provider-neutral Reranker contracts and adapters. Resolve `provider/model`
-  specifications from `src/configs/model.py` here so Agents, Knowledge
-  services, and other callers do not depend on each other. Rerankers score only
-  caller-supplied candidates; they must not query databases or vector stores.
+- `server/`: FastAPI transport and application orchestration.
+  - Routers own authentication, HTTP validation, and response shaping.
+  - Services own cross-repository and infrastructure use cases.
+  - `lifespan.py` and `worker.py` own separate process lifecycles.
+  - Router request and response models live in `server/entities/`.
+  - Do not put SQL queries, Agent reasoning, or client construction in routers.
+- `src/agents/`: Agent contracts, top-level and internal Agents, middleware, MCP
+  integration, and Agent-facing backends.
+  - Agents are context-driven `BaseAgent` packages.
+  - Tools and middleware are assembled at the concrete Agent boundary.
+  - Agents must not own HTTP, database, queue, or object-storage workflows.
+- `src/configs/`: typed settings, environment parsing, defaults, and validation.
+  Configuration modules must not perform business orchestration or hold mutable
+  runtime state outside the concrete Agent context.
+- `src/model/`: provider-neutral Chat, Embedding, and Reranker construction.
+  Rerankers score caller-supplied candidates and must not query databases or
+  vector stores.
 - `src/database/`: SQLAlchemy models, PostgreSQL lifecycle/session helpers, and
-  repositories. Define schema and relationships in models, centralize engine and
-  session lifecycle, and place all persistence queries in responsibility-named
-  repositories. Do not add HTTP, agent, queue, or storage orchestration here.
-- `src/knowledge/`: document parsing and chunking, knowledge-provider adapters,
-  and Milvus-backed knowledge access. Construct processing as explicit pipelines
+  repositories. All persistence queries belong in responsibility-named
+  repositories.
+- `src/knowledge/`: document parsing, extraction, chunking, embedding support,
+  Milvus access, retrieval, and evaluation. Processing is an explicit pipeline
   with narrow Parser, Extractor, Chunker, PostProcessor, and provider contracts.
-  Keep database records, object storage, queues, and request handling outside
-  the Flow.
-- `src/storage/`: infrastructure adapters for MinIO and Redis/ARQ connections.
-  Keep adapters thin and limited to client creation, connection lifecycle, and
-  raw transport operations. Domain semantics such as Agent Run state and
-  cancellation belong in application services.
-- `src/third_party/`: compatibility boundaries for external libraries and SDKs.
-  Expose a small local interface and isolate vendor-specific behavior; do not
-  place application policy or general utilities here.
-- `src/utils/`: small, stateless utilities shared across multiple packages.
-  Utilities must remain domain-neutral and dependency-light. A helper used by
-  one subsystem belongs in that subsystem instead.
-- `test/`: deterministic backend unit and contract tests plus explicitly named
-  manual demos. Mirror production boundaries, avoid live network dependencies in
-  the default suite, and keep manual scripts distinguishable with `demo_` names
-  or dedicated fixture directories.
-- `sandbox_server/`: the standalone sandbox support service. Keep its API and
-  container contract independent from the main FastAPI process; it must not own
-  application persistence or Agent Run orchestration.
+- `src/storage/`: thin MinIO and Redis/ARQ infrastructure adapters. Domain
+  semantics such as Run lifecycle and cancellation remain in application
+  services.
+- `src/third_party/`: small compatibility boundaries around external SDKs. Do
+  not place application policy or generic utilities here.
+- `src/utils/`: small, stateless, domain-neutral helpers shared by multiple
+  subsystems. A helper used by one subsystem belongs in that subsystem.
+- `sandbox_server/`: independently deployed sandbox management service. It must
+  not own application persistence or Agent Run orchestration.
+- `web/`: Vue 3 and TypeScript frontend. Keep API consumption and presentation
+  concerns here; backend domain rules remain in the backend.
+- `test/`: deterministic unit and contract tests plus clearly named manual demos.
+  Avoid live network dependencies in the default suite.
 - `docker/`: Dockerfiles and Compose topology only. Keep service wiring,
-  environment mapping, volumes, and health checks declarative; application
-  behavior remains in production modules.
-- `migrate/`: Alembic environment, revision template, and ordered database
-  Schema versions. Keep only Schema changes and tightly coupled data backfills
-  here; do not add application startup, connection lifecycle, business seeding,
-  Worker, Agent, queue, or storage behavior.
-- `scripts/`: repeatable maintenance entrypoints. Require explicit inputs, keep
-  operations observable, and avoid import-time side effects.
-- `doc/`: architecture diagrams and supporting project documentation. Keep
-  diagrams aligned with the boundaries defined in this guide. Write design
-  documents under `doc/` by default, and use `doc/spec/` for design
-  specifications instead of scattering them through implementation packages.
-  Within `doc/spec/`, mirror the primary owning source path, use at most
-  four subdirectory levels, create only populated branches, keep each
-  cross-layer specification once under its primary owner, and place its assets
-  in the nearest `assets/` directory.
+  environment mapping, volumes, and health checks declarative.
+- `migrate/`: Alembic environment and ordered schema revisions. Keep application
+  startup, business seeding, Worker, Agent, queue, and storage behavior out.
+- `scripts/`: repeatable maintenance entry points with explicit inputs,
+  observable behavior, and no import-time side effects.
+- `docs/`: Constitution, architecture, capability specifications, ADRs, diagrams,
+  and supporting assets. Organize specifications by capability, not by source
+  path.
 
-Dependencies should follow this ownership direction: routers call services, and
-services call repositories or infrastructure adapters. Agent and Knowledge Flow
-packages receive runtime values through their declared contexts or method
-contracts and must not import server routers. Cross-layer use-case coordination
-belongs in `server/service/`; format-specific processing belongs in
-`src/knowledge/flow/`.
+Dependency direction is:
 
-The public top-level agent is `LeaderAgent` in `src/agents/leaderagent/`. Current
-internal subagents are `SearchAgent`, `CitationAgent`, and `OutlineAgent`
-under `src/agents/subagents/`.
+```text
+routers -> services -> repositories / infrastructure adapters
+```
 
-## Backend Architecture
+Agent and Knowledge Flow packages receive runtime values through declared
+contexts or method contracts and must not import server routers. Cross-layer
+use-case coordination belongs in `server/service/`; format-specific processing
+belongs in `src/knowledge/flow/`.
 
-- Shared agent primitives live in `src/agents/base_agent.py` and `src/agents/base_context.py`.
-- Top-level agents live in `src/agents/<agentname>/`; internal agents live in `src/agents/subagents/<agentname>/`. Each package should expose its agent class from `__init__.py`.
-- Every internal subagent package under `src/agents/subagents/<agentname>/` must
-  use the following responsibility-based structure:
-  - `__init__.py` exposes only the concrete Agent class required by discovery.
-  - `agent.py` defines the concrete Agent and assembles its model, Prompt,
-    Context, State, tools, and middleware. Do not place long Prompt bodies or
-    State schemas here.
-  - `prompt.py` owns the subagent system Prompt and Prompt-construction logic.
-  - `context.py` owns runtime configuration by extending `BaseContext`; it must
-    not carry per-invocation messages, evidence, drafts, or other State payloads.
-  - `state.py` owns the subagent graph State and structured input/output
-    contracts. Keep it minimal, but do not replace it with an empty placeholder.
-  - Add `tools.py`, `middleware.py`, or other modules only when that subagent has
-    real package-local behavior that belongs there.
-- A subagent directory must map to a real compiled-Agent boundary with its own
-  responsibility. Do not create package-shaped placeholders for helpers,
-  prompts, or future ideas.
-- `SearchAgent` and `OutlineAgent` predate the standard package structure and
-  are transitional. Migrate them in a dedicated structural refactor before
-  adding substantial new behavior; do not opportunistically add empty files.
-- `AgentManager` in `src/agents/manager.py` discovers both groups, instantiates `BaseAgent` subclasses, and separately records top-level IDs so internal subagents are not exposed as public conversation agents.
-- `BaseAgent.stream_messages(...)` uses LangGraph `astream(...)`. `BaseAgent.stream_messages_with_event(...)` consumes `astream_events(version="v3")` and currently forwards the `messages` channel's `params.data` payload.
-- `LeaderAgent` delegates bounded search, citation validation, and outline work
-  through the local `SubAgentMiddleware`. The middleware exposes Run-backed
-  tools for registered internal agents; it does not execute an embedded
-  runnable in the parent graph. Keep orchestration in `LeaderAgent`; do not move
-  database, queue, or storage behavior into an agent.
-- FastAPI application setup lives in `server/main.py`. Startup and shutdown live in `server/lifespan.py`.
-- Lifespan startup verifies JWT configuration and initializes the API process's PostgreSQL resources. It does not create tables or seed records. Shutdown closes the shared async Redis client before disposing PostgreSQL.
-- HTTP routes live under `server/router/`: `auth_router.py`, `thread_router.py`, `agent_router.py`, `knowledge_router.py`, `library_router.py`, and `model_router.py`.
-- Thread creation, public agent listing, and temporary attachment upload live in `server/router/thread_router.py`. Thread and Conversation are one service boundary: thread-level execution and attachment helpers live in `server/service/thread_service.py`; do not recreate a parallel `conversation_service.py`.
-- Treat `server/router/library_router.py` as the user attachment-library
-  boundary. Its initial scope is attachment list/query, detail, display-name
-  update, and deletion. Read only uploaded files persisted as `Attachment`
-  rows; generated files are outside the initial scope. Keep its request and
-  response models in `server/entities/library.py`.
-- Agent Run creation, cancellation, and SSE exposure live in `server/router/agent_router.py`. The cancellation endpoint calls `cancel_run_service(...)`, while the shared `request_cancel_agent_run(...)` path handles top-level and child Runs in `server/service/agent_run_service.py`.
-- `server/service/arq_queue_servcie.py` owns ARQ pool access, direct Redis Stream `XADD`/`XREAD` operations, Agent Run cancellation-key `SET`/`EXISTS`/`DELETE` operations, and cancellation Pub/Sub `PUBLISH`/blocking `get_message` operations. Keep the existing filename spelling unless a dedicated rename is requested.
-- `server/service/subagent_service.py` owns child conversation/message/Run persistence, parent-child ownership checks, and enqueue handoff. It does not own generic Agent Run cancellation; `SubAgentMiddleware` verifies parent-child scope there before calling `request_cancel_agent_run(...)`.
-- `src/storage/redis/redis_manger.py` owns only Redis/ARQ connection creation, lazy shared-client initialization, and close behavior. It must not own Agent Run semantics.
-- `server/worker.py` is the independent ARQ worker entrypoint and the single startup owner for database bootstrap. Worker startup initializes PostgreSQL, creates missing model tables with `checkfirst=True`, applies the non-destructive `AgentRun.run_type` column/index patch for existing databases, and inserts only missing public/internal Agent registration rows before accepting jobs. It must not drop tables, seed users or conversations, or overwrite existing Agent rows. Worker shutdown only disposes its own PostgreSQL resources; it does not reuse the FastAPI lifespan.
-- Database access belongs in `src/database/repositories/`. Do not put persistence queries inside agents.
+## 4. Backend and Agent Runtime Boundaries
 
-## Knowledge Flow
+- Shared Agent primitives live in `src/agents/base_agent.py` and
+  `src/agents/base_context.py`.
+- Public top-level Agents live under `src/agents/<agentname>/`; internal Agents
+  live under `src/agents/subagents/<agentname>/`. Each package exposes its
+  concrete Agent class from `__init__.py`.
+- A standard internal Agent package uses:
 
-- Knowledge-file indexing is an explicit confirmation step. Only a file in
-  `parsed` state may enter `indexing`; the service reloads its persisted
-  Markdown, applies the configured Chunker and Embedding binding, writes stable
-  `file_id + chunk_index` records to Milvus, and then marks it `indexed`.
-  Indexing failures return the file to `parsed` so the same artifact can be
-  retried. Uploading or parsing a file must never trigger this step implicitly.
-- `MilvusKnowledge` is a thin database adapter. Its `build_file_index(...)`
-  accepts only already embedded file records and owns Collection creation plus
-  Milvus CRUD. It must not read object storage, select Chunkers, load Embedding
-  models, generate vectors, or update PostgreSQL file state.
-- Query-time Rerank contracts and Provider adapters live in `src/model/`.
-  `knowledge_service.search(db, ...)` owns the two-stage flow: retrieve
-  `candidate_limit` Milvus hits, rerank their text, and return the final
-  `limit`. Keep Milvus `distance` separate from `rerank_score`; changing a
-  Reranker does not change the persisted Embedding binding or require
-  reindexing.
-- `src/knowledge/flow/pipeline.py` exposes parsing and chunking as separate
-  stages. `parse_document(...)` returns a `ParsedDocument` whose Markdown may be
-  persisted for user review; `chunk_document(...)` runs only after the caller
-  explicitly resumes indexing. Do not restore an all-in-one `run(...)` path.
-- `src/knowledge/flow/parser/parser.py` is the only public document Parser. It
-  routes by normalized file suffix; it must not infer formats from document
-  content or send one input through multiple format parsers.
-- OCR implementations live under `src/knowledge/flow/extractor/` and are called
-  only by PDF or image parsing paths. Extractors do not select file types,
-  chunk content, or write knowledge records.
-- Chunking lives under `src/knowledge/flow/chunker/`. `TokenChunker` uses a
-  fixed token step. `TitleChunker` explicitly selects `group` or `hierarchy`;
-  both strategies reuse `BaseTitleChunker.invoke()` and the same
-  outline-first, regex-frequency-fallback level resolver. Do not restore
-  content-based `general` / `book` / `laws` / `paper` profile inference.
-- `src/knowledge/embedding_service.py` accepts an injected LangChain
-  `Embeddings` instance and owns batching plus vector result validation. It must
-  not import Agent packages or choose Provider configuration.
-- `KnowledgeEmbeddingBinding` durably binds each `uid + kb_id` to one model
-  spec, observed dimension, batch size, and Milvus collection. Initial indexing
-  creates this binding; every later indexing and query path must load it and
-  reject model or dimension drift.
-- `KnowledgeBase` owns logical knowledge-base metadata. `KnowledgeFile` belongs
-  to exactly one KnowledgeBase and tracks `uploaded`, `parsing`, `parsed`,
-  `indexing`, `indexed`, or `failed`.
-- `Attachment` is a user-owned file resource and must not carry a Conversation
-  foreign key. `MessageAttachment` records only that a Message used an
-  Attachment; deleting a Conversation removes message references, not the
-  Attachment. Attachment files use the private `attachment` MinIO bucket and
-  remain uploaded originals; the Worker must not query, move, parse, or clean
-  them, and they must never create or reuse `KnowledgeFile`, Chunk, Embedding,
-  or Milvus records.
-- `server/service/knowledge_service.py` exposes module-level use-case functions;
-  do not wrap them in a Service class. The module assembles the configured model
-  and owns the parsing boundary: original files and parsed Markdown use
-  `knowledge-files/{uid}/{kb_id}/{file_id}/...` MinIO paths, and parsing stops
-  at `KnowledgeFile.status="parsed"`. Chunking, Embedding, and Milvus writes
-  must not run before explicit user confirmation.
-- Post-processing remains isolated in
-  `src/knowledge/flow/post_processor.py` and is not wired into the current
-  parse/index chain. `RaptorPostProcessor` uses an injected Embedding Provider
-  and the RAGFlow UMAP + scikit-learn GaussianMixture/BIC algorithm; do not add
-  it to `Pipeline` until a dedicated indexing requirement enables it.
-- Parser, Extractor, Chunker, and PostProcessor exchange only the document block
-  and chunk structures from `src/knowledge/flow/types.py`. Embedding Provider
-  construction, persistence, object storage, and queue behavior remain outside
-  the Flow.
+  ```text
+  __init__.py   exports the concrete Agent
+  agent.py      assembles model, Prompt, Context, State, tools, middleware
+  prompt.py     owns system Prompt and Prompt construction
+  context.py    owns runtime configuration extending BaseContext
+  state.py      owns graph State and structured input/output contracts
+  ```
 
-## Agent Runtime Context
+  Add `tools.py`, `middleware.py`, or other modules only for real package-local
+  behavior. Do not create package-shaped placeholders for future ideas.
+- `SearchAgent` and `OutlineAgent` predate the standard package structure. Move
+  them only in an explicitly approved structural refactor; do not opportunistically
+  add empty modules.
+- `AgentManager` discovers public and internal `BaseAgent` subclasses and keeps
+  internal Agents out of the public conversation Agent list.
+- `BaseAgent.stream_messages(...)` uses LangGraph `astream(...)`.
+  `BaseAgent.stream_messages_with_event(...)` consumes
+  `astream_events(version="v3")` and forwards the `messages` channel's
+  `params.data` payload.
+- `LeaderAgent` is the public general-purpose orchestrator. Keep its base Prompt
+  domain-neutral. Specialized behavior belongs in tools, internal Agents, or
+  runtime context.
+- `SubAgentMiddleware` exposes Run-backed delegation tools for registered
+  internal Agents. It does not execute an embedded child runnable inside the
+  parent graph. Persistence, queueing, and storage stay outside Agents.
+- `SearchAgent` owns bounded query planning, retrieval, source comparison, and
+  evidence synthesis. Search remains opt-in through `LeaderAgent`; it does not
+  produce the parent's final response.
+- `CitationAgent` validates only supplied claims, source mappings, and excerpts.
+  It remains tool-free, does not retrieve or invent sources, and returns
+  `pass`, `revise`, or `needs_retrieval`. The current integration is Prompt-driven,
+  not a deterministic final-output gate.
+- `OutlineAgent` produces a bounded outline artifact for its parent. It remains
+  tool-light and must not become another top-level orchestrator.
 
 Agent runtime configuration has exactly three sources:
 
-1. The context class defined by the concrete top-level agent or subagent, including its schema and defaults.
-2. Values supplied for the current run.
-3. Values loaded by the backend from the database for the current agent or run.
+1. The concrete Agent or SubAgent context class, including schema and defaults.
+2. Values supplied for the current Run.
+3. Values loaded by the backend for the current Agent or Run.
 
-Run-supplied and database-loaded values must be merged into the concrete agent context before execution. The resulting context is the only source of runtime configuration for agents, subagents, middleware, tools, and backends. Do not introduce parallel runtime configuration through module globals, middleware-local defaults, ad hoc keyword arguments, or direct database/config reads; resolve those values first and bind them to the context.
+Merge Run-supplied and backend-loaded values into the concrete context before
+execution. The resulting context is the only runtime configuration source for
+Agents, SubAgents, middleware, tools, and backends. Do not add parallel module
+globals, middleware-local defaults, ad hoc keyword arguments, or direct runtime
+configuration reads. Per-invocation messages and similar payloads are State, not
+runtime configuration.
 
-Invocation data such as input messages and similar per-call payloads is not runtime configuration and may remain outside the context.
+## 5. API, Worker, and Agent Run Flow
 
-## Current Chat Flow
-
-- Authentication is email-and-password based. `User.email` is the unique login account; `User.uid` is the stable business identifier used by conversations and Agent Runs.
-- `POST /api/auth/register`, `POST /api/auth/login`, and `GET /api/auth/me` are the current auth endpoints.
-- JWT payloads carry the numeric database user ID in `sub`, plus `uid`, `email`, and `is_active`.
-- `AuthMiddleware` decodes an optional Bearer token into `request.state.auth_payload`; protected routes resolve the database user through `AuthenticatedUser`.
-- Keep password hashing, JWT creation/validation, and user lookup in `server/utils/auth.py`, the auth router, and `UserRepository`; do not duplicate auth logic in feature routes.
-
-## Current Thread and Agent Run Flow
+- FastAPI construction lives in `server/main.py`; API startup and shutdown live
+  in `server/lifespan.py`.
+- Lifespan startup verifies JWT configuration and initializes API PostgreSQL
+  resources. It does not create tables or seed records. Shutdown closes shared
+  Redis before disposing PostgreSQL.
+- HTTP routes live under `server/router/`. Thread-level execution and attachment
+  orchestration live in `server/service/thread_service.py`; do not create a
+  parallel `conversation_service.py`.
+- Agent Run creation, cancellation, and SSE exposure live in
+  `server/router/agent_router.py` and `server/service/agent_run_service.py`.
+- `server/service/arq_queue_servcie.py` owns ARQ pool access, raw Redis Stream
+  operations, cancellation keys, and cancellation Pub/Sub operations. Keep the
+  existing filename spelling unless a dedicated rename is approved.
+- `src/storage/redis/redis_manger.py` owns only Redis/ARQ client construction,
+  shared-client lifecycle, and close behavior. It must not own Agent Run
+  semantics.
+- `server/worker.py` is the independent ARQ Worker entry point and startup owner
+  for Worker-side database bootstrap. It may create missing tables and missing
+  Agent registration rows, but must not drop tables, seed users/conversations,
+  or overwrite existing Agent rows. Worker shutdown disposes only Worker-owned
+  PostgreSQL resources.
 
 The current queued flow is:
 
-1. `POST /api/chat/thread` validates the authenticated user and a public top-level agent, then creates a `Conversation` with a generated `thread_id`.
-2. `POST /api/agent/runs` requires `ENABLE_RUN_QUEUE=true`, validates ownership of the conversation, persists the triggering user `Message`, creates an `AgentRun` linked through `trigger_message_id`, and commits both records.
-3. The router calls `enqueue_agent_run(run_id)`. ARQ receives only the `run_id`, uses job ID `run:{run_id}`, and writes to the configured `ARQ_QUEUE_NAME`.
-4. The independent worker runs `process_agent_run(ctx, run_id)`, reloads `AgentRun`, the triggering `Message`, and `User` from PostgreSQL, changes the run to `running`, and calls `stream_thread_response(...)`.
-5. `stream_thread_response(...)` resolves the database `Agent` by slug and role, builds runtime context, validates conversation ownership, and consumes `BaseAgent.stream_messages_with_event(...)`.
-6. The worker changes the durable run state to `completed`, `failed`, or `cancelled` after execution.
-7. `GET /api/agent/runs/{run_id}/events` now returns a `StreamingResponse` over `stream_agent_run_events(...)`, which reads `run:events:{run_id}` and formats SSE frames.
+```text
+POST /api/chat/thread
+    -> create Conversation
+POST /api/agent/runs
+    -> persist triggering Message and AgentRun
+    -> enqueue run_id through ARQ
+Worker process_agent_run(...)
+    -> reload Run, Message, and User
+    -> set running
+    -> stream Agent execution
+    -> persist completed / failed / cancelled
+GET /api/agent/runs/{run_id}/events
+    -> read Redis Stream
+    -> format SSE frames
+```
 
-Subagent runs reuse that same durable flow. `task` creates and enqueues a child Run and waits for its result; `subagent_start` returns immediately, while `subagent_status`, `subagent_cancel`, and `subagent_await` operate only on child Runs belonging to the current parent Run. `AgentRun.run_type` explicitly selects the public orchestrator (`chat`) or registered internal Agent (`subagent`); `parent_run_id` records only the relationship between Runs and must not be used as a type flag.
+ARQ receives only `run_id`, uses job ID `run:{run_id}`, and writes to the
+configured queue. The Worker produces events; enqueueing does not invoke the SSE
+endpoint. Consumers independently open the SSE endpoint.
 
-Important current boundary:
+SubAgent Runs reuse the same durable flow. `AgentRun.run_type` selects `chat` or
+`subagent`; `parent_run_id` records relationships and must not be used as a type
+flag. Child Run operations must verify ownership by the current parent Run.
 
-- `process_agent_run(...)` publishes `messages`, `values`, and `agent_execute_event` entries to `run:events:{run_id}`. Lifecycle notifications use `type: "status"` with `status: "running"`; every terminal notification uses `type: "end"` with `status: "completed"`, `"failed"`, or `"cancelled"`.
-- Cancellation is two-phase: `POST /api/agent/runs/{run_id}/cancel` passes the request-scoped database session through `cancel_run_service(...)` to `request_cancel_agent_run(...)`. The latter first marks the target Run and all of that user's active direct child Runs as `cancel_requested` in one transaction, then writes each `run:cancel:{run_id}` and publishes its Run ID to the `run:cancel` channel after commit. Cancellation scope does not branch on `run_type`. The worker first checks the durable cancel key and otherwise blocks on Pub/Sub; the matching message sets a Run-local `asyncio.Event`, stops the current Agent stream awaitable, persists `cancelled`, publishes the terminal `end` event, and clears the cancel key.
-- Do not describe enqueueing as invoking the SSE endpoint. The worker produces events, while consumers independently open the SSE read endpoint.
-- Rebuild the Compose worker after backend source changes because the worker image does not bind-mount the checkout.
+Current event and cancellation rules:
 
-## Persistence and ID Boundaries
+- `process_agent_run(...)` publishes `messages`, `values`, and
+  `agent_execute_event` entries to `run:events:{run_id}`.
+- Running lifecycle events use `type: "status"`, `status: "running"`.
+- Terminal events use `type: "end"` and one of `completed`, `failed`, or
+  `cancelled`.
+- Cancellation first persists `cancel_requested` for the target Run and active
+  direct child Runs in one transaction. After commit, it writes
+  `run:cancel:{run_id}` and publishes the Run ID to channel `run:cancel`.
+- The Worker checks the cancellation key and listens to Pub/Sub. A matching
+  signal sets a Run-local `asyncio.Event`, stops the active Agent stream,
+  persists `cancelled`, publishes one terminal event, and clears the key.
+- Cancellation scope does not branch on `run_type`.
+- Rebuild the Compose Worker after backend source changes because the Worker
+  image does not bind-mount the checkout.
 
-- PostgreSQL is the source of truth for users, agents, conversations, messages, attachments, knowledge records, and Agent Run lifecycle state.
-- `Conversation.id` is the internal database primary key; `Conversation.thread_id` is the external conversation/runtime identifier.
-- `Message.id` identifies the persisted triggering input. `AgentRun.trigger_message_id` lets the worker reconstruct input from only `run_id`.
-- `AgentRun.run_type` is the execution-kind flag: `chat` for a main conversation Run and `subagent` for an internally delegated Run. `AgentRun.parent_run_id` remains a relationship field and may also link consecutive main conversation Runs.
+## 6. Persistence and Identifier Boundaries
+
+- PostgreSQL is the source of truth for users, Agents, conversations, messages,
+  attachments, knowledge records, and Agent Run lifecycle state.
+- Redis/ARQ queue state and Redis Stream events are runtime coordination data,
+  not authoritative business state.
+- `Conversation.id` is the database primary key;
+  `Conversation.thread_id` is the external conversation/runtime identifier.
+- `Message.id` identifies the persisted triggering input.
+  `AgentRun.trigger_message_id` lets the Worker reconstruct input from `run_id`.
+- `AgentRun.run_type` is the execution-kind flag. `AgentRun.parent_run_id` is a
+  relationship field.
 - `AgentRun.agent_status` is the only lifecycle field.
-- Current coarse run states are `pending`, `running`, `cancel_requested`, `completed`, `failed`, and `cancelled`.
-- Redis/ARQ queue state is separate from PostgreSQL run state.
-- ARQ job IDs use `run:{run_id}`. Redis Stream event keys use `run:events:{run_id}`. Cancellation keys use `run:cancel:{run_id}`; the cancellation Pub/Sub channel is `run:cancel`.
-- Redis Stream IDs are event cursors, not Agent Run IDs and not durable business status.
+- Current coarse states are `pending`, `running`, `cancel_requested`,
+  `completed`, `failed`, and `cancelled`.
+- ARQ jobs use `run:{run_id}`.
+- Event Streams use `run:events:{run_id}`.
+- Cancellation keys use `run:cancel:{run_id}` and Pub/Sub uses `run:cancel`.
+- Redis Stream IDs are event cursors, not Run IDs or durable business status.
+- Do not duplicate authoritative state across PostgreSQL, Redis, memory, MinIO,
+  or Milvus without explicitly documented ownership, lifetime, consistency, and
+  cleanup behavior.
 
-## Agent Responsibilities
+## 7. Knowledge and Attachment Flow
 
-Agent design references, in priority order:
+Knowledge-file processing is intentionally split:
 
-1. Refer first to `DeerFlow2`, the ByteDance open-source project.
-2. Refer second to `Deep Agents` (`Deep Agent`), the official LangChain library.
+```text
+upload -> parse -> parsed Markdown review -> explicit index confirmation
+       -> chunk -> embed -> Milvus -> indexed
+```
 
-### LeaderAgent
+- Uploading or parsing must never trigger indexing implicitly.
+- Only a file in `parsed` state may enter `indexing`.
+- Indexing reloads persisted Markdown, applies the configured Chunker and
+  Embedding binding, writes stable `file_id + chunk_index` records, and marks the
+  file `indexed`.
+- Indexing failure returns the file to `parsed` so the same artifact can be
+  retried.
+- Current file states are `uploaded`, `parsing`, `parsed`, `indexing`, `indexed`,
+  and `failed`.
+- `src/knowledge/flow/pipeline.py` exposes parsing and chunking as separate
+  stages. Do not restore an all-in-one `run(...)` path.
+- `src/knowledge/flow/parser/parser.py` is the only public Parser. It routes by
+  normalized file suffix and must not infer formats from content or send one
+  input through multiple parsers.
+- OCR Extractors are called only by PDF or image parsing paths. They do not
+  select file types, chunk content, or write knowledge records.
+- Chunking belongs under `src/knowledge/flow/chunker/`. `TokenChunker` uses a
+  fixed token step. `TitleChunker` explicitly selects `group` or `hierarchy`;
+  do not restore content-inferred document profiles.
+- Parser, Extractor, Chunker, and PostProcessor exchange only the canonical
+  block and chunk structures from `src/knowledge/flow/types.py`.
+- `src/knowledge/embedding_service.py` owns batching and vector validation for
+  an injected Embeddings instance. It must not select Provider configuration or
+  import Agent packages.
+- `KnowledgeEmbeddingBinding` binds each `uid + kb_id` to one model specification,
+  observed dimension, batch size, and Milvus collection. Later indexing and
+  query paths must load it and reject model or dimension drift.
+- `MilvusKnowledge` is a thin vector-store adapter. It receives already embedded
+  records and owns collection creation plus CRUD; it must not read object
+  storage, choose Chunkers, load models, generate vectors, or update PostgreSQL
+  file state.
+- `knowledge_service.search(...)` owns two-stage retrieval: retrieve Milvus
+  candidates, rerank their text, and return the final limit. Keep Milvus
+  `distance` separate from `rerank_score`.
+- Post-processing remains isolated in `src/knowledge/flow/post_processor.py` and
+  is not wired into the active parse/index chain without a dedicated approved
+  requirement.
+- `Attachment` is a user-owned uploaded file and does not belong directly to a
+  Conversation. `MessageAttachment` records usage by a Message. Deleting a
+  Conversation removes message references, not the Attachment.
+- Attachments use the private `attachment` MinIO bucket and remain uploaded
+  originals. The Worker must not parse, move, clean, or turn them into
+  `KnowledgeFile`, Chunk, Embedding, or Milvus records.
 
-`LeaderAgent` is the public general-purpose orchestrator. It interprets the user
-goal, selects direct execution or planning and delegation, coordinates tools and
-internal agents, and returns the integrated final result. Keep its base prompt
-domain-neutral; specialized behavior belongs in explicit tools, subagents, or
-runtime context rather than hard-coded product assumptions.
+## 8. Authentication Boundary
 
-Construct `LeaderAgent` from its concrete `LeaderAgentContext`.
-`_create_middlewares(...)` owns middleware assembly, while `get_agent(...)` loads
-context-configured MCP tools and `_build_agent(...)` assembles the LangChain
-agent. It delegates bounded work to registered internal agents through
-`SubAgentMiddleware`. Do not move persistence, queueing, or storage behavior into
-the agent.
+- Authentication is email-and-password based.
+- `User.email` is the unique login account; `User.uid` is the stable business
+  identifier used by conversations and Agent Runs.
+- Current endpoints are `POST /api/auth/register`, `POST /api/auth/login`, and
+  `GET /api/auth/me`.
+- JWT payloads carry the numeric database user ID in `sub`, plus `uid`, `email`,
+  and `is_active`.
+- `AuthMiddleware` decodes an optional Bearer token into
+  `request.state.auth_payload`; protected routes resolve the database user
+  through `AuthenticatedUser`.
+- Password hashing, JWT creation/validation, and user lookup remain in
+  `server/utils/auth.py`, the auth router, and `UserRepository`. Do not duplicate
+  authentication logic in feature routes.
 
-### SearchAgent
-
-`SearchAgent` is an internal search-task orchestrator. It currently exposes knowledge and web search tools and returns evidence-oriented search guidance to its caller.
-
-Keep search opt-in through `LeaderAgent`; do not add automatic pre-retrieval
-middleware around every request. `SearchAgent` owns query planning, retrieval,
-source comparison, and evidence synthesis. It must not take over the parent
-agent's final user response.
-
-### CitationAgent
-
-`CitationAgent` is an internal citation verifier. It receives an answer draft,
-claim-to-source mappings, and the actual retrieved excerpts, then returns a
-structured `pass`, `revise`, or `needs_retrieval` report to `LeaderAgent`.
-
-Keep CitationAgent tool-free in the initial implementation. It must validate
-only the supplied evidence, must not perform retrieval, invent sources, or
-produce the final user response. The current integration is Prompt-driven and
-must not be described as a deterministic final-output gate.
-
-### OutlineAgent
-
-`OutlineAgent` is an internal structure-planning agent. It receives a bounded
-outline task, produces the requested outline artifact, and returns it to the
-parent. Keep it tool-light and context-driven; it must not become a second
-top-level orchestrator or own persistence and transport behavior.
-
-## Development Commands
+## 9. Development Commands
 
 Backend API:
 
@@ -354,20 +408,20 @@ uv sync
 python server/main.py
 ```
 
-ARQ worker:
+ARQ Worker:
 
 ```bash
 uv run --no-sync arq server.worker.WorkerSettings
 ```
 
-Database migration sample:
+Database migrations:
 
 ```bash
 uv run --no-sync alembic upgrade head
 uv run --no-sync alembic downgrade -1
 ```
 
-Local infrastructure and worker through Compose:
+Local infrastructure and Worker:
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d postgres redis minio sandbox worker
@@ -380,24 +434,33 @@ uv run --no-sync python -m compileall server/router server/service server/worker
 git diff --check
 ```
 
-`pytest` is not currently declared as a project dependency. Do not report pytest validation unless it is installed and the tests were actually run. If `uv run` is blocked by local cache permissions, use the repository virtual environment directly, for example `.venv/bin/python -m compileall -q <paths>`.
+`pytest` is not currently declared as a project dependency. Do not report pytest
+validation unless it is installed and the tests were actually run. If `uv run`
+is blocked by local cache permissions, use the repository virtual environment,
+for example `.venv/bin/python -m compileall -q <paths>`.
 
-## Contribution Rules
+## 10. Contribution Rules
 
 - Follow `CONTRIBUTING.md` for repository contribution workflow.
-- Pull requests should include a concise Chinese summary and motivation unless the task explicitly requires another language.
+- Pull requests should include a concise Chinese summary and motivation unless
+  the task explicitly requires another language.
 - Link the issue or task ID when available.
 - Include verification notes with the commands run and outcomes.
 
-## Git Commit Rules
+## 11. Git Commit Rules
 
-- Use Conventional Commits.
-- Commit format: `<type>(<scope>): <subject>`.
-- `type` must be one of `feat`, `fix`, `refactor`, `doc`, `test`, `chore`, `build`, or `ci`.
-- `scope` is recommended and should use a concise module name such as `agent`, `thread`, `worker`, `auth`, or `deps`.
-- Keep the Conventional Commit `type` and `scope` tokens in lowercase English; write the `subject` and optional commit body in Chinese.
-- Keep the Chinese subject concise, recommended no more than 72 characters, and do not end it with punctuation.
-- Examples: `feat(worker): 发布 Agent Run 流式事件`, `fix(auth): 修复令牌校验失败`, `doc(agent): 更新仓库代理指南`.
+- Use Conventional Commits: `<type>(<scope>): <subject>`.
+- `type` must be one of `feat`, `fix`, `refactor`, `doc`, `test`, `chore`,
+  `build`, or `ci`.
+- Use a concise lowercase English scope such as `agent`, `thread`, `worker`,
+  `auth`, or `deps`.
+- Write the subject and optional body in Chinese. Keep the subject concise,
+  preferably no more than 72 characters, and do not end it with punctuation.
+- Examples:
+  - `feat(worker): 发布 Agent Run 流式事件`
+  - `fix(auth): 修复令牌校验失败`
+  - `doc(agent): 更新仓库代理指南`
 - Do not wrap commit messages, subjects, or scopes with `@` characters.
-- Before every push, especially after committing from PowerShell, inspect all outgoing commit subjects and bodies for accidental `@` characters or wrappers. Do not push until malformed commit messages are corrected.
+- Before pushing, especially after committing from PowerShell, inspect all
+  outgoing subjects and bodies for accidental `@` wrappers and correct them.
 - Keep one commit focused on one coherent change.
