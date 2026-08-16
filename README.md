@@ -29,7 +29,7 @@ A general-purpose multi-agent system for exploring agent orchestration, interact
 
 ## 系统架构
 
-![multi-agent-s2c 系统架构图](./doc/image.png)
+![multi-agent-s2c 系统架构图](./docs/image.png)
 
 ## 数据库迁移样例
 
