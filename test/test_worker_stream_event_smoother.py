@@ -1,7 +1,9 @@
 import unittest
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, call, patch
 
-from server.worker import StreamEventSmoother, map_stream_event
+from server.service.arq_queue_servcie import RUN_REDIS_TTL_SECONDS
+from server.worker import StreamEventSmoother, _finalize_run, map_stream_event
 
 
 class StreamEventSmootherTest(unittest.IsolatedAsyncioTestCase):
@@ -40,7 +42,7 @@ class StreamEventSmootherTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=(2, 1, 1, 1),
             ),
             patch(
-                "server.worker.write_agent_run_event",
+                "server.worker.write_agent_run_stream_event",
                 new_callable=AsyncMock,
             ) as write_event,
         ):
@@ -64,16 +66,19 @@ class StreamEventSmootherTest(unittest.IsolatedAsyncioTestCase):
             )
 
         write_event.assert_awaited_once_with(
-            run_id="run-1",
-            payload={
-                "items": [
-                    {"status": "loading", "sequence": 1},
-                    {"status": "loading", "sequence": 3},
-                    {"status": "loading", "sequence": 4},
-                ]
+            "run-1",
+            {
+                "type": "messages",
+                "thread_id": "thread-1",
+                "payload": {
+                    "items": [
+                        {"status": "loading", "sequence": 1},
+                        {"status": "loading", "sequence": 3},
+                        {"status": "loading", "sequence": 4},
+                    ]
+                },
             },
-            event_type="messages",
-            thread_id="thread-1",
+            ttl_seconds=RUN_REDIS_TTL_SECONDS,
         )
         self.assertEqual(smoother.chunk_buckets["thread-1"].chunks, [])
         self.assertEqual(smoother.chunk_buckets["thread-1"].char_counts, 0)
@@ -82,6 +87,105 @@ class StreamEventSmootherTest(unittest.IsolatedAsyncioTestCase):
             [{"status": "loading", "sequence": 2}],
         )
         self.assertEqual(smoother.chunk_buckets["thread-2"].char_counts, 1)
+
+
+class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
+    async def test_failed_run_uses_unified_terminal_path(self) -> None:
+        with (
+            patch(
+                "server.worker.set_run_terminal",
+                new_callable=AsyncMock,
+                return_value=SimpleNamespace(agent_status="failed"),
+            ) as set_terminal,
+            patch(
+                "server.worker.publish_agent_run_event",
+                new_callable=AsyncMock,
+            ) as publish_event,
+            patch(
+                "server.worker.clear_agent_run_cancel_signal",
+                new_callable=AsyncMock,
+            ) as clear_cancel,
+        ):
+            result = await _finalize_run(
+                "run-1",
+                status="failed",
+                thread_id="thread-1",
+                error="boom",
+                error_type="RuntimeError",
+            )
+
+        self.assertEqual(result, {"run_id": "run-1", "status": "failed"})
+        set_terminal.assert_awaited_once_with(
+            "run-1",
+            status="failed",
+            error="boom",
+            error_type="RuntimeError",
+        )
+        publish_event.assert_awaited_once_with(
+            "run-1",
+            {
+                "type": "end",
+                "status": "failed",
+                "thread_id": "thread-1",
+                "error": "boom",
+            },
+        )
+        clear_cancel.assert_not_awaited()
+
+    async def test_cancel_requested_finishes_as_cancelled(self) -> None:
+        with (
+            patch(
+                "server.worker.set_run_terminal",
+                new_callable=AsyncMock,
+                side_effect=(
+                    SimpleNamespace(agent_status="cancel_requested"),
+                    SimpleNamespace(agent_status="cancelled"),
+                ),
+            ) as set_terminal,
+            patch(
+                "server.worker.publish_agent_run_event",
+                new_callable=AsyncMock,
+            ) as publish_event,
+            patch(
+                "server.worker.clear_agent_run_cancel_signal",
+                new_callable=AsyncMock,
+            ) as clear_cancel,
+        ):
+            result = await _finalize_run(
+                "run-1",
+                status="failed",
+                thread_id="thread-1",
+                error="boom",
+                error_type="RuntimeError",
+            )
+
+        self.assertEqual(result, {"run_id": "run-1", "status": "cancelled"})
+        self.assertEqual(
+            set_terminal.await_args_list,
+            [
+                call(
+                    "run-1",
+                    status="failed",
+                    error="boom",
+                    error_type="RuntimeError",
+                ),
+                call(
+                    "run-1",
+                    status="cancelled",
+                    error=None,
+                    error_type=None,
+                ),
+            ],
+        )
+        publish_event.assert_awaited_once_with(
+            "run-1",
+            {
+                "type": "end",
+                "status": "cancelled",
+                "thread_id": "thread-1",
+            },
+        )
+        clear_cancel.assert_awaited_once_with("run-1")
 
 
 if __name__ == "__main__":
