@@ -10,12 +10,11 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.service.arq_queue_servcie import (
-    RUN_REDIS_TTL_SECONDS,
+    build_agent_chunk_envolope,
     get_arq_pool,
     publish_agent_run_cancel_signal,
     read_agent_run_stream_events,
     read_recent_agent_run_stream_events,
-    write_agent_run_stream_event,
 )
 from server.service.attachment_service import (
     attachment_file_ids,
@@ -24,6 +23,7 @@ from server.service.attachment_service import (
     prepare_message_attachments,
 )
 from server.service.input_message_service import build_agent_input_msg
+from server.utils.agent_run_utils import format_agent_run_sse
 from src.configs import config
 from src.database.models import AgentRun, User
 from src.database.repositories import (
@@ -164,14 +164,6 @@ async def wait_agent_run_result(run_id: str) -> str:
         await asyncio.sleep(1)
 
 
-async def publish_agent_run_event(run_id: str, event: dict[str, Any]) -> str:
-    return await write_agent_run_stream_event(
-        run_id,
-        _build_agent_run_event(run_id, event),
-        ttl_seconds=RUN_REDIS_TTL_SECONDS,
-    )
-
-
 async def read_agent_run_events(
     run_id: str,
     *,
@@ -210,7 +202,9 @@ async def read_subagent_progress(
     status = "running" if subagent_event else "pending"
     error: str | None = None
     for event_id, fields in reversed(subagent_event):
-        payload = _decode_event_fields(fields)
+        envelope = _decode_event_fields(fields)
+        event_payload = envelope.get("payload")
+        payload = event_payload if isinstance(event_payload, dict) else {}
         event_status = payload.get("status")
         if isinstance(event_status, str) and event_status:
             status = event_status
@@ -220,7 +214,7 @@ async def read_subagent_progress(
         events.append(
             {
                 "event_id": _to_text(event_id),
-                "payload": payload,
+                "payload": envelope,
             }
         )
 
@@ -274,10 +268,10 @@ async def stream_agent_run_events(
     after_id = "0-0"
     while True:
         events = await read_agent_run_events(run_id, after_id=after_id)
-        for event_id, payload in events:
+        for event_id, envelope in events:
             after_id = event_id
-            yield _format_sse(event_id, payload)
-            if payload.get("type") == "end":
+            yield format_agent_run_sse(event_id, envelope)
+            if envelope.get("event_type") == "end":
                 return
 
         if events:
@@ -299,46 +293,47 @@ async def stream_agent_run_events(
                     run_id
                 )
                 if message is not None:
-                    yield _format_sse(
+                    yield format_agent_run_sse(
                         after_id,
-                        _build_agent_run_event(
-                            run_id,
-                            {
-                                "type": "messages",
-                                "thread_id": thread_id,
-                                "payload": [
+                        build_agent_chunk_envolope(
+                            run_id=run_id,
+                            event_type="messages",
+                            thread_id=thread_id,
+                            payload={
+                                "items": [
                                     {
                                         "event": "content-block-finish",
                                         "content": {"text": str(message.content)},
                                     }
-                                ],
+                                ]
                             },
+                            created_at=datetime.now(UTC).isoformat(),
                         ),
                     )
-                yield _format_sse(
+                yield format_agent_run_sse(
                     after_id,
-                    _build_agent_run_event(
-                        run_id,
-                        {
-                            "type": "end",
-                            "status": "completed",
-                            "thread_id": thread_id,
-                        },
+                    build_agent_chunk_envolope(
+                        run_id=run_id,
+                        event_type="end",
+                        thread_id=thread_id,
+                        payload={"status": "completed"},
+                        created_at=datetime.now(UTC).isoformat(),
                     ),
                 )
                 return
 
             if status in {"failed", "cancelled"}:
-                yield _format_sse(
+                yield format_agent_run_sse(
                     after_id,
-                    _build_agent_run_event(
-                        run_id,
-                        {
-                            "type": "end",
+                    build_agent_chunk_envolope(
+                        run_id=run_id,
+                        event_type="end",
+                        thread_id=thread_id,
+                        payload={
                             "status": status,
-                            "thread_id": thread_id,
                             "error": str(run.error or status),
                         },
+                        created_at=datetime.now(UTC).isoformat(),
                     ),
                 )
                 return
@@ -409,12 +404,6 @@ async def request_cancel_agent_run(
     return run
 
 
-def _build_agent_run_event(run_id: str, event: dict[str, Any]) -> dict[str, Any]:
-    payload = {**event, "scope": "agent_run", "run_id": run_id}
-    payload.setdefault("created_at", datetime.now(UTC).isoformat())
-    return payload
-
-
 def _decode_event_fields(fields: dict[Any, Any]) -> dict[str, Any]:
     raw_event = fields.get("event") if "event" in fields else fields.get(b"event")
     if raw_event is None:
@@ -423,12 +412,6 @@ def _decode_event_fields(fields: dict[Any, Any]) -> dict[str, Any]:
         raw_event = raw_event.decode()
     event = json.loads(raw_event)
     return event if isinstance(event, dict) else {"data": event}
-
-
-def _format_sse(event_id: str, payload: dict[str, Any]) -> str:
-    event_type = str(payload.get("type", "message"))
-    data = json.dumps(payload, ensure_ascii=False)
-    return f"id: {event_id}\nevent: {event_type}\ndata: {data}\n\n"
 
 
 def _to_text(value: Any) -> str:

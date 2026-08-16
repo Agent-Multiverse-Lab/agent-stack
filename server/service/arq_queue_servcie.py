@@ -70,7 +70,7 @@ def build_agent_chunk_envolope(
 async def write_agent_run_stream_event(
     run_id: str,
     event_type: str,
-    event: dict[str, Any],
+    payload: dict[str, Any],
     thread_id: str | None = None,
     *,
     ttl_seconds: int | None = None,
@@ -84,7 +84,7 @@ async def write_agent_run_stream_event(
         run_id=run_id,
         event_type=event_type,
         thread_id=thread_id,
-        payload=event,
+        payload=payload,
         created_at=datetime.now(tz=UTC).isoformat(),
     )
 

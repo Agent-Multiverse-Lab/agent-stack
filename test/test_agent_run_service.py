@@ -1,11 +1,14 @@
 """Agent Run 创建事务与事件辅助函数测试。"""
 
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from server.entities.agent import AgentRunCreateRequest
 from server.service import agent_run_service
+from server.service.arq_queue_servcie import build_agent_chunk_envolope
+from server.utils.agent_run_utils import format_agent_run_sse
 
 FILE_ID_1 = "759b114e-90d6-42d2-a052-bdccaa40c7b6"
 FILE_ID_2 = "123e4567-e89b-42d3-a456-426614174000"
@@ -316,21 +319,30 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], self.events)
 
 
-class AgentRunEventTest(unittest.TestCase):
+class AgentRunEventTest(unittest.IsolatedAsyncioTestCase):
     def test_request_uses_message_metadata_without_attachment_field(self):
         self.assertIn("msg_metadata", AgentRunCreateRequest.model_fields)
         self.assertNotIn("attachment_ids", AgentRunCreateRequest.model_fields)
 
-    def test_build_event_payload(self):
-        payload = agent_run_service._build_agent_run_event(
-            "r1",
-            {"type": "status"},
+    def test_format_sse_uses_queue_envelope(self):
+        envelope = build_agent_chunk_envolope(
+            run_id="r1",
+            event_type="end",
+            thread_id="thread-1",
+            payload={"status": "completed"},
+            created_at="2026-08-16T00:00:00+00:00",
+        )
+        frame = format_agent_run_sse("1-0", envelope)
+        data = json.loads(
+            next(line for line in frame.splitlines() if line.startswith("data: "))[6:]
         )
 
-        self.assertEqual("agent_run", payload["scope"])
-        self.assertEqual("r1", payload["run_id"])
-        self.assertEqual("status", payload["type"])
-        self.assertIn("created_at", payload)
+        self.assertIn("id: 1-0\n", frame)
+        self.assertIn("event: end\n", frame)
+        self.assertEqual("agent_run", data["scope"])
+        self.assertEqual("r1", data["run_id"])
+        self.assertEqual("end", data["type"])
+        self.assertEqual("completed", data["status"])
 
     def test_decode_event_fields_from_redis_bytes(self):
         payload = agent_run_service._decode_event_fields(
@@ -338,6 +350,27 @@ class AgentRunEventTest(unittest.TestCase):
         )
 
         self.assertEqual({"type": "done"}, payload)
+
+    async def test_subagent_progress_reads_nested_payload(self):
+        envelope = build_agent_chunk_envolope(
+            run_id="r1",
+            event_type="end",
+            thread_id="thread-1",
+            payload={"status": "failed", "error": "boom"},
+            created_at="2026-08-16T00:00:00+00:00",
+        )
+        fields = {b"event": json.dumps(envelope).encode()}
+
+        with patch(
+            "server.service.agent_run_service.read_recent_agent_run_stream_events",
+            return_value=[(b"1-0", fields)],
+        ):
+            progress = await agent_run_service.read_subagent_progress(run_id="r1")
+
+        self.assertEqual("failed", progress["status"])
+        self.assertTrue(progress["terminal"])
+        self.assertEqual("boom", progress["error"])
+        self.assertEqual(envelope, progress["events"][0]["payload"])
 
 
 if __name__ == "__main__":

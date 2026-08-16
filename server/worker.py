@@ -37,6 +37,57 @@ class AgentRunCancelRequested(Exception):
     """Worker 收到已落库 Run 的取消信号。"""
 
 
+@dataclass
+class AgentRunContext:
+    """持有单个 Agent Run 的进程内取消监听状态。"""
+
+    run_id: str
+    _cancel_event: asyncio.Event = field(
+        default_factory=asyncio.Event,
+        init=False,
+    )
+    _cancel_listener_task: asyncio.Task[None] | None = field(
+        default=None,
+        init=False,
+    )
+
+    def start(self) -> None:
+        """启动当前 Run 唯一的 Redis 取消信号监听任务。"""
+
+        if self._cancel_listener_task is not None:
+            return
+        self._cancel_listener_task = asyncio.create_task(
+            self._watch_cancel_signal()
+        )
+
+    async def wait_cancel_signal(self) -> None:
+        """等待当前 Run 的取消信号，并传播监听任务异常。"""
+
+        listener_task = self._cancel_listener_task
+        if listener_task is None:
+            raise RuntimeError("Agent Run 取消信号监听尚未启动")
+
+        await self._cancel_event.wait()
+        await listener_task
+
+    async def close(self) -> None:
+        """取消并等待当前 Run 的 Redis 取消信号监听任务。"""
+
+        listener_task = self._cancel_listener_task
+        if listener_task is None:
+            return
+        if not listener_task.done():
+            listener_task.cancel()
+        await asyncio.gather(listener_task, return_exceptions=True)
+
+    async def _watch_cancel_signal(self) -> None:
+        try:
+            await wait_agent_run_cancel_signal(self.run_id)
+        finally:
+            # 正常取消或监听异常都要唤醒等待方，由等待方取得任务结果。
+            self._cancel_event.set()
+
+
 async def ensure_agents_exist() -> None:
     agents = agent_manager.list_top_level_agents()
     subagents = agent_manager.list_subagents()
@@ -102,7 +153,7 @@ async def set_run_terminal(
     error_type: str | None = None,
     conversation_id: int | None = None,
     content: str | None = None,
-):
+) -> tuple[str | None, bool]:
     """用于agent的run事件的结束(无论何种状态), 当状态确实改变后,改变agent的状态,
     """
     if status == "completed" and (conversation_id is None or content is None):
@@ -117,12 +168,12 @@ async def set_run_terminal(
             error_type=error_type,
         )
 
-        current_agent_status = run.agent_status if run else None
-        if run is None or str(run.agent_status) != status:
-            return run
+        current_agent_status = str(run.agent_status) if run else None
 
         if changed and run and run.trigger_message_id:
-            await db.execute(update(Message).where(Message.id == run.trigger_message_id))
+            await db.execute(
+                update(Message).where(Message.id == run.trigger_message_id)
+            )
         return current_agent_status, changed
 
 
@@ -148,13 +199,11 @@ async def _get_agent_run(run_id: str):
 async def _cancellable_stream(
     stream: AsyncIterator[tuple[str, Any]],
     *,
-    run_id: str,
+    run_context: AgentRunContext,
 ) -> AsyncIterator[tuple[str, Any]]:
-    """为一个 Agent Run 创建取消事件并逐条消费流。"""
+    """逐条消费 Agent 流，并等待 Run Context 的取消信号。"""
 
-    cancel_event = asyncio.Event()
-    signal_task = asyncio.create_task(wait_cancel_event(run_id, cancel_event))
-    cancel_task = asyncio.create_task(cancel_event.wait())
+    cancel_task = asyncio.create_task(run_context.wait_cancel_signal())
     stream_task: asyncio.Task[tuple[str, Any]] | None = None
     try:
         while True:
@@ -166,8 +215,8 @@ async def _cancellable_stream(
             if cancel_task in done:
                 stream_task.cancel()
                 await asyncio.gather(stream_task, return_exceptions=True)
-                await signal_task
-                raise AgentRunCancelRequested(run_id)
+                await cancel_task
+                raise AgentRunCancelRequested(run_context.run_id)
 
             try:
                 yield stream_task.result()
@@ -177,7 +226,7 @@ async def _cancellable_stream(
                 print(traceback.print_exc())
                 return
     finally:
-        tasks = (stream_task, cancel_task, signal_task)
+        tasks = (stream_task, cancel_task)
         for task in tasks:
             if task is not None and not task.done():
                 task.cancel()
@@ -187,69 +236,79 @@ async def _cancellable_stream(
         )
 
 
-async def wait_cancel_event(
+async def write_stream_event(
     run_id: str,
-    event: asyncio.Event,
-) -> None:
-    """等待 Redis 取消信号并设置当前事件循环中的 Event。"""
+    event_type: str,
+    payload: dict[str, Any],
+    thread_id: str | None = None,
+) -> str:
+    """写入普通 Agent Run Stream 事件。"""
 
-    try:
-        await wait_agent_run_cancel_signal(run_id)
-    except Exception:
-        logger.exception(f"Agent Run 取消事件等待失败：{run_id}")
-        raise
-    finally:
-        # Redis 异常也必须唤醒等待方，再由等待方取得 watcher 的真实异常。
-        event.set()
+    return await write_agent_run_stream_event(
+        run_id,
+        event_type,
+        payload,
+        thread_id,
+        ttl_seconds=RUN_REDIS_TTL_SECONDS,
+    )
+
+
+async def write_end_stream_event(
+    run_id: str,
+    payload: dict[str, Any],
+    thread_id: str | None = None,
+) -> str:
+    """写入 Agent Run Stream 终态事件。"""
+
+    return await write_stream_event(run_id, "end", payload, thread_id)
 
 
 async def _finalize_run(
     run_id: str,
     *,
     status: str,
-    chunk: dict,
     thread_id: str,
+    payload: dict[str, Any] | None = None,
     error: str | None = None,
     error_type: str | None = None,
-) -> dict[str, str]:
-    run = await set_run_terminal(
+    conversation_id: int | None = None,
+    content: str | None = None,
+) -> tuple[str, bool]:
+    agent_status, changed = await set_run_terminal(
         run_id,
         status=status,
         error=error,
         error_type=error_type,
+        conversation_id=conversation_id,
+        content=content,
     )
-    if run is None:
+    if agent_status is None:
         raise ValueError(f"Agent Run 不存在：{run_id}")
 
-    persisted_status = run.agent_status
-
-    event: dict[str, Any] = {"status": persisted_status}
+    end_payload = dict(payload or {})
+    end_payload["status"] = agent_status
     if error is not None:
-        event["error"] = error
+        end_payload["error"] = error
 
     try:
-        if persisted_status == status:
-            await write_agent_run_stream_event(
-                run_id,
-                "end",
-                event,
-                thread_id,
-                ttl_seconds=RUN_REDIS_TTL_SECONDS,
-            )
+        if changed and agent_status:
+            await write_end_stream_event(run_id, end_payload, thread_id)
     except Exception:
         if status != "failed":
             raise
         logger.exception(f"Agent run 错误事件发布失败：{run_id}")
     finally:
-        if status == "cancelled":
+        if agent_status == "cancelled":
             await clear_agent_run_cancel_signal(run_id)
-    return {"run_id": run_id, "status": persisted_status}
+
+    return agent_status, changed
 
 
 @dataclass
 class StreamEventBucket:
     char_counts: int = 0
     chunks: list[dict[str, Any]] = field(default_factory=list)
+
 
 def map_stream_event(chunk: dict[str, Any]) -> tuple[str, Any]:
     # 映射具体的类型
@@ -310,12 +369,11 @@ class StreamEventSmoother:
         if bucket is None or not bucket.chunks:
             return
 
-        await write_agent_run_stream_event(
+        await write_stream_event(
             self.run_id,
             "messages",
             {"items": list(bucket.chunks)},
             thread_id,
-            ttl_seconds=RUN_REDIS_TTL_SECONDS,
         )
         bucket.chunks.clear()
         bucket.char_counts = 0
@@ -422,116 +480,132 @@ async def process_agent_run(ctx, run_id: str):
     if running_status in {"completed", "failed", "cancelled"}:
         return {"run_id": run_id, "status": running_status}
 
-    await write_agent_run_stream_event(
-        run_id,
-        "status",
-        {"status": "running"},
-        str(thread_id),
-        ttl_seconds=RUN_REDIS_TTL_SECONDS,
-    )
-    result_text = ""
-    stream_event_smoother = StreamEventSmoother(
-        run_id=run_id,
-        character_limit=20,
-    )
+    run_context = AgentRunContext(run_id)
+    run_context.start()
     try:
-        async with postgres_manager.get_async_session_context() as db:
-            stream_thread_events: AsyncIterator = stream_agent_response(
-                agent_slug=agent_slug,  # ty:ignore[invalid-argument-type]
-                thread_id=thread_id,  # ty:ignore[invalid-argument-type]
-                runtime_metadata=metadata,
-                thread_input_message=agent_input_message_formatted,
-                current_user=user,
-                db=db,
+        await write_stream_event(
+            run_id,
+            "status",
+            {"status": "running"},
+            str(thread_id),
+        )
+        result_text = ""
+        terminal_payload: dict[str, Any] | None = None
+        stream_event_smoother = StreamEventSmoother(
+            run_id=run_id,
+            character_limit=20,
+        )
+        try:
+            async with postgres_manager.get_async_session_context() as db:
+                stream_thread_events: AsyncIterator = stream_agent_response(
+                    agent_slug=agent_slug,  # ty:ignore[invalid-argument-type]
+                    thread_id=thread_id,  # ty:ignore[invalid-argument-type]
+                    runtime_metadata=metadata,
+                    thread_input_message=agent_input_message_formatted,
+                    current_user=user,
+                    db=db,
+                )
+
+                async for steam_agent_chunk in _cancellable_stream(
+                    stream_thread_events,
+                    run_context=run_context,
+                ):
+                    for strem_agent_chunk in _normalize_steam_agent_chunk(
+                        steam_agent_chunk  # ty: ignore[invalid-argument-type]
+                    ):  # ty: ignore[invalid-argument-type]
+                        current_thread_id = reslove_thread_id(
+                            strem_agent_chunk,
+                            str(thread_id),
+                        ) or str(thread_id)
+
+                        if strem_agent_chunk.get("status") == "loading":
+                            await stream_event_smoother.append(
+                                strem_agent_chunk,
+                                current_thread_id,
+                            )
+                            continue
+
+                        await stream_event_smoother.release(
+                            thread_id=current_thread_id
+                        )
+
+                        status = strem_agent_chunk.get("status") or "some_event"
+
+                        event_type, payload = map_stream_event(strem_agent_chunk)
+
+                        if event_type != "end":
+                            await write_stream_event(
+                                run_id,
+                                event_type,
+                                payload,
+                                current_thread_id,
+                            )
+
+                        # 预防子agent和fathert,一般没啥问题
+                        if current_thread_id != thread_id:
+                            continue
+
+                        if status == "finished":
+                            agent_status, chaged = await _finalize_run(
+                                run_id=run_id,
+                                status=status,
+                                thread_id=thread_id,  # ty: ignore[invalid-argument-type]
+                                payload=strem_agent_chunk,
+                            )
+                            terminal_set = bool(
+                                agent_status
+                                in ["completed", "failed", "cancelled"]
+                            )
+            await stream_event_smoother.release()
+
+            if not terminal_set:
+                # 未正常结束则兜底
+                finish_payload = {
+                    "status": "finished",
+                    "request_id": request_id,
+                }
+                await _finalize_run(
+                    run_id=run_id,
+                    status="completed",
+                    thread_id=thread_id,  # ty: ignore[invalid-argument-type]
+                    payload=finish_payload,
+                )
+        except AgentRunCancelRequested:
+            logger.info(f"Agent run 收到取消请求：{run_id}")
+            return await _finalize_run(
+                run_id,
+                status="cancelled",
+                thread_id=str(thread_id),
+            )
+        except Exception as exc:
+            await _finalize_run(
+                run_id,
+                status="failed",
+                thread_id=str(thread_id),
+                error=str(exc),
+                error_type=type(exc).__name__,
             )
 
-            async for steam_agent_chunk in _cancellable_stream(
-                stream_thread_events,
-                run_id=run_id,
-            ):
-                for strem_agent_chunk in _normalize_steam_agent_chunk(
-                    steam_agent_chunk
-                ):  # ty: ignore[invalid-argument-type]
-                    current_thread_id = reslove_thread_id(
-                        strem_agent_chunk,
-                        str(thread_id),
-                    ) or str(thread_id)
+            logger.exception(f"Agent run 执行失败：{run_id}")
+            raise
 
-                    if strem_agent_chunk.get("status") == "loading":
-                        await stream_event_smoother.append(
-                            strem_agent_chunk,
-                            current_thread_id,
-                        )
-                        continue
+        if await has_agent_run_cancel_signal(run_id):
+            return await _finalize_run(
+                run_id,
+                status="cancelled",
+                thread_id=str(thread_id),
+            )
 
-                    await stream_event_smoother.release(thread_id=current_thread_id)
-
-                    status = strem_agent_chunk.get("status") or "some_event"
-
-                    event_type, payload = map_stream_event(strem_agent_chunk)
-
-                    if event_type == "end":
-                        await write_agent_run_stream_event(
-                            run_id,
-                            event_type,
-                            payload,
-                            str(thread_id),
-                            ttl_seconds=RUN_REDIS_TTL_SECONDS,
-                        )
-
-                    # 预防子agent和fathert,一般没啥问题
-                    if current_thread_id != thread_id:
-                        continue
-
-                    if status == "finished":
-                        # TODO 待完善事件统一发布
-                        await _finalize_run()
-
-
-    except AgentRunCancelRequested:
-        logger.info(f"Agent run 收到取消请求：{run_id}")
         return await _finalize_run(
             run_id,
-            status="cancelled",
+            status="completed",
             thread_id=str(thread_id),
+            payload=terminal_payload,
+            conversation_id=int(agent_run_event.conversation_id),
+            content=result_text,
         )
-    except Exception as exc:
-        await _finalize_run(
-            run_id,
-            status="failed",
-            thread_id=str(thread_id),
-            error=str(exc),
-            error_type=type(exc).__name__,
-        )
-
-        logger.exception(f"Agent run 执行失败：{run_id}")
-        raise
-
-    if await has_agent_run_cancel_signal(run_id):
-        return await _finalize_run(
-            run_id,
-            status="cancelled",
-            thread_id=str(thread_id),
-        )
-
-    completed_run = await set_run_terminal(
-        run_id,
-        status="completed",
-        conversation_id=int(agent_run_event.conversation_id),
-        content=result_text,
-    )
-    if completed_run is None:
-        raise ValueError(f"Agent Run 不存在：{run_id}")
-    completed_status = str(completed_run.agent_status)
-    if completed_status == "cancel_requested":
-        return await _finalize_run(
-            run_id,
-            status="cancelled",
-            thread_id=str(thread_id),
-        )
-    if completed_status != "completed":
-        return {"run_id": run_id, "status": completed_status}
-
+    finally:
+        await run_context.close()
 
 
 class WorkerSettings:
