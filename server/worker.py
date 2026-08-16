@@ -6,14 +6,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from arq.connections import RedisSettings
-from langchain_core.messages import AIMessage
-from sqlalchemy import select
+from sqlalchemy import select, update
 
-from server.service.agent_run_service import publish_agent_run_event
 from server.service.arq_queue_servcie import (
+    RUN_REDIS_TTL_SECONDS,
     clear_agent_run_cancel_signal,
     has_agent_run_cancel_signal,
     wait_agent_run_cancel_signal,
+    write_agent_run_stream_event,
 )
 from server.service.input_message_service import build_agent_input_msg
 from server.service.thread_service import stream_agent_response
@@ -102,28 +102,28 @@ async def set_run_terminal(
     error_type: str | None = None,
     conversation_id: int | None = None,
     content: str | None = None,
-) -> AgentRun | None:
+):
+    """用于agent的run事件的结束(无论何种状态), 当状态确实改变后,改变agent的状态,
+    """
     if status == "completed" and (conversation_id is None or content is None):
         raise ValueError("completed 终态需要 conversation_id 和 content")
 
     async with postgres_manager.get_async_session_context() as db:
         agent_run_repo = AgentRunRepository(db)
-        run = await agent_run_repo.set_agent_terminal(
+        run, changed = await agent_run_repo.set_agent_terminal(
             run_id,
             status=status,
             error=error,
             error_type=error_type,
         )
+
+        current_agent_status = run.agent_status if run else None
         if run is None or str(run.agent_status) != status:
             return run
 
-        if status == "completed":
-            await ConversationRepository(db).create_agent_output_message(
-                conversation_id=conversation_id,
-                agent_run_id=run_id,
-                content=content,
-            )
-        return run
+        if changed and run and run.trigger_message_id:
+            await db.execute(update(Message).where(Message.id == run.trigger_message_id))
+        return current_agent_status, changed
 
 
 async def _get_user(uid: str) -> User | None:
@@ -203,91 +203,53 @@ async def wait_cancel_event(
         event.set()
 
 
-async def _finalize_cancelled_run(
+async def _finalize_run(
     run_id: str,
     *,
+    status: str,
+    chunk: dict,
     thread_id: str,
-) -> dict[str, str]:
-    run = await set_run_terminal(run_id, status="cancelled")
-    if run is None:
-        raise ValueError(f"Agent Run 不存在：{run_id}")
-
-    status = str(run.agent_status)
-    try:
-        if status == "cancelled":
-            await publish_agent_run_event(
-                run_id,
-                {
-                    "type": "end",
-                    "status": "cancelled",
-                    "thread_id": thread_id,
-                },
-            )
-    finally:
-        await clear_agent_run_cancel_signal(run_id)
-    return {"run_id": run_id, "status": status}
-
-
-async def _finalize_failed_run(
-    run_id: str,
-    *,
-    thread_id: str,
-    error: str,
-    error_type: str,
+    error: str | None = None,
+    error_type: str | None = None,
 ) -> dict[str, str]:
     run = await set_run_terminal(
         run_id,
-        status="failed",
+        status=status,
         error=error,
         error_type=error_type,
     )
     if run is None:
         raise ValueError(f"Agent Run 不存在：{run_id}")
 
-    status = str(run.agent_status)
-    if status == "cancel_requested":
-        return await _finalize_cancelled_run(run_id, thread_id=thread_id)
-    if status == "failed":
-        try:
-            await publish_agent_run_event(
+    persisted_status = run.agent_status
+
+    event: dict[str, Any] = {"status": persisted_status}
+    if error is not None:
+        event["error"] = error
+
+    try:
+        if persisted_status == status:
+            await write_agent_run_stream_event(
                 run_id,
-                {
-                    "type": "end",
-                    "status": "failed",
-                    "thread_id": thread_id,
-                    "error": error,
-                },
+                "end",
+                event,
+                thread_id,
+                ttl_seconds=RUN_REDIS_TTL_SECONDS,
             )
-        except Exception:
-            logger.exception(f"Agent run 错误事件发布失败：{run_id}")
-    return {"run_id": run_id, "status": status}
-
-
-async def write_agent_run_event(
-    run_id: str,
-    payload: Any,
-    event_type: str,
-    thread_id: str | None,
-) -> None:
-    await publish_agent_run_event(
-        run_id,
-        {
-            "type": event_type,
-            "thread_id": thread_id,
-            "payload": payload,
-        },
-    )
+    except Exception:
+        if status != "failed":
+            raise
+        logger.exception(f"Agent run 错误事件发布失败：{run_id}")
+    finally:
+        if status == "cancelled":
+            await clear_agent_run_cancel_signal(run_id)
+    return {"run_id": run_id, "status": persisted_status}
 
 
 @dataclass
 class StreamEventBucket:
     char_counts: int = 0
     chunks: list[dict[str, Any]] = field(default_factory=list)
-
-
-def calculate_character_count(chunk: dict[str, Any]) -> int:
-    return 0
-
 
 def map_stream_event(chunk: dict[str, Any]) -> tuple[str, Any]:
     # 映射具体的类型
@@ -304,7 +266,6 @@ def map_stream_event(chunk: dict[str, Any]) -> tuple[str, Any]:
         return "end", {"status": "completed", "chunk": chunk}
 
     raise ValueError(f"不支持的流事件状态：{status}")
-
 
 class StreamEventSmoother:
     """按 thread_id 分桶保存连续的消息流事件。"""
@@ -324,6 +285,9 @@ class StreamEventSmoother:
         self.character_limit = character_limit
         self.chunk_buckets: dict[str | None, StreamEventBucket] = {}
 
+    def calculate_character_count(self, chunk: dict[str, Any]) -> int:
+        return 0
+
     async def append(
         self,
         chunk: dict[str, Any],
@@ -333,7 +297,7 @@ class StreamEventSmoother:
 
         bucket = self.chunk_buckets.setdefault(thread_id, StreamEventBucket())
         bucket.chunks.append(chunk)
-        bucket.char_counts += calculate_character_count(chunk)
+        bucket.char_counts += self.calculate_character_count(chunk)
 
         # FIXME 需要重写counts
         if bucket.char_counts > self.character_limit:
@@ -346,15 +310,15 @@ class StreamEventSmoother:
         if bucket is None or not bucket.chunks:
             return
 
-        await write_agent_run_event(
-            run_id=self.run_id,
-            payload={"items": list(bucket.chunks)},
-            event_type="messages",
-            thread_id=thread_id,
+        await write_agent_run_stream_event(
+            self.run_id,
+            "messages",
+            {"items": list(bucket.chunks)},
+            thread_id,
+            ttl_seconds=RUN_REDIS_TTL_SECONDS,
         )
         bucket.chunks.clear()
         bucket.char_counts = 0
-
 
 def _normalize_steam_agent_chunk(steam_agent_chunk_bytes: bytes) -> list[dict]:
     steam_agent_chunk_text = steam_agent_chunk_bytes.decode("utf-8")
@@ -381,8 +345,9 @@ async def process_agent_run(ctx, run_id: str):
     if initial_status in {"completed", "failed", "cancelled"}:
         return {"run_id": run_id, "status": initial_status}
     if initial_status == "cancel_requested":
-        return await _finalize_cancelled_run(
+        return await _finalize_run(
             run_id,
+            status="cancelled",
             thread_id=str(agent_run_event.thread_id),
         )
 
@@ -395,8 +360,9 @@ async def process_agent_run(ctx, run_id: str):
             f"当前agent运行id：{run_id} 的输入消息不存在："
             f"{agent_run_event.trigger_message_id}"
         )
-        return await _finalize_failed_run(
+        return await _finalize_run(
             run_id,
+            status="failed",
             thread_id=str(agent_run_event.thread_id),
             error=error,
             error_type="LookupError",
@@ -424,8 +390,9 @@ async def process_agent_run(ctx, run_id: str):
 
     if not user:
         error = f"User not found: {uid}"
-        return await _finalize_failed_run(
+        return await _finalize_run(
             run_id,
+            status="failed",
             thread_id=str(thread_id),
             error=error,
             error_type="LookupError",
@@ -447,20 +414,20 @@ async def process_agent_run(ctx, run_id: str):
         raise ValueError(f"Agent Run 不存在：{run_id}")
     running_status = str(running_run.agent_status)
     if running_status == "cancel_requested":
-        return await _finalize_cancelled_run(
+        return await _finalize_run(
             run_id,
+            status="cancelled",
             thread_id=str(thread_id),
         )
     if running_status in {"completed", "failed", "cancelled"}:
         return {"run_id": run_id, "status": running_status}
 
-    await publish_agent_run_event(
+    await write_agent_run_stream_event(
         run_id,
-        {
-            "type": "status",
-            "status": "running",
-            "thread_id": thread_id,
-        },
+        "status",
+        {"status": "running"},
+        str(thread_id),
+        ttl_seconds=RUN_REDIS_TTL_SECONDS,
     )
     result_text = ""
     stream_event_smoother = StreamEventSmoother(
@@ -504,9 +471,13 @@ async def process_agent_run(ctx, run_id: str):
                     event_type, payload = map_stream_event(strem_agent_chunk)
 
                     if event_type == "end":
-                        await write_agent_run_event(
-                            run_id, payload, event_type, thread_id=thread_id
-                        )  # ty: ignore[invalid-argument-type]
+                        await write_agent_run_stream_event(
+                            run_id,
+                            event_type,
+                            payload,
+                            str(thread_id),
+                            ttl_seconds=RUN_REDIS_TTL_SECONDS,
+                        )
 
                     # 预防子agent和fathert,一般没啥问题
                     if current_thread_id != thread_id:
@@ -514,30 +485,32 @@ async def process_agent_run(ctx, run_id: str):
 
                     if status == "finished":
                         # TODO 待完善事件统一发布
-                        pass
+                        await _finalize_run()
 
 
     except AgentRunCancelRequested:
         logger.info(f"Agent run 收到取消请求：{run_id}")
-        return await _finalize_cancelled_run(
+        return await _finalize_run(
             run_id,
+            status="cancelled",
             thread_id=str(thread_id),
         )
     except Exception as exc:
-        result = await _finalize_failed_run(
+        await _finalize_run(
             run_id,
+            status="failed",
             thread_id=str(thread_id),
             error=str(exc),
             error_type=type(exc).__name__,
         )
-        if result["status"] != "failed":
-            return result
+
         logger.exception(f"Agent run 执行失败：{run_id}")
         raise
 
     if await has_agent_run_cancel_signal(run_id):
-        return await _finalize_cancelled_run(
+        return await _finalize_run(
             run_id,
+            status="cancelled",
             thread_id=str(thread_id),
         )
 
@@ -551,22 +524,14 @@ async def process_agent_run(ctx, run_id: str):
         raise ValueError(f"Agent Run 不存在：{run_id}")
     completed_status = str(completed_run.agent_status)
     if completed_status == "cancel_requested":
-        return await _finalize_cancelled_run(
+        return await _finalize_run(
             run_id,
+            status="cancelled",
             thread_id=str(thread_id),
         )
     if completed_status != "completed":
         return {"run_id": run_id, "status": completed_status}
 
-    await publish_agent_run_event(
-        run_id,
-        {
-            "type": "end",
-            "status": "completed",
-            "thread_id": thread_id,
-        },
-    )
-    return {"run_id": run_id, "status": "completed"}
 
 
 class WorkerSettings:

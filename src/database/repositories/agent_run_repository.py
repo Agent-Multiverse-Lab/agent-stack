@@ -184,7 +184,7 @@ class AgentRunRepository:
         )
         return result.scalar_one_or_none() is not None
 
-    async def _get_for_update(self, run_id: str) -> AgentRun | None:
+    async def _lock_update(self, run_id: str) -> AgentRun | None:
         result = await self.session.execute(
             select(AgentRun)
             .where(AgentRun.id == run_id)
@@ -194,7 +194,7 @@ class AgentRunRepository:
         return result.scalar_one_or_none()
 
     async def set_running(self, run_id: str) -> AgentRun | None:
-        run = await self._get_for_update(run_id)
+        run = await self._lock_update(run_id)
         if run is None:
             return None
         if str(run.agent_status) in AGENT_RUN_TERMINAL_STATUSES | {
@@ -215,16 +215,16 @@ class AgentRunRepository:
         status: str,
         error: str | None = None,
         error_type: str | None = None,
-    ) -> AgentRun | None:
+    ) -> tuple[AgentRun | None, bool]:
         if status not in AGENT_RUN_TERMINAL_STATUSES:
             raise ValueError(f"不支持的 Agent Run 终态：{status}")
 
-        run = await self._get_for_update(run_id)
+        run = await self._lock_update(run_id)
         if run is None:
-            return None
+            return None, False
         current_status = str(run.agent_status)
         if current_status in AGENT_RUN_TERMINAL_STATUSES:
-            return run
+            return run, False
         if status == "cancelled" and current_status != "cancel_requested":
             return run
         if status != "cancelled" and current_status == "cancel_requested":
@@ -235,10 +235,10 @@ class AgentRunRepository:
         run.error = error  # ty: ignore[invalid-assignment]
         run.error_type = error_type  # ty: ignore[invalid-assignment]
         await self.session.flush()
-        return run
+        return run, True
 
     async def request_cancel(self, run_id: str) -> AgentRun | None:
-        run = await self._get_for_update(run_id)
+        run = await self._lock_update(run_id)
         if run is None:
             return None
         if str(run.agent_status) in AGENT_RUN_TERMINAL_STATUSES:

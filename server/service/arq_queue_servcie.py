@@ -50,9 +50,28 @@ def agent_run_cancel_key(run_id: str) -> str:
     return f"run:cancel:{run_id}"
 
 
+def build_agent_chunk_envolope(
+    *,
+    run_id: str,
+    event_type: str,
+    thread_id: str | None = None,
+    payload: dict | None = None,
+    created_at: str | None = None,
+):
+    return {
+        "run_id": run_id,
+        "event_type": event_type,
+        "thread_id": thread_id,
+        "payload": payload,
+        "created_at": created_at,
+    }
+
+
 async def write_agent_run_stream_event(
     run_id: str,
+    event_type: str,
     event: dict[str, Any],
+    thread_id: str | None = None,
     *,
     ttl_seconds: int | None = None,
 ) -> str:
@@ -60,8 +79,18 @@ async def write_agent_run_stream_event(
 
     redis_client = await get_async_redis_client()
     stream_key = queue_event_stream_key(run_id)
+
+    chunk_envelope = build_agent_chunk_envolope(
+        run_id=run_id,
+        event_type=event_type,
+        thread_id=thread_id,
+        payload=event,
+        created_at=datetime.now(tz=UTC).isoformat(),
+    )
+
     fields = {
-        "event": json.dumps(event, ensure_ascii=False, default=str),
+        "event_type": event_type,
+        "event": json.dumps(chunk_envelope, ensure_ascii=False, default=str),
     }
 
     event_id = await redis_client.xadd(

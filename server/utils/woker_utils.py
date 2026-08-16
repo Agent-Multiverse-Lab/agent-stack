@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 
+
 def reslove_thread_id(steam_agent_chunk: object, thread_id:str | None = None) -> str | None:
     
     if not isinstance(steam_agent_chunk, Mapping):

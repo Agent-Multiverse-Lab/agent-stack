@@ -62,11 +62,9 @@ async def create_agent_run_service(
     )
 
     conversation_repository = ConversationRepository(db)
-    conversation = (
-        await conversation_repository.get_conversation_by_thread_id_for_user(
-            thread_id=thread_id,
-            user_id=str(current_user.uid),
-        )
+    conversation = await conversation_repository.get_conversation_by_thread_id_for_user(
+        thread_id=thread_id,
+        user_id=str(current_user.uid),
     )
     if conversation is None:
         raise LookupError("当前会话不存在或已删除")
@@ -390,10 +388,7 @@ async def request_cancel_agent_run(
     )
     for child_run in child_runs:
         child_run = await run_repository.request_cancel(str(child_run.id))
-        if (
-            child_run is not None
-            and str(child_run.agent_status) == "cancel_requested"
-        ):
+        if child_run is not None and str(child_run.agent_status) == "cancel_requested":
             signal_run_ids.append(str(child_run.id))
 
     run = await run_repository.request_cancel(run_id)
