@@ -30,6 +30,14 @@ agent workflow change.
     examples, failure handling, and validation.
   - `tasks.md` defines ordered, independently verifiable work items and the
     requirements each task implements.
+- Every `plan.md` must declare `计划版本：vX.Y.Z` immediately below its title.
+  Revise an unimplemented plan in place without changing its version. Increment
+  the version only when the preceding plan version has been implemented and a
+  new implementation scope begins.
+- Plan history is append-only for implemented versions. Keep the current version
+  first and preserve every previously implemented plan version as a complete,
+  clearly labelled snapshot under the same `plan.md`; do not create historical
+  versions for unimplemented draft revisions.
 - Write specifications and plans as positive, executable scope. Every listed
   behavior, file modification, example, and validation step must correspond to
   work that will actually be performed.
@@ -252,9 +260,16 @@ runtime configuration.
   parallel `conversation_service.py`.
 - Agent Run creation, cancellation, and SSE exposure live in
   `server/router/agent_router.py` and `server/service/agent_run_service.py`.
-- `server/service/arq_queue_servcie.py` owns ARQ pool access, raw Redis Stream
-  operations, cancellation keys, and cancellation Pub/Sub operations. Keep the
-  existing filename spelling unless a dedicated rename is approved.
+- `server/service/arq_queue_servcie.py` owns ARQ pool access, Agent Run event
+  envelope construction and serialization, raw Redis Stream operations,
+  cancellation keys, and cancellation Pub/Sub operations. Keep the existing
+  filename spelling unless a dedicated rename is approved.
+- `server/worker.py` writes ordinary events through `write_stream_event` and
+  terminal events through `write_end_stream_event`; both forward the same
+  `payload` definition to `write_agent_run_stream_event` without adding event
+  packaging policy.
+- `server/utils/agent_run_utils.py` owns the pure Redis-envelope-to-SSE framing
+  adapter. It must not access Redis, PostgreSQL, or Run lifecycle state.
 - `src/storage/redis/redis_manger.py` owns only Redis/ARQ client construction,
   shared-client lifecycle, and close behavior. It must not own Agent Run
   semantics.
@@ -292,6 +307,8 @@ flag. Child Run operations must verify ownership by the current parent Run.
 
 Current event and cancellation rules:
 
+- Redis events use `event_type` for routing and `payload` for the type-specific
+  body. The public SSE adapter exposes the existing flat `type` contract.
 - `process_agent_run(...)` publishes `messages`, `values`, and
   `agent_execute_event` entries to `run:events:{run_id}`.
 - Running lifecycle events use `type: "status"`, `status: "running"`.
@@ -301,8 +318,21 @@ Current event and cancellation rules:
   direct child Runs in one transaction. After commit, it writes
   `run:cancel:{run_id}` and publishes the Run ID to channel `run:cancel`.
 - The Worker checks the cancellation key and listens to Pub/Sub. A matching
-  signal sets a Run-local `asyncio.Event`, stops the active Agent stream,
-  persists `cancelled`, publishes one terminal event, and clears the key.
+  signal sets a Run-local `asyncio.Event`; `_cancellable_stream(...)` cancels
+  the active stream task and propagates `asyncio.CancelledError`.
+- `StreamEventSmoother.release(thread_id)` releases one parent or child thread
+  bucket during normal streaming. Calling `release()` without a thread ID
+  releases every bucket owned by the current Run before cancellation or normal
+  stream completion.
+- Stream-before cancellation writes `cancelled` through `set_run_terminal`
+  without creating a Redis `end`. Stream-active cancellation releases all
+  buckets, writes the PostgreSQL terminal state, and publishes one `end` only
+  when the returned `changed` flag and actual persisted status permit it. This
+  path does not clear the cancellation key.
+- After a Run enters `running`, `AgentRunContext` owns its single process-local
+  cancellation Event and Redis listener. `process_agent_run(...)` calls
+  `start()` and always calls `close()` in `finally`; `_cancellable_stream(...)`
+  waits through `wait_cancel_signal()` and does not create another listener.
 - Cancellation scope does not branch on `run_type`.
 - Rebuild the Compose Worker after backend source changes because the Worker
   image does not bind-mount the checkout.
