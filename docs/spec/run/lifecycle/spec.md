@@ -22,16 +22,34 @@
 run = await set_run_terminal(
     run_id,
     status="completed",
-    conversation_id=int(agent_run_event.conversation_id),
-    content=result_text,
 )
 ```
+
+`set_run_terminal` 只接收 Run 终态字段 `status/error/error_type`，不得接收或持久化
+`conversation_id/content`。输出消息持久化不属于 Run 终态写入职责。
 
 ### RUN-LC-003 终态回写并发保护
 `set_agent_terminal` 必须拒绝非法回退；并发场景下仅允许一处成功写入终态。
 
 ### RUN-LC-004 `cancellation` 与终态一致
 `cancel_requested` 不能直接变回 `running`；若终态已变更为 `completed`/`failed`/`cancelled`，后续 finalize 只读返回原状态。
+
+### RUN-LC-005 Agent Stream 前终态分类
+
+`server/worker.py:process_agent_run` 在进入 Agent Stream 消费循环前，不得把所有
+停止统一解释为 `cancelled`：
+
+- Run 不存在：无法写入终态，记录错误并返回；
+- Run 已是 `completed/failed/cancelled`：保持当前终态并返回；
+- 执行前检查仍为 `cancel_requested`：写入 `cancelled`，清理取消信号并返回；
+- Message、User、Agent 或执行准备失败：写入 `failed`，同时保存对应
+  `error/error_type` 并返回；
+- `completed` 只表示 Agent 执行正常结束，不得用于取消或执行准备错误。
+
+上述分支只 `await set_run_terminal(...)` 完成数据库副作用，不消费其返回值，也不
+调用 `_finalize_run`。进入 Agent Stream 消费循环后的终态继续由 `_finalize_run`
+收敛。Redis/SSE 终止遵循
+[`RUN-ES-004`](../event-streaming/spec.md) 的 PostgreSQL 权威状态规则。
 
 ## 4. Failure Contract
 
@@ -44,3 +62,5 @@ run = await set_run_terminal(
 - 所有终态路径会落库：`completed / failed / cancelled`
 - 同一 run 的终态确定后不得发生反向变更
 - 任何对终态的写入调用需通过仓储 `set_agent_terminal`
+- Agent Stream 前的停止原因会被分类为不存在、既有终态、取消或失败，不使用统一
+  的 `cancelled` 代替真实结果

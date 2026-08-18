@@ -60,11 +60,22 @@ Worker 的可观测事件统一通过 `write_agent_run_stream_event` 写入 Stre
 `server/utils/agent_run_utils.py` 只负责把已经构造好的 Redis envelope 格式化为
 SSE frame。它不得访问数据库、Redis 或修改 Run 生命周期。
 
-### RUN-ES-004 终态兜底
+### RUN-ES-004 PostgreSQL 驱动终止
 
-若 Redis Stream 尚未创建、已经过期或缺失终态事件，
-`stream_agent_run_events` 按 PostgreSQL 中的 Run 终态生成只用于当前 SSE
-响应的兜底事件。兜底事件仍复用队列服务的 envelope builder，不写回 Redis。
+`AgentRun.agent_status` 是 SSE 判断 Run 是否终止的唯一事实来源。
+`stream_agent_run_events` 每轮先读取 PostgreSQL 中的最新 Run 状态，再读取当前
+cursor 之后的 Redis 事件：
+
+- Run 未终态时，继续等待和转发普通 Redis 事件；
+- Redis `end` 只作为唤醒状态重查的传输信号，不能直接决定 SSE 结束；
+- Run 已终态时，先排空 Redis 中尚未发送的普通事件，再根据数据库中的终态和
+  error 生成唯一公共 SSE `end`，随后关闭连接；
+- Redis Stream 未创建、已过期或缺少 `end` 时仍执行同一数据库终止流程，生成
+  的公共 `end` 只用于当前 SSE 响应，不写回 Redis。
+
+Redis 等待必须在有限时间内返回控制权，使没有 Redis Stream 的连接也能重新查询
+PostgreSQL。数据库终态只能在 Worker 已经 flush 当前 Run 的全部 Agent chunk 后
+提交，保证 SSE 查到终态后可以安全排空剩余事件。
 
 ### RUN-ES-005 Worker 写入语义
 
@@ -72,19 +83,28 @@ SSE frame。它不得访问数据库、Redis 或修改 Run 生命周期。
 `write_end_stream_event` 写 `event_type="end"` 的终态事件。两个方法都是对
 `write_agent_run_stream_event` 的薄包装：普通方法原样转发事件参数，终态方法
 只固定事件类型并复用普通方法，不增加状态更新、任务停止或资源清理行为。
-`write_end_stream_event` 只由 `_finalize_run` 在终态落库实际发生后调用。
+`write_end_stream_event` 只由 `_finalize_run` 在终态落库实际发生后调用；它写入的
+Redis `end` 只负责唤醒 SSE 重新查询 PostgreSQL，不是 Run 终态依据。
 三个 writer 对事件体统一使用参数名 `payload`，且
 `write_end_stream_event` 必须把收到的 payload 写入 end envelope，不能只写空的
 停止标记。
+
+Worker 尚未进入当前 Run 的 Agent Stream 消费循环时，停止路径只调用
+`set_run_terminal` 提交 PostgreSQL 终态，不调用 `_finalize_run` 或
+`write_end_stream_event`。该场景由 [`RUN-ES-004`](#run-es-004-postgresql-驱动终止)
+按数据库状态为当前 SSE 响应生成终态，不得为了补齐事件而创建或回写 Redis
+Stream。
 
 ## 4. Acceptance Criteria
 
 - `agent_run_service.py` 不再包含 Agent Run event builder 或事件发布包装。
 - Redis 事件只由 `arq_queue_servcie.py` 构造并序列化。
 - SSE formatter 位于 `server/utils/agent_run_utils.py`，且保持当前前端的扁平事件契约。
-- SSE 按 Redis Stream ID 顺序读取，并在 `event_type=end` 时结束。
+- SSE 按 Redis Stream ID 顺序读取；Redis `end` 只唤醒数据库状态重查。
+- SSE 只在 PostgreSQL 已终态且未消费普通事件已经排空后生成公共 `end` 并结束。
 - 子 Agent 进度从 envelope 的 `payload` 读取 `status` 和 `error`。
-- 数据库终态兜底不向 Redis Stream 重复写入事件。
+- PostgreSQL 驱动生成的公共 `end` 不向 Redis Stream 重复写入事件。
 - Worker 普通写入和终态写入分别使用两个语义明确的薄包装。
 - 队列 writer、Worker 普通 writer 和 Worker end writer 对事件体统一使用
   `payload` 参数名和定义。
+- Agent Stream 前停止不写 Redis `end`，数据库驱动的公共终态不回写 Redis。
