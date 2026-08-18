@@ -1,14 +1,23 @@
 <script setup lang="ts">
+import { onMounted } from "vue"
 import { GithubOutlined } from "@ant-design/icons-vue"
 import { RouterLink, useRouter } from "vue-router"
 
 import authIllustrationUrl from "@/assets/auth-illustrate.png"
 import logoUrl from "@/assets/logo.svg"
 import LoginComponent from "@/components/LoginComponent.vue"
+import { useAuthStore } from "@/stores/useAuthStore"
 
 const router = useRouter()
+const authStore = useAuthStore()
 
 const openChat = () => router.replace({ name: "chat" })
+
+onMounted(() => {
+  if (authStore.accessToken) {
+    openChat()
+  }
+})
 </script>
 
 <template>

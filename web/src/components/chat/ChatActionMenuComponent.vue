@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue"
 import { ChevronRight, Paperclip, Plus } from "@lucide/vue"
+import { Tooltip as ATooltip } from "ant-design-vue"
 
 defineProps<{
   disabled?: boolean
+  placement: "top" | "bottom"
 }>()
 
 const emit = defineEmits<{
@@ -54,38 +56,46 @@ onBeforeUnmount(() => {
     ref="containerRef"
     class="static"
   >
-    <!-- Trigger Button -->
-    <button
-      class="grid size-10 shrink-0 place-items-center rounded-full bg-graphite/6 text-graphite transition-all duration-150 hover:bg-graphite/10 disabled:cursor-not-allowed disabled:text-graphite/25 motion-reduce:transition-none"
-      type="button"
-      :disabled="disabled"
-      :aria-expanded="isOpen"
-      aria-haspopup="true"
-      aria-label="Action menu"
+    <ATooltip
+      :placement="placement === 'top' ? 'bottom' : 'top'"
       title="Action menu"
-      @click.stop="toggleMenu"
     >
-      <Plus
-        :size="19"
-        :stroke-width="1.9"
-        class="transition-transform duration-200 motion-reduce:transition-none"
-        :class="{ 'rotate-45': isOpen }"
-        aria-hidden="true"
-      />
-    </button>
+      <button
+        class="grid size-10 shrink-0 place-items-center rounded-full bg-graphite/6 text-graphite transition-all duration-150 hover:bg-graphite/10 disabled:cursor-not-allowed disabled:text-graphite/25 motion-reduce:transition-none"
+        type="button"
+        :disabled="disabled"
+        :aria-expanded="isOpen"
+        aria-haspopup="true"
+        aria-label="Action menu"
+        @click.stop="toggleMenu"
+      >
+        <Plus
+          :size="19"
+          :stroke-width="1.9"
+          class="transition-transform duration-200 motion-reduce:transition-none"
+          :class="{ 'rotate-45': isOpen }"
+          aria-hidden="true"
+        />
+      </button>
+    </ATooltip>
 
-    <!-- Floating Full-Width Action Menu Panel Below Input Box -->
+    <!-- Floating Full-Width Action Menu Panel -->
     <Transition
-      enter-active-class="transition duration-150 ease-out"
-      enter-from-class="transform scale-[0.98] opacity-0 -translate-y-1"
+      enter-active-class="transition duration-150 ease-out motion-reduce:transition-none"
+      :enter-from-class="placement === 'top'
+        ? 'transform scale-[0.98] opacity-0 translate-y-1'
+        : 'transform scale-[0.98] opacity-0 -translate-y-1'"
       enter-to-class="transform scale-100 opacity-100 translate-y-0"
-      leave-active-class="transition duration-100 ease-in"
+      leave-active-class="transition duration-100 ease-in motion-reduce:transition-none"
       leave-from-class="transform scale-100 opacity-100 translate-y-0"
-      leave-to-class="transform scale-[0.98] opacity-0 -translate-y-1"
+      :leave-to-class="placement === 'top'
+        ? 'transform scale-[0.98] opacity-0 translate-y-1'
+        : 'transform scale-[0.98] opacity-0 -translate-y-1'"
     >
       <div
         v-if="isOpen"
-        class="absolute top-full left-0 right-0 z-50 mt-2 w-full overflow-hidden rounded-[16px] border border-graphite/14 bg-paper/95 p-2 shadow-[0_16px_36px_rgba(13,13,13,0.12)] backdrop-blur-md motion-reduce:transition-none"
+        class="absolute left-0 right-0 z-50 w-full overflow-hidden rounded-[16px] border border-graphite/14 bg-paper/95 p-2 shadow-[0_16px_36px_rgba(13,13,13,0.12)] backdrop-blur-md"
+        :class="placement === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'"
         role="menu"
         aria-orientation="vertical"
         aria-label="Actions menu"

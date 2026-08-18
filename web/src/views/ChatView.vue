@@ -140,6 +140,7 @@ onBeforeUnmount(stop)
           :uploading="uploadingCount"
           :running="isRunActive"
           :disabled="inputDisabled"
+          :action-menu-placement="composerDocked ? 'top' : 'bottom'"
           @files-selected="uploadFiles"
           @remove-attachment="removeAttachment"
           @submit="submit"

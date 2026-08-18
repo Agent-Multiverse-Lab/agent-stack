@@ -13,6 +13,7 @@ import {
   Layers,
   Library,
   LogIn,
+  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
@@ -20,16 +21,18 @@ import {
   SquarePen,
   SquareTerminal
 } from "@lucide/vue"
-import { Tooltip as ATooltip } from "ant-design-vue"
+import { Dropdown as ADropdown, Menu as AMenu, MenuItem as AMenuItem, Tooltip as ATooltip } from "ant-design-vue"
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
 
 import logoUrl from "@/assets/logo.svg"
 import SearchChatComponent from "@/components/SearchChatComponent.vue"
 import SettingsComponent from "@/components/SettingsComponent.vue"
+import { useAuthStore } from "@/stores/useAuthStore"
 import type { FeatureId } from "@/types/feature"
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 
 const sidebarCollapsed = ref(false)
 const mobileSidebarOpen = ref(false)
@@ -274,7 +277,7 @@ const openSettings = () => {
             </button>
           </ATooltip>
 
-          <ATooltip placement="right" :title="sidebarCollapsed && !isNarrowViewport ? 'Log in' : undefined">
+          <ATooltip v-if="!authStore.accessToken" placement="right" :title="sidebarCollapsed && !isNarrowViewport ? 'Log in' : undefined">
             <RouterLink
               class="flex min-h-9 items-center rounded-sm bg-transparent text-left text-sm text-slate hover:bg-graphite/8 hover:text-graphite"
               :class="sidebarCollapsed && !isNarrowViewport ? 'justify-center px-0' : 'gap-2 px-2.5'"
@@ -317,31 +320,44 @@ const openSettings = () => {
     />
 
     <main class="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <header class="group flex min-h-[52px] shrink-0 items-center justify-between gap-4 px-[clamp(0.75rem,2vw,1.25rem)] py-2">
-        <div class="flex min-w-0 items-center gap-1.5">
-          <h1 class="m-0 truncate text-base font-semibold tracking-[-0.02em]">
-            {{ pageTitle }}
-          </h1>
-        </div>
-
+      <header class="group flex min-h-[52px] shrink-0 items-center justify-end gap-4 px-[clamp(0.75rem,2vw,1.25rem)] py-2">
         <nav
           class="flex items-center gap-1"
           aria-label="Secondary actions"
         >
-          <button
-            class="grid h-9 w-9 place-items-center rounded-sm bg-transparent text-slate hover:bg-mist hover:text-graphite"
-            type="button"
-            aria-label="New conversation"
-            title="New conversation"
-            @click="openNewConversation"
-          >
-            <SquarePen
-              :size="18"
-              :stroke-width="1.8"
-              aria-hidden="true"
-            />
-          </button>
+          <ATooltip placement="bottom" title="More options">
+            <ADropdown placement="bottomRight" trigger="click">
+              <button
+                class="grid h-9 w-9 place-items-center rounded-sm bg-transparent text-slate hover:bg-mist hover:text-graphite"
+                type="button"
+                aria-label="More options"
+              >
+                <MoreHorizontal
+                  :size="18"
+                  :stroke-width="1.8"
+                  aria-hidden="true"
+                />
+              </button>
+              <template #overlay>
+                <AMenu>
+                  <AMenuItem key="new-chat" @click="openNewConversation">
+                    <div class="flex items-center gap-2 text-xs">
+                      <SquarePen :size="14" />
+                      <span>New chat</span>
+                    </div>
+                  </AMenuItem>
+                  <AMenuItem key="settings" @click="openSettings">
+                    <div class="flex items-center gap-2 text-xs">
+                      <Settings :size="14" />
+                      <span>Settings</span>
+                    </div>
+                  </AMenuItem>
+                </AMenu>
+              </template>
+            </ADropdown>
+          </ATooltip>
           <RouterLink
+            v-if="!authStore.accessToken"
             class="inline-flex min-h-[34px] items-center rounded-sm px-3 text-[13px] font-medium text-slate hover:bg-mist hover:text-graphite"
             to="/login"
           >

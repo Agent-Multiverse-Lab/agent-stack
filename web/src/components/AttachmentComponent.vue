@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import { File as FileIcon, X } from "@lucide/vue"
+import { Tooltip as ATooltip } from "ant-design-vue"
 
 import type { ChatAttachment } from "@/types/attachment"
 
@@ -50,19 +51,23 @@ const isImage = computed(() =>
       {{ props.attachment.file_name }}
     </strong>
 
-    <button
+    <ATooltip
       v-if="removable"
-      class="grid size-7 shrink-0 place-items-center rounded-full bg-transparent text-graphite/58 transition-colors duration-120 hover:bg-graphite hover:text-paper motion-reduce:transition-none"
-      type="button"
-      :aria-label="`Remove attachment ${props.attachment.file_name}`"
+      placement="top"
       :title="`Remove ${props.attachment.file_name}`"
-      @click="emit('remove', props.attachment.file_id)"
     >
-      <X
-        :size="14"
-        :stroke-width="1.9"
-        aria-hidden="true"
-      />
-    </button>
+      <button
+        class="grid size-7 shrink-0 place-items-center rounded-full bg-transparent text-graphite/58 transition-colors duration-120 hover:bg-graphite hover:text-paper motion-reduce:transition-none"
+        type="button"
+        :aria-label="`Remove attachment ${props.attachment.file_name}`"
+        @click="emit('remove', props.attachment.file_id)"
+      >
+        <X
+          :size="14"
+          :stroke-width="1.9"
+          aria-hidden="true"
+        />
+      </button>
+    </ATooltip>
   </li>
 </template>
