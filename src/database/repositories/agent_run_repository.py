@@ -225,10 +225,6 @@ class AgentRunRepository:
         current_status = str(run.agent_status)
         if current_status in AGENT_RUN_TERMINAL_STATUSES:
             return run, False
-        if status == "cancelled" and current_status != "cancel_requested":
-            return run
-        if status != "cancelled" and current_status == "cancel_requested":
-            return run
 
         run.agent_status = status  # ty: ignore[invalid-assignment]
         run.finished_at = datetime.now(UTC)  # ty: ignore[invalid-assignment]

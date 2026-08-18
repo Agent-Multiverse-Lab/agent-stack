@@ -862,7 +862,7 @@ async def stream_agent_response(
                 if standard_stream_event.get("type") != "message_delta":
                     content = ""
                 else:
-                    content = standard_stream_event.get("content", "")
+                    content = standard_stream_event.get("cotent_delta", "")
 
                 yield make_agent_stream_event(
                     status="loading",
