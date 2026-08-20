@@ -6,34 +6,152 @@
 
 ## 1. Implementation Steps
 
-1. 调整 `server/service/agent_run_service.py:stream_agent_run_events`，每轮先重新
-   查询 PostgreSQL 中的最新 `AgentRun.agent_status`，不复用连接建立时读取的
-   Run 状态作为终态依据。
-2. Run 未终态时继续读取和格式化普通 Redis 事件；Redis `event_type="end"`
-   只结束本次等待并触发下一轮数据库状态重查，不直接输出公共 SSE `end`。
-3. Run 已终态时，从当前 cursor 非阻塞排空 Redis 中尚未发送的普通事件；排空后
-   使用数据库中的 `agent_status/error` 构造唯一公共 SSE `end` 并结束生成器。
-4. Redis Stream 不存在或没有新事件时，读取必须在有限时间内返回，使 SSE 能够
-   再次查询数据库；不新增 Redis key、数据库通知或后台轮询任务。
-5. 保留 `server/worker.py:_finalize_run` 的顺序：flush Agent chunk、提交数据库
-   终态，再写 Redis `end`。该 Redis `end` 只唤醒 SSE 状态重查。
-6. Agent Stream 消费循环前停止只调用 `set_run_terminal`，不调用 `_finalize_run` 或
-   创建 Redis Stream；SSE 仍通过同一 PostgreSQL 驱动流程生成公共 `end`。
-7. 更新 `test/test_agent_run_service.py` 的定向测试，覆盖 Redis `end` 不直接结束、
-   数据库终态前排空普通事件、无 Redis Stream 时根据数据库结束，并同步
-   `AGENTS.md` 的当前事件与终态所有权。
+1. 修改 `src/agents/base_agent.py:BaseAgent.stream_messages_with_event`，只识别当前
+   LangChain v3 的 `messages`、`values` 和 `tools` channel；保留 `params.data` 与
+   `params.namespace`，删除未使用的 v2 兼容分支和 `tool` 单数分支。
+2. 修改 `server/service/thread_service.py:stream_agent_response` 及其 message
+   dispatcher：消息统一投影为 `message_delta/message_id/thread_id/content_delta`，
+   values 投影为 `agent_state`，tools 投影为 LangChain v3 的工具生命周期事件；
+   使用实际解析到的子线程 ID，异常直接向 Worker 传播。
+3. 修改 `server/worker.py:map_stream_event` 和 `StreamEventSmoother`：内部
+   `chunk.status` 只选择 `status/messages/values/agent_execute_event/end`，写入
+   `messages` 时只保存标准 `AgentMessage` item，不保存原始 chunk。
+4. 保留 `server/service/arq_queue_servcie.py` 的现有 envelope 和 XADD 行为；不新增
+   `run_type`、`seq` 或第二个事件 builder。
+5. 在 `server/router/agent_router.py:create_agent_run` 的响应中增加当前 Run 的
+   `run_type`；历史消息继续使用现有 `ThreadRunMetadataResponse.run_type`。
+6. 调整 `server/router/agent_router.py:stream_run_event`，读取并校验可选
+   `Last-Event-ID`；调整 `server/service/agent_run_service.py:stream_agent_run_events`
+   从该 Redis Stream ID 之后读取。
+7. 完成现有 PostgreSQL 驱动终止计划：每轮重查 `AgentRun.agent_status`，Redis
+   `end` 只唤醒重查，数据库终态前排空普通事件，再生成唯一公共 SSE `end`。
+8. 在 `web/src/types/chat.ts` 定义 `AgentRunEventType`、`AgentMessage`、工具生命周期
+   payload 和完整 `AgentRunEvent` 判别联合；公共事件基类包含从 SSE `id:` 取得的
+   `event_id`。
+9. 将 `web/src/api/chat.ts:waitForAgentRunEnd` 改为逐帧消费函数：解析
+   `id/event/data`、校验联合类型、把每个事件交给调用方并返回最终 `end`；重连时
+   发送最后成功处理的 `Last-Event-ID`。
+10. 修改 `web/src/composables/useChat.ts`，按外层 `type` 更新 Run UI 状态、流式
+    Assistant `ThreadMessageResponse`、最新 Agent state 和工具执行状态；修改
+    `ChatView.vue`/现有 Chat components 只渲染归并后的数据。
+11. 更新后端定向 unittest、前端 typecheck/build 覆盖和 `AGENTS.md` 当前事件链路。
 
 ## 2. Ownership
 
 - PostgreSQL `AgentRun.agent_status`：Run 终态唯一事实来源。
+- PostgreSQL `AgentRun.run_type`：Run 执行类型；创建响应和历史 DTO 暴露，不写入
+  每个 Redis entry。
+- Agent/Thread Service：LangChain v3 channel 到公开 payload 的投影。
+- Worker `chunk.status`：写 Redis 前的内部分类，前端不可见。
 - Redis Stream：普通事件的有序传输，以及已有事件流上的终态重查唤醒。
 - `stream_agent_run_events`：重新读取数据库状态、排空 Redis 普通事件并生成公共
   SSE `end`。
 - `format_agent_run_sse`：只格式化已经确定的 envelope，不查询数据库或 Redis。
+- Frontend API adapter：SSE frame 解析、`event_id` 提取和协议校验。
+- `useChat`：事件到 UI 状态的归并。
 
 ## 3. Core Examples
 
-### 3.1 数据库优先的 SSE 循环
+### 3.1 Frontend event union
+
+目标：`web/src/types/chat.ts`
+
+```ts
+interface AgentRunEventBase {
+  event_id: string
+  scope: "agent_run"
+  run_id: string
+  thread_id: string
+  created_at: IsoDateTime
+}
+
+interface AgentMessage {
+  type: "message_delta"
+  message_id: string
+  thread_id: string
+  content_delta: string
+}
+
+type AgentRunEvent =
+  | (AgentRunEventBase & { type: "status"; status: string })
+  | (AgentRunEventBase & { type: "messages"; items: AgentMessage[] })
+  | (AgentRunEventBase & { type: "values"; agent_state: JsonObject })
+  | AgentRunExecuteEvent
+  | AgentRunEndEvent
+```
+
+不创建 `ChunkStatus` 前端类型；`chunk.status` 不属于公开协议。
+
+### 3.2 Agent message projection
+
+目标：`server/service/thread_service.py:stream_agent_response`、
+`server/worker.py:StreamEventSmoother.release`
+
+```python
+message = {
+    "type": "message_delta",
+    "message_id": message_id,
+    "thread_id": event_thread_id,
+    "content_delta": text,
+}
+
+await write_stream_event(
+    run_id,
+    "messages",
+    {"items": messages},
+    event_thread_id,
+)
+```
+
+`messages` payload 不再包含 `status="loading"`、`response`、`stream_event` 或原始
+LangChain metadata。
+
+### 3.3 SSE cursor
+
+目标：`server/router/agent_router.py:stream_run_event`、
+`web/src/api/chat.ts`
+
+```python
+last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None
+
+stream_agent_run_events(
+    run_id=run_id,
+    current_uid=current_user.uid,
+    thread_id=thread_id,
+    after_id=last_event_id or "0-0",
+)
+```
+
+```ts
+const headers = lastEventId
+  ? { "Last-Event-ID": lastEventId }
+  : undefined
+```
+
+SSE parser 从 `id:` 取得 `event_id` 并附加到解析后的事件对象；不拆分 Redis ID。
+
+### 3.4 Frontend event reduction
+
+目标：`web/src/composables/useChat.ts:monitorRun`
+
+```ts
+const applyRunEvent = (event: AgentRunEvent) => {
+  if (event.type === "messages") {
+    for (const item of event.items) appendMessageDelta(item)
+  } else if (event.type === "status") {
+    runStatus.value = event.status
+  } else if (event.type === "values") {
+    agentState.value = event.agent_state
+  } else if (event.type === "agent_execute_event") {
+    applyToolEvent(event)
+  }
+}
+```
+
+流式 Assistant 消息继续复用 `ThreadMessageResponse` 形状，不新增平行的
+`LocalMessage` 或 display DTO。
+
+### 3.5 数据库优先的 SSE 循环
 
 目标：`server/service/agent_run_service.py:stream_agent_run_events`
 
@@ -64,7 +182,7 @@ while True:
 示例表达控制顺序；实现复用现有 repository、queue reader、builder 和 formatter，
 不新增 `load_current_agent_run` 或 `build_terminal_envelope` 公共抽象。
 
-### 3.2 Redis end 只负责唤醒
+### 3.6 Redis end 只负责唤醒
 
 目标：`server/service/agent_run_service.py:stream_agent_run_events`
 
@@ -75,7 +193,7 @@ if envelope["event_type"] == "end":
 
 公共 SSE `end` 的 `status/error` 只取自下一轮读取到的数据库 Run。
 
-### 3.3 无 Redis Stream 的执行前终态
+### 3.7 无 Redis Stream 的执行前终态
 
 目标：`server/worker.py:process_agent_run`、
 `server/service/agent_run_service.py:stream_agent_run_events`
@@ -87,6 +205,13 @@ await set_run_terminal(run_id, status="cancelled")
 
 ## 4. Failure Handling
 
+- 非法 `Last-Event-ID`：HTTP 422，不把未校验字符串交给 Redis。
+- SSE frame 缺少 `id:`、`type` 或类型所需 payload：前端抛出协议错误，不静默
+  当成 `end`。
+- 前端只在事件成功归并后更新 last event ID；断线从上一个成功 ID 续读。
+- 未知 `event_type`：后端不写入；前端不猜测为 messages/custom。
+- Agent channel 解析失败：异常传播到 Worker 并落 `failed`，不得吞掉后继续
+  `completed`。
 - Redis `end` 先于 SSE 的数据库查询到达：只唤醒重查，不直接结束。
 - 数据库已终态但仍有未消费普通事件：先按 Stream ID 排空，再生成公共 `end`。
 - Redis Stream 不存在或已过期：有限等待后重新查库，数据库终态即可结束。
@@ -96,16 +221,22 @@ await set_run_terminal(run_id, status="cancelled")
 ## 5. Scope Limits
 
 - 不新增状态表、Redis key、数据库通知、后台任务或兼容路径。
-- 不修改公开 SSE DTO、普通事件 envelope 或 Redis Stream cursor 语义。
+- 不修改 Redis envelope 或 Redis Stream ID 语义。
+- 不新增 `seq`、`sequence`、`sequential` 或前端 `ChunkStatus`。
+- 不把 `run_type` 重复写入每个 Redis entry。
 - 不把数据库查询放入 `format_agent_run_sse` 或队列服务。
-- 不调整 Agent chunk 内容、缓冲阈值或前端消费逻辑。
+- 不新增前端 Store、EventSource 包装、runtime schema 依赖或第二套 Message DTO。
+- 本计划不新增最终 Assistant Message 持久化；该缺口属于 Run 完成与 Thread Message
+  持久化边界，不能塞进 Redis/SSE formatter。
 
 ## 6. Validation
 
 - 运行 `test/test_agent_run_service.py` 与
   `test/test_worker_stream_event_smoother.py` 中的定向 `unittest`。
-- 对变更的 service、Worker 和测试文件运行 `compileall`。
-- 运行 `git diff --check`。
+- 增加 Agent channel 投影测试，覆盖 message、values、tools 和异常传播。
+- 从 `web/` 运行 `npm run typecheck`、`npm run lint` 和 `npm run build`。
+- 对变更的 Agent、service、Worker 和测试文件运行 `compileall`。
+- 运行 `git diff --check`，并确认 `chunk.status` 未出现在前端类型和消费代码中。
 
 ## 7. 历史版本
 

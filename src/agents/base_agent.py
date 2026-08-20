@@ -172,23 +172,3 @@ class BaseAgent:
              
                     # 构建任务触发时，所要输出内容
                     yield "agent_execute_event", stream_execute_data
-                    
-                    
-
-
-                # v3 返回的类型具体可以看官方的文档
-                # Each event is a ProtocolEvent envelope wrapping a channel-specific payload.
-                # The same shape is what a transformer’s process(event) receives.
-
-                # ProtocolEvent 长得像
-                #
-                # class ProtocolEvent(TypedDict):
-                #    seq: int                    # strictly increasing within a run; use for ordering
-                #    method: str                 # channel name: "messages", "values", "updates", "custom", "tools", "lifecycle", ...
-                #    params: ProtocolEventParams
-
-
-                #    class ProtocolEventParams(TypedDict):
-                #       namespace: list[str]        # path of "<name>:<runtime_id>" segments from the root graph; [] is the root
-                #       timestamp: int              # wall-clock milliseconds; can drift, don't rely on for ordering
-                #       data: Any   # channel-specific payload; shape depends on `method`

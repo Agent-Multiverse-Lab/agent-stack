@@ -612,7 +612,7 @@ def _lc_message_v3_dispather(
     if event_type == "content-block-delta":
         delta = event.get("delta") if isinstance(event.get("delta"), dict) else None
         text = delta.get("text")
-        if delta.get("type") == "text_delta" and isinstance(text, str) and text:
+        if delta.get("type") == "text-delta" and isinstance(text, str) and text:
             return {
                 "type": "message_delta",
                 "message_id": message_id,
@@ -851,6 +851,7 @@ async def stream_agent_response(
 
             # message输出的时候走的路径
             agent_msg, agent_metadata = payload
+            agent_msg_thread_id = reslove_thread_id(agent_metadata, thread_id)
             standard_stream_events = _make_lc_message_to_standard(
                 agent_msg=agent_msg,
                 agent_metadata=agent_metadata,
