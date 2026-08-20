@@ -44,10 +44,14 @@ DEFAULT_BASE_MODEL_PROVIER: dict[str, BaseModelProvider] = {
     "dashscope": BaseModelProvider(
         name="dashscope",
         api_key="DASHSCOPE_API_KEY",
-        default_model="qwen3.6-plus",
-        base_url="https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+        default_model="qwen3.8-max",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         model_list=[
             "qwen3.6-plus",
+            "qwen3.5-27b",
+            "qwen3.6-35b-a3b",
+            "qwen3.8-max"
+
         ],
     ),
     

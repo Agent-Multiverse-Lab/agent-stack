@@ -48,7 +48,7 @@ class Config(BaseSettings):
 
     # ---------- 模型 ----------
     default_model: str = Field(
-        default="deepseek/deepseek-v4-pro", description="默认使用的模型名称"
+        default="dashscope/qwen3.8-max", description="默认使用的模型名称"
     )
     fallback_model: str = Field(
         default="deepseek/deepseek-v4-pro", description="备用模型名称"
