@@ -3,8 +3,7 @@ import { nextTick, onBeforeUnmount, ref, watch } from "vue"
 import { useRouter } from "vue-router"
 import { Loader2, MessageSquare, Search, X } from "@lucide/vue"
 
-import { listThreads } from "@/api/chat"
-import { useAuthStore } from "@/stores/useAuthStore"
+import { listThreads } from "@/api/agent"
 import type { ThreadSummaryResponse } from "@/types/chat"
 
 const props = defineProps<{
@@ -16,7 +15,6 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
-const authStore = useAuthStore()
 
 const query = ref("")
 const inputRef = ref<HTMLInputElement | null>(null)
@@ -37,9 +35,6 @@ const close = () => {
 }
 
 const fetchThreads = async (searchQuery: string, cursor?: string) => {
-  const token = authStore.accessToken
-  if (!token) return
-
   const isInitial = !cursor
   if (isInitial) {
     loading.value = true
@@ -48,7 +43,7 @@ const fetchThreads = async (searchQuery: string, cursor?: string) => {
   }
 
   try {
-    const res = await listThreads(token, {
+    const res = await listThreads({
       query: searchQuery.trim() || undefined,
       cursor,
       limit: 15

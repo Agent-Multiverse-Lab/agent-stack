@@ -1,258 +1,205 @@
-import { computed, ref } from "vue"
+import { ref } from "vue"
 
-import {
-  cancelAgentRun,
-  createAgentRun,
-  createThread,
-  getThreadDetail,
-  listChatAgents,
-  uploadChatAttachments,
-  waitForAgentRunEnd
-} from "@/api/chat"
-import { useAuthStore } from "@/stores/useAuthStore"
 import type { UploadedAttachmentResponse } from "@/types/attachment"
 import type {
-  AgentRunEndEvent,
+  AgentRunStreamEvent,
+  ChatMessage,
+  ThreadDetailResponse,
   ThreadMessageResponse,
+  ThreadResponse,
   ThreadSummaryResponse
 } from "@/types/chat"
 
-type ThreadCreatedHandler = (threadId: string) => void | Promise<void>
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null
 
-const activeRunStatuses = new Set(["pending", "running", "cancel_requested"])
+const toChatMessage = (message: ThreadMessageResponse): ChatMessage => ({
+  type: message.role === "user" ? "human" : "ai",
+  payload: {
+    type: "text",
+    event: message
+  }
+})
 
-const errorText = (error: unknown) =>
-  error instanceof Error ? error.message : "请求失败"
+const chatMessageEvent = (message: ChatMessage) =>
+  isRecord(message.payload.event) ? message.payload.event : null
 
-const isAbortError = (error: unknown) =>
-  error instanceof DOMException && error.name === "AbortError"
-
-const runStreamUrl = (runId: string, threadId: string) =>
-  `/api/agent/runs/${encodeURIComponent(runId)}/events?thread_id=${encodeURIComponent(threadId)}`
+const chatMessageId = (message: ChatMessage) =>
+  chatMessageEvent(message)?.message_id
 
 export const useChat = () => {
-  const authStore = useAuthStore()
   const thread = ref<ThreadSummaryResponse | null>(null)
-  const messages = ref<ThreadMessageResponse[]>([])
+  const messages = ref<ChatMessage[]>([])
   const draft = ref("")
   const attachments = ref<UploadedAttachmentResponse[]>([])
   const uploadingCount = ref(0)
   const uploadError = ref("")
-  const runId = ref<string | null>(null)
-  const runStatus = ref<string | null>(null)
-  const streamUrl = ref<string | null>(null)
   const loading = ref(false)
   const submitting = ref(false)
-  const cancelling = ref(false)
   const error = ref("")
 
-  let streamController: AbortController | null = null
-  let operation = 0
-  let uploadGeneration = 0
   let optimisticMessageId = -1
 
-  const isRunActive = computed(() =>
-    runStatus.value ? activeRunStatuses.has(runStatus.value) : false
-  )
-
-  const requireAccessToken = () => {
-    if (!authStore.accessToken) throw new Error("请先登录后再开始对话")
-    return authStore.accessToken
-  }
-
-  const abortStream = () => {
-    streamController?.abort()
-    streamController = null
-  }
-
-  const clearRun = () => {
-    abortStream()
-    runId.value = null
-    runStatus.value = null
-    streamUrl.value = null
-    submitting.value = false
-    cancelling.value = false
-  }
-
   const clearPendingInput = () => {
-    uploadGeneration += 1
     draft.value = ""
     attachments.value = []
     uploadingCount.value = 0
     uploadError.value = ""
   }
 
-  const applyThreadDetail = async (
-    threadId: string,
-    accessToken: string,
-    expectedOperation: number
-  ) => {
-    const detail = await getThreadDetail(threadId, accessToken)
-    if (operation !== expectedOperation) return false
+  const applyThreadDetail = (detail: ThreadDetailResponse) => {
     thread.value = detail.thread
-    messages.value = detail.messages
-    const latestRun = [...detail.messages]
-      .reverse()
-      .find((message) => message.run)?.run ?? null
-    const activeRun = [...detail.messages]
-      .reverse()
-      .find(
-        (message) =>
-          message.run && activeRunStatuses.has(message.run.status)
-      )?.run ?? null
-    runId.value = activeRun?.run_id ?? latestRun?.run_id ?? null
-    runStatus.value = activeRun?.status ?? latestRun?.status ?? null
-    streamUrl.value = activeRun
-      ? runStreamUrl(activeRun.run_id, threadId)
-      : null
-    return true
+    messages.value = detail.messages.map(toChatMessage)
   }
 
-  const monitorRun = async (
-    threadId: string,
-    accessToken: string,
-    expectedOperation: number
+  const applyCreatedThread = (
+    created: ThreadResponse
+  ): ThreadSummaryResponse => {
+    const createdThread = {
+      thread_id: created.thread_id,
+      title: created.title,
+      summary: null,
+      agent_id: created.agent_id,
+      metadata: created.metadata,
+      created_at: created.created_at,
+      updated_at: created.updated_at,
+      last_message_at: null
+    }
+    thread.value = createdThread
+    return createdThread
+  }
+
+  const clearRunStreamMessages = (targetRunId: string) => {
+    messages.value = messages.value.filter((message) => {
+      if (message.type !== "ai") return true
+      const event = chatMessageEvent(message)
+      if (event?.run_id !== targetRunId) return true
+      return !(
+        message.payload.type === "tool" ||
+        event.status === "streaming"
+      )
+    })
+  }
+
+  const appendAiText = (
+    messageId: string,
+    contentDelta: string,
+    threadId: string | null,
+    event: AgentRunStreamEvent,
+    monitoredRunId: string
   ) => {
-    const monitoredRunId = runId.value
-    if (!monitoredRunId || !streamUrl.value || !isRunActive.value) return
+    const messageIndex = messages.value.findIndex(
+      (message) =>
+        message.type === "ai" &&
+        message.payload.type === "text" &&
+        chatMessageId(message) === messageId
+    )
 
-    while (
-      operation === expectedOperation &&
-      runId.value === monitoredRunId &&
-      streamUrl.value &&
-      isRunActive.value
-    ) {
-      const controller = new AbortController()
-      streamController = controller
-      let endEvent: AgentRunEndEvent
-      try {
-        endEvent = await waitForAgentRunEnd(
-          streamUrl.value,
-          accessToken,
-          controller.signal
-        )
-      } catch (caught) {
-        if (operation !== expectedOperation || isAbortError(caught)) return
-        error.value = errorText(caught)
-        try {
-          await applyThreadDetail(
-            threadId,
-            accessToken,
-            expectedOperation
-          )
-        } catch {
-          // 保持已知 Run 状态，稍后重新连接。
+    if (messageIndex === -1) {
+      messages.value = [
+        ...messages.value,
+        {
+          type: "ai",
+          payload: {
+            type: "text",
+            event: {
+              message_id: messageId,
+              thread_id: threadId,
+              run_id: monitoredRunId,
+              content: contentDelta,
+              status: "streaming",
+              attachments: [],
+              created_at: event.created_at
+            }
+          }
         }
-        if (
-          operation !== expectedOperation ||
-          runId.value !== monitoredRunId
-        ) {
-          return
-        }
-        if (!isRunActive.value) {
-          error.value = runStatus.value === "failed"
-            ? "Agent 执行失败"
-            : ""
-          return
-        }
-        await new Promise((resolve) => window.setTimeout(resolve, 1000))
-        continue
-      } finally {
-        if (streamController === controller) streamController = null
-      }
-
-      if (operation !== expectedOperation) return
-      runStatus.value = endEvent.status
-      error.value = ""
-      try {
-        await applyThreadDetail(
-          threadId,
-          accessToken,
-          expectedOperation
-        )
-      } catch (caught) {
-        if (operation === expectedOperation && !isAbortError(caught)) {
-          error.value = errorText(caught)
-        }
-      }
-      if (operation !== expectedOperation) return
-      if (endEvent.status === "failed") {
-        error.value = endEvent.error || "Agent 执行失败"
-      }
+      ]
       return
     }
-  }
 
-  const resetThread = () => {
-    operation += 1
-    clearRun()
-    thread.value = null
-    messages.value = []
-    clearPendingInput()
-    error.value = ""
-    loading.value = false
-  }
-
-  const loadThread = async (threadId: string) => {
-    const expectedOperation = ++operation
-    clearRun()
-    clearPendingInput()
-    thread.value = null
-    messages.value = []
-    loading.value = true
-    error.value = ""
-    try {
-      const accessToken = requireAccessToken()
-      const applied = await applyThreadDetail(
-        threadId,
-        accessToken,
-        expectedOperation
-      )
-      if (applied && isRunActive.value) {
-        void monitorRun(threadId, accessToken, expectedOperation)
+    const message = messages.value[messageIndex]
+    if (!message) return
+    const currentEvent = chatMessageEvent(message)
+    if (!currentEvent) return
+    const currentContent = typeof currentEvent.content === "string"
+      ? currentEvent.content
+      : ""
+    const nextMessages = [...messages.value]
+    nextMessages[messageIndex] = {
+      ...message,
+      payload: {
+        ...message.payload,
+        event: {
+          ...currentEvent,
+          content: currentContent + contentDelta
+        }
       }
-    } catch (caught) {
-      if (operation === expectedOperation && !isAbortError(caught)) {
-        thread.value = null
-        messages.value = []
-        error.value = errorText(caught)
-      }
-    } finally {
-      if (operation === expectedOperation) loading.value = false
     }
+    messages.value = nextMessages
   }
 
-  const uploadFiles = async (files: File[]) => {
-    if (files.length === 0) return
+  const applyAiTextDelta = (
+    event: AgentRunStreamEvent,
+    monitoredRunId: string
+  ) => {
+    if (!Array.isArray(event.items)) return
 
-    const expectedGeneration = uploadGeneration
-    uploadingCount.value += files.length
-    uploadError.value = ""
-    try {
-      const uploaded = await uploadChatAttachments(
-        files,
-        requireAccessToken()
-      )
-      if (uploadGeneration !== expectedGeneration) return
-      attachments.value = [...attachments.value, ...uploaded]
-    } catch (caught) {
-      if (uploadGeneration === expectedGeneration) {
-        uploadError.value = errorText(caught)
-      }
-    } finally {
-      if (uploadGeneration === expectedGeneration) {
-        uploadingCount.value = Math.max(
-          0,
-          uploadingCount.value - files.length
+    for (const item of event.items) {
+      if (!isRecord(item) || !Array.isArray(item.stream_event)) continue
+      for (const messageEvent of item.stream_event) {
+        if (
+          !isRecord(messageEvent) ||
+          messageEvent.type !== "message_delta" ||
+          typeof messageEvent.message_id !== "string" ||
+          typeof messageEvent.content_delta !== "string"
+        ) {
+          continue
+        }
+        appendAiText(
+          messageEvent.message_id,
+          messageEvent.content_delta,
+          typeof messageEvent.thread_id === "string"
+            ? messageEvent.thread_id
+            : event.thread_id,
+          event,
+          monitoredRunId
         )
       }
     }
   }
 
-  const removeAttachment = (fileId: string) => {
-    attachments.value = attachments.value.filter(
-      (attachment) => attachment.file_id !== fileId
-    )
+  const applyRunMessageEvent = (
+    event: AgentRunStreamEvent,
+    monitoredRunId: string
+  ) => {
+    if (event.type === "messages") {
+      applyAiTextDelta(event, monitoredRunId)
+      return
+    }
+    if (event.type !== "custom" || event.name !== "agent_state") return
+
+    const messageIndex = messages.value.findIndex((message) => {
+      const messageEvent = chatMessageEvent(message)
+      return (
+        message.type === "ai" &&
+        message.payload.type === "tool" &&
+        messageEvent?.id === event.id
+      )
+    })
+    const toolMessage: ChatMessage = {
+      type: "ai",
+      payload: {
+        type: "tool",
+        event
+      }
+    }
+    if (messageIndex === -1) {
+      messages.value = [...messages.value, toolMessage]
+      return
+    }
+    const nextMessages = [...messages.value]
+    nextMessages[messageIndex] = toolMessage
+    messages.value = nextMessages
   }
 
   const createOptimisticMessage = (
@@ -284,160 +231,65 @@ export const useChat = () => {
     }
   }
 
-  const submitDraft = async (onThreadCreated?: ThreadCreatedHandler) => {
+  const beginSubmission = () => {
     const draftSnapshot = draft.value
     const query = draftSnapshot.trim()
     const attachmentSnapshot = [...attachments.value]
     if (
       (!query && attachmentSnapshot.length === 0) ||
       uploadingCount.value > 0 ||
-      submitting.value ||
-      isRunActive.value
+      submitting.value
     ) {
-      return
+      return null
     }
 
-    const expectedOperation = ++operation
     const optimisticMessage = createOptimisticMessage(
       query,
       attachmentSnapshot
     )
-    messages.value = [...messages.value, optimisticMessage]
+    messages.value = [...messages.value, toChatMessage(optimisticMessage)]
     draft.value = ""
     attachments.value = []
     uploadError.value = ""
-    abortStream()
     submitting.value = true
     error.value = ""
-    let runCreated = false
-
-    try {
-      const accessToken = requireAccessToken()
-      let currentThread = thread.value
-
-      if (!currentThread) {
-        const agents = await listChatAgents(accessToken)
-        const leader = agents.find((agent) => agent.id === "LeaderAgent")
-        if (!leader) throw new Error("LeaderAgent 当前不可用")
-
-        const created = await createThread(leader.id, accessToken)
-        if (operation !== expectedOperation) return
-        currentThread = {
-          thread_id: created.thread_id,
-          title: created.title,
-          summary: null,
-          agent_id: created.agent_id,
-          metadata: created.metadata,
-          created_at: created.created_at,
-          updated_at: created.updated_at,
-          last_message_at: null
-        }
-        thread.value = currentThread
-        await onThreadCreated?.(created.thread_id)
-      }
-
-      if (operation !== expectedOperation) return
-      const run = await createAgentRun(
-        query,
-        currentThread.agent_id,
-        currentThread.thread_id,
-        attachmentSnapshot.map((attachment) => attachment.file_id),
-        accessToken
-      )
-      if (operation !== expectedOperation) return
-      runCreated = true
-
-      runId.value = run.run_id
-      runStatus.value = run.status
-      streamUrl.value = run.stream_url
-
-      try {
-        await applyThreadDetail(
-          currentThread.thread_id,
-          accessToken,
-          expectedOperation
-        )
-      } catch (caught) {
-        if (operation === expectedOperation && !isAbortError(caught)) {
-          error.value = errorText(caught)
-        }
-      }
-      if (operation !== expectedOperation) return
-      if (run.status === "failed") {
-        error.value = "Agent 执行失败"
-      }
-
-      await monitorRun(
-        currentThread.thread_id,
-        accessToken,
-        expectedOperation
-      )
-    } catch (caught) {
-      if (operation === expectedOperation && !isAbortError(caught)) {
-        error.value = errorText(caught)
-        if (
-          !runCreated &&
-          messages.value.some(
-            (message) =>
-              message.message_id === optimisticMessage.message_id
-          )
-        ) {
-          messages.value = messages.value.filter(
-            (message) =>
-              message.message_id !== optimisticMessage.message_id
-          )
-          draft.value = draftSnapshot
-          attachments.value = attachmentSnapshot
-        }
-      }
-    } finally {
-      if (operation === expectedOperation) {
-        streamController = null
-        streamUrl.value = null
-        submitting.value = false
-      }
+    return {
+      query,
+      draft: draftSnapshot,
+      attachments: attachmentSnapshot,
+      optimisticMessageId: optimisticMessage.message_id
     }
   }
 
-  const cancelCurrentRun = async () => {
-    if (!runId.value || cancelling.value || !isRunActive.value) return
-    const targetRunId = runId.value
-    const expectedOperation = operation
-    cancelling.value = true
+  const rollbackSubmission = (
+    submission: NonNullable<ReturnType<typeof beginSubmission>>
+  ) => {
+    messages.value = messages.value.filter(
+      (message) => chatMessageId(message) !== submission.optimisticMessageId
+    )
+    draft.value = submission.draft
+    attachments.value = submission.attachments
+  }
+
+  const appendUploadedAttachments = (
+    uploaded: UploadedAttachmentResponse[]
+  ) => {
+    attachments.value = [...attachments.value, ...uploaded]
+  }
+
+  const removeAttachment = (fileId: string) => {
+    attachments.value = attachments.value.filter(
+      (attachment) => attachment.file_id !== fileId
+    )
+  }
+
+  const resetThread = () => {
+    thread.value = null
+    messages.value = []
+    clearPendingInput()
     error.value = ""
-    try {
-      const response = await cancelAgentRun(
-        targetRunId,
-        requireAccessToken()
-      )
-      if (
-        operation !== expectedOperation ||
-        runId.value !== targetRunId
-      ) {
-        return
-      }
-      runStatus.value = response.status
-    } catch (caught) {
-      if (
-        operation === expectedOperation &&
-        runId.value === targetRunId
-      ) {
-        error.value = errorText(caught)
-      }
-    } finally {
-      if (
-        operation === expectedOperation &&
-        runId.value === targetRunId
-      ) {
-        cancelling.value = false
-      }
-    }
-  }
-
-  const stop = () => {
-    operation += 1
-    uploadGeneration += 1
-    abortStream()
+    loading.value = false
+    submitting.value = false
   }
 
   return {
@@ -447,20 +299,18 @@ export const useChat = () => {
     attachments,
     uploadingCount,
     uploadError,
-    runId,
-    runStatus,
-    streamUrl,
     loading,
     submitting,
-    cancelling,
     error,
-    isRunActive,
-    loadThread,
-    resetThread,
-    uploadFiles,
+    clearPendingInput,
+    applyThreadDetail,
+    applyCreatedThread,
+    clearRunStreamMessages,
+    applyRunMessageEvent,
+    beginSubmission,
+    rollbackSubmission,
+    appendUploadedAttachments,
     removeAttachment,
-    submitDraft,
-    cancelCurrentRun,
-    stop
+    resetThread
   }
 }

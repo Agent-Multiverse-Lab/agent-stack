@@ -5,38 +5,23 @@ import type {
   UserResponse
 } from "@/types/auth"
 
-const readError = async (response: Response) => {
-  const payload = (await response.json().catch(() => null)) as {
-    detail?: unknown
-  } | null
-  return typeof payload?.detail === "string"
-    ? payload.detail
-    : `请求失败（${response.status}）`
-}
-
-const requestJson = async <T>(
-  path: string,
-  payload: LoginRequest | RegisterRequest
-): Promise<T> => {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  })
-  if (!response.ok) throw new Error(await readError(response))
-  return response.json() as Promise<T>
-}
+import { apiClient } from "@/api/client"
 
 export const registerUser = (payload: RegisterRequest) =>
-  requestJson<UserResponse>("/api/auth/register", payload)
+  apiClient.apiPost<UserResponse, RegisterRequest>(
+    "/api/auth/register",
+    payload,
+    { requiresAuth: false }
+  )
 
 export const loginUser = (payload: LoginRequest) =>
-  requestJson<TokenResponse>("/api/auth/login", payload)
+  apiClient.apiPost<TokenResponse, LoginRequest>(
+    "/api/auth/login",
+    payload,
+    { requiresAuth: false }
+  )
 
-export const getCurrentUser = async (accessToken: string) => {
-  const response = await fetch("/api/auth/me", {
-    headers: { Authorization: `Bearer ${accessToken}` }
+export const getCurrentUser = () =>
+  apiClient.apiGet<UserResponse>("/api/auth/me", {
+    requiresAuth: true
   })
-  if (!response.ok) throw new Error(await readError(response))
-  return response.json() as Promise<UserResponse>
-}

@@ -86,14 +86,29 @@ export interface AgentRunCancelResponse {
   status: string
 }
 
-export interface AgentRunEndEvent {
+export interface AgentRunStreamEvent extends JsonObject {
+  id: string
   scope: "agent_run"
-  type: "end"
+  type: string
   run_id: string
-  thread_id: string
+  thread_id: string | null
+  created_at: IsoDateTime | null
+}
+
+export interface AgentRunEndEvent extends AgentRunStreamEvent {
+  type: "end"
   status: "completed" | "failed" | "cancelled"
   error?: string
-  created_at: IsoDateTime
+}
+
+export interface ChatMessagePayload extends JsonObject {
+  type: "text" | "tool"
+  event: unknown
+}
+
+export interface ChatMessage {
+  type: "ai" | "human"
+  payload: ChatMessagePayload
 }
 
 export interface ThreadListResponse {

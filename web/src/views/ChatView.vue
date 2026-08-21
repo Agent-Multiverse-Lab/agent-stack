@@ -2,15 +2,35 @@
 import { computed, onBeforeUnmount, watch } from "vue"
 import { useRouter } from "vue-router"
 
+import {
+  createThread,
+  getThreadDetail,
+  listChatAgents,
+  uploadChatAttachments
+} from "@/api/agent"
 import ChatMessageComponent from "@/components/chat/ChatMessageComponent.vue"
 import ChatMessageInputComponent from "@/components/chat/ChatMessageInputComponent.vue"
+import { useAgentRun } from "@/composables/useAgentRun"
 import { useChat } from "@/composables/useChat"
+import type { AgentRunEndEvent, ChatMessage } from "@/types/chat"
 
 const props = defineProps<{
   threadId?: string
 }>()
 
 const router = useRouter()
+const {
+  runId,
+  runStatus,
+  streamUrl,
+  cancelling,
+  isRunActive,
+  createRun,
+  restoreRunFromThread,
+  consumeRunStream,
+  cancelCurrentRun: requestRunCancellation,
+  clearRun
+} = useAgentRun()
 const {
   thread,
   messages,
@@ -20,17 +40,262 @@ const {
   uploadError,
   loading,
   submitting,
-  cancelling,
   error,
-  isRunActive,
-  loadThread,
+  clearPendingInput,
+  applyThreadDetail,
+  applyCreatedThread,
+  clearRunStreamMessages,
+  applyRunMessageEvent,
+  beginSubmission,
+  rollbackSubmission,
+  appendUploadedAttachments,
   resetThread,
-  uploadFiles,
-  removeAttachment,
-  submitDraft,
-  cancelCurrentRun,
-  stop
+  removeAttachment
 } = useChat()
+
+let streamController: AbortController | null = null
+let operation = 0
+let uploadGeneration = 0
+
+const errorText = (caught: unknown) =>
+  caught instanceof Error ? caught.message : "请求失败"
+
+const isAbortError = (caught: unknown) =>
+  caught instanceof DOMException && caught.name === "AbortError"
+
+const abortStream = () => {
+  streamController?.abort()
+  streamController = null
+}
+
+const loadAndApplyThread = async (
+  threadId: string,
+  expectedOperation: number
+) => {
+  const detail = await getThreadDetail(threadId)
+  if (operation !== expectedOperation) return null
+  applyThreadDetail(detail)
+  return restoreRunFromThread(detail)
+}
+
+const monitorRun = async (
+  threadId: string,
+  expectedOperation: number
+) => {
+  const monitoredRunId = runId.value
+  if (!monitoredRunId || !streamUrl.value || !isRunActive.value) return
+
+  while (
+    operation === expectedOperation &&
+    runId.value === monitoredRunId &&
+    streamUrl.value &&
+    isRunActive.value
+  ) {
+    clearRunStreamMessages(monitoredRunId)
+    const controller = new AbortController()
+    streamController = controller
+    let endEvent: AgentRunEndEvent
+    try {
+      const consumedEndEvent = await consumeRunStream(
+        controller.signal,
+        (event) => {
+          if (
+            operation === expectedOperation &&
+            runId.value === monitoredRunId
+          ) {
+            applyRunMessageEvent(event, monitoredRunId)
+          }
+        }
+      )
+      if (!consumedEndEvent) return
+      endEvent = consumedEndEvent
+    } catch (caught) {
+      if (operation !== expectedOperation || isAbortError(caught)) return
+      error.value = errorText(caught)
+      try {
+        await loadAndApplyThread(
+          threadId,
+          expectedOperation
+        )
+      } catch {
+        // 保持已知 Run 状态，稍后重新连接。
+      }
+      if (
+        operation !== expectedOperation ||
+        runId.value !== monitoredRunId
+      ) {
+        return
+      }
+      if (!isRunActive.value) {
+        error.value = runStatus.value === "failed"
+          ? "Agent 执行失败"
+          : ""
+        return
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1000))
+      continue
+    } finally {
+      if (streamController === controller) streamController = null
+    }
+
+    if (operation !== expectedOperation) return
+    error.value = ""
+    try {
+      await loadAndApplyThread(
+        threadId,
+        expectedOperation
+      )
+    } catch (caught) {
+      if (operation === expectedOperation && !isAbortError(caught)) {
+        error.value = errorText(caught)
+      }
+    }
+    if (operation !== expectedOperation) return
+    if (endEvent.status === "failed") {
+      error.value = endEvent.error || "Agent 执行失败"
+    }
+    return
+  }
+}
+
+const loadThread = async (threadId: string) => {
+  const expectedOperation = ++operation
+  uploadGeneration += 1
+  abortStream()
+  clearRun()
+  clearPendingInput()
+  submitting.value = false
+  thread.value = null
+  messages.value = []
+  loading.value = true
+  error.value = ""
+  try {
+    const activeRun = await loadAndApplyThread(
+      threadId,
+      expectedOperation
+    )
+    if (activeRun && isRunActive.value) {
+      void monitorRun(threadId, expectedOperation)
+    }
+  } catch (caught) {
+    if (operation === expectedOperation && !isAbortError(caught)) {
+      thread.value = null
+      messages.value = []
+      error.value = errorText(caught)
+    }
+  } finally {
+    if (operation === expectedOperation) loading.value = false
+  }
+}
+
+const uploadFiles = async (files: File[]) => {
+  if (files.length === 0) return
+
+  const expectedGeneration = uploadGeneration
+  uploadingCount.value += files.length
+  uploadError.value = ""
+  try {
+    const uploaded = await uploadChatAttachments(files)
+    if (uploadGeneration !== expectedGeneration) return
+    appendUploadedAttachments(uploaded)
+  } catch (caught) {
+    if (uploadGeneration === expectedGeneration) {
+      uploadError.value = errorText(caught)
+    }
+  } finally {
+    if (uploadGeneration === expectedGeneration) {
+      uploadingCount.value = Math.max(
+        0,
+        uploadingCount.value - files.length
+      )
+    }
+  }
+}
+
+const submit = async () => {
+  if (isRunActive.value) return
+  const submission = beginSubmission()
+  if (!submission) return
+
+  const expectedOperation = ++operation
+  abortStream()
+  let runCreated = false
+  try {
+    let currentThread = thread.value
+
+    if (!currentThread) {
+      const agents = await listChatAgents()
+      const leader = agents.find((agent) => agent.id === "LeaderAgent")
+      if (!leader) throw new Error("LeaderAgent 当前不可用")
+
+      const created = await createThread(leader.id)
+      if (operation !== expectedOperation) return
+      currentThread = applyCreatedThread(created)
+      if (props.threadId !== created.thread_id) {
+        await router.replace({
+          name: "conversation",
+          params: { threadId: created.thread_id }
+        })
+      }
+    }
+
+    if (operation !== expectedOperation) return
+    const run = await createRun({
+      query: submission.query,
+      agentId: currentThread.agent_id,
+      threadId: currentThread.thread_id,
+      attachmentFileIds: submission.attachments.map(
+        (attachment) => attachment.file_id
+      )
+    })
+    if (operation !== expectedOperation) return
+    runCreated = true
+
+    try {
+      await loadAndApplyThread(
+        currentThread.thread_id,
+        expectedOperation
+      )
+    } catch (caught) {
+      if (operation === expectedOperation && !isAbortError(caught)) {
+        error.value = errorText(caught)
+      }
+    }
+    if (operation !== expectedOperation) return
+    if (run.status === "failed") error.value = "Agent 执行失败"
+
+    await monitorRun(
+      currentThread.thread_id,
+      expectedOperation
+    )
+  } catch (caught) {
+    if (operation === expectedOperation && !isAbortError(caught)) {
+      error.value = errorText(caught)
+      if (!runCreated) rollbackSubmission(submission)
+    }
+  } finally {
+    if (operation === expectedOperation) {
+      streamController = null
+      submitting.value = false
+    }
+  }
+}
+
+const cancelCurrentRun = async () => {
+  error.value = ""
+  try {
+    await requestRunCancellation()
+  } catch (caught) {
+    error.value = errorText(caught)
+  }
+}
+
+const stop = () => {
+  operation += 1
+  uploadGeneration += 1
+  abortStream()
+  clearRun()
+}
 
 const inputDisabled = computed(
   () => loading.value || cancelling.value || (submitting.value && !isRunActive.value)
@@ -38,10 +303,24 @@ const inputDisabled = computed(
 const composerDocked = computed(() => messages.value.length > 0)
 const displayedError = computed(() => uploadError.value || error.value)
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null
+
+const messageKey = (message: ChatMessage, index: number) => {
+  const event = isRecord(message.payload.event)
+    ? message.payload.event
+    : null
+  const eventId = event?.message_id ?? event?.id
+  return typeof eventId === "string" || typeof eventId === "number"
+    ? `${message.type}:${message.payload.type}:${eventId}`
+    : `${message.type}:${message.payload.type}:${index}`
+}
+
 watch(
   () => props.threadId,
   (threadId) => {
     if (!threadId) {
+      stop()
       resetThread()
       return
     }
@@ -49,15 +328,6 @@ watch(
   },
   { immediate: true }
 )
-
-const submit = () =>
-  submitDraft(async (threadId) => {
-    if (props.threadId === threadId) return
-    await router.replace({
-      name: "conversation",
-      params: { threadId }
-    })
-  })
 
 onBeforeUnmount(stop)
 </script>
@@ -74,8 +344,8 @@ onBeforeUnmount(stop)
 
         <template v-else>
           <ChatMessageComponent
-            v-for="message in messages"
-            :key="message.message_id"
+            v-for="(message, index) in messages"
+            :key="messageKey(message, index)"
             :message="message"
           />
         </template>
