@@ -11,7 +11,6 @@ from langchain_core.messages import AIMessageChunk
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.service.input_message_service import AgentInputMsg
-from server.utils import reslove_thread_id
 from server.utils.auth import AuthenticatedUser
 from src.agents import BaseAgent, agent_manager
 from src.agents import CustomAgentState as AgentState
@@ -727,7 +726,7 @@ async def stream_agent_response(
         **kwargs: Any,
     ) -> bytes:
         """构建 agent 流式输出的事件格式"""
-        thread_id = (
+        event_thread_id = (
             kwargs.pop("thread_id", None)
             or runtime_metadata.get("thread_id")
             or thread_id
@@ -737,7 +736,7 @@ async def stream_agent_response(
                 {
                     "request_id": runtime_metadata.get("request_id"),
                     "response": content,
-                    "thread_id": thread_id,
+                    "thread_id": event_thread_id,
                     "status": status,
                     **kwargs,
                 },
@@ -814,24 +813,16 @@ async def stream_agent_response(
             runtime_context=agent_runtime_context,
         ):
             if method == "values":
-                try:
-                    agent_state = _reslove_agent_state(payload)
-                    currentr_agent_state = _serialize_agent_state(agent_state)
-                    if (
-                        currentr_agent_state
-                        and currentr_agent_state != last_agent_state
-                    ):
-                        last_agent_state = currentr_agent_state
-                        yield make_agent_stream_event(
-                            status="agent_state",
-                            content=agent_state,
-                            runtime_metadata=runtime_metadata,
-                        )
-                    continue
-                except Exception:
-                    import traceback
-
-                    print(traceback.print_exc())
+                agent_state = _reslove_agent_state(payload)
+                currentr_agent_state = _serialize_agent_state(agent_state)
+                if currentr_agent_state and currentr_agent_state != last_agent_state:
+                    last_agent_state = currentr_agent_state
+                    yield make_agent_stream_event(
+                        status="agent_state",
+                        content=agent_state,
+                        runtime_metadata=runtime_metadata,
+                    )
+                continue
 
             if method == "agent_execute_state":
                 yield make_agent_stream_event(
@@ -851,7 +842,6 @@ async def stream_agent_response(
 
             # message输出的时候走的路径
             agent_msg, agent_metadata = payload
-            agent_msg_thread_id = reslove_thread_id(agent_metadata, thread_id)
             standard_stream_events = _make_lc_message_to_standard(
                 agent_msg=agent_msg,
                 agent_metadata=agent_metadata,
@@ -863,7 +853,7 @@ async def stream_agent_response(
                 if standard_stream_event.get("type") != "message_delta":
                     content = ""
                 else:
-                    content = standard_stream_event.get("cotent_delta", "")
+                    content = standard_stream_event.get("content_delta", "")
 
                 yield make_agent_stream_event(
                     status="loading",
@@ -877,10 +867,9 @@ async def stream_agent_response(
             status="finished",
             runtime_metadata=runtime_metadata,
         )
-    except Exception as e:
-        import traceback
-
-        logger.exception(f"{traceback.print_exc()}")
+    except Exception:
+        logger.exception("Agent stream 响应失败")
+        raise
 
 
 async def stream_resume_response():
