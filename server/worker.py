@@ -319,9 +319,18 @@ class StreamEventSmoother:
         self.character_limit = character_limit
         self.chunk_buckets: dict[str | None, StreamEventBucket] = {}
 
-    def calculate_character_count(self, chunk: dict[str, Any]) -> int:
+    def calculate_character_count(self, chunk: dict[str, Any]):
         # tTODO 待实现char计数
-        return 0
+        response = chunk.get("response")
+        
+        chunk_size = len(response) if isinstance(response, str) else 0
+        stream_event = chunk.get("stream_event")
+        if not isinstance(stream_event, dict):
+            return chunk_size
+
+        # 暂时不兼容v2
+        return chunk_size
+
 
     async def append(
         self,
