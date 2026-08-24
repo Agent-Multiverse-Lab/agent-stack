@@ -23,4 +23,4 @@ run 执行需要持续流式消费；HTTP SSE 连接需要重连友好的时间�
 
 ## References
 - [run-system.md](../architecture/run-system.md)
-- [doc/spec/run/event-streaming/spec.md](../spec/run/event-streaming/spec.md)
+- [docs/spec/run/event-streaming/spec.md](../spec/run/event-streaming/spec.md)

@@ -16,4 +16,4 @@ run 状态需要可重试、可审计、可恢复。Redis/Stream 只适合运行
 
 ## References
 - [persistence-system.md](../architecture/persistence-system.md)
-- [doc/spec/run/lifecycle/spec.md](../spec/run/lifecycle/spec.md)
+- [docs/spec/run/lifecycle/spec.md](../spec/run/lifecycle/spec.md)

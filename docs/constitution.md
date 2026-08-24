@@ -23,7 +23,7 @@
 `cancel_requested` 只是中间态，最终落库必须通过终态确定。
 
 ### C7. Stop at Spec
-所有可观察行为改动先更新 `doc/spec` 的规格，再进入实现修改。
+所有可观察行为改动先更新 `docs/spec` 的规格，再进入实现修改。
 
 ### C8. 可验证
 关键行为（状态、取消、终态事件）必须有对应验收标准并可追踪测试点。
@@ -35,4 +35,3 @@
 - `knowledge`：知识上传、解析、检索与重排。
 - `sandbox`：代码与工具执行隔离环境。
 - `persistence`：PostgreSQL、Redis、MinIO、Milvus 的持久化职责。
-

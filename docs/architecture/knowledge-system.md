@@ -4,6 +4,12 @@
 
 管理知识库文件生命周期：上传 -> 解析 -> 切块 -> 向量化 -> 索引 -> 检索/重排。
 
+行为规格入口：
+
+- [Knowledge Ingestion Spec](../spec/knowledge/ingestion/spec.md)
+- [Knowledge Retrieval Spec](../spec/knowledge/retrieval/spec.md)
+- [Knowledge Evaluation Spec](../spec/knowledge/evaluation/spec.md)
+
 ## 2. Pipeline Components
 
 - `server/service/knowledge_service.py`：服务编排（上传、解析、索引、检索）。
@@ -31,3 +37,16 @@
 
 - 索引阶段必须持久化绑定，禁止隐式重建绑定。
 - 搜索服务只读 Milvus，不在搜索路径中直接写入向量数据。
+
+## 7. Capability Ownership
+
+| 能力 | 承载位置 | 责任边界 |
+| --- | --- | --- |
+| 上传、解析、索引和检索编排 | `server/service/knowledge_service.py` | 协调数据库、对象存储、Embedding 和向量库 |
+| Parser/Extractor/Chunker 流程 | `src/knowledge/flow/` | 只交换规范化 block/chunk 结构，不写业务记录 |
+| Embedding 批处理和校验 | `src/knowledge/embedding_service.py` | 使用注入的 Embeddings，不选择 Agent 或 Provider 业务配置 |
+| 向量存取 | `src/knowledge/store/milvus/milvus.py` | 接收已嵌入记录并负责 Milvus CRUD，不读取对象存储 |
+| 文件状态和绑定 | `src/database/`、`KnowledgeEmbeddingBinding` | PostgreSQL 保存权威状态和模型/维度绑定 |
+
+上传原始 `Attachment` 与知识库 `KnowledgeFile` 是两条不同边界；Worker 不把聊天附件
+隐式转换成解析、切块或 Milvus 记录。

@@ -1,11 +1,12 @@
-# doc/spec 索引
+# docs/spec 索引
 
-`doc/spec` 按能力分成：
+`docs/spec` 按能力分成：
 
 - `run/`：运行域（生命周期 / 取消 / 事件流）
 - `agent/`：代理域（上下文管理 / 子代理委派）
 - `knowledge/`：知识域（输入处理 / 检索 / 评估）
 - `persistence/`：持久化边界
+- `product/`：产品身份与跨页面体验
 
 每个能力目录应包含：
 
@@ -25,6 +26,9 @@
 - [run/event-streaming/spec.md](run/event-streaming/spec.md)
 - [run/event-streaming/plan.md](run/event-streaming/plan.md)
 - [run/event-streaming/tasks.md](run/event-streaming/tasks.md)
+- [run/message-persistence/spec.md](run/message-persistence/spec.md)
+- [run/message-persistence/plan.md](run/message-persistence/plan.md)
+- [run/message-persistence/tasks.md](run/message-persistence/tasks.md)
 
 ## Agent Domain
 
@@ -55,3 +59,12 @@
 - [persistence/state-ownership/spec.md](persistence/state-ownership/spec.md)
 - [persistence/state-ownership/plan.md](persistence/state-ownership/plan.md)
 - [persistence/state-ownership/tasks.md](persistence/state-ownership/tasks.md)
+
+## Product Domain
+
+- [product/branding/spec.md](product/branding/spec.md)
+- [product/branding/plan.md](product/branding/plan.md)
+- [product/branding/tasks.md](product/branding/tasks.md)
+- [product/account-navigation/spec.md](product/account-navigation/spec.md)
+- [product/account-navigation/plan.md](product/account-navigation/plan.md)
+- [product/account-navigation/tasks.md](product/account-navigation/tasks.md)
