@@ -16,8 +16,8 @@
 | ES-010 | RUN-ES-006 | `server/worker.py` | 将内部 chunk 分类映射为五种 Run event type，messages 只写标准 item |
 | ES-011 | RUN-ES-007 | `server/router/agent_router.py`, `server/service/agent_run_service.py` | 用 Last-Event-ID 从 Redis Stream ID 之后续读 |
 | ES-012 | RUN-ES-008 | `web/src/types/chat.ts`, `web/src/api/chat.ts` | 定义 AgentRunEvent/AgentMessage 并逐帧解析 SSE id/event/data |
-| ES-013 | RUN-ES-008 | `web/src/composables/useChat.ts`, `web/src/views/ChatView.vue`, `web/src/components/chat/` | 归并并渲染消息、Run 状态、Agent state 和工具执行事件 |
-| ES-014 | RUN-ES-006/007/008 | `test/`, `web/` | 验证 channel 投影、cursor 续读、判别联合和前端构建 |
+| ES-013 | RUN-ES-008/009 | `web/src/composables/useChat.ts`, `web/src/views/ChatView.vue`, `web/src/components/chat/ChatLoadingStateComponent.vue` | 归并并渲染消息、Run 状态、Agent state 和工具执行事件；等待组件复用于 Thread Detail 读取和 Run 等待，拥有像素波、经过时间和动画降级，当前 Run 有可见 Assistant 文本或 Agent tool 状态后卸载 |
+| ES-014 | RUN-ES-006/007/008/009 | `test/`, `web/` | 验证 channel 投影、cursor 续读、判别联合和前端构建 |
 
 ## Done 条件
 
@@ -33,6 +33,8 @@
 - Redis 与前端只使用 `status/messages/values/agent_execute_event/end` 五种事件类型。
 - `messages.items` 符合 `AgentMessage`，不包含原始 chunk 或 LangChain metadata。
 - 前端逐帧处理完整 `AgentRunEvent`，只按外层 `type` 路由。
+- `ChatLoadingStateComponent` 只在当前 Run 活跃且尚无可见 Assistant 文本或 Agent tool 状态时显示，并在卸载时清理计时器。
+- 当前 Run 的 Thinking 与 Agent tool 状态互斥，任一 tool 消息可见时不显示 Thinking。
 - SSE `id:` 作为不透明 `event_id` 被保存并通过 `Last-Event-ID` 续读。
 - 前后端不新增 `seq/sequential` 字段，前端不定义或读取 `ChunkStatus`。
 - Agent channel 解析异常传播到 Worker，不会落成 `completed`。

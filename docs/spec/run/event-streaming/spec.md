@@ -817,6 +817,17 @@ const { assistantContent } = storeToRefs(chatStore)
 终态后 `finalizeActiveRun()` 重新读取 Thread Detail；`clearActiveRun()` 清空
 `assistantContent`，最终 Assistant 消息由 PostgreSQL 返回的 `messages` 渲染。
 
+`ChatLoadingStateComponent.vue` 统一渲染 Chat 的等待状态。它接收一个
+`label` 文案，Thread Detail 读取传入 `Loading conversation`，活跃 Run
+使用默认的 `Thinking`；组件内部显示 3x3 方形像素
+波、单色 shimmer 文案和 0.1 秒精度的经过时间。组件卸载时必须清理
+计时器；用户设置 reduced motion 时停止像素和 shimmer 动画，计时仍继续。
+
+`ChatView.vue` 只决定何时挂载该组件：当前 Run 仍活跃且还没有产生
+可见 Assistant 文本或 Agent tool 状态时显示；首个非空文本增量或首个 tool
+消息被并入页面消息后立即隐藏。其他 Run 的历史消息和空白增量不得改变
+该判断。可见性根据现有 `messages + runId` 派生，不新增 Store 字段或后端事件。
+
 ### 10.8 Stop current Run
 
 目标：`web/src/composables/useChat.ts:cancelCurrentRun`
@@ -892,6 +903,19 @@ PostgreSQL 保存权威 Run，Pinia 保存当前运行态，`localStorage` 以
 后端核实 Run 状态；只有活跃 Run 才从 Redis Stream 起点重放。终态或无效快照必须
 清除。
 
+### RUN-ES-008 Frontend event projection
+
+前端按外层 Run event type 解析并归并状态、Assistant 文本、Agent state 和
+工具执行事件；不读取 Worker 内部 `chunk.status`，不建立平行的消息 DTO。
+
+### RUN-ES-009 Output-aware activity indicator
+
+`ChatLoadingStateComponent` 拥有等待状态的展示、经过时间和动画降级；
+`ChatView` 拥有可见性。`Thinking` 只表示当前活跃 Run 尚未产生可见
+Assistant 文本或 Agent tool 状态。当前 Run 一旦出现首个非空文本增量或首个
+tool 消息，页面必须卸载该组件，不得同时展示 Assistant 文本、Agent tool 状态
+和等待指示器。
+
 ## 12. Acceptance Criteria
 
 - 创建 Run 后，Worker 在没有 SSE 客户端时仍继续执行。
@@ -904,6 +928,12 @@ PostgreSQL 保存权威 Run，Pinia 保存当前运行态，`localStorage` 以
   直接读取 Thread Detail。
 - 前端消费 `status/messages/custom/end`，不再只等待 `end`。
 - 文本增量来自真实 `messages.items[].stream_event[]`。
+- 当前 Run 尚无可见 Assistant 文本或 Agent tool 状态时，
+  `ChatLoadingStateComponent` 显示 `Thinking`、3x3 像素波和经过时间；首个非空
+  文本增量或首个 tool 消息渲染后立即卸载，且不受其他 Run 的消息影响。
+- Thinking 与当前 Run 的 Agent tool 状态互斥；tool 状态可见期间不得重新显示
+  Thinking。
+- reduced motion 停止等待组件的像素和 shimmer 动画，但经过时间继续。
 - 页面未刷新且 Pinia cursor 仍在内存时，SSE 续连同一个 Run 并从
   `Last-Stream-ID` 之后开始；整页刷新从 `0-0` 重放。
 - 前端点击停止后显示 `cancel_requested`，直到收到 `cancelled` 终态。
