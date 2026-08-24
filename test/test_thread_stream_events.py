@@ -29,6 +29,8 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             langchain_msg=HumanMessage(content="hello"),
         )
         current_user = SimpleNamespace(uid="user-1")
+        save_messages = AsyncMock()
+        self.save_messages = save_messages
 
         with (
             patch(
@@ -48,6 +50,10 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             patch(
                 "server.service.thread_service._check_conv_status",
                 new_callable=AsyncMock,
+            ),
+            patch(
+                "server.service.thread_service.save_message_from_langgraph_state",
+                new=save_messages,
             ),
         ):
             return [
@@ -105,6 +111,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             loading_event["stream_event"][0]["content_delta"],
         )
         self.assertEqual("finished", events[1]["status"])
+        self.save_messages.assert_awaited_once()
 
     async def test_invalid_values_payload_propagates(self) -> None:
         with self.assertRaises(AttributeError):

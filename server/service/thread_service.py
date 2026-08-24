@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from langchain.messages import HumanMessage
-from langchain_core.messages import AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.service.input_message_service import AgentInputMsg
@@ -696,6 +696,88 @@ def _serialize_agent_state(agent_state: AgentState | None) -> str:
         return str(agent_state)
 
 
+async def save_ai_message(
+    *,
+    db: AsyncSession,
+    conversation_id: int,
+    agent_run_id: str,
+    message: AIMessage,
+) -> None:
+    """保存一条 LangGraph AI Message。"""
+    conversations = ConversationRepository(db)
+    output_message = await conversations.create_agent_output_message(
+        conversation_id=conversation_id,
+        agent_run_id=agent_run_id,
+        content=message.text,
+    )
+    await AgentRunRepository(db).set_output_message(
+        run_id=agent_run_id,
+        output_message_id=int(output_message.id),
+    )
+
+    if message.tool_calls:
+        tool_call = message.tool_calls[0]
+        await conversations.create_tool_call(
+            message_id=int(output_message.id),
+            tool_call_id=tool_call["id"],
+            tool_name=tool_call["name"],
+            tool_arguments=tool_call["args"],
+        )
+
+
+async def save_tool_message(
+    *,
+    db: AsyncSession,
+    message: ToolMessage,
+) -> None:
+    """保存一条 LangGraph Tool Message 的执行结果。"""
+    await ConversationRepository(db).update_tool_call(
+        tool_call_id=message.tool_call_id,
+        tool_result=message.text,
+        status=message.status,
+    )
+
+
+async def save_message_from_langgraph_state(
+    *,
+    agent_instance: BaseAgent,
+    runtime_context: dict[str, Any],
+    db: AsyncSession,
+) -> None:
+    """读取当前 checkpoint，并按 Message type 持久化运行结果。"""
+    context = agent_instance.agent_context()
+    context.update_context(runtime_context)
+    graph = await agent_instance.get_agent(context)
+    checkpoint = await graph.aget_state(
+        {
+            "configurable": {
+                "thread_id": context.thread_id,
+                "uid": context.uid,
+            }
+        }
+    )
+
+    conversation = await ConversationRepository(
+        db
+    ).get_conversation_by_thread_id_for_user(
+        thread_id=context.thread_id,
+        user_id=context.uid,
+    )
+
+    for message in checkpoint.values.get("messages", []):
+        if message.type == "ai":
+            await save_ai_message(
+                db=db,
+                conversation_id=int(conversation.id),
+                agent_run_id=context.run_id,
+                message=message,
+            )
+        elif message.type == "tool":
+            await save_tool_message(db=db, message=message)
+
+    await db.commit()
+
+
 async def stream_agent_response(
     *,
     agent_slug: str,
@@ -862,6 +944,12 @@ async def stream_agent_response(
                     metadata=agent_metadata,
                     thread_id=thread_id,
                 )
+
+        await save_message_from_langgraph_state(
+            agent_instance=agent_instacne,
+            runtime_context=agent_runtime_context,
+            db=db,
+        )
 
         yield make_agent_stream_event(
             status="finished",

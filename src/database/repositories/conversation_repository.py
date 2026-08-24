@@ -5,7 +5,7 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from src.database.models import Conversation, Message
+from src.database.models import AgentRun, Conversation, Message, ToolCall
 
 
 class ConversationRepository:
@@ -301,19 +301,51 @@ class ConversationRepository:
             content=content,
         )
 
+    async def create_tool_call(
+        self,
+        *,
+        message_id: int,
+        tool_call_id: str,
+        tool_name: str,
+        tool_arguments: dict,
+    ) -> ToolCall:
+        """为 Assistant Message 创建工具调用。"""
+        tool_call = ToolCall(
+            message_id=message_id,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            tool_arguments=dict(tool_arguments),
+        )
+        self.session.add(tool_call)
+        await self.session.flush()
+        return tool_call
+
+    async def update_tool_call(
+        self,
+        *,
+        tool_call_id: str,
+        tool_result: str,
+        status: str,
+    ) -> ToolCall:
+        """按 LangGraph Tool Call ID 写入执行结果。"""
+        result = await self.session.execute(
+            select(ToolCall).where(ToolCall.tool_call_id == tool_call_id)
+        )
+        tool_call = result.scalar_one()
+        tool_call.tool_result = tool_result
+        tool_call.status = status
+        await self.session.flush()
+        return tool_call
+
     async def get_run_result_message(
         self,
         run_id: str,
     ) -> Message | None:
-        """读取指定 Run 最近保存的 Assistant 消息。"""
+        """通过输出消息指针读取指定 Run 的结果。"""
         result = await self.session.execute(
             select(Message)
-            .where(
-                Message.agent_run_id == run_id,
-                Message.role == "assistant",
-            )
-            .order_by(Message.id.desc())
-            .limit(1)
+            .join(AgentRun, AgentRun.output_message_id == Message.id)
+            .where(AgentRun.id == run_id)
             .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()

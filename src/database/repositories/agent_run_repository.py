@@ -22,6 +22,18 @@ class AgentRunRepository:
         )
         return result.scalar_one_or_none()
 
+    async def set_output_message(
+        self,
+        *,
+        run_id: str,
+        output_message_id: int,
+    ) -> AgentRun:
+        """记录当前 Run 最新保存的输出 Message。"""
+        run = await self.get_by_id(run_id)
+        run.output_message_id = output_message_id
+        await self.session.flush()
+        return run
+
     async def get_child_for_parent(
         self,
         *,

@@ -105,8 +105,16 @@ class Message(Base):
 
     conversation = relationship("Conversation", back_populates="messages")
     # FIXME: 恢复 AgentRun.messages 对应的反向关系，避免 ORM mapper 初始化失败。
-    agent_run = relationship("AgentRun", back_populates="messages")
-    tool_calls = relationship("ToolCall", back_populates="message", cascade="all, delete-orphan", order_by="ToolCall.tool_sequence")
+    agent_run = relationship(
+        "AgentRun",
+        back_populates="messages",
+        foreign_keys=[agent_run_id],
+    )
+    tool_calls = relationship(
+        "ToolCall",
+        back_populates="message",
+        cascade="all, delete-orphan",
+    )
     attachment_links = relationship(
         "MessageAttachment",
         back_populates="message",
@@ -120,12 +128,12 @@ class ToolCall(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="工具调用ID")
     message_id = Column(Integer, ForeignKey("message.id", ondelete="CASCADE"), nullable=False, comment="消息ID")
-    tool_sequence = Column(Integer, nullable=False, comment="工具调用顺序")
     tool_call_id = Column(String(255), nullable=True, comment="模型返回的工具调用ID")
     tool_name = Column(String(255), nullable=False, comment="工具名称")
     tool_arguments = Column(JSON, nullable=False, default=dict, comment="工具参数")
     tool_input = Column(JSON , nullable=True, comment="工具输入")
     tool_result = Column(Text, nullable=True, comment="工具结果")
+    status = Column(String(16), nullable=True, comment="工具执行状态")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="创建时间")
 
     message = relationship("Message", back_populates="tool_calls")
@@ -157,6 +165,12 @@ class AgentRun(Base):
     agent_status = Column(String(32), nullable=False, default="pengding", comment="运行状态 pending, running, cancel_requested, completed, failed, cancelled")
 
     trigger_message_id = Column(Integer, nullable=True, comment="Input message ID")
+    output_message_id = Column(
+        Integer,
+        ForeignKey("message.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Output message ID",
+    )
     request_id = Column(String(128), unique=True, index=True, nullable=True, comment="请求ID")
     parent_run_id = Column(String(64), nullable=True, index=True, comment="当前runid的父id")
     run_metadata = Column(
@@ -175,7 +189,11 @@ class AgentRun(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), comment="更新时间")
 
     user = relationship("User")
-    messages = relationship("Message", back_populates="agent_run")
+    messages = relationship(
+        "Message",
+        back_populates="agent_run",
+        foreign_keys="Message.agent_run_id",
+    )
 
 
 class Agent(Base):
