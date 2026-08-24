@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import { XIcon } from "lucide-vue-next"
+import { XIcon } from "@lucide/vue"
 import ChatTrajectoryComponent from "./ChatTrajectoryComponent.vue"
 import ChatAttachmentDetailsComponent from "./ChatAttachmentDetailsComponent.vue"
 

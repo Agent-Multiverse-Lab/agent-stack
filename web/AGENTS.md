@@ -33,6 +33,10 @@
 
 前端使用 Vue 3、TypeScript、Vite、Vue Router、Tailwind CSS、Ant Design Vue、Lucide 和 GSAP。依赖与脚本以 `package.json` 和锁文件为准，不在本文件维护版本快照。
 
+Web 产品的当前品牌名为 `AM`（`Agent Multiverse`），唯一 Logo 源文件为
+`src/assets/logo.svg`。仓库名、GitHub URL 与 `au.access_token` 是稳定技术标识，
+不随用户可见品牌文案修改。
+
 标准启动链为：
 
 ```text

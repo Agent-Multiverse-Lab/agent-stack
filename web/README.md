@@ -1,6 +1,6 @@
-# AU Web
+# AM Web
 
-Vue 3 frontend for AU. The current Chat flow uses the FastAPI authentication,
+Vue 3 frontend for AM (Agent Multiverse). The current Chat flow uses the FastAPI authentication,
 Thread, Agent Run, cancellation, and SSE endpoints through the Vite `/api` proxy.
 
 ## Commands

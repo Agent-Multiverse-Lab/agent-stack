@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { Component } from "vue"
-import { onBeforeUnmount, ref, watch } from "vue"
+import { computed, onBeforeUnmount, ref, watch } from "vue"
 import { Database, Info, Settings, User, X } from "@lucide/vue"
 import { RouterLink } from "vue-router"
+
+import type { UserResponse } from "@/types/auth"
 
 type SettingsSectionId = "general" | "account" | "data" | "about"
 
@@ -14,6 +16,7 @@ interface SettingsSection {
 
 const props = defineProps<{
   open: boolean
+  user: UserResponse | null
 }>()
 
 const emit = defineEmits<{
@@ -32,6 +35,11 @@ const theme = ref("light")
 const language = ref("en")
 const showFollowUps = ref(true)
 const improveModel = ref(false)
+
+const accountStatus = computed(() => {
+  if (!props.user) return "Not logged in"
+  return props.user.is_active ? "Active" : "Inactive"
+})
 
 const close = () => emit("close")
 
@@ -201,12 +209,16 @@ onBeforeUnmount(() => {
                 <div class="grid min-w-0">
                   <div class="flex min-h-12 items-center justify-between gap-5 border-b border-graphite/6 py-3 text-sm">
                     <span class="min-w-0">Status</span>
-                    <span class="text-right text-slate">Not logged in</span>
+                    <span class="text-right text-slate">{{ accountStatus }}</span>
                   </div>
 
                   <div class="flex min-h-12 items-center justify-between gap-5 border-b border-graphite/6 py-3 text-sm">
                     <span class="min-w-0">Account</span>
+                    <span v-if="user" class="min-w-0 truncate text-right text-slate">
+                      {{ user.email }}
+                    </span>
                     <RouterLink
+                      v-else
                       class="font-medium underline underline-offset-2"
                       to="/login"
                       @click="close"
@@ -260,7 +272,7 @@ onBeforeUnmount(() => {
                 <div class="grid min-w-0">
                   <div class="flex min-h-12 items-center justify-between gap-5 border-b border-graphite/6 py-3 text-sm">
                     <span class="min-w-0">Product</span>
-                    <span class="text-right text-slate">AU</span>
+                    <span class="text-right text-slate">AM</span>
                   </div>
 
                   <div class="flex min-h-12 items-center justify-between gap-5 border-b border-graphite/6 py-3 text-sm">

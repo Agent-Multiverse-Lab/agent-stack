@@ -29,7 +29,7 @@ onMounted(() => {
       <RouterLink
         class="inline-flex min-h-9 items-center gap-2 rounded-lg px-1 text-sm font-bold tracking-[-0.02em] hover:text-[#15545a] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#15545a]"
         :to="{ name: 'chat' }"
-        aria-label="AU home"
+        aria-label="AM home"
       >
         <img
           class="size-6 object-contain"
@@ -37,7 +37,7 @@ onMounted(() => {
           alt=""
           aria-hidden="true"
         >
-        <span>AU</span>
+        <span>AM</span>
       </RouterLink>
 
       <a
@@ -45,7 +45,7 @@ onMounted(() => {
         href="https://github.com/leeejuju/multi-agent-s2c"
         target="_blank"
         rel="noopener noreferrer"
-        aria-label="AU on GitHub"
+        aria-label="AM on GitHub"
       >
         <GithubOutlined class="text-xl" aria-hidden="true" />
       </a>
@@ -56,7 +56,7 @@ onMounted(() => {
     >
       <section
         class="grid h-[580px] w-full max-w-[960px] grid-cols-2 overflow-hidden rounded-[20px] bg-white shadow-[0_28px_80px_rgba(8,37,43,0.14)] max-[1000px]:h-auto max-[1000px]:grid-cols-1"
-        aria-label="AU authentication"
+        aria-label="AM authentication"
       >
         <div
           class="min-h-0 overflow-hidden bg-[#f2f4f3] max-[1000px]:h-[clamp(240px,48vw,420px)]"

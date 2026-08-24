@@ -43,8 +43,8 @@ const title = computed(() =>
 )
 const description = computed(() =>
   isRegister.value
-    ? "Create an AU account with your email."
-    : "Sign in to AU with your email."
+    ? "Create an AM account with your email."
+    : "Sign in to AM with your email."
 )
 
 const validatePasswordConfirmation = (_rule: Rule, value: string) =>

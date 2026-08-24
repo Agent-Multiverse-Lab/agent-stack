@@ -8,6 +8,7 @@ import {
   listChatAgents,
   uploadChatAttachments
 } from "@/api/agent"
+import ChatLoadingStateComponent from "@/components/chat/ChatLoadingStateComponent.vue"
 import ChatMessageComponent from "@/components/chat/ChatMessageComponent.vue"
 import ChatMessageInputComponent from "@/components/chat/ChatMessageInputComponent.vue"
 import { useAgentRun } from "@/composables/useAgentRun"
@@ -306,6 +307,21 @@ const displayedError = computed(() => uploadError.value || error.value)
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null
 
+const hasCurrentRunAssistantText = computed(() => {
+  const currentRunId = runId.value
+  if (!currentRunId) return false
+
+  return messages.value.some((message) => {
+    if (message.type !== "ai" || message.payload.type !== "text") return false
+    const event = isRecord(message.payload.event)
+      ? message.payload.event
+      : null
+    return event?.run_id === currentRunId &&
+      typeof event.content === "string" &&
+      event.content.trim().length > 0
+  })
+})
+
 const messageKey = (message: ChatMessage, index: number) => {
   const event = isRecord(message.payload.event)
     ? message.payload.event
@@ -338,9 +354,10 @@ onBeforeUnmount(stop)
       <div
         class="mx-auto grid w-full max-w-[52rem] content-start gap-7 px-[clamp(1rem,4vw,2rem)] pt-6 pb-10"
       >
-        <p v-if="loading" class="m-0 text-sm text-slate" role="status">
-          Loading conversation…
-        </p>
+        <ChatLoadingStateComponent
+          v-if="loading"
+          label="Loading conversation"
+        />
 
         <template v-else>
           <ChatMessageComponent
@@ -356,23 +373,10 @@ onBeforeUnmount(stop)
           enter-from-class="opacity-0"
           leave-to-class="opacity-0"
         >
-          <div
-            v-if="isRunActive"
-            class="flex items-center gap-4 py-1"
-            role="status"
-            aria-live="polite"
-          >
-            <span class="flex items-center gap-1.5" aria-hidden="true">
-              <span class="size-1.5 animate-pulse rounded-full bg-slate [animation-delay:-0.3s] motion-reduce:animate-none" />
-              <span class="size-1.5 animate-pulse rounded-full bg-slate [animation-delay:-0.15s] motion-reduce:animate-none" />
-              <span class="size-1.5 animate-pulse rounded-full bg-slate motion-reduce:animate-none" />
-            </span>
-            <span
-              class="animate-pulse bg-gradient-to-r from-violet-500 to-pink-500 bg-clip-text text-lg font-medium text-transparent motion-reduce:animate-none"
-            >
-              Thinking...
-            </span>
-          </div>
+          <ChatLoadingStateComponent
+            v-if="!loading && isRunActive && !hasCurrentRunAssistantText"
+            :key="runId ?? 'pending'"
+          />
         </Transition>
       </div>
     </div>
@@ -389,7 +393,7 @@ onBeforeUnmount(stop)
           class="mb-4 text-center select-none"
         >
           <h1 class="text-3xl font-semibold tracking-tight text-graphite sm:text-4xl">
-            Welcome to Multi-Agent S2C
+            Welcome to AM
           </h1>
           <p class="mt-2 text-sm text-slate sm:text-base">
             What would you like to explore or build today?

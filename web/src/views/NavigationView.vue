@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { Component } from "vue"
 import {
-  computed,
   onBeforeUnmount,
   onMounted,
   ref,
@@ -25,8 +24,10 @@ import { Dropdown as ADropdown, Menu as AMenu, MenuItem as AMenuItem, Tooltip as
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
 
 import logoUrl from "@/assets/logo.svg"
+import ProfileComponent from "@/components/ProfileComponent.vue"
 import SearchChatComponent from "@/components/SearchChatComponent.vue"
 import SettingsComponent from "@/components/SettingsComponent.vue"
+import SidebarAccountComponent from "@/components/SidebarAccountComponent.vue"
 import { useAuthStore } from "@/stores/useAuthStore"
 import type { FeatureId } from "@/types/feature"
 
@@ -36,6 +37,7 @@ const authStore = useAuthStore()
 
 const sidebarCollapsed = ref(false)
 const mobileSidebarOpen = ref(false)
+const profileOpen = ref(false)
 const settingsOpen = ref(false)
 const searchOpen = ref(false)
 const isNarrowViewport = ref(false)
@@ -54,9 +56,6 @@ const featureLinks: Array<{
   { id: "sandbox", label: "Sandbox", icon: SquareTerminal }
 ]
 
-const pageTitle = computed(() =>
-  typeof route.meta.title === "string" ? route.meta.title : "Chat"
-)
 const isFeatureActive = (featureId: FeatureId | "knowledge") =>
   route.name === featureId
 
@@ -109,7 +108,23 @@ const openNewConversation = async () => {
 }
 
 const openSettings = () => {
+  profileOpen.value = false
   settingsOpen.value = true
+  mobileSidebarOpen.value = false
+}
+
+const openProfile = () => {
+  settingsOpen.value = false
+  profileOpen.value = true
+  mobileSidebarOpen.value = false
+}
+
+const logout = async () => {
+  profileOpen.value = false
+  settingsOpen.value = false
+  mobileSidebarOpen.value = false
+  authStore.logout()
+  await router.push({ name: "login" })
 }
 </script>
 
@@ -143,7 +158,7 @@ const openSettings = () => {
           <RouterLink
             class="inline-flex min-w-0 items-center gap-2 font-semibold tracking-[-0.02em]"
             :to="{ name: 'chat' }"
-            aria-label="AU home"
+            aria-label="AM home"
             @click="openNewConversation"
           >
             <img
@@ -151,7 +166,7 @@ const openSettings = () => {
               class="h-[1.15rem] w-[1.15rem]"
               alt=""
             >
-            <span class="truncate text-[0.95rem]">AU</span>
+            <span class="truncate text-[0.95rem]">AM</span>
           </RouterLink>
 
           <div class="flex items-center gap-1">
@@ -292,21 +307,14 @@ const openSettings = () => {
             </RouterLink>
           </ATooltip>
 
-          <ATooltip placement="right" :title="sidebarCollapsed && !isNarrowViewport ? 'Settings' : undefined">
-            <button
-              class="flex min-h-9 items-center rounded-sm bg-transparent text-left text-sm text-slate hover:bg-graphite/8 hover:text-graphite"
-              :class="sidebarCollapsed && !isNarrowViewport ? 'justify-center px-0' : 'gap-2 px-2.5'"
-              type="button"
-              @click="openSettings"
-            >
-              <Settings
-                :size="17"
-                :stroke-width="1.8"
-                aria-hidden="true"
-              />
-              <span v-if="!sidebarCollapsed || isNarrowViewport">Settings</span>
-            </button>
-          </ATooltip>
+          <SidebarAccountComponent
+            v-if="authStore.accessToken"
+            username="AM User"
+            :collapsed="sidebarCollapsed && !isNarrowViewport"
+            @profile="openProfile"
+            @settings="openSettings"
+            @logout="logout"
+          />
         </footer>
       </div>
     </aside>
@@ -372,8 +380,16 @@ const openSettings = () => {
     </main>
   </div>
 
+  <ProfileComponent
+    :open="profileOpen"
+    :user="authStore.user"
+    username="AM User"
+    @close="profileOpen = false"
+  />
+
   <SettingsComponent
     :open="settingsOpen"
+    :user="authStore.user"
     @close="settingsOpen = false"
   />
 
