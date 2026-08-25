@@ -9,7 +9,7 @@
 2. 新增 `migrate/versions/0007_agent_run_message_persistence.py`，只执行上述
    schema 变更，不增加兼容字段或数据回填逻辑。
 3. 修改 `ConversationRepository`：保留 `create_agent_output_message`，增加
-   `create_tool_call` 和 `update_tool_call`，并让 `get_run_result_message`
+   `add_tool_call` 和 `update_tool_call`，并让 `get_run_result_message`
    通过 `AgentRun.output_message_id` 查询。
 4. 修改 `AgentRunRepository`：增加 `set_output_message`。
 5. 修改 `server/service/thread_service.py`：增加三个 snake_case 异步函数，从
@@ -112,10 +112,10 @@ op.add_column(
 ### 4.1 Create ToolCall
 
 目标：
-`src/database/repositories/conversation_repository.py:ConversationRepository.create_tool_call`
+`src/database/repositories/conversation_repository.py:ConversationRepository.add_tool_call`
 
 ```python
-async def create_tool_call(
+async def add_tool_call(
     self,
     *,
     message_id: int,
@@ -209,26 +209,22 @@ async def save_ai_message(
     conversation_id: int,
     agent_run_id: str,
     message: AIMessage,
-) -> None:
+) -> Message:
     conversations = ConversationRepository(db)
     output_message = await conversations.create_agent_output_message(
         conversation_id=conversation_id,
         agent_run_id=agent_run_id,
         content=message.text,
     )
-    await AgentRunRepository(db).set_output_message(
-        run_id=agent_run_id,
-        output_message_id=int(output_message.id),
-    )
-
     if message.tool_calls:
         tool_call = message.tool_calls[0]
-        await conversations.create_tool_call(
+        await conversations.add_tool_call(
             message_id=int(output_message.id),
             tool_call_id=tool_call["id"],
             tool_name=tool_call["name"],
             tool_arguments=tool_call["args"],
         )
+    return output_message
 ```
 
 ### 5.2 Save Tool Message
@@ -257,6 +253,7 @@ async def save_message_from_langgraph_state(
     *,
     agent_instance: BaseAgent,
     runtime_context: dict[str, Any],
+    run_id: str,
     db: AsyncSession,
 ) -> None:
     context = agent_instance.agent_context()
@@ -278,12 +275,13 @@ async def save_message_from_langgraph_state(
         user_id=context.uid,
     )
 
+    saved_ai_message = None
     for message in checkpoint.values.get("messages", []):
         if message.type == "ai":
-            await save_ai_message(
+            saved_ai_message = await save_ai_message(
                 db=db,
                 conversation_id=int(conversation.id),
-                agent_run_id=context.run_id,
+                agent_run_id=run_id,
                 message=message,
             )
         elif message.type == "tool":
@@ -291,6 +289,14 @@ async def save_message_from_langgraph_state(
                 db=db,
                 message=message,
             )
+
+    agent_run_repo = AgentRunRepository(db)
+    current_run = await agent_run_repo.get_by_id(run_id)
+    if current_run is not None and saved_ai_message is not None:
+        await agent_run_repo.set_output_message(
+            run_id=run_id,
+            output_message_id=int(saved_ai_message.id),
+        )
 
     await db.commit()
 ```
@@ -306,6 +312,7 @@ async def save_message_from_langgraph_state(
 await save_message_from_langgraph_state(
     agent_instance=agent_instacne,
     runtime_context=agent_runtime_context,
+    run_id=run_id,
     db=db,
 )
 

@@ -44,9 +44,10 @@ Run 终态仍遵循 [`RUN-LC-002`](../lifecycle/spec.md)，Redis/SSE 事件仍�
 Assistant Message 仍通过 `Message.agent_run_id` 关联当前 Run。
 
 一次 Run 可以产生发起工具调用和输出最终文本的两个 AI Message。
-`save_ai_message` 每创建一条 Assistant Message，就用该 Message ID 更新
-`AgentRun.output_message_id`。按 checkpoint 原始顺序遍历完成后，该字段自然指向
-最后一条 AI Message，不需要额外的 sequence。
+`save_ai_message` 返回创建的 Assistant Message；
+`save_message_from_langgraph_state` 按 checkpoint 原始顺序遍历并持续覆盖
+`saved_ai_message`。遍历结束后，只有当前 Run 和 `saved_ai_message` 都存在时，才将
+最后一条 AI Message ID 写入 `AgentRun.output_message_id`，不需要额外的 sequence。
 
 `ConversationRepository.get_run_result_message(run_id)` 必须通过
 `AgentRun.output_message_id` 读取结果，不再按 `Message.agent_run_id` 猜测最新一条。
@@ -54,7 +55,7 @@ Assistant Message 仍通过 `Message.agent_run_id` 关联当前 Run。
 ### RUN-MP-002 Repository ownership
 
 - `ConversationRepository` 拥有 Assistant Message 创建、Run 结果查询、
-  `create_tool_call` 和 `update_tool_call`；
+  `add_tool_call` 和 `update_tool_call`；
 - `AgentRunRepository` 拥有 `output_message_id` 的更新；
 - Thread Service 只提取 LangChain 字段、调用 Repository 并控制一次事务；
 - Repository 方法只 `flush`，`save_message_from_langgraph_state` 在全部消息处理完成后
@@ -79,7 +80,8 @@ Conversation；本能力不改变软删除行为。
 ### RUN-MP-003 Read the LangGraph checkpoint
 
 `save_message_from_langgraph_state` 使用当前 `BaseAgent` 实例创建具体 Context 和
-`CompiledStateGraph`，并复用执行时的 config：
+`CompiledStateGraph`，通过显式 `run_id` 形参接收顶层 Run ID，并复用执行时的
+LangGraph config：
 
 ```python
 config = {
@@ -105,15 +107,17 @@ messages = checkpoint.values.get("messages", [])
 
 父方法按 `checkpoint.values["messages"]` 的原始顺序逐条处理。工具调用 AI Message
 之后出现的 Tool Message 会在后续循环中自然进入 `tool` 分支，不增加额外的工具顺序
-处理。
+处理。保存 AI Message、查询 Run 和设置 output 都使用显式传入的 `run_id`，不从
+Agent Context 读取。遍历结束后，父方法通过 `AgentRunRepository.get_by_id` 判断当前
+Run 是否存在；仅当 Run 和最后保存的 AI Message 都存在时调用一次
+`set_output_message`。
 
 ### RUN-MP-005 Save AI Message
 
 `save_ai_message` 必须：
 
 1. 使用 `message.text` 创建关联当前 Run 的 Assistant Message；
-2. 通过 `AgentRunRepository` 将新 Message ID 写入
-   `AgentRun.output_message_id`；
+2. 返回新建的 Assistant Message，由父方法保留最后一次返回值；
 3. 当 `message.tool_calls` 非空时，读取 `message.tool_calls[0]`；
 4. 从该工具调用读取并保存原始 `id`、`name` 和 `args`；
 5. `args` 只写入 `ToolCall.tool_arguments`，不重复写入 `tool_input`；
