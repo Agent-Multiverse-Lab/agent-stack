@@ -301,13 +301,38 @@ class ConversationRepository:
             content=content,
         )
 
-    async def create_tool_call(
+    async def add_message_by_thread_id(
+        self,
+        *,
+        thread_id: str,
+        user_id: str,
+        agent_run_id: str,
+        content: str,
+        role: str
+    ) -> Message:
+        """按用户和 Thread ID 添加 Agent 输出消息。"""
+        conversation = await self.get_conversation_by_thread_id_for_user(
+            thread_id=thread_id,
+            user_id=user_id,
+        )
+        if conversation is None:
+            raise LookupError("当前会话不存在或已删除")
+
+        return await self._create_message(
+            conversation_id=int(conversation.id),
+            agent_run_id=agent_run_id,
+            role=role,
+            content=content,
+        )
+
+    async def add_tool_call(
         self,
         *,
         message_id: int,
         tool_call_id: str,
         tool_name: str,
         tool_arguments: dict,
+        status: str
     ) -> ToolCall:
         """为 Assistant Message 创建工具调用。"""
         tool_call = ToolCall(
@@ -315,6 +340,7 @@ class ConversationRepository:
             tool_call_id=tool_call_id,
             tool_name=tool_name,
             tool_arguments=dict(tool_arguments),
+            status=status
         )
         self.session.add(tool_call)
         await self.session.flush()

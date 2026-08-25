@@ -452,7 +452,6 @@ async def _build_agent_runtime(
 
 
 async def _build_agent_runtime_context(
-    agent_instance: BaseAgent,
     uid: str,
     run_id: str,
     thread_id: str,
@@ -472,8 +471,6 @@ async def _build_agent_runtime_context(
     """
     agent_runtime_context = {}
 
-    # 构建固有上下文元素
-    # agent_runtime_context = agent_instance.agent_context()
 
     # 根据当前用户的传递内容填填充上下文
     agent_runtime_context.update(
@@ -695,34 +692,85 @@ def _serialize_agent_state(agent_state: AgentState | None) -> str:
     except Exception:
         return str(agent_state)
 
+async def save_interrupt_message():
+    # 保存发生错误/主动打断/等产生的消息
+    pass
 
 async def save_ai_message(
     *,
     db: AsyncSession,
-    conversation_id: int,
+    thread_id: str,
+    user_id: str,
     agent_run_id: str,
     message: AIMessage,
-) -> None:
+) -> Message | None:
     """保存一条 LangGraph AI Message。"""
-    conversations = ConversationRepository(db)
-    output_message = await conversations.create_agent_output_message(
-        conversation_id=conversation_id,
+
+    conversations_repo = ConversationRepository(db)
+
+    # 抽离toolcall消息，分流到toolcall表
+    if hasattr(message, "model_dump"):
+        ai_msg = message.model_dump()
+    elif isinstance(message, dict):
+        ai_msg = dict(message)
+    else:
+        return None
+
+    ai_content = ai_msg.get("content", "")
+    tool_content = ai_msg.get("tool_calls", [])
+    if not isinstance(tool_content, list):
+        tool_content = []
+
+    if isinstance(ai_content, list):
+        if not tool_content:
+            tool_content = [
+                {
+                    "id": content.get("id"),
+                    "name": content.get("name"),
+                    "args": content.get("args", {}),
+                }
+                for content in ai_content
+                if isinstance(content, dict) and content.get("type") == "tool_call"
+            ]
+        ai_content = "\n".join(
+            content.get("text", "")
+            for content in ai_content
+            if isinstance(content, dict) and isinstance(content.get("text"), str)
+        )
+
+    elif not isinstance(ai_content, str):
+        ai_content = str(ai_content)
+
+    saved_ai_message = await conversations_repo.add_message_by_thread_id(
+        thread_id=thread_id,
+        user_id=user_id,
         agent_run_id=agent_run_id,
-        content=message.text,
-    )
-    await AgentRunRepository(db).set_output_message(
-        run_id=agent_run_id,
-        output_message_id=int(output_message.id),
+        content=ai_content,
+        role="ai",
     )
 
-    if message.tool_calls:
-        tool_call = message.tool_calls[0]
-        await conversations.create_tool_call(
-            message_id=int(output_message.id),
-            tool_call_id=tool_call["id"],
-            tool_name=tool_call["name"],
-            tool_arguments=tool_call["args"],
-        )
+    if saved_ai_message and tool_content:
+        for tool_call in tool_content:
+            if not isinstance(tool_call, dict):
+                continue
+            tool_call_id = tool_call.get("id")
+            tool_name = tool_call.get("name")
+            tool_arguments = tool_call.get("args", {})
+            if (
+                not isinstance(tool_call_id, str)
+                or not isinstance(tool_name, str)
+                or not isinstance(tool_arguments, dict)
+            ):
+                continue
+            await conversations_repo.add_tool_call(
+                message_id=int(saved_ai_message.id),
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                tool_arguments=tool_arguments,
+                status="pending",
+            )
+
+    return saved_ai_message
 
 
 async def save_tool_message(
@@ -731,20 +779,45 @@ async def save_tool_message(
     message: ToolMessage,
 ) -> None:
     """保存一条 LangGraph Tool Message 的执行结果。"""
-    await ConversationRepository(db).update_tool_call(
-        tool_call_id=message.tool_call_id,
-        tool_result=message.text,
-        status=message.status,
+
+    conv_repo = ConversationRepository(db)
+
+    if hasattr(message, "model_dump"):
+        tool_message = message.model_dump()
+    elif isinstance(message, dict):
+        tool_message = dict(message)
+
+    tool_call_id = tool_message.get("tool_call_id")
+    tool_result = tool_message.get("content", "")
+
+    # FIXME 这里需要关注下，这点可能存在返回的值为""的情况
+    if not tool_call_id:
+        return
+
+    if isinstance(tool_result, list):
+        tool_result = json.dumps(tool_result) if tool_result else ""
+    else:
+        tool_result = str(tool_result)
+
+    await conv_repo.update_tool_call(
+        tool_call_id=tool_call_id,
+        tool_result=tool_result,
+        status="success",
     )
 
 
 async def save_message_from_langgraph_state(
     *,
+    thread_id: str,
+    run_id: str,
+    context,
     agent_instance: BaseAgent,
     runtime_context: dict[str, Any],
     db: AsyncSession,
 ) -> None:
     """读取当前 checkpoint，并按 Message type 持久化运行结果。"""
+
+    # 获取上下文
     context = agent_instance.agent_context()
     context.update_context(runtime_context)
     graph = await agent_instance.get_agent(context)
@@ -757,23 +830,26 @@ async def save_message_from_langgraph_state(
         }
     )
 
-    conversation = await ConversationRepository(
-        db
-    ).get_conversation_by_thread_id_for_user(
-        thread_id=context.thread_id,
-        user_id=context.uid,
-    )
-
+    saved_ai_message: Message | None = None
     for message in checkpoint.values.get("messages", []):
         if message.type == "ai":
-            await save_ai_message(
+            saved_ai_message = await save_ai_message(
                 db=db,
-                conversation_id=int(conversation.id),
-                agent_run_id=context.run_id,
+                thread_id=context.thread_id,
+                user_id=context.uid,
+                agent_run_id=run_id,
                 message=message,
             )
         elif message.type == "tool":
             await save_tool_message(db=db, message=message)
+
+    agent_run_repo = AgentRunRepository(db)
+    current_run = await agent_run_repo.get_by_id(run_id)
+    if current_run is not None and saved_ai_message is not None:
+        await agent_run_repo.set_output_message(
+            run_id=run_id,
+            output_message_id=int(saved_ai_message.id),
+        )
 
     await db.commit()
 
@@ -832,6 +908,7 @@ async def stream_agent_response(
         thread_id = str(uuid.uuid4())
 
     runtime_metadata = dict(runtime_metadata or {})
+    run_id = str(runtime_metadata["run_id"])
 
     # 设置单次 request_id 作为单次断联的标志以及附件的隔离归属
     if not runtime_metadata.get("request_id"):
@@ -864,9 +941,8 @@ async def stream_agent_response(
     # 构建构建agentu运行所需的上下文
     messages = [human_msg]
     agent_runtime_context = await _build_agent_runtime_context(
-        agent_instance=agent_instacne,
         uid=current_user.uid,  # ty:ignore[invalid-argument-type]
-        run_id=runtime_metadata.get("run_id"),  # ty:ignore[invalid-argument-type]
+        run_id=run_id,
         thread_id=thread_id,
         request_id=runtime_metadata.get(
             "request_id"
@@ -946,6 +1022,9 @@ async def stream_agent_response(
                 )
 
         await save_message_from_langgraph_state(
+            thread_id=thread_id,
+            run_id=run_id,
+            context=agent_runtime_context,
             agent_instance=agent_instacne,
             runtime_context=agent_runtime_context,
             db=db,
