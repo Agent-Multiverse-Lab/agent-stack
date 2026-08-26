@@ -4,6 +4,8 @@ import type {
   AgentRunCancelResponse,
   AgentRunCreateResponse,
   AgentRunEndEvent,
+  AgentRunResumeRequest,
+  AgentRunResumeResponse,
   AgentRunStreamEvent,
   AgentSummary,
   ThreadDetailResponse,
@@ -78,6 +80,17 @@ export const createAgentRun = (
 
 export const buildAgentRunStreamUrl = (runId: string, threadId: string) =>
   `/api/agent/runs/${encodeURIComponent(runId)}/events?thread_id=${encodeURIComponent(threadId)}`
+
+// FIXEME: 父 Run 仅用于定位恢复点，响应会返回新的 Resume Run ID。
+export const resumeAgentRun = (
+  parentRunId: string,
+  request: AgentRunResumeRequest
+) =>
+  apiClient.apiPost<AgentRunResumeResponse, AgentRunResumeRequest>(
+    `/api/agent/runs/${encodeURIComponent(parentRunId)}/resume`,
+    request,
+    { requiresAuth: true }
+  )
 
 const readSseBlock = (block: string): AgentRunStreamEvent | null => {
   const lines = block.split(/\r?\n/)

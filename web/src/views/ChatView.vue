@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, watch } from "vue"
+import { storeToRefs } from "pinia"
 import { useRouter } from "vue-router"
 
 import {
@@ -8,11 +9,14 @@ import {
   listChatAgents,
   uploadChatAttachments
 } from "@/api/agent"
-import ChatLoadingStateComponent from "@/components/chat/ChatLoadingStateComponent.vue"
+import ChatLoadingStateComponent from "@/components/chat/loading/ChatLoadingStateComponent.vue"
 import ChatMessageComponent from "@/components/chat/ChatMessageComponent.vue"
 import ChatMessageInputComponent from "@/components/chat/ChatMessageInputComponent.vue"
+import ChatThinkingGroupComponent from "@/components/chat/loading/ChatThinkingGroupComponent.vue"
+import ChatAskUserComponent from "@/components/chat/hil/ChatAskUserComponent.vue"
 import { useAgentRun } from "@/composables/useAgentRun"
 import { useChat } from "@/composables/useChat"
+import { useModelStore } from "@/stores/useModelStore"
 import type { AgentRunEndEvent, ChatMessage } from "@/types/chat"
 
 const props = defineProps<{
@@ -20,13 +24,23 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
+const modelStore = useModelStore()
+const {
+  models,
+  selectedModelId,
+  loading: modelsLoading
+} = storeToRefs(modelStore)
+
 const {
   runId,
   runStatus,
   streamUrl,
+  pendingInteraction,
   cancelling,
+  resuming,
   isRunActive,
   createRun,
+  resumeRun,
   restoreRunFromThread,
   consumeRunStream,
   cancelCurrentRun: requestRunCancellation,
@@ -214,7 +228,7 @@ const uploadFiles = async (files: File[]) => {
 }
 
 const submit = async () => {
-  if (isRunActive.value) return
+  if (isRunActive.value || pendingInteraction.value) return
   const submission = beginSubmission()
   if (!submission) return
 
@@ -247,7 +261,8 @@ const submit = async () => {
       threadId: currentThread.thread_id,
       attachmentFileIds: submission.attachments.map(
         (attachment) => attachment.file_id
-      )
+      ),
+      modelId: selectedModelId.value || undefined
     })
     if (operation !== expectedOperation) return
     runCreated = true
@@ -291,6 +306,32 @@ const cancelCurrentRun = async () => {
   }
 }
 
+// FIXEME: 回答提交后立即切换到后端返回的新 Resume Run Stream。
+const submitResume = async (answer: string) => {
+  const interaction = pendingInteraction.value
+  const currentThread = thread.value
+  if (!interaction || !currentThread || resuming.value) return
+
+  const expectedOperation = ++operation
+  abortStream()
+  error.value = ""
+  try {
+    await resumeRun(interaction.parent_run_id, {
+      thread_id: currentThread.thread_id,
+      thread_metadata: {
+        request_id: crypto.randomUUID(),
+        resume: { answer }
+      }
+    })
+    if (operation !== expectedOperation) return
+    await monitorRun(currentThread.thread_id, expectedOperation)
+  } catch (caught) {
+    if (operation === expectedOperation && !isAbortError(caught)) {
+      error.value = errorText(caught)
+    }
+  }
+}
+
 const stop = () => {
   operation += 1
   uploadGeneration += 1
@@ -299,7 +340,9 @@ const stop = () => {
 }
 
 const inputDisabled = computed(
-  () => loading.value || cancelling.value || (submitting.value && !isRunActive.value)
+  () => loading.value || cancelling.value || resuming.value ||
+    Boolean(pendingInteraction.value) ||
+    (submitting.value && !isRunActive.value)
 )
 const composerDocked = computed(() => messages.value.length > 0)
 const displayedError = computed(() => uploadError.value || error.value)
@@ -367,13 +410,20 @@ onBeforeUnmount(stop)
           />
         </template>
 
+        <ChatAskUserComponent
+          v-if="!loading && pendingInteraction"
+          :interaction="pendingInteraction"
+          :disabled="resuming"
+          @submit="submitResume"
+        />
+
         <Transition
           enter-active-class="transition-opacity duration-200 ease-out motion-reduce:transition-none"
           leave-active-class="transition-opacity duration-150 ease-in motion-reduce:transition-none"
           enter-from-class="opacity-0"
           leave-to-class="opacity-0"
         >
-          <ChatLoadingStateComponent
+          <ChatThinkingGroupComponent
             v-if="!loading && isRunActive && !hasCurrentRunAssistantText"
             :key="runId ?? 'pending'"
           />
@@ -415,6 +465,10 @@ onBeforeUnmount(stop)
           :running="isRunActive"
           :disabled="inputDisabled"
           :action-menu-placement="composerDocked ? 'top' : 'bottom'"
+          :models="models"
+          :model-id="selectedModelId"
+          :models-loading="modelsLoading"
+          @update:model-id="modelStore.selectModel"
           @files-selected="uploadFiles"
           @remove-attachment="removeAttachment"
           @submit="submit"

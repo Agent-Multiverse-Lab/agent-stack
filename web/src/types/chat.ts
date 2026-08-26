@@ -40,6 +40,14 @@ export interface ThreadRunMetadataResponse {
   finished_at: IsoDateTime | null
 }
 
+// FIXEME: 第一版只承载 ask_user 的单选问题。
+export interface InteractionRequired {
+  kind: "ask_user"
+  parent_run_id: string
+  question: string
+  options: string[]
+}
+
 export interface ThreadMessageResponse {
   message_id: number
   role: string
@@ -58,6 +66,8 @@ export interface ThreadDetailResponse {
   thread: ThreadSummaryResponse
   messages: ThreadMessageResponse[]
   next_before_message_id: number | null
+  active_run: ThreadRunMetadataResponse | null
+  pending_interaction: InteractionRequired | null
 }
 
 export interface AgentRunCreateResponse {
@@ -66,6 +76,22 @@ export interface AgentRunCreateResponse {
   status: string
   request_id: string | null
   stream_url: string
+}
+
+// FIXEME: Resume 请求按后端 thread_metadata 合同传递 answer 和幂等键。
+export interface AgentRunResumeRequest {
+  thread_id: string
+  thread_metadata: {
+    request_id: string
+    resume: {
+      answer: string
+    }
+  }
+}
+
+export interface AgentRunResumeResponse extends AgentRunCreateResponse {
+  run_type: "resume"
+  parent_run_id: string
 }
 
 export interface AgentRunCancelResponse {
@@ -86,7 +112,7 @@ export interface AgentRunStreamEvent extends JsonObject {
 
 export interface AgentRunEndEvent extends AgentRunStreamEvent {
   type: "end"
-  status: "completed" | "failed" | "cancelled"
+  status: "completed" | "failed" | "cancelled" | "interrupted"
   error?: string
 }
 

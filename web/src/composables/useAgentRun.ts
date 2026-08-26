@@ -4,10 +4,13 @@ import {
   buildAgentRunStreamUrl,
   cancelAgentRun,
   consumeAgentRunStream,
-  createAgentRun
+  createAgentRun,
+  resumeAgentRun
 } from "@/api/agent"
 import type {
+  AgentRunResumeRequest,
   AgentRunStreamEvent,
+  InteractionRequired,
   ThreadDetailResponse,
   ThreadRunMetadataResponse
 } from "@/types/chat"
@@ -37,7 +40,10 @@ export const useAgentRun = () => {
   const runId = ref<string | null>(null)
   const runStatus = ref<string | null>(null)
   const streamUrl = ref<string | null>(null)
+  // FIXEME: pending interaction 只保存在页面运行状态，不写 localStorage。
+  const pendingInteraction = ref<InteractionRequired | null>(null)
   const cancelling = ref(false)
+  const resuming = ref(false)
   let runStateVersion = 0
 
   const isRunActive = computed(() =>
@@ -58,22 +64,40 @@ export const useAgentRun = () => {
     runStatus.value = run.status
     streamUrl.value = run.stream_url
     cancelling.value = false
+    pendingInteraction.value = null
     return run
+  }
+
+  // FIXEME: Resume 成功后只监听响应中的新 Run ID。
+  const resumeRun = async (
+    parentRunId: string,
+    request: AgentRunResumeRequest
+  ) => {
+    const expectedVersion = ++runStateVersion
+    resuming.value = true
+    try {
+      const run = await resumeAgentRun(parentRunId, request)
+      if (runStateVersion !== expectedVersion) return run
+      runId.value = run.run_id
+      runStatus.value = run.status
+      streamUrl.value = run.stream_url
+      pendingInteraction.value = null
+      cancelling.value = false
+      return run
+    } finally {
+      if (runStateVersion === expectedVersion) resuming.value = false
+    }
   }
 
   const restoreRunFromThread = (
     detail: ThreadDetailResponse
   ): ThreadRunMetadataResponse | null => {
     runStateVersion += 1
+    pendingInteraction.value = detail.pending_interaction
     const latestRun = [...detail.messages]
       .reverse()
       .find((message) => message.run)?.run ?? null
-    const activeRun = [...detail.messages]
-      .reverse()
-      .find(
-        (message) =>
-          message.run && isAgentRunActiveStatus(message.run.status)
-      )?.run ?? null
+    const activeRun = detail.active_run
     const restoredRun = activeRun ?? latestRun
     const nextRunId = restoredRun?.run_id ?? null
     if (runId.value !== nextRunId) cancelling.value = false
@@ -103,6 +127,22 @@ export const useAgentRun = () => {
         if (runId.value !== targetRunId) return
         if (event.type === "status" && typeof event.status === "string") {
           runStatus.value = event.status
+          return
+        }
+        if (
+          event.type === "interaction_required" &&
+          event.kind === "ask_user" &&
+          typeof event.parent_run_id === "string" &&
+          typeof event.question === "string" &&
+          Array.isArray(event.options) &&
+          event.options.every((option) => typeof option === "string")
+        ) {
+          pendingInteraction.value = {
+            kind: "ask_user",
+            parent_run_id: event.parent_run_id,
+            question: event.question,
+            options: event.options
+          }
           return
         }
         await onMessageEvent(event)
@@ -135,16 +175,21 @@ export const useAgentRun = () => {
     runId.value = null
     runStatus.value = null
     streamUrl.value = null
+    pendingInteraction.value = null
     cancelling.value = false
+    resuming.value = false
   }
 
   return {
     runId,
     runStatus,
     streamUrl,
+    pendingInteraction,
     cancelling,
+    resuming,
     isRunActive,
     createRun,
+    resumeRun,
     restoreRunFromThread,
     consumeRunStream,
     cancelCurrentRun,
