@@ -29,6 +29,9 @@
 - [run/message-persistence/spec.md](run/message-persistence/spec.md)
 - [run/message-persistence/plan.md](run/message-persistence/plan.md)
 - [run/message-persistence/tasks.md](run/message-persistence/tasks.md)
+- [run/interrupt-resume/spec.md](run/interrupt-resume/spec.md)
+- [run/interrupt-resume/plan.md](run/interrupt-resume/plan.md)
+- [run/interrupt-resume/tasks.md](run/interrupt-resume/tasks.md)
 
 ## Agent Domain
 
@@ -68,3 +71,12 @@
 - [product/account-navigation/spec.md](product/account-navigation/spec.md)
 - [product/account-navigation/plan.md](product/account-navigation/plan.md)
 - [product/account-navigation/tasks.md](product/account-navigation/tasks.md)
+- [product/chat-thinking/spec.md](product/chat-thinking/spec.md)
+- [product/chat-thinking/plan.md](product/chat-thinking/plan.md)
+- [product/chat-thinking/tasks.md](product/chat-thinking/tasks.md)
+- [product/chat-tool-group/spec.md](product/chat-tool-group/spec.md)
+- [product/chat-tool-group/plan.md](product/chat-tool-group/plan.md)
+- [product/chat-tool-group/tasks.md](product/chat-tool-group/tasks.md)
+- [product/chat-model-selection/spec.md](product/chat-model-selection/spec.md)
+- [product/chat-model-selection/plan.md](product/chat-model-selection/plan.md)
+- [product/chat-model-selection/tasks.md](product/chat-model-selection/tasks.md)
