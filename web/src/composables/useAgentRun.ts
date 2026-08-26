@@ -26,6 +26,7 @@ interface AgentRunCreateRequest {
   agentId: string
   threadId: string
   attachmentFileIds: string[]
+  modelId?: string
 }
 
 type RunMessageEventHandler = (
@@ -49,7 +50,8 @@ export const useAgentRun = () => {
       request.query,
       request.agentId,
       request.threadId,
-      request.attachmentFileIds
+      request.attachmentFileIds,
+      request.modelId
     )
     if (runStateVersion !== expectedVersion) return run
     runId.value = run.run_id

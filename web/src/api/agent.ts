@@ -59,7 +59,8 @@ export const createAgentRun = (
   query: string,
   agentId: string,
   threadId: string,
-  attachmentFileIds: string[]
+  attachmentFileIds: string[],
+  modelId?: string
 ) =>
   apiClient.apiPost<AgentRunCreateResponse, Record<string, unknown>>(
     "/api/agent/runs",
@@ -67,6 +68,7 @@ export const createAgentRun = (
       query,
       agent_id: agentId,
       thread_id: threadId,
+      thread_metadata: modelId ? { model: modelId } : {},
       msg_metadata: {
         attachment_file_ids: attachmentFileIds
       }
