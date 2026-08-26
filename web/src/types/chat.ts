@@ -3,17 +3,6 @@ import type { ThreadMessageAttachmentResponse } from "@/types/attachment"
 export type JsonObject = Record<string, unknown>
 export type IsoDateTime = string
 
-export type AgentToolStatus = "running" | "completed" | "failed"
-
-export type AgentToolState = JsonObject & {
-  status: AgentToolStatus
-}
-
-export interface AgentTool {
-  name: string
-  state: AgentToolState
-}
-
 export interface AgentSummary {
   id: string
   name: string

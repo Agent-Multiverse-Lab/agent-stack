@@ -3,6 +3,7 @@ import { computed } from "vue"
 import MarkdownRender from "markstream-vue"
 
 import AttachmentComponent from "@/components/AttachmentComponent.vue"
+import AgentToolGroupComponent from "@/components/chat/tools/AgentToolGroupComponent.vue"
 import type { ThreadMessageAttachmentResponse } from "@/types/attachment"
 import type { ChatMessage } from "@/types/chat"
 
@@ -38,9 +39,6 @@ const isAiTool = computed(
   () => props.message.type === "ai" && props.message.payload.type === "tool"
 )
 const isFinal = computed(() => event.value.status !== "streaming")
-const toolName = computed(() =>
-  typeof event.value.name === "string" ? event.value.name : "tool"
-)
 </script>
 
 <template>
@@ -96,18 +94,10 @@ const toolName = computed(() =>
     </ul>
   </article>
 
-  <article
+  <AgentToolGroupComponent
     v-else-if="isAiTool"
-    class="w-fit max-w-full rounded-lg border border-graphite/10 bg-graphite/[0.025] px-3 py-2 text-sm text-slate"
-  >
-    <div class="flex items-center gap-2">
-      <span class="rounded bg-graphite/7 px-1.5 py-0.5 text-xs font-medium text-graphite">
-        Tool
-      </span>
-      <span class="font-mono text-xs">{{ toolName }}</span>
-    </div>
-    <p class="mt-1 mb-0 text-xs">Agent state updated</p>
-  </article>
+    :event="event"
+  />
 
   <article v-else class="whitespace-pre-wrap text-sm text-slate">
     {{ content }}

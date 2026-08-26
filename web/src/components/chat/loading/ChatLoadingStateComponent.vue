@@ -1,16 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 
+import ChatThinkingIcon from "./ChatThinkingIcon.vue"
+
 withDefaults(defineProps<{
   label?: string
 }>(), {
   label: "Thinking"
-})
-
-const pixelDelays = Array.from({ length: 9 }, (_, index) => {
-  const row = Math.floor(index / 3)
-  const column = index % 3
-  return (column + Math.abs(row - 1)) * 90
 })
 
 const elapsedMs = ref(0)
@@ -40,17 +36,7 @@ onBeforeUnmount(() => {
     role="status"
     aria-live="polite"
   >
-    <span
-      class="grid shrink-0 grid-cols-[repeat(3,4px)] gap-[1.5px]"
-      aria-hidden="true"
-    >
-      <span
-        v-for="(delay, index) in pixelDelays"
-        :key="index"
-        class="loading-pixel size-1 rounded-[1px] bg-graphite"
-        :style="{ animationDelay: `${delay}ms` }"
-      />
-    </span>
+    <ChatThinkingIcon />
 
     <span class="loading-label text-[13px] font-medium">
       {{ label }}
@@ -61,15 +47,11 @@ onBeforeUnmount(() => {
     >
       {{ elapsed }}
     </span>
+    <slot name="trailing" />
   </div>
 </template>
 
 <style scoped>
-.loading-pixel {
-  opacity: 0.15;
-  animation: pixel-on 650ms ease-in-out infinite;
-}
-
 .loading-label {
   color: transparent;
   background-image: linear-gradient(
@@ -83,17 +65,6 @@ onBeforeUnmount(() => {
   animation: shimmer-text 1.4s linear infinite;
 }
 
-@keyframes pixel-on {
-  0%,
-  100% {
-    opacity: 0.15;
-  }
-
-  45% {
-    opacity: 0.95;
-  }
-}
-
 @keyframes shimmer-text {
   from {
     background-position: 100% 0;
@@ -101,6 +72,14 @@ onBeforeUnmount(() => {
 
   to {
     background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-label {
+    color: var(--color-graphite);
+    background-image: none;
+    animation: none;
   }
 }
 </style>
