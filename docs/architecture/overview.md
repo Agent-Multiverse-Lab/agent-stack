@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-说明 `multi-agent-s2c` 在运行时如何分层：  
+说明 `agent-stack` 在运行时如何分层：
 Web/API -> Service -> Worker -> Agent Runtime -> Storage/RAG。
 
 ## 2. Domain Architecture

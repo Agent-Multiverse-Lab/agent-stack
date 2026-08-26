@@ -7,7 +7,7 @@
 
 ## 1. 当前项目描述
 
-`multi-agent-s2c` 是一个面向技术学习和工程实践的多 Agent 系统：
+`agent-stack` 是一个面向技术学习和工程实践的多 Agent 系统：
 
 - 后端是 FastAPI，使用 LangChain/LangGraph 组织 Agent 执行。
 - PostgreSQL 保存业务持久化状态；Redis/ARQ 负责队列、运行信号和事件流。

@@ -1,16 +1,14 @@
-# Contributing Guide
+# 贡献与提交指南
 
-## Commit Message Convention
+## Commit Message 规范
 
-This repository uses Conventional Commits.
-
-Format:
+本仓库使用 Conventional Commits，格式：
 
 ```text
 <type>(<scope>): <subject>
 ```
 
-Examples:
+示例：
 
 ```text
 feat(agent): 接入流式响应接口
@@ -20,18 +18,19 @@ doc(readme): 补充后端启动步骤
 chore(deps): 更新项目依赖
 ```
 
-Rules:
+规则：
 
-- `type` should be one of: `feat`, `fix`, `refactor`, `doc`, `test`, `chore`, `build`, `ci`.
-- `scope` is recommended and should describe the changed module, such as `agent`, `thread`, `worker`, `web`, or `deps`.
-- Keep `type` and `scope` as lowercase English Conventional Commit tokens.
-- Write the `subject` and optional commit body in Chinese. Keep the subject concise (recommended <= 72 characters) and do not end it with punctuation.
-- Do not wrap commit messages, subjects, or scopes with `@` characters.
-- Keep one commit focused on one change.
+- `type` 必须是 `feat`、`fix`、`refactor`、`doc`、`test`、`chore`、`build`、`ci` 之一。
+- `scope` 建议使用简洁的小写英文模块名，例如 `agent`、`thread`、`worker`、`auth`、`deps`。
+- subject 及可选的 body 使用中文。subject 应简洁（建议不超过 72 个字符），且不要以标点结尾。
+- 不要使用 `@` 字符包裹 commit message、subject 或 scope。
+- 一个 commit 只聚焦一个完整一致的变更。
+- 推送前，尤其是在 PowerShell 中提交后，检查所有待推送的 subject 和 body，确认没有误加
+  `@` 包裹，如有则修正。
 
-## Pull Request Checklist
+## Pull Request 规范
 
-- Include a short summary and motivation.
-- Link the issue/task ID when available.
-- For UI changes in `web/`, include screenshot(s) or video.
-- Add verification notes (commands run and outcomes).
+- 包含简洁的中文摘要和动机说明（除非任务明确要求其他语言）。
+- 有 issue 或任务 ID 时附上链接。
+- `web/` 的 UI 变更附上截图或视频。
+- 写明执行过的验证命令及其结果。
