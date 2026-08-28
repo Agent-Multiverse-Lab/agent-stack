@@ -6,9 +6,6 @@ from langchain.messages import HumanMessage
 from langchain.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
 
-from src.configs import config
-from src.model import load_model
-
 
 @tool
 def add_numbers(a: int, b: int) -> int:
@@ -17,22 +14,21 @@ def add_numbers(a: int, b: int) -> int:
 
 
 async def main() -> None:
+    from src.configs import config
+    from src.model import load_model
+
     run_config = {"configurable": {"thread_id": "astream-events-v3-values-demo"}}
     agent = create_agent(
         model=load_model(config.default_model),
         tools=[add_numbers],
-        system_prompt="当需要计算式调用add_numbers工具.",
+        system_prompt="处理加法计算时必须调用 add_numbers 工具。",
         checkpointer=InMemorySaver(),
     )
-
     stream = await agent.astream_events(
         {
             "messages": [
                 HumanMessage(
-                    content=(
-                        "调用计算工具add_numbers计算下 17 + 25, "
-                        "计算完成后直接输出结果."
-                    )
+                    content="请调用 add_numbers 计算 17 + 25，并告诉我最终答案。"
                 )
             ]
         },
@@ -42,15 +38,22 @@ async def main() -> None:
 
     async with stream:
         async for event in stream:
-            print(f"\nmethod:{event["method"]}")
-            print(f"\npayload (event['params']为):{event["params"]}")
+            print(f"\nmethod: {event['method']}")
+            pprint(event["params"], sort_dicts=False, width=120)
             print("-" * 80)
 
     state = await agent.aget_state(run_config)
     messages = state.values.get("messages", [])
 
-    print("\n运行完成后的 graph state messages:")
-    print("=" * 80)
+    print("\nToolCall ID 核验:")
+    for message in messages:
+        if message.type == "ai":
+            for tool_call in message.tool_calls:
+                print(f"AIMessage.tool_calls[].id = {tool_call.get('id')!r}")
+        elif message.type == "tool":
+            print(f"ToolMessage.tool_call_id = {message.tool_call_id!r}")
+
+    print("\n完整 graph state messages:")
     for index, message in enumerate(messages):
         print(f"[{index}] {type(message).__name__}")
         pprint(message.model_dump() if hasattr(message, "model_dump") else message)
