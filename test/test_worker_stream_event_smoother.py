@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock, patch
 
 from server.service.arq_queue_servcie import RUN_REDIS_TTL_SECONDS
 from server.worker import (
-    AgentRunCancelRequested,
     AgentRunContext,
     StreamEventSmoother,
     _cancellable_stream,
+    _finalize_interrupted_run,
     _finalize_run,
     map_stream_event,
     write_end_stream_event,
@@ -49,7 +49,7 @@ class AgentRunContextTest(unittest.IsolatedAsyncioTestCase):
                 await stream_started.wait()
                 cancel_signal.set()
 
-                with self.assertRaises(AgentRunCancelRequested):
+                with self.assertRaises(asyncio.CancelledError):
                     await next_chunk
             finally:
                 await run_context.close()
@@ -213,6 +213,48 @@ class WorkerStreamWriterTest(unittest.IsolatedAsyncioTestCase):
 
 
 class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
+    async def test_interrupted_run_persists_before_interaction_and_end(self) -> None:
+        events = []
+
+        async def set_interrupted(run_id, payload):
+            events.append(("persist", run_id, payload))
+            return "interrupted", True
+
+        async def write_event(run_id, event_type, payload, thread_id):
+            events.append((event_type, run_id, payload, thread_id))
+
+        async def write_end(run_id, payload, thread_id):
+            events.append(("end", run_id, payload, thread_id))
+
+        payload = {
+            "kind": "ask_user",
+            "question": "请选择数据库",
+            "options": ["PostgreSQL", "MySQL"],
+        }
+        with (
+            patch(
+                "server.worker.set_run_interrupted",
+                side_effect=set_interrupted,
+            ),
+            patch("server.worker.write_stream_event", side_effect=write_event),
+            patch("server.worker.write_end_stream_event", side_effect=write_end),
+        ):
+            result = await _finalize_interrupted_run(
+                "parent-run",
+                thread_id="thread-1",
+                interrupt_payload=payload,
+            )
+
+        self.assertEqual(("interrupted", True), result)
+        self.assertEqual(
+            ["persist", "interaction_required", "end"],
+            [event[0] for event in events],
+        )
+        self.assertEqual(
+            "parent-run",
+            events[1][2]["parent_run_id"],
+        )
+
     async def test_failed_run_uses_unified_terminal_path(self) -> None:
         with (
             patch(
@@ -243,8 +285,6 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
             status="failed",
             error="boom",
             error_type="RuntimeError",
-            conversation_id=None,
-            content=None,
         )
         write_end_event.assert_awaited_once_with(
             "run-1",
@@ -284,8 +324,6 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
             status="cancelled",
             error=None,
             error_type=None,
-            conversation_id=None,
-            content=None,
         )
         write_end_event.assert_awaited_once_with(
             "run-1",
@@ -310,8 +348,6 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
                 "run-1",
                 status="completed",
                 thread_id="thread-1",
-                conversation_id=1,
-                content="done",
             )
 
         self.assertEqual(result, ("completed", False))

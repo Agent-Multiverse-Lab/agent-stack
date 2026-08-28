@@ -5,6 +5,7 @@ from typing import Any
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.store.postgres import AsyncPostgresStore
+from langgraph.types import Command
 
 from src.database import postgres_manager
 from src.utils.logger import logger
@@ -172,3 +173,54 @@ class BaseAgent:
              
                     # 构建任务触发时，所要输出内容
                     yield "agent_execute_event", stream_execute_data
+
+    # FIXEME: Resume 必须把 Command 原样交给 LangGraph，不能包装成 messages。
+    async def stream_message_by_resume(
+        self,
+        resume_input: Command,
+        runtime_context=None,
+        **kwargs,
+    ):
+        context: BaseContext = self.agent_context()
+        context.update_context(runtime_context or {})
+        agent: CompiledStateGraph = await self.get_agent(context)
+        logger.info(f"智能体：{agent} Resume 初始化成功")
+        input_config = {
+            "configurable": {"thread_id": context.thread_id, "uid": context.uid}
+        }
+
+        async with await agent.astream_events(
+            input=resume_input,
+            config=input_config,
+            version="v3",
+            context=context,
+            **kwargs,
+        ) as stream_events:  # ty:ignore[no-matching-overload]
+            async for stream_event in stream_events:
+                stream_method = stream_event.get("method")
+                stream_params = stream_event.get("params") or {}
+                stream_data = stream_params.get("data")
+                stream_namespace = stream_params.get("namespace", [])
+
+                if stream_method == "values":
+                    yield stream_method, stream_data
+                    continue
+
+                if stream_method == "messages":
+                    stream_msg, stream_agent_run_metadata = stream_data
+                    stream_agent_run_metadata = dict(
+                        stream_agent_run_metadata or {}
+                    )
+                    stream_agent_run_metadata["namespace"] = stream_namespace
+                    yield stream_method, (
+                        stream_msg,
+                        stream_agent_run_metadata,
+                    )
+                    continue
+
+                if stream_method == "tool":
+                    yield "agent_execute_event", {
+                        "stream_methods": stream_method,
+                        "stream_namesapce": stream_namespace,
+                        "stream_data": stream_data,
+                    }

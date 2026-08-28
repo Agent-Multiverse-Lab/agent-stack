@@ -2,12 +2,13 @@ import base64
 import binascii
 import json
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime
 from typing import Any
 
 from langchain.messages import HumanMessage
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.service.input_message_service import AgentInputMsg
@@ -151,10 +152,29 @@ async def get_thread_detail(
             if message.agent_run_id is not None
         }
     )
-    runs = await AgentRunRepository(db).get_by_ids_for_conversation(
+    run_repository = AgentRunRepository(db)
+    runs = await run_repository.get_by_ids_for_conversation(
         run_ids=run_ids,
         conversation_id=int(conversation.id),
     )
+    # FIXEME: active Resume 与待回答问题均不能依赖当前消息分页是否包含对应 Run。
+    active_run = await run_repository.get_latest_active_for_thread(
+        uid=uid,
+        thread_id=thread_id,
+    )
+    pending_interaction_run = await run_repository.get_pending_interaction_run(
+        uid=uid,
+        thread_id=thread_id,
+    )
+    pending_interaction = None
+    if pending_interaction_run is not None:
+        interrupt_value = dict(
+            pending_interaction_run.run_metadata or {}
+        ).get("interrupt")
+        pending_interaction = {
+            **build_agent_interrupt_message(interrupt_value),
+            "parent_run_id": str(pending_interaction_run.id),
+        }
     attachment_rows = await MessageAttachmentRepository(
         db
     ).list_attachments_by_message_ids([int(message.id) for message in page_desc])
@@ -174,6 +194,8 @@ async def get_thread_detail(
             for message in reversed(page_desc)
         ],
         "next_before_message_id": next_before_message_id,
+        "active_run": _run_response(active_run),
+        "pending_interaction": pending_interaction,
     }
 
 
@@ -333,19 +355,7 @@ def _message_response(
         if message.agent_run_id is not None
         else None
     )
-    run_payload = None
-    if run is not None:
-        run_payload = {
-            "run_id": str(run.id),
-            "run_type": str(run.run_type),
-            "status": str(run.agent_status),
-            "parent_run_id": (
-                str(run.parent_run_id) if run.parent_run_id is not None else None
-            ),
-            "metadata": dict(run.run_metadata or {}),
-            "started_at": run.started_at,
-            "finished_at": run.finished_at,
-        }
+    run_payload = _run_response(run)
 
     return {
         "message_id": int(message.id),
@@ -363,6 +373,23 @@ def _message_response(
         "attachments": attachments,
         "created_at": message.created_at,
         "updated_at": message.updated_at,
+    }
+
+
+# FIXEME: Thread 顶层状态与消息内 Run 元数据使用同一序列化合同。
+def _run_response(run: AgentRun | None) -> dict[str, Any] | None:
+    if run is None:
+        return None
+    return {
+        "run_id": str(run.id),
+        "run_type": str(run.run_type),
+        "status": str(run.agent_status),
+        "parent_run_id": (
+            str(run.parent_run_id) if run.parent_run_id is not None else None
+        ),
+        "metadata": dict(run.run_metadata or {}),
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
     }
 
 
@@ -456,6 +483,7 @@ async def _build_agent_runtime_context(
     run_id: str,
     thread_id: str,
     request_id: str,
+    model: str | None = None,
 ):
     """结合前端传递构建 agent 运行的固有参数的上下文
 
@@ -465,6 +493,7 @@ async def _build_agent_runtime_context(
         run_id (str): 当前运行agent事件的id
         thread_id (str): 当前会话的id
         request_id (str): 当前会话内的单词请求id
+        model (str | None): 当前 Run 选择的模型 ID
 
     Returns:
         dict[str, str]: 上下文结构
@@ -479,6 +508,7 @@ async def _build_agent_runtime_context(
             "run_id": run_id,
             "thread_id": thread_id,
             "request_id": request_id,
+            "model": model or "",
         }
     )
     return agent_runtime_context
@@ -716,6 +746,17 @@ async def save_ai_message(
     else:
         return None
 
+    # FIXEME: checkpoint 返回完整消息历史，已有 LangGraph Message 不重复插入。
+    langgraph_message_id = ai_msg.get("id")
+    if isinstance(langgraph_message_id, str) and langgraph_message_id:
+        existing = await conversations_repo.get_message_by_langgraph_id(
+            thread_id=thread_id,
+            user_id=user_id,
+            langgraph_message_id=langgraph_message_id,
+        )
+        if existing is not None:
+            return existing
+
     ai_content = ai_msg.get("content", "")
     tool_content = ai_msg.get("tool_calls", [])
     if not isinstance(tool_content, list):
@@ -747,6 +788,11 @@ async def save_ai_message(
         agent_run_id=agent_run_id,
         content=ai_content,
         role="ai",
+        msg_metadata=(
+            {"langgraph_message_id": langgraph_message_id}
+            if isinstance(langgraph_message_id, str) and langgraph_message_id
+            else None
+        ),
     )
 
     if saved_ai_message and tool_content:
@@ -812,19 +858,16 @@ async def save_message_from_langgraph_state(
     run_id: str,
     context,
     agent_instance: BaseAgent,
-    runtime_context: dict[str, Any],
     db: AsyncSession,
 ) -> None:
     """读取当前 checkpoint，并按 Message type 持久化运行结果。"""
 
     # 获取上下文
-    context = agent_instance.agent_context()
-    context.update_context(runtime_context)
     graph = await agent_instance.get_agent(context)
     checkpoint = await graph.aget_state(
         {
             "configurable": {
-                "thread_id": context.thread_id,
+                "thread_id": thread_id,
                 "uid": context.uid,
             }
         }
@@ -833,13 +876,19 @@ async def save_message_from_langgraph_state(
     saved_ai_message: Message | None = None
     for message in checkpoint.values.get("messages", []):
         if message.type == "ai":
-            saved_ai_message = await save_ai_message(
+            current_ai_message = await save_ai_message(
                 db=db,
-                thread_id=context.thread_id,
+                thread_id=thread_id,
                 user_id=context.uid,
                 agent_run_id=run_id,
                 message=message,
             )
+            # FIXEME: Resume 重读的父 Run AI Message 不能成为新 Run 的 output。
+            if (
+                current_ai_message is not None
+                and str(current_ai_message.agent_run_id) == run_id
+            ):
+                saved_ai_message = current_ai_message
         elif message.type == "tool":
             await save_tool_message(db=db, message=message)
 
@@ -854,6 +903,115 @@ async def save_message_from_langgraph_state(
     await db.commit()
 
 
+# FIXEME: ask_user interrupt 只接受当前第一版的单问题、非空单选合同。
+def build_agent_interrupt_message(interrupt_value: Any) -> dict[str, Any]:
+    if not isinstance(interrupt_value, dict):
+        raise ValueError("Agent interrupt value 必须是对象")
+    if interrupt_value.get("kind") != "ask_user":
+        raise ValueError("Agent interrupt kind 必须是 ask_user")
+
+    question = interrupt_value.get("question")
+    options = interrupt_value.get("options")
+    if not isinstance(question, str) or not question.strip():
+        raise ValueError("ask_user question 不能为空")
+    if (
+        not isinstance(options, list)
+        or not options
+        or not all(
+            isinstance(option, str) and bool(option.strip())
+            for option in options
+        )
+    ):
+        raise ValueError("ask_user options 必须是非空字符串列表")
+
+    return {
+        "kind": "ask_user",
+        "question": question.strip(),
+        "options": [option.strip() for option in options],
+    }
+
+
+# FIXEME: interrupt 只从 checkpoint StateSnapshot.interrupts 判断。
+async def check_agent_interrupt_handler(
+    *,
+    agent_instance: BaseAgent,
+    context: Any,
+) -> dict[str, Any] | None:
+    graph = await agent_instance.get_agent(context)
+    state = await graph.aget_state(
+        {
+            "configurable": {
+                "thread_id": context.thread_id,
+                "uid": context.uid,
+            }
+        }
+    )
+    interrupts = tuple(state.interrupts or ())
+    if not interrupts:
+        return None
+    if len(interrupts) != 1:
+        raise ValueError("第一版只支持单个 ask_user interrupt")
+    return build_agent_interrupt_message(interrupts[0].value)
+
+
+# FIXEME: 两个 Thread Service 入口共用 v3 事件到内部 chunk 的适配逻辑。
+async def _stream_agent_event_chunks(
+    *,
+    stream_events: AsyncIterator[Any],
+    thread_id: str,
+    make_event: Callable[..., bytes],
+) -> AsyncIterator[bytes]:
+    last_agent_state = ""
+    message_ids: dict[tuple[str, str], str] = {}
+
+    async for method, payload in stream_events:
+        if method == "values":
+            agent_state = _reslove_agent_state(payload)
+            current_agent_state = _serialize_agent_state(agent_state)
+            if current_agent_state and current_agent_state != last_agent_state:
+                last_agent_state = current_agent_state
+                yield make_event(
+                    status="agent_state",
+                    content=agent_state,
+                )
+            continue
+
+        if method == "agent_execute_event":
+            yield make_event(
+                status="agent_execute_event",
+                event=payload,
+                namespace=(
+                    payload.get("stream_namesapce")
+                    if isinstance(payload, dict)
+                    else []
+                ),
+            )
+            continue
+
+        if method != "messages":
+            continue
+
+        agent_msg, agent_metadata = payload
+        standard_stream_events = _make_lc_message_to_standard(
+            agent_msg=agent_msg,
+            agent_metadata=agent_metadata,
+            thread_id=thread_id,
+            message_ids=message_ids,
+        )
+        for standard_stream_event in standard_stream_events:
+            content = (
+                standard_stream_event.get("content_delta", "")
+                if standard_stream_event.get("type") == "message_delta"
+                else ""
+            )
+            yield make_event(
+                status="loading",
+                content=content,
+                stream_event=standard_stream_events,
+                metadata=agent_metadata,
+            )
+
+
 async def stream_agent_response(
     *,
     agent_slug: str,
@@ -863,27 +1021,21 @@ async def stream_agent_response(
     current_user: AuthenticatedUser,
     db: AsyncSession,
 ) -> AsyncIterator[Any]:
-    """前端发送的内容产生消息流
+    """使用普通 HumanMessage 启动 Agent Run。"""
 
-    Args:
-        agent_id (str): agent的名称
-        thread_id (str): 当前会话的id
-        thread_input_message (str): 输入的消息
-        current_user (AuthenticatedUser): 当前用户
-        db (AsyncSession): 数据库session
-        metadata (dict[str, Any] | None, optional): 附带的信息，如agent类型，本此请求的等
+    if not thread_id:
+        thread_id = str(uuid.uuid4())
+    runtime_metadata = dict(runtime_metadata or {})
+    run_id = str(runtime_metadata["run_id"])
+    if not runtime_metadata.get("request_id"):
+        runtime_metadata["request_id"] = str(uuid.uuid4())
 
-    Returns:
-        AsyncIterator[bytes]: _description_
-    """
-
-    # 统一消息传递格式
+    # FIXEME: 普通 Run 的 chunk builder 只属于 stream_agent_response。
     def make_agent_stream_event(
         status: str | None = None,
         content: Any = None,
         **kwargs: Any,
     ) -> bytes:
-        """构建 agent 流式输出的事件格式"""
         event_thread_id = (
             kwargs.pop("thread_id", None)
             or runtime_metadata.get("thread_id")
@@ -903,31 +1055,16 @@ async def stream_agent_response(
             + b"\n"
         )
 
-    # guard
-    if not thread_id:
-        thread_id = str(uuid.uuid4())
-
-    runtime_metadata = dict(runtime_metadata or {})
-    run_id = str(runtime_metadata["run_id"])
-
-    # 设置单次 request_id 作为单次断联的标志以及附件的隔离归属
-    if not runtime_metadata.get("request_id"):
-        runtime_metadata["request_id"] = str(uuid.uuid4())
-
-    # 抽取agent执行的元数据
-    query: str = thread_input_message.content
-    image_content: str | None = thread_input_message.image_content
+    query = thread_input_message.content
+    image_content = thread_input_message.image_content
     human_msg: HumanMessage = thread_input_message.langchain_msg
-
-    # 根据agent_id解析 agent 的运行配置，构建agent实例
-    agent_item, agent_instacne = await _build_agent_runtime(
+    agent_item, agent_instance = await _build_agent_runtime(
         agent_slug=agent_slug,
         user=current_user,
         thread_id=thread_id,
         db=db,
-        run_type=runtime_metadata.get("run_type") or "chat",
+        run_type="chat",
     )
-
     runtime_metadata.update(
         {
             "query": query,
@@ -937,98 +1074,51 @@ async def stream_agent_response(
             "has_image": bool(image_content),
         }
     )
-
-    # 构建构建agentu运行所需的上下文
-    messages = [human_msg]
     agent_runtime_context = await _build_agent_runtime_context(
         uid=current_user.uid,  # ty:ignore[invalid-argument-type]
         run_id=run_id,
         thread_id=thread_id,
-        request_id=runtime_metadata.get(
-            "request_id"
-        ),  # ty:ignore[invalid-argument-type]
+        request_id=runtime_metadata["request_id"],
+        model=runtime_metadata.get("model"),
     )
-
-    # agent任务执行任务状态
-    last_agent_state = ""
-    message_ids: dict[tuple[str, str], str] = {}
+    agent_context = agent_instance.agent_context()
+    agent_context.update_context(agent_runtime_context)
 
     try:
-        # 构建运行中所需的repo
-        conv_repo = ConversationRepository(db)
         await _check_conv_status(
-            conv_repo=conv_repo,
+            conv_repo=ConversationRepository(db),
             thread_id=thread_id,
             uid=current_user.uid,  # ty:ignore[invalid-argument-type]
             agent_item=agent_item,
         )
-
-        # TODO确保文件相关存在，此处按下不表
-
-        # FIXME: 通过 runtime_context 传值，避免把 context 重复透传给 astream_events。
-        async for method, payload in agent_instacne.stream_messages_with_event(
-            messages,  # ty:ignore[invalid-argument-type]
+        stream_events = agent_instance.stream_messages_with_event(
+            [human_msg],
             runtime_context=agent_runtime_context,
+        )
+        async for chunk in _stream_agent_event_chunks(
+            stream_events=stream_events,
+            thread_id=thread_id,
+            make_event=make_agent_stream_event,
         ):
-            if method == "values":
-                agent_state = _reslove_agent_state(payload)
-                currentr_agent_state = _serialize_agent_state(agent_state)
-                if currentr_agent_state and currentr_agent_state != last_agent_state:
-                    last_agent_state = currentr_agent_state
-                    yield make_agent_stream_event(
-                        status="agent_state",
-                        content=agent_state,
-                        runtime_metadata=runtime_metadata,
-                    )
-                continue
-
-            if method == "agent_execute_state":
-                yield make_agent_stream_event(
-                    status="agent_execute_state",
-                    event=payload,
-                    namespace=(
-                        payload.get("namespace") if isinstance(payload, dict) else []
-                    ),
-                    thread_id=(
-                        payload.get("thread_id")
-                        if isinstance(payload, dict)
-                        else thread_id
-                    ),
-                    runtime_metadata=runtime_metadata,
-                )
-                continue
-
-            # message输出的时候走的路径
-            agent_msg, agent_metadata = payload
-            standard_stream_events = _make_lc_message_to_standard(
-                agent_msg=agent_msg,
-                agent_metadata=agent_metadata,
-                thread_id=thread_id,
-                message_ids=message_ids,
-            )
-
-            for standard_stream_event in standard_stream_events:
-                if standard_stream_event.get("type") != "message_delta":
-                    content = ""
-                else:
-                    content = standard_stream_event.get("content_delta", "")
-
-                yield make_agent_stream_event(
-                    status="loading",
-                    content=content,
-                    stream_event=standard_stream_events,
-                    metadata=agent_metadata,
-                    thread_id=thread_id,
-                )
+            yield chunk
 
         await save_message_from_langgraph_state(
             thread_id=thread_id,
             run_id=run_id,
-            context=agent_runtime_context,
-            agent_instance=agent_instacne,
-            runtime_context=agent_runtime_context,
+            context=agent_context,
+            agent_instance=agent_instance,
             db=db,
         )
+        interrupt_payload = await check_agent_interrupt_handler(
+            agent_instance=agent_instance,
+            context=agent_context,
+        )
+        if interrupt_payload is not None:
+            yield make_agent_stream_event(
+                status="interrupted",
+                interrupt=interrupt_payload,
+            )
+            return
 
         yield make_agent_stream_event(
             status="finished",
@@ -1039,6 +1129,111 @@ async def stream_agent_response(
         raise
 
 
-async def stream_resume_response():
-    # TODO interrupt后的断续重连
-    pass
+# FIXEME: Resume 与普通入口同级，直接把 Command 交给 BaseAgent 专用方法。
+async def resume_agent_response(
+    *,
+    agent_slug: str,
+    thread_id: str,
+    runtime_metadata: dict,
+    current_user: AuthenticatedUser,
+    db: AsyncSession,
+) -> AsyncIterator[Any]:
+    runtime_metadata = dict(runtime_metadata or {})
+    run_id = str(runtime_metadata["run_id"])
+    resume = runtime_metadata.get("resume")
+    answer = resume.get("answer") if isinstance(resume, dict) else None
+    if not isinstance(answer, str) or not answer.strip():
+        raise ValueError("Resume Run 缺少非空 answer")
+
+    # FIXEME: Resume Run 使用自己的 chunk builder，不复用普通 Run builder。
+    def make_agent_resume_event(
+        status: str | None = None,
+        content: Any = None,
+        **kwargs: Any,
+    ) -> bytes:
+        event_thread_id = (
+            kwargs.pop("thread_id", None)
+            or runtime_metadata.get("thread_id")
+            or thread_id
+        )
+        return (
+            json.dumps(
+                {
+                    "request_id": runtime_metadata.get("request_id"),
+                    "response": content,
+                    "thread_id": event_thread_id,
+                    "status": status,
+                    **kwargs,
+                },
+                ensure_ascii=False,
+            ).encode("utf-8")
+            + b"\n"
+        )
+
+    agent_item, agent_instance = await _build_agent_runtime(
+        agent_slug=agent_slug,
+        user=current_user,
+        thread_id=thread_id,
+        db=db,
+        run_type="resume",
+    )
+    runtime_metadata.update(
+        {
+            "agent_slug": agent_item.slug,
+            "thread_id": thread_id,
+            "uid": current_user.uid,
+        }
+    )
+    agent_runtime_context = await _build_agent_runtime_context(
+        uid=current_user.uid,  # ty:ignore[invalid-argument-type]
+        run_id=run_id,
+        thread_id=thread_id,
+        request_id=str(runtime_metadata["request_id"]),
+        model=runtime_metadata.get("model"),
+    )
+    agent_context = agent_instance.agent_context()
+    agent_context.update_context(agent_runtime_context)
+
+    try:
+        await _check_conv_status(
+            conv_repo=ConversationRepository(db),
+            thread_id=thread_id,
+            uid=current_user.uid,  # ty:ignore[invalid-argument-type]
+            agent_item=agent_item,
+        )
+        stream_events = agent_instance.stream_message_by_resume(
+            Command(resume=answer.strip()),
+            runtime_context=agent_runtime_context,
+        )
+        async for chunk in _stream_agent_event_chunks(
+            stream_events=stream_events,
+            thread_id=thread_id,
+            make_event=make_agent_resume_event,
+        ):
+            yield chunk
+
+        await save_message_from_langgraph_state(
+            thread_id=thread_id,
+            run_id=run_id,
+            context=agent_context,
+            agent_instance=agent_instance,
+            db=db,
+        )
+        interrupt_payload = await check_agent_interrupt_handler(
+            agent_instance=agent_instance,
+            context=agent_context,
+        )
+        if interrupt_payload is not None:
+            yield make_agent_resume_event(
+                status="interrupted",
+                interrupt=interrupt_payload,
+            )
+            return
+
+        yield make_agent_resume_event(
+            status="finished",
+            runtime_metadata=runtime_metadata,
+        )
+    except Exception:
+        logger.exception("Agent Resume stream 响应失败")
+        raise

@@ -160,9 +160,10 @@ class AgentRun(Base):
         default="chat",
         server_default="chat",
         index=True,
-        comment="运行类型 chat, subagent",
+        comment="运行类型 chat, subagent, resume",
     )
-    agent_status = Column(String(32), nullable=False, default="pengding", comment="运行状态 pending, running, cancel_requested, completed, failed, cancelled")
+    # FIXEME: interrupt/resume 第一版沿用现有状态字段，不新增交互表。
+    agent_status = Column(String(32), nullable=False, default="pending", comment="运行状态 pending, running, cancel_requested, interrupted, completed, failed, cancelled")
 
     trigger_message_id = Column(Integer, nullable=True, comment="Input message ID")
     output_message_id = Column(

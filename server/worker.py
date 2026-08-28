@@ -16,7 +16,7 @@ from server.service.arq_queue_servcie import (
     write_agent_run_stream_event,
 )
 from server.service.input_message_service import build_agent_input_msg
-from server.service.thread_service import stream_agent_response
+from server.service.thread_service import resume_agent_response, stream_agent_response
 from server.utils.woker_utils import reslove_thread_id
 from src.agents import agent_manager
 from src.configs import config
@@ -25,7 +25,6 @@ from src.database.models import AgentRun, Message, User
 from src.database.repositories import (
     AgentRepository,
     AgentRunRepository,
-    ConversationRepository,
 )
 from src.utils import logger
 
@@ -163,6 +162,19 @@ async def set_run_terminal(
         return current_agent_status, changed
 
 
+# FIXEME: interrupted 独立于 completed/failed/cancelled 的终态写入入口。
+async def set_run_interrupted(
+    run_id: str,
+    payload: dict[str, Any],
+) -> tuple[str | None, bool]:
+    async with postgres_manager.get_async_session_context() as db:
+        run, changed = await AgentRunRepository(db).set_interrupted(
+            run_id,
+            payload,
+        )
+        return (str(run.agent_status) if run else None), changed
+
+
 async def _get_user(uid: str) -> User | None:
     """获取到当前前的user"""
     async with postgres_manager.get_async_session_context() as db:
@@ -279,6 +291,42 @@ async def _finalize_run(
     return agent_status, changed
 
 
+# FIXEME: 必须先提交 interrupted 状态，再依次发布 interaction 和 end。
+async def _finalize_interrupted_run(
+    run_id: str,
+    *,
+    thread_id: str,
+    interrupt_payload: dict[str, Any],
+) -> tuple[str, bool]:
+    agent_status, changed = await set_run_interrupted(
+        run_id,
+        interrupt_payload,
+    )
+    if agent_status is None:
+        raise ValueError(f"Agent Run 不存在：{run_id}")
+
+    if changed:
+        interaction_payload = {
+            **interrupt_payload,
+            "parent_run_id": run_id,
+        }
+        try:
+            await write_stream_event(
+                run_id,
+                "interaction_required",
+                interaction_payload,
+                thread_id,
+            )
+            await write_end_stream_event(
+                run_id,
+                {"status": "interrupted"},
+                thread_id,
+            )
+        except Exception:
+            logger.exception("Agent interrupt 事件发布失败：run_id=%s", run_id)
+    return agent_status, changed
+
+
 @dataclass
 class StreamEventBucket:
     char_counts: int = 0
@@ -295,6 +343,13 @@ def map_stream_event(chunk: dict[str, Any]) -> tuple[str, Any]:
             "name": "agent_state",
             "chunk": chunk,
             "agent_state": chunk.get("response"),
+        }
+    if status == "agent_execute_event":
+        # FIXEME: Tool 事件继续复用现有 custom SSE 通道。
+        return "custom", {
+            "name": "agent_execute_event",
+            "chunk": chunk,
+            "event": chunk.get("event"),
         }
     if status == "finished":
         return "end", {"status": "completed", "chunk": chunk}
@@ -391,29 +446,12 @@ async def process_agent_run(ctx, run_id: str):
 
     # agent_status 是当前 Run 生命周期的唯一状态字段。
     initial_status = str(agent_run_event.agent_status)
-    if initial_status in {"completed", "failed", "cancelled"}:
+    if initial_status in {"completed", "failed", "cancelled", "interrupted"}:
         return {"run_id": run_id, "status": initial_status}
     if initial_status == "cancel_requested":
         return await set_run_terminal(
             run_id,
             status="cancelled",
-        )
-
-    agent_input_message = await _get_agent_input_msg(
-        message_id=agent_run_event.trigger_message_id  # ty:ignore[invalid-argument-type]
-    )  # ty:ignore[invalid-argument-type]
-    if agent_input_message is None:
-        error = f"Input message not found: {agent_run_event.trigger_message_id}"
-        logger.error(
-            f"当前agent运行id：{run_id} 的输入消息不存在："
-            f"{agent_run_event.trigger_message_id}"
-        )
-        return await _finalize_run(
-            run_id,
-            status="failed",
-            thread_id=str(agent_run_event.thread_id),
-            error=error,
-            error_type="LookupError",
         )
 
     # 构建agent内部的参数
@@ -422,16 +460,34 @@ async def process_agent_run(ctx, run_id: str):
     request_id = agent_run_event.request_id
     thread_id = agent_run_event.thread_id
 
-    image_content = agent_input_message.image_content  # ty:ignore[unresolved-attribute]
+    run_type = str(agent_run_event.run_type)
+    agent_input_message_formatted = None
+    # FIXEME: Resume Run 没有 trigger_message_id，必须先按 run_type 分支。
+    if run_type != "resume":
+        agent_input_message = await _get_agent_input_msg(
+            message_id=agent_run_event.trigger_message_id
+        )
+        if agent_input_message is None:
+            error = f"Input message not found: {agent_run_event.trigger_message_id}"
+            logger.error(
+                f"当前agent运行id：{run_id} 的输入消息不存在："
+                f"{agent_run_event.trigger_message_id}"
+            )
+            return await _finalize_run(
+                run_id,
+                status="failed",
+                thread_id=str(agent_run_event.thread_id),
+                error=error,
+                error_type="LookupError",
+            )
 
-    # 构建访问消息
-    agent_input_message_formatted = build_agent_input_msg(
-        query=agent_input_message.content,  # ty:ignore[invalid-argument-type]
-        # FIXME: 恢复数据库里记录的输入消息类型，而不是传空字符串。
-        msg_type=agent_input_message.message_type,  # ty:ignore[invalid-argument-type]
-        image_content=image_content,  # ty:ignore[invalid-argument-type]
-        msg_metadata=dict(agent_input_message.msg_metadata or {}),
-    )
+        agent_input_message_formatted = build_agent_input_msg(
+            query=agent_input_message.content,
+            # FIXME: 恢复数据库里记录的输入消息类型，而不是传空字符串。
+            msg_type=agent_input_message.message_type,
+            image_content=agent_input_message.image_content,
+            msg_metadata=dict(agent_input_message.msg_metadata or {}),
+        )
 
     # 配置整体metadata
     user = await _get_user(uid=uid)  # ty:ignore[invalid-argument-type]
@@ -447,8 +503,8 @@ async def process_agent_run(ctx, run_id: str):
         )
 
     # Run 类型由创建入口显式落库；parent_run_id 只保留运行间的关联关系。
-    run_type = str(agent_run_event.run_type)
     metadata = {
+        **dict(agent_run_event.run_metadata or {}),
         "run_id": run_id,
         "request_id": request_id,
         "agent_slug": agent_slug,
@@ -466,7 +522,7 @@ async def process_agent_run(ctx, run_id: str):
             run_id,
             status="cancelled",
         )
-    if running_status in {"completed", "failed", "cancelled"}:
+    if running_status in {"completed", "failed", "cancelled", "interrupted"}:
         return {"run_id": run_id, "status": running_status}
 
     run_context = AgentRunContext(run_id)
@@ -486,14 +542,26 @@ async def process_agent_run(ctx, run_id: str):
         )
         try:
             async with postgres_manager.get_async_session_context() as db:
-                stream_thread_events: AsyncIterator = stream_agent_response(
-                    agent_slug=agent_slug,  # ty:ignore[invalid-argument-type]
-                    thread_id=thread_id,  # ty:ignore[invalid-argument-type]
-                    runtime_metadata=metadata,
-                    thread_input_message=agent_input_message_formatted,
-                    current_user=user,
-                    db=db,
-                )
+                # FIXEME: 两个入口参数不同，显式分支便于核验 Resume 不读取普通消息。
+                if run_type == "resume":
+                    stream_thread_events: AsyncIterator = resume_agent_response(
+                        agent_slug=agent_slug,  # ty:ignore[invalid-argument-type]
+                        thread_id=thread_id,  # ty:ignore[invalid-argument-type]
+                        runtime_metadata=metadata,
+                        current_user=user,
+                        db=db,
+                    )
+                else:
+                    if agent_input_message_formatted is None:
+                        raise RuntimeError("普通 Agent Run 缺少输入消息")
+                    stream_thread_events = stream_agent_response(
+                        agent_slug=agent_slug,  # ty:ignore[invalid-argument-type]
+                        thread_id=thread_id,  # ty:ignore[invalid-argument-type]
+                        runtime_metadata=metadata,
+                        thread_input_message=agent_input_message_formatted,
+                        current_user=user,
+                        db=db,
+                    )
 
                 async for steam_agent_chunk in _cancellable_stream(
                     stream_thread_events,
@@ -524,6 +592,18 @@ async def process_agent_run(ctx, run_id: str):
                         )
 
                         status = strem_agent_chunk.get("status") or "some_event"
+
+                        if current_thread_id == thread_id and status == "interrupted":
+                            interrupt_payload = strem_agent_chunk.get("interrupt")
+                            if not isinstance(interrupt_payload, dict):
+                                raise ValueError("interrupted chunk 缺少 interrupt payload")
+                            await stream_event_smoother.release()
+                            terminal_result = await _finalize_interrupted_run(
+                                run_id,
+                                thread_id=str(thread_id),
+                                interrupt_payload=interrupt_payload,
+                            )
+                            break
 
                         event_type, payload = map_stream_event(strem_agent_chunk)
 

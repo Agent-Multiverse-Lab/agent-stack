@@ -61,14 +61,24 @@ class ThreadMessagePersistenceTest(unittest.IsolatedAsyncioTestCase):
         )
         conversations = SimpleNamespace(
             get_conversation_by_thread_id_for_user=AsyncMock(return_value=SimpleNamespace(id=7)),
-            create_agent_output_message=AsyncMock(side_effect=[SimpleNamespace(id=1), SimpleNamespace(id=2)]),
-            create_tool_call=AsyncMock(),
+            get_message_by_langgraph_id=AsyncMock(return_value=None),
+            add_message_by_thread_id=AsyncMock(
+                side_effect=[
+                    SimpleNamespace(id=1, agent_run_id="run-1"),
+                    SimpleNamespace(id=2, agent_run_id="run-1"),
+                ]
+            ),
+            add_tool_call=AsyncMock(),
             update_tool_call=AsyncMock(),
         )
         runs = SimpleNamespace(
+            get_by_id=AsyncMock(return_value=SimpleNamespace(id="run-1")),
             set_output_message=AsyncMock(),
         )
         db = SimpleNamespace(commit=AsyncMock())
+        # FIXEME: state 持久化与 interrupt handler 都使用完整 Agent context。
+        context = FakeContext()
+        context.update_context({"uid": "user-1", "thread_id": "thread-1"})
 
         with (
             patch.object(
@@ -84,11 +94,9 @@ class ThreadMessagePersistenceTest(unittest.IsolatedAsyncioTestCase):
         ):
             await thread_service.save_message_from_langgraph_state(
                 agent_instance=agent,
-                runtime_context={
-                    "uid": "user-1",
-                    "run_id": "run-1",
-                    "thread_id": "thread-1",
-                },
+                context=context,
+                thread_id="thread-1",
+                run_id="run-1",
                 db=db,
             )
 
@@ -100,40 +108,58 @@ class ThreadMessagePersistenceTest(unittest.IsolatedAsyncioTestCase):
                 }
             },
         )
-        conversations.create_agent_output_message.assert_has_awaits(
+        conversations.add_message_by_thread_id.assert_has_awaits(
             [
-                call(conversation_id=7, agent_run_id="run-1", content=""),
-                call(conversation_id=7, agent_run_id="run-1", content="42"),
+                call(
+                    thread_id="thread-1",
+                    user_id="user-1",
+                    agent_run_id="run-1",
+                    content="",
+                    role="ai",
+                    msg_metadata=None,
+                ),
+                call(
+                    thread_id="thread-1",
+                    user_id="user-1",
+                    agent_run_id="run-1",
+                    content="42",
+                    role="ai",
+                    msg_metadata=None,
+                ),
             ]
         )
-        runs.set_output_message.assert_has_awaits(
-            [
-                call(run_id="run-1", output_message_id=1),
-                call(run_id="run-1", output_message_id=2),
-            ]
+        runs.get_by_id.assert_awaited_once_with("run-1")
+        runs.set_output_message.assert_awaited_once_with(
+            run_id="run-1",
+            output_message_id=2,
         )
-        conversations.create_tool_call.assert_awaited_once_with(
+        conversations.add_tool_call.assert_awaited_once_with(
             message_id=1,
             tool_call_id="",
             tool_name="add_numbers",
             tool_arguments={"a": 17, "b": 25},
+            status="pending",
         )
-        conversations.update_tool_call.assert_awaited_once_with(
-            tool_call_id="",
-            tool_result="42",
-            status="success",
-        )
+        conversations.update_tool_call.assert_not_awaited()
         db.commit.assert_awaited_once_with()
 
     async def test_repository_methods_write_tool_and_output_fields(self) -> None:
-        session = SimpleNamespace(add=Mock(), flush=AsyncMock())
+        # FIXEME: add_tool_call 会先按外部 Tool Call ID 检查幂等记录。
+        session = SimpleNamespace(
+            add=Mock(),
+            flush=AsyncMock(),
+            execute=AsyncMock(
+                return_value=SimpleNamespace(scalar_one_or_none=lambda: None)
+            ),
+        )
         conversations = ConversationRepository(session)
 
-        tool_call = await conversations.create_tool_call(
+        tool_call = await conversations.add_tool_call(
             message_id=3,
             tool_call_id="call-1",
             tool_name="add_numbers",
             tool_arguments={"a": 17, "b": 25},
+            status="pending",
         )
         self.assertEqual({"a": 17, "b": 25}, tool_call.tool_arguments)
         session.add.assert_called_once_with(tool_call)
@@ -152,6 +178,28 @@ class ThreadMessagePersistenceTest(unittest.IsolatedAsyncioTestCase):
         runs.get_by_id = AsyncMock(return_value=run)
         await runs.set_output_message(run_id="run-1", output_message_id=9)
         self.assertEqual(9, run.output_message_id)
+
+        output_session = SimpleNamespace(
+            add=Mock(),
+            flush=AsyncMock(),
+            execute=AsyncMock(
+                return_value=SimpleNamespace(
+                    scalar_one_or_none=lambda: SimpleNamespace(id=7)
+                )
+            ),
+        )
+        output_message = await ConversationRepository(
+            output_session
+        ).add_message_by_thread_id(
+            thread_id="thread-1",
+            user_id="user-1",
+            agent_run_id="run-1",
+            content="42",
+            role="ai",
+        )
+        self.assertEqual(7, output_message.conversation_id)
+        self.assertEqual("ai", output_message.role)
+        output_session.add.assert_called_once_with(output_message)
 
     async def test_result_query_uses_output_message_pointer(self) -> None:
         result_message = SimpleNamespace(id=9, content="42")

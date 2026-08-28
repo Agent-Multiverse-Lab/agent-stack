@@ -32,10 +32,16 @@ from src.database.repositories import (
     MessageAttachmentRepository,
 )
 from src.database.session import session_context
+from src.model import is_model_available
 from src.utils import logger
 
-_TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
+_TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "interrupted"}
 SUBAGENT_PROGRESS_EVENT_COUNT = 5
+
+
+# FIXEME: 第一版用独立异常把可恢复冲突映射为 HTTP 409。
+class AgentRunConflictError(RuntimeError):
+    """Agent Run 当前状态不允许执行请求。"""
 
 
 async def create_agent_run_service(
@@ -47,12 +53,18 @@ async def create_agent_run_service(
     thread_id: str,
     thread_metadata: dict[str, Any],
     image_content: str | None,
-    parent_run_id: str | None,
     msg_metadata: dict[str, Any],
 ) -> AgentRun:
     """原子创建用户消息和 Agent Run，提交后入队。"""
     if not thread_id:
         raise ValueError("会话 ID 不能为空")
+
+    run_metadata = dict(thread_metadata)
+    model_id = run_metadata.get("model")
+    if model_id is not None and (
+        not isinstance(model_id, str) or not is_model_available(model_id)
+    ):
+        raise ValueError("所选模型不在当前可用模型目录中")
 
     file_ids = attachment_file_ids(msg_metadata)
     input_message = build_agent_input_msg(
@@ -69,7 +81,13 @@ async def create_agent_run_service(
     if conversation is None:
         raise LookupError("当前会话不存在或已删除")
 
-    run_metadata = dict(thread_metadata)
+    # FIXEME: 待回答 ask_user 时不能再追加普通 HumanMessage。
+    if await AgentRunRepository(db).get_pending_interaction_run(
+        uid=str(current_user.uid),
+        thread_id=thread_id,
+    ) is not None:
+        raise AgentRunConflictError("当前会话有待回答的问题")
+
     request_id = str(run_metadata.get("request_id") or uuid.uuid4())
     run_id = str(uuid.uuid4())
     copied_objects: list[tuple[str, str]] = []
@@ -102,7 +120,6 @@ async def create_agent_run_service(
             request_id=request_id,
             trigger_message_id=int(message.id),
             run_type="chat",
-            parent_run_id=parent_run_id,
             run_metadata=run_metadata,
         )
         message.agent_run_id = run.id
@@ -128,6 +145,100 @@ async def create_agent_run_service(
             run = failed_run
         await db.commit()
     return run
+
+
+# FIXEME: Resume 创建仅复用父 Run 的身份与 Thread，不创建或重放 HumanMessage。
+async def create_resume_agent_run_service(
+    *,
+    db: AsyncSession,
+    current_user: User,
+    interrupted_run_id: str,
+    thread_id: str,
+    thread_metadata: dict[str, Any],
+) -> AgentRun:
+    if not thread_id:
+        raise AgentRunConflictError("恢复请求的会话 ID 不能为空")
+
+    run_metadata = dict(thread_metadata)
+    resume = run_metadata.get("resume")
+    if not isinstance(resume, dict):
+        raise ValueError("thread_metadata.resume 必须是对象")
+    answer = resume.get("answer")
+    if not isinstance(answer, str) or not answer.strip():
+        raise ValueError("thread_metadata.resume.answer 不能为空")
+    answer = answer.strip()
+    run_metadata["resume"] = {**resume, "answer": answer}
+    request_id = str(run_metadata.get("request_id") or uuid.uuid4())
+    run_metadata["request_id"] = request_id
+
+    run_repository = AgentRunRepository(db)
+    owned_parent = await run_repository.get_by_id_for_user(
+        run_id=interrupted_run_id,
+        uid=str(current_user.uid),
+    )
+    if owned_parent is None:
+        raise LookupError("被打断的 Agent Run 不存在或不属于当前用户")
+    if str(owned_parent.thread_id) != thread_id:
+        raise AgentRunConflictError("恢复请求与父 Run 的会话不匹配")
+
+    parent = await run_repository.get_for_resume_for_update(
+        run_id=interrupted_run_id,
+        uid=str(current_user.uid),
+        thread_id=thread_id,
+    )
+    if parent is None:
+        raise AgentRunConflictError("父 Run 当前不可恢复")
+    if str(parent.agent_status) != "interrupted":
+        raise AgentRunConflictError("父 Run 不处于 interrupted 状态")
+
+    interrupt_payload = dict(parent.run_metadata or {}).get("interrupt")
+    options = (
+        interrupt_payload.get("options")
+        if isinstance(interrupt_payload, dict)
+        else None
+    )
+    if (
+        not isinstance(options, list)
+        or not all(isinstance(option, str) and option for option in options)
+        or answer not in options
+    ):
+        raise ValueError("回答不在父 Run 提供的选项中")
+
+    existing = await run_repository.get_resume_child(interrupted_run_id)
+    if existing is not None:
+        if str(existing.request_id) == request_id:
+            await db.commit()
+            return existing
+        raise AgentRunConflictError("当前问题已经回答")
+
+    resume_run = await run_repository.create_run(
+        run_id=str(uuid.uuid4()),
+        thread_id=str(parent.thread_id),
+        conversation_id=int(parent.conversation_id),
+        uid=str(parent.uid),
+        agent_slug=str(parent.agent_id),
+        request_id=request_id,
+        trigger_message_id=None,
+        run_type="resume",
+        parent_run_id=str(parent.id),
+        run_metadata=run_metadata,
+    )
+    await db.commit()
+
+    try:
+        await enqueue_agent_run(str(resume_run.id))
+    except Exception as exc:
+        logger.exception("Resume Agent Run 入队失败：run_id=%s", resume_run.id)
+        failed_run, _ = await run_repository.set_agent_terminal(
+            str(resume_run.id),
+            status="failed",
+            error=f"Resume Agent Run 入队失败：{exc}",
+            error_type=type(exc).__name__,
+        )
+        await db.commit()
+        if failed_run is not None:
+            resume_run = failed_run
+    return resume_run
 
 
 async def enqueue_agent_run(run_id: str) -> None:
@@ -158,7 +269,7 @@ async def wait_agent_run_result(run_id: str) -> str:
                 if message is None:
                     raise RuntimeError(f"Agent Run 未保存最终消息：{run_id}")
                 return str(message.content)
-            if status in {"failed", "cancelled"}:
+            if status in {"failed", "cancelled", "interrupted"}:
                 raise RuntimeError(str(run.error or status))
 
         await asyncio.sleep(1)
@@ -333,6 +444,35 @@ async def stream_agent_run_events(
                             "status": status,
                             "error": str(run.error or status),
                         },
+                        created_at=datetime.now(UTC).isoformat(),
+                    ),
+                )
+                return
+
+            # FIXEME: Redis Stream 缺失时由 PostgreSQL interrupt metadata 恢复问题。
+            if status == "interrupted":
+                interrupt_payload = dict(run.run_metadata or {}).get("interrupt")
+                if isinstance(interrupt_payload, dict):
+                    yield format_agent_run_sse(
+                        after_id,
+                        build_agent_chunk_envolope(
+                            run_id=run_id,
+                            event_type="interaction_required",
+                            thread_id=thread_id,
+                            payload={
+                                **interrupt_payload,
+                                "parent_run_id": run_id,
+                            },
+                            created_at=datetime.now(UTC).isoformat(),
+                        ),
+                    )
+                yield format_agent_run_sse(
+                    after_id,
+                    build_agent_chunk_envolope(
+                        run_id=run_id,
+                        event_type="end",
+                        thread_id=thread_id,
+                        payload={"status": "interrupted"},
                         created_at=datetime.now(UTC).isoformat(),
                     ),
                 )

@@ -91,6 +91,8 @@ class FakeAgentRunRepository:
     def __init__(self) -> None:
         self.runs = {}
         self.has_active = False
+        self.active_run = None
+        self.pending_interaction_run = None
 
     async def get_by_ids_for_conversation(self, **values):
         """返回预设 Run 映射。"""
@@ -103,6 +105,13 @@ class FakeAgentRunRepository:
     async def has_active_for_conversations(self, **values):
         """返回预设活动 Run 状态。"""
         return self.has_active
+
+    # FIXEME: Thread 详情独立返回活动 Run 与待回答 interaction。
+    async def get_latest_active_for_thread(self, **_values):
+        return self.active_run
+
+    async def get_pending_interaction_run(self, **_values):
+        return self.pending_interaction_run
 
 
 class FakeMessageAttachmentRepository:
@@ -316,6 +325,38 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [3, 2],
             self.message_attachments.requested_message_ids,
+        )
+        self.assertIsNone(result["active_run"])
+        self.assertIsNone(result["pending_interaction"])
+
+    async def test_detail_returns_pending_ask_user_interaction(self) -> None:
+        self.conversations.conversation = make_conversation(1)
+        self.runs.pending_interaction_run = SimpleNamespace(
+            id="parent-run",
+            run_metadata={
+                "interrupt": {
+                    "kind": "ask_user",
+                    "question": "请选择数据库",
+                    "options": ["PostgreSQL", "MySQL"],
+                }
+            },
+        )
+
+        result = await thread_service.get_thread_detail(
+            self.db,
+            uid="user-1",
+            thread_id="thread-1",
+            message_limit=10,
+        )
+
+        self.assertEqual(
+            {
+                "kind": "ask_user",
+                "parent_run_id": "parent-run",
+                "question": "请选择数据库",
+                "options": ["PostgreSQL", "MySQL"],
+            },
+            result["pending_interaction"],
         )
 
     async def test_detail_batch_loads_ordered_message_attachments(self) -> None:

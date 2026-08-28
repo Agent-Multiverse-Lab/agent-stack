@@ -8,7 +8,15 @@ from langchain.messages import HumanMessage
 from server.service import thread_service
 
 
+class FakeContext:
+    def update_context(self, values: dict) -> None:
+        for key, value in values.items():
+            setattr(self, key, value)
+
+
 class FakeAgent:
+    agent_context = FakeContext
+
     def __init__(self, events=(), error: Exception | None = None) -> None:
         self.events = events
         self.error = error
@@ -19,8 +27,24 @@ class FakeAgent:
         for event in self.events:
             yield event
 
+    async def stream_message_by_resume(self, resume_input, **_kwargs):
+        self.resume_input = resume_input
+        for event in self.events:
+            yield event
+
 
 class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
+    async def test_runtime_context_includes_selected_model(self):
+        context = await thread_service._build_agent_runtime_context(
+            uid="user-1",
+            run_id="run-1",
+            thread_id="thread-1",
+            request_id="request-1",
+            model="dashscope/qwen3.8-max",
+        )
+
+        self.assertEqual("dashscope/qwen3.8-max", context["model"])
+
     async def collect_events(self, agent: FakeAgent) -> list[dict]:
         agent_item = SimpleNamespace(slug="test-agent")
         input_message = SimpleNamespace(
@@ -54,6 +78,12 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             patch(
                 "server.service.thread_service.save_message_from_langgraph_state",
                 new=save_messages,
+            ),
+            # FIXEME: 流事件单测不重复验证 checkpoint interrupt fixture。
+            patch(
+                "server.service.thread_service.check_agent_interrupt_handler",
+                new_callable=AsyncMock,
+                return_value=None,
             ),
         ):
             return [
@@ -112,6 +142,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual("finished", events[1]["status"])
         self.save_messages.assert_awaited_once()
+        self.assertEqual("run-1", self.save_messages.await_args.kwargs["run_id"])
 
     async def test_invalid_values_payload_propagates(self) -> None:
         with self.assertRaises(AttributeError):
@@ -122,6 +153,50 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             await self.collect_events(
                 FakeAgent(error=RuntimeError("model failed"))
             )
+
+    async def test_resume_stream_passes_command_without_human_message(self) -> None:
+        agent = FakeAgent()
+        agent_item = SimpleNamespace(slug="test-agent")
+        current_user = SimpleNamespace(uid="user-1")
+
+        with (
+            patch(
+                "server.service.thread_service._build_agent_runtime",
+                new_callable=AsyncMock,
+                return_value=(agent_item, agent),
+            ),
+            patch(
+                "server.service.thread_service._check_conv_status",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "server.service.thread_service.save_message_from_langgraph_state",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "server.service.thread_service.check_agent_interrupt_handler",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            events = [
+                json.loads(chunk)
+                async for chunk in thread_service.resume_agent_response(
+                    agent_slug="test-agent",
+                    thread_id="thread-1",
+                    runtime_metadata={
+                        "run_id": "resume-run",
+                        "request_id": "resume-request",
+                        "run_type": "resume",
+                        "resume": {"answer": "PostgreSQL"},
+                    },
+                    current_user=current_user,
+                    db=object(),
+                )
+            ]
+
+        self.assertEqual("PostgreSQL", agent.resume_input.resume)
+        self.assertEqual("finished", events[-1]["status"])
 
 
 if __name__ == "__main__":

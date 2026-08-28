@@ -4,10 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.entities.agent import AgentRunCreateRequest
+from server.entities.agent import AgentRunCreateRequest, AgentRunResumeRequest
 from server.service.agent_run_service import (
+    AgentRunConflictError,
     cancel_run_service,
     create_agent_run_service,
+    create_resume_agent_run_service,
     stream_agent_run_events,
 )
 from server.utils.auth import AuthenticatedUser
@@ -45,12 +47,16 @@ async def create_agent_run(
             thread_id=agentrun_request.thread_id,
             thread_metadata=agentrun_request.thread_metadata,
             image_content=agentrun_request.image_content,
-            parent_run_id=agentrun_request.parent_run_id,
             msg_metadata=agentrun_request.msg_metadata,
         )
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except AgentRunConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
     except ValueError as exc:
@@ -61,6 +67,58 @@ async def create_agent_run(
 
     return {
         "run_id": run.id,
+        "thread_id": run.thread_id,
+        "status": run.agent_status,
+        "request_id": run.request_id,
+        "stream_url": (
+            f"/api/agent/runs/{run.id}/events?thread_id={run.thread_id}"
+        ),
+    }
+
+
+@agent_router.post("/runs/{interrupted_run_id}/resume")
+async def resume_agent_run(
+    interrupted_run_id: str,
+    resume_request: AgentRunResumeRequest,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """创建新的 Resume Run，并继续父 Run 所在 checkpoint。"""
+    if not config.enable_run_queue:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="请开启 ARQ 队列模式",
+        )
+
+    # FIXEME: Resume 保持独立入口，普通 Run 创建接口不再猜测恢复语义。
+    try:
+        run = await create_resume_agent_run_service(
+            db=db,
+            current_user=current_user,
+            interrupted_run_id=interrupted_run_id,
+            thread_id=resume_request.thread_id,
+            thread_metadata=resume_request.thread_metadata,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except AgentRunConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    return {
+        "run_id": run.id,
+        "run_type": run.run_type,
+        "parent_run_id": run.parent_run_id,
         "thread_id": run.thread_id,
         "status": run.agent_status,
         "request_id": run.request_id,

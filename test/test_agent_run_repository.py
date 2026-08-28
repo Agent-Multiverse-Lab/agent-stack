@@ -16,6 +16,32 @@ class FakeSession:
 
 
 class AgentRunTerminalTest(unittest.IsolatedAsyncioTestCase):
+    async def test_set_interrupted_persists_payload_and_status(self) -> None:
+        session = FakeSession()
+        run = SimpleNamespace(
+            agent_status="running",
+            run_metadata={"model": "test-model"},
+            finished_at=None,
+        )
+        repository = AgentRunRepository(session)  # type: ignore[arg-type]
+        repository._lock_update = AsyncMock(return_value=run)
+        payload = {
+            "kind": "ask_user",
+            "question": "请选择数据库",
+            "options": ["PostgreSQL", "MySQL"],
+        }
+
+        # FIXEME: interrupted 使用独立写入方法并保留已有 Run metadata。
+        result, changed = await repository.set_interrupted("run-1", payload)
+
+        self.assertIs(run, result)
+        self.assertTrue(changed)
+        self.assertEqual("interrupted", run.agent_status)
+        self.assertEqual("test-model", run.run_metadata["model"])
+        self.assertEqual(payload, run.run_metadata["interrupt"])
+        self.assertIsNotNone(run.finished_at)
+        self.assertEqual(1, session.flush_count)
+
     async def test_writes_completed_failed_and_cancelled(self) -> None:
         cases = (
             ("running", "completed", None, None),
@@ -33,9 +59,9 @@ class AgentRunTerminalTest(unittest.IsolatedAsyncioTestCase):
                     error_type="OldError",
                 )
                 repository = AgentRunRepository(session)  # type: ignore[arg-type]
-                repository._get_for_update = AsyncMock(return_value=run)
+                repository._lock_update = AsyncMock(return_value=run)
 
-                result = await repository.set_agent_terminal(
+                result, changed = await repository.set_agent_terminal(
                     "run-1",
                     status=status,
                     error=error,
@@ -43,16 +69,17 @@ class AgentRunTerminalTest(unittest.IsolatedAsyncioTestCase):
                 )
 
                 self.assertIs(run, result)
+                self.assertTrue(changed)
                 self.assertEqual(status, run.agent_status)
                 self.assertEqual(error, run.error)
                 self.assertEqual(error_type, run.error_type)
                 self.assertIsNotNone(run.finished_at)
                 self.assertEqual(1, session.flush_count)
 
-    async def test_preserves_cancel_requested_transition(self) -> None:
+    async def test_preserves_existing_terminal_or_interrupted_status(self) -> None:
         cases = (
-            ("running", "cancelled"),
-            ("cancel_requested", "failed"),
+            ("completed", "failed"),
+            ("interrupted", "failed"),
         )
 
         for current_status, status in cases:
@@ -65,14 +92,15 @@ class AgentRunTerminalTest(unittest.IsolatedAsyncioTestCase):
                     error_type=None,
                 )
                 repository = AgentRunRepository(session)  # type: ignore[arg-type]
-                repository._get_for_update = AsyncMock(return_value=run)
+                repository._lock_update = AsyncMock(return_value=run)
 
-                result = await repository.set_agent_terminal(
+                result, changed = await repository.set_agent_terminal(
                     "run-1",
                     status=status,
                 )
 
                 self.assertIs(run, result)
+                self.assertFalse(changed)
                 self.assertEqual(current_status, run.agent_status)
                 self.assertIsNone(run.finished_at)
                 self.assertEqual(0, session.flush_count)
@@ -80,12 +108,12 @@ class AgentRunTerminalTest(unittest.IsolatedAsyncioTestCase):
     async def test_rejects_non_terminal_status(self) -> None:
         session = FakeSession()
         repository = AgentRunRepository(session)  # type: ignore[arg-type]
-        repository._get_for_update = AsyncMock()
+        repository._lock_update = AsyncMock()
 
         with self.assertRaisesRegex(ValueError, "running"):
             await repository.set_agent_terminal("run-1", status="running")
 
-        repository._get_for_update.assert_not_awaited()
+        repository._lock_update.assert_not_awaited()
         self.assertEqual(0, session.flush_count)
 
 

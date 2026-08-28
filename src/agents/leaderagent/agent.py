@@ -9,9 +9,6 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
 from server.service.mcp_service import get_mcp_tools
-from src.agents.backends.composite_backend import (
-    create_custom_filesystem_middleware,
-)
 from src.agents.base_agent import BaseAgent
 from src.agents.middlewares.subagent_middlware import create_subagent_middleware
 from src.agents.subagents.citationagent import CitationAgent
@@ -22,6 +19,7 @@ from src.model import load_model
 
 from .context import LeaderAgentContext
 from .prompt import build_prompt
+from .tools import ask_user
 
 
 class LeaderAgent(BaseAgent):
@@ -55,7 +53,11 @@ class LeaderAgent(BaseAgent):
     async def get_agent(self, context=None) -> CompiledStateGraph:
         runtime_context = context or self.context()
         mcp_tools = await get_mcp_tools(runtime_context.mcps)
-        return self._build_agent(runtime_context, tools=list(mcp_tools))
+        # FIXEME: ask_user 仅注册到顶层 LeaderAgent，不扩散到 SubAgent。
+        return self._build_agent(
+            runtime_context,
+            tools=[*mcp_tools, ask_user],
+        )
 
     def _build_agent(
         self,

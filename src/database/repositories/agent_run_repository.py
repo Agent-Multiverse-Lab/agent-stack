@@ -8,6 +8,8 @@ from sqlalchemy.orm import aliased
 from src.database.models import AgentRun, Conversation
 
 AGENT_RUN_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+# FIXEME: interrupted 对当前 Run 是终止执行，但不并入 set_agent_terminal 的允许值。
+AGENT_RUN_INACTIVE_STATUSES = AGENT_RUN_TERMINAL_STATUSES | {"interrupted"}
 
 
 class AgentRunRepository:
@@ -72,7 +74,7 @@ class AgentRunRepository:
                 AgentRun.uid == uid,
                 Conversation.uid == uid,
                 AgentRun.run_type == "subagent",
-                AgentRun.agent_status.not_in(AGENT_RUN_TERMINAL_STATUSES),
+                AgentRun.agent_status.not_in(AGENT_RUN_INACTIVE_STATUSES),
                 Conversation.deleted_at.is_(None),
             )
             .execution_options(populate_existing=True)
@@ -88,7 +90,7 @@ class AgentRunRepository:
         uid: str,
         agent_slug: str,
         request_id: str,
-        trigger_message_id: int,
+        trigger_message_id: int | None,
         agent_status: str = "pending",
         run_type: str = "chat",
         parent_run_id: str | None = None,
@@ -190,7 +192,7 @@ class AgentRunRepository:
             .where(
                 AgentRun.conversation_id.in_(conversation_ids),
                 AgentRun.uid == uid,
-                AgentRun.agent_status.not_in(AGENT_RUN_TERMINAL_STATUSES),
+                AgentRun.agent_status.not_in(AGENT_RUN_INACTIVE_STATUSES),
             )
             .limit(1)
         )
@@ -205,11 +207,102 @@ class AgentRunRepository:
         )
         return result.scalar_one_or_none()
 
+    # FIXEME: 锁定父 Run 后，Resume 创建与重复请求判断必须处于同一事务。
+    async def get_for_resume_for_update(
+        self,
+        *,
+        run_id: str,
+        uid: str,
+        thread_id: str,
+    ) -> AgentRun | None:
+        result = await self.session.execute(
+            select(AgentRun)
+            .join(Conversation, Conversation.id == AgentRun.conversation_id)
+            .where(
+                AgentRun.id == run_id,
+                AgentRun.uid == uid,
+                AgentRun.thread_id == thread_id,
+                Conversation.uid == uid,
+                Conversation.thread_id == thread_id,
+                Conversation.deleted_at.is_(None),
+            )
+            .with_for_update(of=AgentRun)
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    # FIXEME: Resume 与 SubAgent 共用 parent_run_id，查询必须显式限制 run_type。
+    async def get_resume_child(self, parent_run_id: str) -> AgentRun | None:
+        result = await self.session.execute(
+            select(AgentRun)
+            .where(
+                AgentRun.parent_run_id == parent_run_id,
+                AgentRun.run_type == "resume",
+            )
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    # FIXEME: Thread 刷新时直接返回尚在执行的最新 Run，Resume 不依赖消息关联。
+    async def get_latest_active_for_thread(
+        self,
+        *,
+        uid: str,
+        thread_id: str,
+    ) -> AgentRun | None:
+        result = await self.session.execute(
+            select(AgentRun)
+            .join(Conversation, Conversation.id == AgentRun.conversation_id)
+            .where(
+                AgentRun.uid == uid,
+                AgentRun.thread_id == thread_id,
+                AgentRun.agent_status.not_in(AGENT_RUN_INACTIVE_STATUSES),
+                Conversation.uid == uid,
+                Conversation.thread_id == thread_id,
+                Conversation.deleted_at.is_(None),
+            )
+            .order_by(AgentRun.created_at.desc())
+            .limit(1)
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    # FIXEME: 只有尚无 Resume 子 Run 的最新 interrupted Run 仍待用户回答。
+    async def get_pending_interaction_run(
+        self,
+        *,
+        uid: str,
+        thread_id: str,
+    ) -> AgentRun | None:
+        resume_child = aliased(AgentRun)
+        result = await self.session.execute(
+            select(AgentRun)
+            .join(Conversation, Conversation.id == AgentRun.conversation_id)
+            .outerjoin(
+                resume_child,
+                (resume_child.parent_run_id == AgentRun.id)
+                & (resume_child.run_type == "resume"),
+            )
+            .where(
+                AgentRun.uid == uid,
+                AgentRun.thread_id == thread_id,
+                AgentRun.agent_status == "interrupted",
+                Conversation.uid == uid,
+                Conversation.thread_id == thread_id,
+                Conversation.deleted_at.is_(None),
+                resume_child.id.is_(None),
+            )
+            .order_by(AgentRun.created_at.desc())
+            .limit(1)
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
     async def set_running(self, run_id: str) -> AgentRun | None:
         run = await self._lock_update(run_id)
         if run is None:
             return None
-        if str(run.agent_status) in AGENT_RUN_TERMINAL_STATUSES | {
+        if str(run.agent_status) in AGENT_RUN_INACTIVE_STATUSES | {
             "cancel_requested"
         }:
             return run
@@ -219,6 +312,27 @@ class AgentRunRepository:
         run.error = None
         await self.session.flush()
         return run
+
+    # FIXEME: interrupted 独立保存 payload，不扩大 set_agent_terminal 的职责。
+    async def set_interrupted(
+        self,
+        run_id: str,
+        payload: dict,
+    ) -> tuple[AgentRun | None, bool]:
+        run = await self._lock_update(run_id)
+        if run is None:
+            return None, False
+        if str(run.agent_status) in AGENT_RUN_INACTIVE_STATUSES:
+            return run, False
+
+        run.run_metadata = {
+            **dict(run.run_metadata or {}),
+            "interrupt": dict(payload),
+        }
+        run.agent_status = "interrupted"
+        run.finished_at = datetime.now(UTC)
+        await self.session.flush()
+        return run, True
 
     async def set_agent_terminal(
         self,
@@ -235,7 +349,7 @@ class AgentRunRepository:
         if run is None:
             return None, False
         current_status = str(run.agent_status)
-        if current_status in AGENT_RUN_TERMINAL_STATUSES:
+        if current_status in AGENT_RUN_INACTIVE_STATUSES:
             return run, False
 
         run.agent_status = status  # ty: ignore[invalid-assignment]
@@ -249,7 +363,7 @@ class AgentRunRepository:
         run = await self._lock_update(run_id)
         if run is None:
             return None
-        if str(run.agent_status) in AGENT_RUN_TERMINAL_STATUSES:
+        if str(run.agent_status) in AGENT_RUN_INACTIVE_STATUSES:
             return run
 
         run.agent_status = "cancel_requested"

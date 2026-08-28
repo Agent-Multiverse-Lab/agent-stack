@@ -308,7 +308,8 @@ class ConversationRepository:
         user_id: str,
         agent_run_id: str,
         content: str,
-        role: str
+        role: str,
+        msg_metadata: dict | None = None,
     ) -> Message:
         """按用户和 Thread ID 添加 Agent 输出消息。"""
         conversation = await self.get_conversation_by_thread_id_for_user(
@@ -323,7 +324,29 @@ class ConversationRepository:
             agent_run_id=agent_run_id,
             role=role,
             content=content,
+            msg_metadata=msg_metadata,
         )
+
+    # FIXEME: checkpoint 会返回完整历史，按 LangGraph Message ID 避免重复落库。
+    async def get_message_by_langgraph_id(
+        self,
+        *,
+        thread_id: str,
+        user_id: str,
+        langgraph_message_id: str,
+    ) -> Message | None:
+        result = await self.session.execute(
+            select(Message)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(
+                Conversation.thread_id == thread_id,
+                Conversation.uid == user_id,
+                Conversation.deleted_at.is_(None),
+                Message.msg_metadata["langgraph_message_id"].as_string()
+                == langgraph_message_id,
+            )
+        )
+        return result.scalar_one_or_none()
 
     async def add_tool_call(
         self,
@@ -335,6 +358,15 @@ class ConversationRepository:
         status: str
     ) -> ToolCall:
         """为 Assistant Message 创建工具调用。"""
+        # FIXEME: Resume checkpoint 重读历史 AI Tool Call 时复用已有记录。
+        if tool_call_id:
+            result = await self.session.execute(
+                select(ToolCall).where(ToolCall.tool_call_id == tool_call_id)
+            )
+            existing = result.scalar_one_or_none()
+            if existing is not None:
+                return existing
+
         tool_call = ToolCall(
             message_id=message_id,
             tool_call_id=tool_call_id,

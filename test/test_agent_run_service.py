@@ -66,6 +66,10 @@ class FakeAgentRunRepository:
         )
         return self.run
 
+    # FIXEME: 普通 Run 创建测试默认没有待回答 interaction。
+    async def get_pending_interaction_run(self, **_values):
+        return None
+
     async def set_agent_terminal(
         self,
         run_id,
@@ -169,7 +173,6 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
                 "source": "web",
             },
             "image_content": None,
-            "parent_run_id": None,
         }
         values.update(overrides)
         return await agent_run_service.create_agent_run_service(**values)
@@ -318,11 +321,43 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([], self.events)
 
+    async def test_selected_model_is_persisted_in_run_metadata(self):
+        async def enqueue(_):
+            return None
+
+        with patch(
+            "server.service.agent_run_service.enqueue_agent_run",
+            side_effect=enqueue,
+        ):
+            await self.create_run(
+                thread_metadata={
+                    "request_id": "request-1",
+                    "model": "dashscope/qwen3.8-max",
+                }
+            )
+
+        self.assertEqual(
+            "dashscope/qwen3.8-max",
+            self.runs.arguments["run_metadata"]["model"],
+        )
+
+    async def test_unavailable_model_is_rejected_before_writes(self):
+        with self.assertRaisesRegex(ValueError, "可用模型目录"):
+            await self.create_run(
+                thread_metadata={
+                    "model": "gemini/gemini-3-pro",
+                }
+            )
+
+        self.assertEqual([], self.events)
+
 
 class AgentRunEventTest(unittest.IsolatedAsyncioTestCase):
     def test_request_uses_message_metadata_without_attachment_field(self):
         self.assertIn("msg_metadata", AgentRunCreateRequest.model_fields)
         self.assertNotIn("attachment_ids", AgentRunCreateRequest.model_fields)
+        self.assertNotIn("is_resume", AgentRunCreateRequest.model_fields)
+        self.assertNotIn("parent_run_id", AgentRunCreateRequest.model_fields)
 
     def test_format_sse_uses_queue_envelope(self):
         envelope = build_agent_chunk_envolope(

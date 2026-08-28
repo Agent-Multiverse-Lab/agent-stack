@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AgentCreateRequest(BaseModel):
@@ -24,8 +24,33 @@ class AgentRunCreateRequest(BaseModel):
         description="单次输入消息元数据",
     )
     image_content: str | None = Field(None, description="图像文件")
-    is_resume: Any | None = Field(None, description="resume选项，用于特殊如Hil")
-    parent_run_id: str | None = Field(None, description="父事件id,没有就自己的id")
+
+
+class AgentRunResumeRequest(BaseModel):
+    """从被打断 Run 创建恢复请求。"""
+
+    thread_id: str = Field(default=..., description="对话 thread_id")
+    thread_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Resume Run 元数据",
+    )
+
+    # FIXEME: 第一版只接受 ask_user 的非空单选答案。
+    @field_validator("thread_metadata")
+    @classmethod
+    def validate_resume_metadata(
+        cls,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized = dict(metadata)
+        resume = normalized.get("resume")
+        if not isinstance(resume, dict):
+            raise ValueError("thread_metadata.resume 必须是对象")
+        answer = resume.get("answer")
+        if not isinstance(answer, str) or not answer.strip():
+            raise ValueError("thread_metadata.resume.answer 不能为空")
+        normalized["resume"] = {**resume, "answer": answer.strip()}
+        return normalized
 
 
 class AgentSummary(BaseModel):

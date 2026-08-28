@@ -57,6 +57,8 @@ class AgentRepository:
 
         expected_role = {
             "chat": "orchestrator",
+            # FIXEME: Resume Run 继续执行原顶层 orchestrator checkpoint。
+            "resume": "orchestrator",
             "subagent": "subagent",
         }.get(run_type)
         if expected_role is None:
