@@ -9,4 +9,4 @@ router = APIRouter(prefix="/models", tags=["models"])
 
 @router.get("", response_model=dict[str, Any])
 async def get_models():
-    return list_models()
+    return await list_models()
