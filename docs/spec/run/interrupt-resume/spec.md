@@ -141,7 +141,7 @@ answer 只在 Resume 请求中出现。
 await save_message_from_langgraph_state(...)
 interrupt_payload = await check_agent_interrupt_handler(
     agent_instance=agent_instance,
-    context=agent_runtime_context,
+    context=agent_context,
 )
 if interrupt_payload is not None:
     # Resume 入口在相同位置调用 make_agent_resume_event。
@@ -155,8 +155,9 @@ if interrupt_payload is not None:
 该 bytes chunk 经既有 `_cancellable_stream` 进入 `process_agent_run`，再由
 `_normalize_steam_agent_chunk` 解码为事件字典。只有 Worker 解释 `status="interrupted"`
 并执行运行状态收敛；`stream_agent_response` 不发送 `finished`，也不写 Run 状态、
-`interaction_required` 或 `end`。Thread Service 在 yield interrupted chunk 后返回，Worker
-不通过 `break` 截断消费循环，而是在状态收敛后等待该 stream 自然耗尽。
+`interaction_required` 或 `end`。Thread Service 在 yield interrupted chunk 后返回；Worker
+循环内只按每个 chunk 的 `status` 处理，不使用 `terminal_flag` 判断是否继续处理，也不使用
+`break`、`continue` 或立即 `return` 控制消费循环，而是在状态收敛后等待该 stream 自然耗尽。
 
 参考：[LangGraph Interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)、
 [LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)。
@@ -168,30 +169,52 @@ metadata 中提取 answer。Resume 由同级 `resume_agent_response` 和 BaseAge
 ### RUN-HIL-006 Unified finalization and publish ownership
 
 Worker 的 `process_agent_run` 必须以解码后的 chunk `status` 驱动控制操作。过程状态继续
-转发或缓冲；`finished`、`error`、`failed` 和 `interrupted` 等停止状态统一调用
+转发或缓冲；Thread Service 只使用 `finished`、`error` 和 `interrupted` 三种停止信号并统一调用
 `_finalize_run`，不得为 interrupt 保留 `_finalize_interrupted_run`，也不得在对应 case 中
 用 `break` 或立即 `return` 截断 stream。
 
-`_finalize_run` 是 Worker 统一的数据库状态转换入口，只返回 PostgreSQL 中的实际
-`(agent_status, changed)`，不发布 Redis 事件：
+`_finalize_run` 是 Worker 统一的数据库状态转换入口，并返回 PostgreSQL 中的实际
+`(agent_status, changed)`：
 
 - `finished` 请求转换为 `completed`；
-- `error` 或 `failed` 请求转换为 `failed`，并保存 `error/error_type`；
+- `error` 请求转换为 `failed`，并保存 `error/error_type`；
 - `cancelled` 请求转换为 `cancelled`；
-- `interrupted` 请求转换为 `interrupted`，并保存 interrupt payload。
+- `interrupted` 请求转换为 `interrupted`，并复用现有 `error/error_type` 保存打断消息和 kind。
 
-Repository 层继续分离：`set_agent_terminal` 只处理 `completed/failed/cancelled`，
-`set_interrupted` 独立保存打断载荷；`_finalize_run` 根据目标状态选择其中一个，不合并两个
-Repository 方法。
+`_finalize_run` 统一执行数据库状态转换和终态事件发布，并返回
+`(agent_status, changed)`。只有 `changed=True` 时发布：普通
+`completed/failed/cancelled` 发布 `end`；`interrupted` 依次发布
+`interaction_required` 和 `end(status=interrupted)`。
+
+父 Run 的 `finished/error/interrupted` case 在 `_finalize_run` 返回后继续处理同一次结果：
+
+- `changed=True` 时，当前 case 再调用一次 `write_end_stream_event`；payload 顶层
+  `status` 使用实际 `agent_status`，`chunk` 保存当前 Thread Service 原始停止消息；
+- `changed=False` 时，当前 case 不二次发布；
+- `_finalize_run` 的现有发布与 case 的二次发布同时保留，不去重。
+
+`error` 只属于 Thread Service 到 Worker 的内部 chunk 合同；PostgreSQL 中的 Run 终态和对外
+`end` 事件仍使用 `failed`。Thread Service 不生成 `status="failed"`，Worker 也不保留
+`error/failed` 双分支兼容。
+
+Repository 层使用同一个 `set_agent_terminal` 处理
+`completed/failed/cancelled/interrupted`。打断内容序列化到现有 `error`，`kind` 使用现有
+`error_type`，Repository 同步构造 `run_metadata.interrupt`；不增加 `set_interrupted`、
+`set_run_interrupted` 或 `interrupt_payload` 专用参数。
 
 每个停止状态 case 在 `_finalize_run` 返回后按同一规则处理：
 
-1. `agent_status` 属于 Run 停止状态时记录 `terminal_result`；
-2. `changed=False` 表示此前已有路径完成状态转换，当前 Worker 不重复发布；
-3. `changed=True` 表示本次调用完成状态转换，当前 Worker 才拥有停止事件发布权；
-4. 普通终止发布 `end(status=agent_status)`；打断依次发布 `interaction_required` 和
-   `end(status=interrupted)`；
-5. case 使用 `continue`，等待 Thread Service stream 自然耗尽，再返回 `terminal_result`。
+1. 先调用 `_finalize_run` 取得实际 `(agent_status, changed)`；
+2. `changed=True` 时，在当前 case 内二次发布
+   `end({"status": agent_status, "chunk": current_chunk})`；
+3. `changed=False` 时不二次发布；
+4. 每个 case 最后都在内部执行
+   `terminal_flag = agent_status in AGENT_RUN_TERMINAL_STATUSES`，该判断与 `changed` 无关；
+5. case 不读取 `terminal_flag`，也不使用 `break`、`continue` 或立即 `return`；等待 Thread
+   Service stream 自然耗尽并退出数据库上下文后，flag 为真则裸返回；否则先由
+   `AgentRunContext` 判断是否取消，取消时
+   调用 `_finalize_run(status="cancelled")`，否则按流协议错误调用
+   `_finalize_run(status="failed")`。
 
 只有正式 `finished` chunk 能把 Run 转换为 `completed`。stream 在没有任何停止状态的情况
 下耗尽属于流协议错误，必须收敛为 `failed`，不得沿用默认 completed 兜底。PostgreSQL 已
@@ -288,9 +311,12 @@ pending_interaction: InteractionRequired | null
   普通入口内部使用 `make_agent_stream_event`，Resume 入口内部使用
   `make_agent_resume_event`，两者 yield 相同字段合同的 interrupted chunk；
   `process_agent_run` 按 chunk status 调用统一 `_finalize_run`，并等待 stream 自然耗尽；
-- `_finalize_interrupted_run` 不存在；Repository 的普通终态和 interrupted 写入仍保持分离；
-- 只有 `_finalize_run` 返回停止状态且 `changed=True` 时才发布停止事件；interrupt 按
-  PostgreSQL、interaction、end 的顺序发布，`changed=False` 不重复发布；
+- `_finalize_interrupted_run`、`set_run_interrupted` 和 Repository `set_interrupted` 均不存在；
+  interrupted 与其他终态共用 `set_run_terminal -> set_agent_terminal`；
+- `_finalize_run` 保留现有 changed-only 发布；`changed=True` 时当前 case 再发布携带原始
+  chunk 的 `end`，`changed=False` 时不二次发布；
+- `error/finished/interrupted` 分别在 case 内根据实际 `agent_status` 设置 `terminal_flag`；
 - 只有显式 `finished` chunk 能收敛为 completed，无停止状态的流耗尽收敛为 failed；
+- Thread Service 内部只发送 `error`，Worker 将其映射为 PostgreSQL 和 `end` 事件的 `failed`；
 - 重复恢复、越权、错误 Thread 和缺失 checkpoint 均有确定结果；
 - 刷新后能恢复活动 Resume Run 或待回答问题；取消与打断互不复用状态和信号。

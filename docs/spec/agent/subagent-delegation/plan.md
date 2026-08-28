@@ -1,5 +1,7 @@
 # Implementation Plan: Subagent Delegation
 
+计划版本：v0.1.0
+
 ## Steps
 
 1. 确保父子 run 创建时显式写入 `run_type` 与 `parent_run_id`。

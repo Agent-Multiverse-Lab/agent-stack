@@ -1,5 +1,7 @@
 # Implementation Plan: Knowledge Evaluation
 
+计划版本：v0.1.0
+
 1. 将评估逻辑作为可选脚本与独立任务，不影响主请求路径。
 2. 统一评估输入 schema（query/ground truth/response）。
 3. 记录模型版本与重现参数（seed、rerank/model）。

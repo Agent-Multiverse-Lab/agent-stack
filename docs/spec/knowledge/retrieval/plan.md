@@ -1,5 +1,7 @@
 # Implementation Plan: Knowledge Retrieval
 
+计划版本：v0.1.0
+
 1. 校验 `uid/kb_id/query/limit` 输入。
 2. 读取 `KnowledgeEmbeddingBinding`，构建 embedding 并生成 query vector。
 3. Milvus 检索候选并（必要时）调用 reranker。

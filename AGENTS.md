@@ -26,7 +26,9 @@
 2. 读取 [docs/architecture/README.md](docs/architecture/README.md)，确定承载该任务的系统。
 3. 读取对应的 `docs/architecture/<system>-system.md`，确认模块职责和边界。
 4. 读取 [docs/spec/README.md](docs/spec/README.md)，再读取对应 domain README 和 capability 的
-   `spec.md`；需要实施时继续读取 `plan.md` 和 `tasks.md`。
+   `spec.md`；需要设计或实施时，只读取该 capability 根目录当前的 `plan.md` 和 `tasks.md`。
+   如果 `plan.md` 路由到 `implementation/`，只继续读取当前任务对应的实施切片。`history/`
+   默认不加载，只有追溯已完成变更时才读取指定版本。
 5. 需要启动、迁移或验证时，读取 [docs/development.md](docs/development.md)。
 6. 需要提交或发起 Pull Request 时，读取 [docs/contributing.md](docs/contributing.md)。
 7. 只有任务涉及已有技术取舍时，才读取 [docs/adr/README.md](docs/adr/README.md) 和相关 ADR。
@@ -47,4 +49,4 @@
 | Pull Request 和 Git 提交 | `docs/contributing.md` |
 
 架构文档回答“哪个系统承载什么”；spec 文档回答“能力必须如何工作”；源码负责实现和验证，
-不要把这些详细规则重新复制回 `AGENTS.md`。
+不要把这些详细规则重新复制回 `AGENTS.md`，也不要递归扫描整个 `docs/spec/`。

@@ -1,5 +1,7 @@
 # Implementation Plan: Context Management
 
+计划版本：v0.1.0
+
 ## 1. Steps
 
 1. 明确 `worker` 与 `agent` 服务中 context 组装点。

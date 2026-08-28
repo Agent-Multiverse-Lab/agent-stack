@@ -1,82 +1,46 @@
 # docs/spec 索引
 
-`docs/spec` 按能力分成：
+`docs/spec/` 按能力而不是源码文件组织，并通过索引逐层披露上下文。
 
-- `run/`：运行域（生命周期 / 取消 / 事件流）
-- `agent/`：代理域（上下文管理 / 子代理委派）
-- `knowledge/`：知识域（输入处理 / 检索 / 评估）
-- `persistence/`：持久化边界
-- `product/`：产品身份与跨页面体验
+| Domain | 职责 | 入口 |
+| --- | --- | --- |
+| Run | 生命周期、取消、事件流、消息持久化、打断恢复 | [run/README.md](run/README.md) |
+| Agent | 上下文管理、子代理委派 | [agent/README.md](agent/README.md) |
+| Knowledge | 输入处理、检索、评估 | [knowledge/README.md](knowledge/README.md) |
+| Persistence | 状态和存储所有权 | [persistence/README.md](persistence/README.md) |
+| Product | 产品身份和跨页面体验 | [product/README.md](product/README.md) |
 
-每个能力目录应包含：
+## Capability 结构
 
-1. `spec.md`：行为要求与验收标准  
-2. `plan.md`：实施步骤与接口映射  
-3. `tasks.md`：可执行任务清单
+```text
+<domain>/<capability>/
+├── README.md                 # 可选的能力入口，只做路由
+├── spec.md                   # 单一现行能力契约
+├── plan.md                   # 当前变更总览和阅读路由；没有当前变更时可不存在
+├── tasks.md                  # 当前一次变更的任务；与 plan 同生命周期
+├── implementation/          # 可选；大型变更按真实职责拆分的当前实施细节
+│   └── <responsibility>.md
+└── history/
+    └── <version>/
+        ├── plan.md           # 已完成计划快照
+        └── tasks.md          # 有任务快照时保留
+```
 
-## Run Domain
+`spec.md` 是当前目标行为，不记录版本演进。根目录 `plan.md` / `tasks.md` 只描述一次当前变更。
+简单变更不创建 `implementation/`；大型跨系统变更由根计划路由到按职责命名的实施切片。完成后
+先把实施切片合并回完整计划，再只将 `plan.md` / `tasks.md` 移入 `history/<version>/`；历史目录
 
-- [run/README.md](run/README.md)
-- [run/lifecycle/spec.md](run/lifecycle/spec.md)
-- [run/lifecycle/plan.md](run/lifecycle/plan.md)
-- [run/lifecycle/tasks.md](run/lifecycle/tasks.md)
-- [run/cancellation/spec.md](run/cancellation/spec.md)
-- [run/cancellation/plan.md](run/cancellation/plan.md)
-- [run/cancellation/tasks.md](run/cancellation/tasks.md)
-- [run/event-streaming/spec.md](run/event-streaming/spec.md)
-- [run/event-streaming/plan.md](run/event-streaming/plan.md)
-- [run/event-streaming/tasks.md](run/event-streaming/tasks.md)
-- [run/message-persistence/spec.md](run/message-persistence/spec.md)
-- [run/message-persistence/plan.md](run/message-persistence/plan.md)
-- [run/message-persistence/tasks.md](run/message-persistence/tasks.md)
-- [run/interrupt-resume/spec.md](run/interrupt-resume/spec.md)
-- [run/interrupt-resume/plan.md](run/interrupt-resume/plan.md)
-- [run/interrupt-resume/tasks.md](run/interrupt-resume/tasks.md)
+如果一个 spec 同时承载多个可独立验收的职责，应按能力边界拆成具名的 sub-capability，并由
+上级 README 路由；不要按版本、日期或文件长度机械分片。
 
-## Agent Domain
+## 加载顺序
 
-- [agent/README.md](agent/README.md)
-- [agent/context-management/spec.md](agent/context-management/spec.md)
-- [agent/context-management/plan.md](agent/context-management/plan.md)
-- [agent/context-management/tasks.md](agent/context-management/tasks.md)
-- [agent/subagent-delegation/spec.md](agent/subagent-delegation/spec.md)
-- [agent/subagent-delegation/plan.md](agent/subagent-delegation/plan.md)
-- [agent/subagent-delegation/tasks.md](agent/subagent-delegation/tasks.md)
+1. 从本页选择一个 domain，不扫描全部 capability。
+2. 读取该 domain 的 README，定位一个 capability。
+3. 读取该 capability 的 `spec.md`，确认当前契约。
+4. 只有需要设计或实施时，才读取根目录当前的 `plan.md` 和 `tasks.md`。
+5. 如果根计划存在实施切片，只读取当前 Task 明确指向的 `implementation/<responsibility>.md`。
+6. 只有追溯、回归或比较旧设计时，才读取明确指定的 `history/<version>/`。
 
-## Knowledge Domain
-
-- [knowledge/README.md](knowledge/README.md)
-- [knowledge/ingestion/spec.md](knowledge/ingestion/spec.md)
-- [knowledge/ingestion/plan.md](knowledge/ingestion/plan.md)
-- [knowledge/ingestion/tasks.md](knowledge/ingestion/tasks.md)
-- [knowledge/retrieval/spec.md](knowledge/retrieval/spec.md)
-- [knowledge/retrieval/plan.md](knowledge/retrieval/plan.md)
-- [knowledge/retrieval/tasks.md](knowledge/retrieval/tasks.md)
-- [knowledge/evaluation/spec.md](knowledge/evaluation/spec.md)
-- [knowledge/evaluation/plan.md](knowledge/evaluation/plan.md)
-- [knowledge/evaluation/tasks.md](knowledge/evaluation/tasks.md)
-
-## Persistence Domain
-
-- [persistence/README.md](persistence/README.md)
-- [persistence/state-ownership/spec.md](persistence/state-ownership/spec.md)
-- [persistence/state-ownership/plan.md](persistence/state-ownership/plan.md)
-- [persistence/state-ownership/tasks.md](persistence/state-ownership/tasks.md)
-
-## Product Domain
-
-- [product/branding/spec.md](product/branding/spec.md)
-- [product/branding/plan.md](product/branding/plan.md)
-- [product/branding/tasks.md](product/branding/tasks.md)
-- [product/account-navigation/spec.md](product/account-navigation/spec.md)
-- [product/account-navigation/plan.md](product/account-navigation/plan.md)
-- [product/account-navigation/tasks.md](product/account-navigation/tasks.md)
-- [product/chat-thinking/spec.md](product/chat-thinking/spec.md)
-- [product/chat-thinking/plan.md](product/chat-thinking/plan.md)
-- [product/chat-thinking/tasks.md](product/chat-thinking/tasks.md)
-- [product/chat-tool-group/spec.md](product/chat-tool-group/spec.md)
-- [product/chat-tool-group/plan.md](product/chat-tool-group/plan.md)
-- [product/chat-tool-group/tasks.md](product/chat-tool-group/tasks.md)
-- [product/chat-model-selection/spec.md](product/chat-model-selection/spec.md)
-- [product/chat-model-selection/plan.md](product/chat-model-selection/plan.md)
-- [product/chat-model-selection/tasks.md](product/chat-model-selection/tasks.md)
+架构归属先从 [`docs/architecture/README.md`](../architecture/README.md) 判断。具体维护规则以
+[`docs/working-rules.md`](../working-rules.md) 为准。

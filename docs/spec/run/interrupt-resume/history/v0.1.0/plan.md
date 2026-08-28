@@ -2,6 +2,8 @@
 
 计划版本：`v0.1.0`
 
+归档状态：已完成。
+
 ## 1. Implementation Order
 
 1. 用最小 `ask_user` fixture 固定当前 LangGraph interrupt/resume 真实结构。
@@ -32,23 +34,29 @@
   - 状态说明加入 `interrupted`，运行类型说明加入 `resume`；
   - `trigger_message_id` 允许 Resume Run 为 `null`，不新增表或 JSON 列。
 - `src/database/repositories/agent_run_repository.py`
-  - active 查询把 `interrupted` 视为已结束；
-  - 新增 `set_interrupted(run_id, payload)`；
+  - 把 `interrupted` 纳入统一 `AGENT_RUN_TERMINAL_STATUSES`；
+  - `set_agent_terminal` 同时处理 `completed/failed/cancelled/interrupted`；
+  - interrupted 把结构化消息序列化到现有 `error`，并用现有 `error_type` 保存 kind；Repository
+    从该消息同步 `run_metadata.interrupt`，不新增 interrupt 专用参数或写入方法；
   - 新增带父行锁的 Resume 子 Run 查询；
-  - `set_agent_terminal` 保持 `completed/failed/cancelled`，不接收 interrupt payload。
 
-目标：`AgentRunRepository.set_interrupted`
+目标：`AgentRunRepository.set_agent_terminal`
 
 ```python
 run = await self._lock_update(run_id)
-if run is None or str(run.agent_status) in AGENT_RUN_TERMINAL_STATUSES | {
-    "interrupted"
-}:
+if run is None or str(run.agent_status) in AGENT_RUN_TERMINAL_STATUSES:
     return run, False
 
-run.run_metadata = {**dict(run.run_metadata or {}), "interrupt": payload}
-run.agent_status = "interrupted"
+if status == "interrupted" and error is not None:
+    interrupt_payload = json.loads(error)
+    run.run_metadata = {
+        **dict(run.run_metadata or {}),
+        "interrupt": interrupt_payload,
+    }
+run.agent_status = status
 run.finished_at = datetime.now(UTC)
+run.error = error
+run.error_type = error_type
 await self.session.flush()
 return run, True
 ```
@@ -242,7 +250,7 @@ def build_agent_interrupt_message(interrupt: Interrupt) -> dict[str, Any]:
 await save_message_from_langgraph_state(...)
 interrupt_payload = await check_agent_interrupt_handler(
     agent_instance=agent_instance,
-    context=agent_runtime_context,
+    context=agent_context,
 )
 if interrupt_payload is not None:
     yield make_agent_stream_event(
@@ -263,32 +271,90 @@ detector 类或新模块；BaseAgent 两个入口保持相同输出合同，但�
 ### 2.5 Worker lifecycle
 
 - `server/worker.py:_finalize_run`
-  - 作为普通、错误、取消和打断的统一数据库状态转换入口；删除
+  - 作为进入 Agent Stream 后普通、错误、取消和打断的统一数据库状态转换入口；删除
     `_finalize_interrupted_run`；
-  - `status="interrupted"` 时调用独立 `set_run_interrupted` 保存 payload，其余停止状态
-    调用 `set_run_terminal`；本轮不合并两个 Repository 方法；
-  - 只返回 PostgreSQL 实际 `(agent_status, changed)`，不写 Redis Stream。
+  - 所有停止状态统一调用 `set_run_terminal`；`interrupted` 复用已有 `error/error_type` 终态
+    消息参数，不增加 `interrupt_payload` 参数或独立写入函数；
+  - 返回 PostgreSQL 实际 `(agent_status, changed)`；
+  - 仅在 `changed=True` 时发布终态事件：普通终态发布 `end`，interrupted 依次发布
+    interaction/end。
 - `server/worker.py:process_agent_run`
+  - 初次读取到 `cancel_requested` 时不提前调用 `_finalize_run`，继续执行到
+    `set_run_running` 后的统一执行前状态检查点；
+  - 在进入 `_cancellable_stream` 消费循环前，输入 Message、User 或其他准备校验失败时，
+    直接调用 `set_run_terminal(status="failed", error, error_type)` 后裸返回；该函数内部
+    使用 Repository 的 `set_agent_terminal`，不经过 `_finalize_run`，不发布 Redis `end`；
+  - `set_run_running` 后仍为 `cancel_requested` 时，直接调用
+    `set_run_terminal(status="cancelled")`、清理取消信号并裸返回，同样不发布 Redis `end`；
   - 先读取 `run_type`；普通 Run 构造 message 输入并调用 `stream_agent_response`，Resume
     Run 不查询 `trigger_message_id`，直接调用 `resume_agent_response`；
   - 把 `AgentRun.run_metadata` 合入 `runtime_metadata`；
   - 两个入口返回相同 chunk 合同，后续事件消费不按运行类型分叉；
   - 通过既有 `_cancellable_stream` 消费 bytes chunk，并使用 `_normalize_steam_agent_chunk`
     解码两个入口各自 builder 的结果；
-  - 以 chunk `status` 作为控制入口：`finished` 收敛为 completed，`error/failed` 收敛为
-    failed，`interrupted` 收敛为 interrupted；取消路径也调用同一个 `_finalize_run`；
+  - 进入消费循环后以 chunk `status` 作为控制入口：`finished` 收敛为 completed，内部
+    `error` 收敛为 failed，`interrupted` 收敛为 interrupted；执行中取消也调用同一个
+    `_finalize_run`；
+  - 不接收 Thread Service 的 `failed` chunk；`failed` 只作为 PostgreSQL 终态和对外
+    `end` 事件状态；
   - 每个停止 case 都检查 `_finalize_run` 返回的实际 `agent_status` 是否属于停止状态，并
     保存 `terminal_result`；不为 `None` 或非停止状态增加额外异常；
-  - 仅当 `changed=True` 时发布本次状态转换对应的停止事件；`changed=False` 不重复发布；
-  - interrupted 的本次转换依次发布 interaction/end，其他停止状态发布 end；
-  - 停止 case 使用 `continue`，不使用 `break` 或立即 `return`；Thread Service 在终止
-    chunk 后自行返回，Worker 等待 stream 自然耗尽后再返回 `terminal_result`；
+  - 每个 status case 只调用 `_finalize_run` 并保存实际结果；终态事件统一由
+    `_finalize_run` 根据 `changed` 发布，`changed=False` 不重复发布；
+  - 循环内只按 Thread Service 产出的 chunk `status` 处理，不读取 `terminal_result` 判断
+    是否继续；停止 case 只记录 `terminal_result`，不使用 `break`、`continue` 或立即
+    `return` 控制循环；
+  - Thread Service 在终止 chunk 后自行返回；Worker 等待 stream 自然耗尽并退出数据库
+    上下文后，存在 `terminal_result` 则返回；不存在则先由 `AgentRunContext` 判断是否取消，
+    再通过 `_finalize_run` 强制收敛为 cancelled 或 failed；
   - 只有显式 `finished` chunk 能写 completed；没有停止 status 的流耗尽按协议错误写
     failed，不保留 completed 兜底。
 - `server/service/arq_queue_servcie.py`
   - 复用现有 Stream writer，不新增 Redis key、channel 或 sequence。
 
 ```python
+# _finalize_run：所有停止状态统一落库，并在 changed=True 时发布对应终态事件。
+terminal_error = error
+terminal_error_type = error_type
+if status == "interrupted" and payload is not None:
+    terminal_error = json.dumps(payload, ensure_ascii=False)
+    terminal_error_type = str(payload.get("kind") or "interrupted")
+
+agent_status, changed = await set_run_terminal(
+    run_id,
+    status=status,
+    error=terminal_error,
+    error_type=terminal_error_type,
+)
+if changed and agent_status == "interrupted":
+    await write_stream_event(
+        run_id,
+        "interaction_required",
+        {**(payload or {}), "parent_run_id": run_id},
+        thread_id,
+    )
+if changed and agent_status:
+    await write_end_stream_event(run_id, end_payload, thread_id)
+return agent_status, changed
+
+
+# Agent Stream 前：准备失败只落库，不通过 _finalize_run 发布 end。
+if run_type != "resume" and input_message is None:
+    await set_run_terminal(
+        run_id,
+        status="failed",
+        error="Input message not found",
+        error_type="LookupError",
+    )
+    return
+
+running_run = await set_run_running(run_id)
+if running_run.agent_status == "cancel_requested":
+    await set_run_terminal(run_id, status="cancelled")
+    await clear_agent_run_cancel_signal(run_id)
+    return
+
+
 if run_type == "resume":
     agent_stream = resume_agent_response(
         runtime_metadata=runtime_metadata,
@@ -301,64 +367,56 @@ else:
         ...
     )
 
-# FIXEME: 所有停止状态统一经过 _finalize_run，事件发布权由 changed 决定。
+# FIXEME: 进入 Agent Stream 后的停止状态经过 _finalize_run，事件发布权由 changed 决定。
 async for stream_chunk in _cancellable_stream(agent_stream, ...):
     for chunk in _normalize_steam_agent_chunk(stream_chunk):
         status = chunk.get("status")
-
-        if terminal_result is not None:
-            continue
 
         if status == "interrupted":
             await smoother.release()
             agent_status, changed = await _finalize_run(
                 run_id,
                 status="interrupted",
-                interrupt_payload=chunk["interrupt"],
+                thread_id=thread_id,
+                payload=chunk["interrupt"],
             )
-            if agent_status in RUN_TERMINAL_STATUSES:
+            if agent_status in AGENT_RUN_TERMINAL_STATUSES:
                 terminal_result = (agent_status, changed)
-                if changed:
-                    await write_stream_event(
-                        run_id, "interaction_required", payload, thread_id
-                    )
-                    await write_end_stream_event(
-                        run_id, {"status": agent_status}, thread_id
-                    )
-            continue
-
-        if status in {"error", "failed"}:
+        elif status == "error":
             agent_status, changed = await _finalize_run(
                 run_id,
                 status="failed",
+                thread_id=thread_id,
                 error=chunk.get("error"),
                 error_type=chunk.get("error_type"),
             )
-            if agent_status in RUN_TERMINAL_STATUSES:
+            if agent_status in AGENT_RUN_TERMINAL_STATUSES:
                 terminal_result = (agent_status, changed)
-                if changed:
-                    await write_end_stream_event(
-                        run_id,
-                        {"status": agent_status, "error": chunk.get("error")},
-                        thread_id,
-                    )
-            continue
-
-        if status == "finished":
+        elif status == "finished":
             agent_status, changed = await _finalize_run(
                 run_id,
                 status="completed",
+                thread_id=thread_id,
+                payload=chunk,
             )
-            if agent_status in RUN_TERMINAL_STATUSES:
+            if agent_status in AGENT_RUN_TERMINAL_STATUSES:
                 terminal_result = (agent_status, changed)
-                if changed:
-                    await write_end_stream_event(
-                        run_id, {"status": agent_status}, thread_id
-                    )
-            continue
 
 if terminal_result is not None:
     return terminal_result
+
+if await run_context.has_cancel_signal():
+    return await _finalize_run(
+        run_id, status="cancelled", thread_id=thread_id
+    )
+
+return await _finalize_run(
+    run_id,
+    status="failed",
+    thread_id=thread_id,
+    error="Agent stream ended without terminal status",
+    error_type="RuntimeError",
+)
 ```
 
 目标文件与函数：`server/worker.py:_finalize_run`、`server/worker.py:process_agent_run`。
@@ -417,7 +475,12 @@ def ask_user(question: str, options: list[str]) -> str:
 - 父 Run 校验失败时不创建或入队 Resume Run；
 - 入队失败沿用现有 failed 收敛；
 - checkpoint 缺失时新 Resume Run 写为 failed，不重放父输入；
-- Stream 未产生任何停止 status 就自然耗尽时按协议错误写 failed，不得默认 completed；
+- Agent Stream 前的 Message/User/准备失败直接通过 `set_run_terminal` 写 failed 后返回，
+  不调用 `_finalize_run`，也不发布 Redis `end`；
+- Stream 耗尽后没有 `terminal_result` 时，先由 `AgentRunContext` 判断取消；取消收敛为
+  cancelled，未取消才按协议错误收敛为 failed；
+- Stream 未取消且未产生任何停止 status 就自然耗尽时按协议错误写 failed，不得默认
+  completed；
 - PostgreSQL 已提交但 Redis 发布失败时，以数据库状态和 metadata 收敛；
 - 父行锁和 Resume 子 Run 查询串行化并发恢复。
 
@@ -428,8 +491,9 @@ def ask_user(question: str, options: list[str]) -> str:
 - `build_agent_interrupt_message` 的 question/options 正常与非法结构测试；
 - Repository 的 interrupted、父行锁、幂等和重复恢复测试；
 - Resume Service 的权限、Thread、`thread_metadata.resume` 和新旧 Run ID 测试；
-- Worker 的 finished/error/failed/interrupted 分支、自然耗尽、`changed=True/False` 和
-  PostgreSQL -> interaction -> end 顺序测试；
+- Worker 的执行前 failed/cancelled 裸返回、finished/error/interrupted 分支、无终态时的
+  Run Context 取消判断、自然耗尽、`changed=True/False` 和 PostgreSQL -> interaction ->
+  end 顺序测试；
 - ToolCall/ToolMessage 幂等持久化和再次 interrupt 测试；
 - 前端状态流、刷新恢复、重复提交禁用、ESLint、TypeScript 和生产构建；
 - Ruff/compileall、文档链接和 `git diff --check`。
