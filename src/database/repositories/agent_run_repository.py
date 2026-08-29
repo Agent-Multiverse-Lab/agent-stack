@@ -1,3 +1,4 @@
+import json
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
@@ -7,9 +8,9 @@ from sqlalchemy.orm import aliased
 
 from src.database.models import AgentRun, Conversation
 
-AGENT_RUN_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
-# FIXEME: interrupted 对当前 Run 是终止执行，但不并入 set_agent_terminal 的允许值。
-AGENT_RUN_INACTIVE_STATUSES = AGENT_RUN_TERMINAL_STATUSES | {"interrupted"}
+AGENT_RUN_TERMINAL_STATUSES = frozenset(
+    {"completed", "failed", "cancelled", "interrupted"}
+)
 
 
 class AgentRunRepository:
@@ -74,7 +75,7 @@ class AgentRunRepository:
                 AgentRun.uid == uid,
                 Conversation.uid == uid,
                 AgentRun.run_type == "subagent",
-                AgentRun.agent_status.not_in(AGENT_RUN_INACTIVE_STATUSES),
+                AgentRun.agent_status.not_in(AGENT_RUN_TERMINAL_STATUSES),
                 Conversation.deleted_at.is_(None),
             )
             .execution_options(populate_existing=True)
@@ -192,7 +193,7 @@ class AgentRunRepository:
             .where(
                 AgentRun.conversation_id.in_(conversation_ids),
                 AgentRun.uid == uid,
-                AgentRun.agent_status.not_in(AGENT_RUN_INACTIVE_STATUSES),
+                AgentRun.agent_status.not_in(AGENT_RUN_TERMINAL_STATUSES),
             )
             .limit(1)
         )
@@ -256,7 +257,7 @@ class AgentRunRepository:
             .where(
                 AgentRun.uid == uid,
                 AgentRun.thread_id == thread_id,
-                AgentRun.agent_status.not_in(AGENT_RUN_INACTIVE_STATUSES),
+                AgentRun.agent_status.not_in(AGENT_RUN_TERMINAL_STATUSES),
                 Conversation.uid == uid,
                 Conversation.thread_id == thread_id,
                 Conversation.deleted_at.is_(None),
@@ -302,7 +303,7 @@ class AgentRunRepository:
         run = await self._lock_update(run_id)
         if run is None:
             return None
-        if str(run.agent_status) in AGENT_RUN_INACTIVE_STATUSES | {
+        if str(run.agent_status) in AGENT_RUN_TERMINAL_STATUSES | {
             "cancel_requested"
         }:
             return run
@@ -312,27 +313,6 @@ class AgentRunRepository:
         run.error = None
         await self.session.flush()
         return run
-
-    # FIXEME: interrupted 独立保存 payload，不扩大 set_agent_terminal 的职责。
-    async def set_interrupted(
-        self,
-        run_id: str,
-        payload: dict,
-    ) -> tuple[AgentRun | None, bool]:
-        run = await self._lock_update(run_id)
-        if run is None:
-            return None, False
-        if str(run.agent_status) in AGENT_RUN_INACTIVE_STATUSES:
-            return run, False
-
-        run.run_metadata = {
-            **dict(run.run_metadata or {}),
-            "interrupt": dict(payload),
-        }
-        run.agent_status = "interrupted"
-        run.finished_at = datetime.now(UTC)
-        await self.session.flush()
-        return run, True
 
     async def set_agent_terminal(
         self,
@@ -349,9 +329,18 @@ class AgentRunRepository:
         if run is None:
             return None, False
         current_status = str(run.agent_status)
-        if current_status in AGENT_RUN_INACTIVE_STATUSES:
+        if current_status in AGENT_RUN_TERMINAL_STATUSES:
             return run, False
 
+        # FIXEME: interrupted 复用现有 error/error_type 终态消息字段，不增加专用参数。
+        if status == "interrupted" and error is not None:
+            interrupt_payload = json.loads(error)
+            if not isinstance(interrupt_payload, dict):
+                raise ValueError("interrupted 终态消息必须是 JSON 对象")
+            run.run_metadata = {
+                **dict(run.run_metadata or {}),
+                "interrupt": interrupt_payload,
+            }
         run.agent_status = status  # ty: ignore[invalid-assignment]
         run.finished_at = datetime.now(UTC)  # ty: ignore[invalid-assignment]
         run.error = error  # ty: ignore[invalid-assignment]
@@ -363,7 +352,7 @@ class AgentRunRepository:
         run = await self._lock_update(run_id)
         if run is None:
             return None
-        if str(run.agent_status) in AGENT_RUN_INACTIVE_STATUSES:
+        if str(run.agent_status) in AGENT_RUN_TERMINAL_STATUSES:
             return run
 
         run.agent_status = "cancel_requested"

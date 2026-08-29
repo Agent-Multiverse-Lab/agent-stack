@@ -1124,9 +1124,15 @@ async def stream_agent_response(
             status="finished",
             runtime_metadata=runtime_metadata,
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Agent stream 响应失败")
-        raise
+        # FIXEME: 普通 Run 只负责把执行异常转换为内部 error chunk。
+        yield make_agent_stream_event(
+            status="error",
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return
 
 
 # FIXEME: Resume 与普通入口同级，直接把 Command 交给 BaseAgent 专用方法。
@@ -1234,6 +1240,12 @@ async def resume_agent_response(
             status="finished",
             runtime_metadata=runtime_metadata,
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Agent Resume stream 响应失败")
-        raise
+        # FIXEME: Resume Run 使用自己的 builder 输出相同字段合同的 error chunk。
+        yield make_agent_resume_event(
+            status="error",
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return

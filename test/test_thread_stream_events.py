@@ -29,6 +29,8 @@ class FakeAgent:
 
     async def stream_message_by_resume(self, resume_input, **_kwargs):
         self.resume_input = resume_input
+        if self.error is not None:
+            raise self.error
         for event in self.events:
             yield event
 
@@ -144,15 +146,22 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
         self.save_messages.assert_awaited_once()
         self.assertEqual("run-1", self.save_messages.await_args.kwargs["run_id"])
 
-    async def test_invalid_values_payload_propagates(self) -> None:
-        with self.assertRaises(AttributeError):
-            await self.collect_events(FakeAgent(events=(("values", None),)))
+    async def test_invalid_values_payload_yields_error_chunk(self) -> None:
+        # FIXEME: Thread Service 将内部解析异常转换为统一 error chunk。
+        events = await self.collect_events(FakeAgent(events=(("values", None),)))
 
-    async def test_agent_stream_error_propagates(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "model failed"):
-            await self.collect_events(
-                FakeAgent(error=RuntimeError("model failed"))
-            )
+        self.assertEqual("error", events[-1]["status"])
+        self.assertEqual("AttributeError", events[-1]["error_type"])
+
+    async def test_agent_stream_error_yields_error_chunk(self) -> None:
+        # FIXEME: 模型异常不再越过 Thread Service 直接抛给 Worker。
+        events = await self.collect_events(
+            FakeAgent(error=RuntimeError("model failed"))
+        )
+
+        self.assertEqual("error", events[-1]["status"])
+        self.assertEqual("model failed", events[-1]["error"])
+        self.assertEqual("RuntimeError", events[-1]["error_type"])
 
     async def test_resume_stream_passes_command_without_human_message(self) -> None:
         agent = FakeAgent()
@@ -197,6 +206,43 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("PostgreSQL", agent.resume_input.resume)
         self.assertEqual("finished", events[-1]["status"])
+
+    async def test_resume_stream_error_yields_error_chunk(self) -> None:
+        # FIXEME: Resume 入口使用自己的 builder 输出 error chunk。
+        agent = FakeAgent(error=RuntimeError("resume failed"))
+        agent_item = SimpleNamespace(slug="test-agent")
+        current_user = SimpleNamespace(uid="user-1")
+
+        with (
+            patch(
+                "server.service.thread_service._build_agent_runtime",
+                new_callable=AsyncMock,
+                return_value=(agent_item, agent),
+            ),
+            patch(
+                "server.service.thread_service._check_conv_status",
+                new_callable=AsyncMock,
+            ),
+        ):
+            events = [
+                json.loads(chunk)
+                async for chunk in thread_service.resume_agent_response(
+                    agent_slug="test-agent",
+                    thread_id="thread-1",
+                    runtime_metadata={
+                        "run_id": "resume-run",
+                        "request_id": "resume-request",
+                        "run_type": "resume",
+                        "resume": {"answer": "PostgreSQL"},
+                    },
+                    current_user=current_user,
+                    db=object(),
+                )
+            ]
+
+        self.assertEqual("error", events[-1]["status"])
+        self.assertEqual("resume failed", events[-1]["error"])
+        self.assertEqual("RuntimeError", events[-1]["error_type"])
 
 
 if __name__ == "__main__":

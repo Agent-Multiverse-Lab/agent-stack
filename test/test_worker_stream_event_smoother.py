@@ -1,5 +1,8 @@
 import asyncio
+import json
 import unittest
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from server.service.arq_queue_servcie import RUN_REDIS_TTL_SECONDS
@@ -7,9 +10,9 @@ from server.worker import (
     AgentRunContext,
     StreamEventSmoother,
     _cancellable_stream,
-    _finalize_interrupted_run,
     _finalize_run,
     map_stream_event,
+    process_agent_run,
     write_end_stream_event,
     write_stream_event,
 )
@@ -214,35 +217,37 @@ class WorkerStreamWriterTest(unittest.IsolatedAsyncioTestCase):
 
 class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
     async def test_interrupted_run_persists_before_interaction_and_end(self) -> None:
+        # FIXEME: finalizer 统一保证 interrupt 落库和事件发布顺序。
         events = []
-
-        async def set_interrupted(run_id, payload):
-            events.append(("persist", run_id, payload))
-            return "interrupted", True
-
-        async def write_event(run_id, event_type, payload, thread_id):
-            events.append((event_type, run_id, payload, thread_id))
-
-        async def write_end(run_id, payload, thread_id):
-            events.append(("end", run_id, payload, thread_id))
-
         payload = {
             "kind": "ask_user",
             "question": "请选择数据库",
             "options": ["PostgreSQL", "MySQL"],
         }
+
+        async def set_terminal(run_id, **kwargs):
+            events.append(("persist", run_id, kwargs))
+            return "interrupted", True
+
+        async def write_event(run_id, event_type, event_payload, thread_id):
+            events.append((event_type, run_id, event_payload, thread_id))
+
+        async def write_end(run_id, event_payload, thread_id):
+            events.append(("end", run_id, event_payload, thread_id))
+
         with (
             patch(
-                "server.worker.set_run_interrupted",
-                side_effect=set_interrupted,
+                "server.worker.set_run_terminal",
+                side_effect=set_terminal,
             ),
             patch("server.worker.write_stream_event", side_effect=write_event),
             patch("server.worker.write_end_stream_event", side_effect=write_end),
         ):
-            result = await _finalize_interrupted_run(
+            result = await _finalize_run(
                 "parent-run",
+                status="interrupted",
                 thread_id="thread-1",
-                interrupt_payload=payload,
+                payload=payload,
             )
 
         self.assertEqual(("interrupted", True), result)
@@ -250,10 +255,13 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
             ["persist", "interaction_required", "end"],
             [event[0] for event in events],
         )
+        self.assertEqual("interrupted", events[0][2]["status"])
         self.assertEqual(
-            "parent-run",
-            events[1][2]["parent_run_id"],
+            payload,
+            json.loads(events[0][2]["error"]),
         )
+        self.assertEqual("ask_user", events[0][2]["error_type"])
+        self.assertEqual("parent-run", events[1][2]["parent_run_id"])
 
     async def test_failed_run_uses_unified_terminal_path(self) -> None:
         with (
@@ -352,6 +360,428 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, ("completed", False))
         write_end_event.assert_not_awaited()
+
+
+# FIXEME: Agent Stream 前的退出只写 Repository 终态，不通过 finalizer 发布 end。
+class AgentRunPreStreamFailureTest(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _agent_run(**overrides):
+        values = {
+            "id": "run-1",
+            "agent_status": "queued",
+            "uid": "user-1",
+            "agent_id": "leader-agent",
+            "request_id": "request-1",
+            "thread_id": "thread-1",
+            "run_type": "resume",
+            "run_metadata": {"resume": {"answer": "PostgreSQL"}},
+            "trigger_message_id": None,
+        }
+        values.update(overrides)
+        return SimpleNamespace(**values)
+
+    async def test_missing_input_sets_failed_without_finalizer(self) -> None:
+        agent_run = self._agent_run(
+            run_type="normal",
+            run_metadata={},
+            trigger_message_id=101,
+        )
+
+        with (
+            patch(
+                "server.worker._get_agent_run",
+                new_callable=AsyncMock,
+                return_value=agent_run,
+            ),
+            patch(
+                "server.worker._get_agent_input_msg",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "server.worker.set_run_terminal",
+                new_callable=AsyncMock,
+            ) as set_terminal,
+            patch(
+                "server.worker._finalize_run",
+                new_callable=AsyncMock,
+            ) as finalizer,
+            patch(
+                "server.worker.write_end_stream_event",
+                new_callable=AsyncMock,
+            ) as write_end,
+        ):
+            result = await process_agent_run({}, "run-1")
+
+        self.assertIsNone(result)
+        set_terminal.assert_awaited_once_with(
+            "run-1",
+            status="failed",
+            error="Input message not found: 101",
+            error_type="LookupError",
+        )
+        finalizer.assert_not_awaited()
+        write_end.assert_not_awaited()
+
+    async def test_missing_user_sets_failed_without_finalizer(self) -> None:
+        with (
+            patch(
+                "server.worker._get_agent_run",
+                new_callable=AsyncMock,
+                return_value=self._agent_run(),
+            ),
+            patch(
+                "server.worker._get_user",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "server.worker.set_run_terminal",
+                new_callable=AsyncMock,
+            ) as set_terminal,
+            patch(
+                "server.worker._finalize_run",
+                new_callable=AsyncMock,
+            ) as finalizer,
+            patch(
+                "server.worker.write_end_stream_event",
+                new_callable=AsyncMock,
+            ) as write_end,
+        ):
+            result = await process_agent_run({}, "run-1")
+
+        self.assertIsNone(result)
+        set_terminal.assert_awaited_once_with(
+            "run-1",
+            status="failed",
+            error="User not found: user-1",
+            error_type="LookupError",
+        )
+        finalizer.assert_not_awaited()
+        write_end.assert_not_awaited()
+
+    async def test_pre_stream_cancel_sets_terminal_without_end(self) -> None:
+        with (
+            patch(
+                "server.worker._get_agent_run",
+                new_callable=AsyncMock,
+                return_value=self._agent_run(),
+            ),
+            patch(
+                "server.worker._get_user",
+                new_callable=AsyncMock,
+                return_value=SimpleNamespace(uid="user-1"),
+            ),
+            patch(
+                "server.worker.set_run_running",
+                new_callable=AsyncMock,
+                return_value=SimpleNamespace(agent_status="cancel_requested"),
+            ),
+            patch(
+                "server.worker.set_run_terminal",
+                new_callable=AsyncMock,
+            ) as set_terminal,
+            patch(
+                "server.worker.clear_agent_run_cancel_signal",
+                new_callable=AsyncMock,
+            ) as clear_cancel,
+            patch(
+                "server.worker._finalize_run",
+                new_callable=AsyncMock,
+            ) as finalizer,
+            patch(
+                "server.worker.write_end_stream_event",
+                new_callable=AsyncMock,
+            ) as write_end,
+        ):
+            result = await process_agent_run({}, "run-1")
+
+        self.assertIsNone(result)
+        set_terminal.assert_awaited_once_with("run-1", status="cancelled")
+        clear_cancel.assert_awaited_once_with("run-1")
+        finalizer.assert_not_awaited()
+        write_end.assert_not_awaited()
+
+
+# FIXEME: 终态 chunk 必须在 process_agent_run 中按 status 驱动自然收口。
+class AgentRunProcessTest(unittest.IsolatedAsyncioTestCase):
+    async def _run_process(
+        self,
+        chunks: list[dict],
+        *,
+        final_status: str,
+        changed: bool = True,
+        has_cancel_signal: bool = False,
+    ):
+        events: list[tuple] = []
+        agent_run = SimpleNamespace(
+            id="run-1",
+            agent_status="queued",
+            uid="user-1",
+            agent_id="leader-agent",
+            request_id="request-1",
+            thread_id="thread-1",
+            run_type="resume",
+            run_metadata={"resume": {"answer": "PostgreSQL"}},
+            trigger_message_id=None,
+        )
+        user = SimpleNamespace(uid="user-1")
+        running_run = SimpleNamespace(agent_status="running")
+
+        async def stream_response(**_kwargs):
+            for chunk in chunks:
+                chunk.setdefault("thread_id", "thread-1")
+                yield (json.dumps(chunk) + "\n").encode("utf-8")
+
+        async def passthrough_stream(stream, **_kwargs):
+            async for chunk in stream:
+                yield chunk
+
+        async def set_terminal(
+            run_id,
+            *,
+            status,
+            error=None,
+            error_type=None,
+        ):
+            events.append(
+                (
+                    "finalize",
+                    status,
+                    {"error": error, "error_type": error_type},
+                )
+            )
+            return final_status, changed
+
+        async def write_event(run_id, event_type, payload, thread_id):
+            events.append((event_type, payload, thread_id))
+            return "1-0"
+
+        async def write_end(run_id, payload, thread_id):
+            events.append(("end", payload, thread_id))
+            return "2-0"
+
+        @asynccontextmanager
+        async def session_context():
+            yield object()
+
+        with (
+            patch(
+                "server.worker._get_agent_run",
+                new_callable=AsyncMock,
+                return_value=agent_run,
+            ),
+            patch(
+                "server.worker._get_user",
+                new_callable=AsyncMock,
+                return_value=user,
+            ),
+            patch(
+                "server.worker.set_run_running",
+                new_callable=AsyncMock,
+                return_value=running_run,
+            ),
+            patch(
+                "server.worker.resume_agent_response",
+                side_effect=lambda **kwargs: stream_response(**kwargs),
+            ),
+            patch("server.worker._cancellable_stream", new=passthrough_stream),
+            patch(
+                "server.worker.postgres_manager.get_async_session_context",
+                return_value=session_context(),
+            ),
+            patch("server.worker.set_run_terminal", side_effect=set_terminal),
+            patch("server.worker._finalize_run", wraps=_finalize_run) as finalizer,
+            patch("server.worker.write_stream_event", side_effect=write_event),
+            patch("server.worker.write_end_stream_event", side_effect=write_end),
+            patch(
+                "server.worker.clear_agent_run_cancel_signal",
+                new_callable=AsyncMock,
+            ),
+            patch("server.worker.AgentRunContext.start"),
+            patch(
+                "server.worker.AgentRunContext.has_cancel_signal",
+                new_callable=AsyncMock,
+                return_value=has_cancel_signal,
+            ),
+            patch(
+                "server.worker.AgentRunContext.close",
+                new_callable=AsyncMock,
+            ),
+        ):
+            result = await process_agent_run({}, "run-1")
+
+        return result, finalizer, events
+
+    async def test_interrupted_status_uses_finalizer(self) -> None:
+        interrupt = {
+            "kind": "ask_user",
+            "question": "请选择数据库",
+            "options": ["PostgreSQL", "MySQL"],
+        }
+
+        result, finalizer, events = await self._run_process(
+            [{"status": "interrupted", "interrupt": interrupt}],
+            final_status="interrupted",
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(
+            ["status", "finalize", "interaction_required", "end", "end"],
+            [event[0] for event in events],
+        )
+        self.assertEqual(
+            interrupt,
+            finalizer.await_args.kwargs["payload"],
+        )
+        self.assertEqual("interrupted", events[-1][1]["status"])
+        self.assertEqual("interrupted", events[-1][1]["chunk"]["status"])
+        self.assertEqual(interrupt, events[-1][1]["chunk"]["interrupt"])
+
+    async def test_unchanged_interrupted_status_does_not_publish(self) -> None:
+        result, finalizer, events = await self._run_process(
+            [
+                {
+                    "status": "interrupted",
+                    "interrupt": {
+                        "kind": "ask_user",
+                        "question": "请选择数据库",
+                        "options": ["PostgreSQL"],
+                    },
+                }
+            ],
+            final_status="interrupted",
+            changed=False,
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(
+            ["status", "finalize"],
+            [event[0] for event in events],
+        )
+        finalizer.assert_awaited_once()
+
+    async def test_error_status_maps_to_failed(self) -> None:
+        result, finalizer, events = await self._run_process(
+            [
+                {
+                    "status": "error",
+                    "error": "model failed",
+                    "error_type": "RuntimeError",
+                }
+            ],
+            final_status="failed",
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual("failed", finalizer.await_args.kwargs["status"])
+        self.assertEqual("model failed", finalizer.await_args.kwargs["error"])
+        self.assertEqual(
+            "RuntimeError",
+            finalizer.await_args.kwargs["error_type"],
+        )
+        self.assertEqual(
+            ["status", "finalize", "end", "end"],
+            [event[0] for event in events],
+        )
+        self.assertEqual("failed", events[-1][1]["status"])
+        self.assertEqual("error", events[-1][1]["chunk"]["status"])
+        self.assertEqual("model failed", events[-1][1]["chunk"]["error"])
+
+    async def test_unchanged_error_uses_actual_terminal_status_for_flag(
+        self,
+    ) -> None:
+        result, finalizer, events = await self._run_process(
+            [
+                {
+                    "status": "error",
+                    "error": "late error",
+                    "error_type": "RuntimeError",
+                }
+            ],
+            final_status="completed",
+            changed=False,
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(
+            ["status", "finalize"],
+            [event[0] for event in events],
+        )
+        finalizer.assert_awaited_once()
+
+    async def test_finished_status_maps_to_completed(self) -> None:
+        result, finalizer, events = await self._run_process(
+            [{"status": "finished", "request_id": "request-1"}],
+            final_status="completed",
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual("completed", finalizer.await_args.kwargs["status"])
+        self.assertEqual(
+            "finished",
+            finalizer.await_args.kwargs["payload"]["status"],
+        )
+        self.assertEqual(
+            ["status", "finalize", "end", "end"],
+            [event[0] for event in events],
+        )
+        self.assertEqual("completed", events[-1][1]["status"])
+        self.assertEqual("finished", events[-1][1]["chunk"]["status"])
+
+    async def test_unchanged_finished_status_does_not_publish_end(self) -> None:
+        # FIXEME: case 只在本次数据库状态发生变化时发布终止事件。
+        result, _, events = await self._run_process(
+            [{"status": "finished", "request_id": "request-1"}],
+            final_status="completed",
+            changed=False,
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(
+            ["status", "finalize"],
+            [event[0] for event in events],
+        )
+
+    async def test_chunks_after_terminal_flag_still_follow_status(self) -> None:
+        # terminal_flag 只在循环结束后读取，不屏蔽后续 chunk。
+        result, _, events = await self._run_process(
+            [
+                {"status": "finished", "request_id": "request-1"},
+                {"status": "agent_state", "response": {"agent_todo": []}},
+            ],
+            final_status="completed",
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(
+            ["status", "finalize", "end", "end", "custom"],
+            [event[0] for event in events],
+        )
+
+    async def test_stream_without_terminal_uses_context_cancellation(self) -> None:
+        # 无 terminal_flag 时先由 Run Context 判定取消。
+        result, finalizer, _ = await self._run_process(
+            [],
+            final_status="cancelled",
+            has_cancel_signal=True,
+        )
+
+        self.assertEqual(("cancelled", True), result)
+        self.assertEqual("cancelled", finalizer.await_args.kwargs["status"])
+
+    async def test_stream_without_terminal_status_maps_to_failed(self) -> None:
+        result, finalizer, _ = await self._run_process(
+            [],
+            final_status="failed",
+        )
+
+        self.assertEqual(("failed", True), result)
+        self.assertEqual("failed", finalizer.await_args.kwargs["status"])
+        self.assertEqual(
+            "Agent stream ended without terminal status",
+            finalizer.await_args.kwargs["error"],
+        )
 
 
 if __name__ == "__main__":

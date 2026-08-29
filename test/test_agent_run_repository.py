@@ -1,5 +1,6 @@
 """Agent Run 终态写入测试。"""
 
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -16,7 +17,7 @@ class FakeSession:
 
 
 class AgentRunTerminalTest(unittest.IsolatedAsyncioTestCase):
-    async def test_set_interrupted_persists_payload_and_status(self) -> None:
+    async def test_set_agent_terminal_persists_interrupt_payload(self) -> None:
         session = FakeSession()
         run = SimpleNamespace(
             agent_status="running",
@@ -31,14 +32,22 @@ class AgentRunTerminalTest(unittest.IsolatedAsyncioTestCase):
             "options": ["PostgreSQL", "MySQL"],
         }
 
-        # FIXEME: interrupted 使用独立写入方法并保留已有 Run metadata。
-        result, changed = await repository.set_interrupted("run-1", payload)
+        # FIXEME: interrupted 复用统一终态写入并保留已有 Run metadata。
+        terminal_message = json.dumps(payload, ensure_ascii=False)
+        result, changed = await repository.set_agent_terminal(
+            "run-1",
+            status="interrupted",
+            error=terminal_message,
+            error_type="ask_user",
+        )
 
         self.assertIs(run, result)
         self.assertTrue(changed)
         self.assertEqual("interrupted", run.agent_status)
         self.assertEqual("test-model", run.run_metadata["model"])
         self.assertEqual(payload, run.run_metadata["interrupt"])
+        self.assertEqual(terminal_message, run.error)
+        self.assertEqual("ask_user", run.error_type)
         self.assertIsNotNone(run.finished_at)
         self.assertEqual(1, session.flush_count)
 
