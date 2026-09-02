@@ -191,7 +191,6 @@ async def _get_user(uid: str) -> User | None:
         result = await db.execute(select(User).where(User.uid == uid))
         return result.scalar_one_or_none()
 
-
 async def _get_agent_input_msg(message_id: int | None) -> Message | None:
     async with postgres_manager.get_async_session_context() as db:
         result = await db.execute(select(Message).where(Message.id == message_id))
@@ -422,6 +421,12 @@ def _normalize_steam_agent_chunk(steam_agent_chunk_bytes: bytes) -> list[dict]:
             logger.warning(f"解析输出流失败{line}")
     return steam_agent_chunks
 
+async def _pending_run_cancel(run_id: str) -> bool:
+    # 判断当前前端是否发起了取消请求
+    current_agent_run = await _get_agent_run(run_id)
+    if current_agent_run is not None:
+        return current_agent_run.agent_status == "cancel_requested"
+    return False
 
 async def process_agent_run(ctx, run_id: str):
     agent_run_event: AgentRun | None = await _get_agent_run(run_id)
@@ -501,7 +506,6 @@ async def process_agent_run(ctx, run_id: str):
         raise ValueError(f"Agent Run 不存在：{run_id}")
     running_status = str(running_run.agent_status)
     if running_status == "cancel_requested":
-        # FIXEME: 执行前取消只落库并清理信号，不通过 finalizer 发布 end。
         await set_run_terminal(
             run_id,
             status="cancelled",
@@ -566,6 +570,7 @@ async def process_agent_run(ctx, run_id: str):
                             strem_agent_chunk,
                         )
                         status = strem_agent_chunk.get("status") or "some_event"
+
 
                         # FIXEME: 循环内只按 Thread Service 产出的 status 处理 chunk。
                         if status == "loading":
@@ -715,6 +720,7 @@ async def process_agent_run(ctx, run_id: str):
             raise
     finally:
         await run_context.close()
+
 
 
 class WorkerSettings:
