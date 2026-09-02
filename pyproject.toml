@@ -60,3 +60,8 @@ dependencies = [
     "a2a-sdk>=1.1.0",
     "umap-learn>=0.5.9.post2",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
