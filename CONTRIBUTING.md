@@ -34,3 +34,19 @@ chore(deps): 更新项目依赖
 - 有 issue 或任务 ID 时附上链接。
 - `web/` 的 UI 变更附上截图或视频。
 - 写明执行过的验证命令及其结果。
+
+## GitHub Release
+
+版本发布由维护者显式创建并推送语义版本 Tag 触发。Tag 去掉 `v` 前缀后必须与
+`pyproject.toml` 中的项目版本一致。
+
+首个版本的发布命令为：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+发布工作流会重新执行后端和前端构建检查；全部通过后创建正式的
+GitHub Release，并由 GitHub 自动生成 Release Notes 和源码归档。该流程不部署应用，
+也不发布容器镜像或语言包。

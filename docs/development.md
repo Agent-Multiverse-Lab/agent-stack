@@ -40,3 +40,19 @@ git diff --check
 `.venv/bin/python -m compileall -q <paths>`。
 
 修改后端源码后必须重建 Compose Worker，因为 Worker 镜像没有绑定挂载当前工作区。
+
+## CI 等价检查
+
+GitHub Actions 对 `main` 的 Pull Request 和 push 执行以下核心检查：
+
+```bash
+uv sync --frozen --no-dev
+uv run --no-sync python -m compileall -q server src
+
+cd web
+npm ci
+npm run build
+cd ..
+```
+
+这些命令只验证后端源码与前端产物可构建，不启动 Compose 服务，也不部署应用。
