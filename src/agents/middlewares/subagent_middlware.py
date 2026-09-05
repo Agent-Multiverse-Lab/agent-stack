@@ -2,7 +2,8 @@
 
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Any
+from dataclasses import dataclass
+from typing import Annotated, Any
 
 from deepagents.middleware._utils import append_to_system_message
 from langchain.agents.middleware.types import (
@@ -43,6 +44,9 @@ TASK_SYSTEM_PROMPT = """## 子智能体任务编排
 - 不要通过 HTTP、shell 或命令行绕过这些工具调用子智能体。
 """
 
+TASK_DESCRIPTION = "请详细描述当前Agent所需要执行的任务内容，上下文以及需要输出的内容"
+AGENT_DESCRIPTION = "必须从当前规定的可用的子AGENT中选取执行"
+
 
 class TaskInput(BaseModel):
     description: str = Field(description="子智能体可独立执行的完整任务")
@@ -52,6 +56,17 @@ class TaskInput(BaseModel):
 class SubAgentRunInput(BaseModel):
     run_id: str = Field(description="由 task 或 subagent_start 返回的子运行 ID")
 
+# 以实体类形式返回结果
+@dataclass(frozen=True)
+class _ParentAgentRuntime:
+    pass
+
+@dataclass(frozen=True)
+class _SubAgentStartResult:
+    start_result: Any
+    parent_runtime: _ParentAgentRuntime
+    agent: Any
+    
 
 def _subagent_run_service(db: AsyncSession):
     """延迟加载 service，并绑定当前数据库会话。"""
@@ -98,12 +113,13 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
 
     def _create_task_tool(self) -> StructuredTool:
         async def task(
-            description: str,
-            subagent_slug: str,
+            subagent_slug: Annotated[str, AGENT_DESCRIPTION],
+            task_description: Annotated[str, TASK_DESCRIPTION],
             runtime: ToolRuntime,
+            thread_id: str | None
         ) -> Command:
-            subagent_record, error = await self._start_run(
-                description=description,
+            subagent_run_record, error = await self._start_run(
+                task_description=task_description,
                 subagent_slug=subagent_slug,
                 runtime=runtime,
                 tool_name="task",
@@ -111,7 +127,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
             if error is not None:
                 return error
 
-            run_id = str(subagent_record["run_id"])  # ty:ignore[not-subscriptable]
+            run_id = str(subagent_run_record["run_id"])  # ty:ignore[not-subscriptable]
             try:
                 result = await wait_agent_run_result(run_id)
             except Exception as exc:
@@ -120,7 +136,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
                     tool_name="task",
                     subagent_slug=subagent_slug,
                     content=f"子智能体运行未能返回结果：{exc}",
-                    record={**subagent_record, "status": "failed"},  # ty:ignore[invalid-argument-type]
+                    record={**subagent_run_record, "status": "failed"},  # ty:ignore[invalid-argument-type]
                     status="failed",
                     error=True,
                 )
@@ -130,7 +146,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
                 tool_name="task",
                 subagent_slug=subagent_slug,
                 content=result or "子智能体已完成，但没有返回文本结果。",
-                record={**subagent_record, "status": "completed"},
+                record={**subagent_run_record, "status": "completed"},
                 status="completed",
             )
 
@@ -355,7 +371,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
     async def _start_run(
         self,
         *,
-        description: str,
+        task_description: str,
         subagent_slug: str,
         runtime: ToolRuntime,
         tool_name: str,
@@ -382,7 +398,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
                 ).create_subagent_record(
                     parent_run_id=self.parent_context.run_id,
                     agent_slug=subagent_slug,
-                    input_message=build_agent_input_msg(query=description),
+                    input_message=build_agent_input_msg(query=task_description),
                     uid=self.parent_context.uid,
                     tool_call_id=runtime.tool_call_id,
                     request_id=self.parent_context.request_id,
