@@ -12,7 +12,6 @@ from server.service.mcp_service import get_mcp_tools
 from src.agents.base_agent import BaseAgent
 from src.agents.middlewares.subagent_middlware import create_subagent_middleware
 from src.agents.subagents.citationagent import CitationAgent
-from src.agents.subagents.outlineagent import OutlineAgent
 from src.agents.subagents.searchagent import SearchAgent
 from src.configs import config as sys_config
 from src.model import load_model
@@ -40,7 +39,6 @@ class LeaderAgent(BaseAgent):
                 subagents=[
                     SearchAgent(),
                     CitationAgent(),
-                    OutlineAgent(),
                 ],
                 parent_context=context,
             ),
