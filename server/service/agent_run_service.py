@@ -9,6 +9,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from server.exception import AgentRunTimeOut
 from server.service.arq_queue_servcie import (
     build_agent_chunk_envolope,
     get_arq_pool,
@@ -82,10 +83,13 @@ async def create_agent_run_service(
         raise LookupError("当前会话不存在或已删除")
 
     # FIXEME: 待回答 ask_user 时不能再追加普通 HumanMessage。
-    if await AgentRunRepository(db).get_pending_interaction_run(
-        uid=str(current_user.uid),
-        thread_id=thread_id,
-    ) is not None:
+    if (
+        await AgentRunRepository(db).get_pending_interaction_run(
+            uid=str(current_user.uid),
+            thread_id=thread_id,
+        )
+        is not None
+    ):
         raise AgentRunConflictError("当前会话有待回答的问题")
 
     request_id = str(run_metadata.get("request_id") or uuid.uuid4())
@@ -253,27 +257,25 @@ async def enqueue_agent_run(run_id: str) -> None:
     )
 
 
-async def wait_agent_run_result(run_id: str) -> str:
-    """从数据库等待 Run 终态并读取最终消息。"""
-    while True:
-        async with session_context() as db:
-            run = await AgentRunRepository(db).get_by_id(run_id)
-            if run is None:
-                raise ValueError(f"Agent Run 不存在：{run_id}")
+async def load_agent_run_result(run_id: str, uid: str):
+    return get_agent_run_result(current_uid=uid, run_id=run_id)
 
-            status = str(run.agent_status)
-            if status == "completed":
-                message = await ConversationRepository(db).get_run_result_message(
-                    run_id
-                )
-                if message is None:
-                    raise RuntimeError(f"Agent Run 未保存最终消息：{run_id}")
-                return str(message.content)
-            if status in {"failed", "cancelled", "interrupted"}:
-                raise RuntimeError(str(run.error or status))
 
-        await asyncio.sleep(1)
+async def wait_agent_run_result(run_id: str, uid: str, time_out: float = 600) -> str:
+    """子agent不显示进程，只执行完毕，从数据库读取子Aent的结果返回"""
 
+    agent_run_events = await read_agent_run_events(
+        run_id=run_id, after_id="0-0", block_ms=15_000
+    )
+    async for _ in agent_run_events:
+        pass
+
+    # 事件流尽后，从库直接拿结果
+    subagent_run_result = await load_agent_run_result(run_id=run_id, uid=uid)
+    if str(subagent_run_result.get("status") or "") not in _TERMINAL_RUN_STATUSES:
+        raise AgentRunTimeOut(subagent_run_result)
+    return subagent_run_result
+    
 
 async def read_agent_run_events(
     run_id: str,
