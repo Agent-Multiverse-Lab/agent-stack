@@ -343,7 +343,9 @@ const inputDisabled = computed(
     Boolean(pendingInteraction.value) ||
     (submitting.value && !isRunActive.value),
 );
-const composerDocked = computed(() => messages.value.length > 0);
+const composerDocked = computed(
+  () => messages.value.length > 0 || Boolean(pendingInteraction.value),
+);
 const displayedError = computed(() => uploadError.value || error.value);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -446,13 +448,6 @@ onBeforeUnmount(stop);
           </template>
         </template>
 
-        <ChatAskUserComponent
-          v-if="!loading && pendingInteraction"
-          :interaction="pendingInteraction"
-          :disabled="resuming"
-          @submit="submitResume"
-        />
-
         <Transition
           enter-active-class="transition-opacity duration-200 ease-out motion-reduce:transition-none"
           leave-active-class="transition-opacity duration-150 ease-in motion-reduce:transition-none"
@@ -469,11 +464,12 @@ onBeforeUnmount(stop);
 
     <footer
       class="inset-x-0 px-[clamp(0.75rem,4vw,2rem)]"
-      :class="
+      :class="[
         composerDocked
           ? 'shrink-0 bg-paper pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]'
-          : 'absolute top-[38%] -translate-y-1/2'
-      "
+          : 'absolute top-[38%] -translate-y-1/2',
+        pendingInteraction && 'max-h-full overflow-y-auto overscroll-contain',
+      ]"
     >
       <div class="relative mx-auto grid w-full max-w-[48rem] gap-2">
         <div
@@ -501,13 +497,23 @@ onBeforeUnmount(stop);
         <button
           v-if="composerDocked && showScrollToBottom"
           type="button"
-          class="absolute left-1/2 top-0 z-10 grid size-9 -translate-x-1/2 -translate-y-[calc(100%+0.75rem)] place-items-center rounded-full border border-graphite/10 bg-paper text-slate shadow-sm transition-colors hover:bg-mist hover:text-graphite focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-graphite/35"
+          class="z-10 grid size-9 place-items-center rounded-full border border-graphite/10 bg-paper text-slate shadow-sm transition-colors hover:bg-mist hover:text-graphite focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-graphite/35"
+          :class="pendingInteraction
+            ? 'justify-self-center'
+            : 'absolute left-1/2 top-0 -translate-x-1/2 -translate-y-[calc(100%+0.75rem)]'"
           aria-label="Scroll to latest message"
           title="Scroll to latest message"
           @click="scrollToBottom('smooth')"
         >
           <ArrowDown :size="17" :stroke-width="2" aria-hidden="true" />
         </button>
+
+        <ChatAskUserComponent
+          v-if="!loading && pendingInteraction"
+          :interaction="pendingInteraction"
+          :disabled="resuming"
+          @submit="submitResume"
+        />
 
         <ChatMessageInputComponent
           v-model="draft"
