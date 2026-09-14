@@ -9,7 +9,7 @@
 
 ### CHAT-THINK-001 Pixel flow icon
 
-`ChatThinkingIconComponent` 使用 3×3 像素矩阵。九个像素继续根据行列位置设置不同
+`ChatThinkingIcon` 使用 3×3 像素矩阵。九个像素继续根据行列位置设置不同
 动画延迟，并使用现有 `pixel-on 650ms ease-in-out infinite` 流动效果。不得替换为
 星形图标、普通 spinner 或静态图片。
 
@@ -21,15 +21,16 @@ slot。存在 slot 内容时允许用户展开或收起；无 slot 内容时只�
 
 ### CHAT-THINK-003 Current integration
 
-`ChatView` 在 Run 活跃且当前 Run 尚无 Assistant 文本时展示 Thinking Group。
-Conversation 加载状态继续使用 `ChatLoadingStateComponent`，该组件复用相同的 Thinking
-icon，不维护第二套像素动画。
+`ChatView` 在 Run 活跃、尚无 Assistant 文本且未等待用户交互时展示 Thinking Group。
+当前 Run 已产生的有效 Agent Tool 状态紧随 Thinking，以同级紧凑组件显示；它拥有
+独立生命周期，不随 Thinking 卸载。Conversation 加载状态也直接使用
+`ChatThinkingGroupComponent` 并传入对应 label，不维护第二套等待组件或像素动画。
 
 ### CHAT-THINK-004 Event boundary
 
 本能力不新增前端 `thinking` 消息类型，不修改 Run/SSE 事件协议，也不使用演示代码中的
-静态阶段、模拟计时序列或 Steps/Reasoning/Search/Coding 假数据。Group 的可选 slot
-用于承载后续真实事件内容。
+静态阶段、模拟计时序列或 Steps/Reasoning/Search/Coding 假数据。同一 Run 的 Agent
+state 更新覆盖旧快照；没有有效 Todo 的状态不创建 Tool 组件。
 
 ### CHAT-THINK-005 Accessibility
 
@@ -39,12 +40,15 @@ icon，不维护第二套像素动画。
 ## 3. Non-goals
 
 - 不修改后端、数据库、Run 生命周期或事件结构。
-- 不聚合当前 `text | tool` Message，也不把 Tool Message 伪装成 Thinking 内容。
+- 不把 Assistant 文本或 Tool 状态放入 Thinking Group，也不为活动事件建立第二套状态模型。
 - 不迁移 React 示例或引入新的动画依赖。
 
 ## 4. Acceptance Criteria
 
 - 运行中 Thinking 状态继续显示 3×3 像素流动效果。
 - Thinking Group 以独立 Vue 组件存在，并组合独立 icon 组件。
-- Conversation 加载和 Thinking Group 复用同一个 icon 组件。
+- Conversation 加载和 Agent Thinking 复用同一个 Thinking Group。
+- 当前 Run 尚无 Assistant 文本时，Thinking 与有效 Agent Tool 状态依次同级展示。
+- 当前 Run 开始输出 Assistant 文本或等待用户交互后，Thinking Group 不再显示。
+- Thinking 卸载、Assistant 正文输出和 Run 终态收口不得删除当前页面已有的 Tool 组件。
 - `npm run typecheck`、定向 ESLint 和 `git diff --check` 通过。

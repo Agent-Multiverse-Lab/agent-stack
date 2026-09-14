@@ -6,7 +6,9 @@
 调用包含多个独立的单选问题，通过一次 LangGraph `interrupt()` 暂停并等待回答。
 
 当前目标覆盖多问题展示、回答提交、Resume Run 创建、Worker 传参以及恢复流的完整收尾。
-本文是目标契约；当前根目录 plan.md 为待确认设计，生产代码尚未完成适配。
+本文定义能力目标与既有设计边界，不表示生产代码已经完成适配。
+已有工具、解析、handler、消息保存和终态函数作为现有依赖，保持实现与签名。
+当前实施只补齐恢复入口及前后端调用处的参数与事件接线，范围见根目录 plan.md。
 
 本次不包含自由文本、多选、多个并行工具中断的业务处理、SubAgent 提问、超时和多人回答，
 也不接入 `HumanInTheLoopMiddleware` 或工具审批。取消仍按
@@ -66,8 +68,7 @@ ToolMessage 保留两道问题各自的答案。
 `thread_id`、`run_id`、`questions` 和默认值为 `ask_user` 的 `kind`，不增加字段验证。
 `thread_id` 表示所属会话，`run_id` 表示产生中断的执行；恢复时新 Run 的
 `parent_run_id` 指向该 Run，同一会话可以经历多次 Run 和中断。
-`_build_ask_human_interrupt` 由调用方显式传入两个 ID，返回实体，不能采用模型载荷里的 ID。
-问题为空时拒绝该中断，不生成默认确认问题。`build_agent_interrupt_message` 将实体转换为字典供事件链路使用。
+`build_agent_interrupt_message` 将实体转换为字典供事件链路使用。
 实时中断入口传入 context 的 thread_id/run_id；线程详情重建待回答问题时传入持久化 Run 的
 thread_id/id，并保留 parent_run_id。实时事件和刷新恢复使用相同 questions 结构。
 
@@ -177,49 +178,33 @@ POST /api/agent/runs/{interrupted_run_id}/resume
 
 ### RUN-HIL-005 Interrupt detection
 
-LangGraph 在 `interrupt()` 暂停图时把打断信息写入 checkpoint。当前锁定的 LangGraph 1.2.9
-中，`graph.aget_state(config)` 返回的 `StateSnapshot.interrupts` 直接包含 `Interrupt`；实现以
-该字段为判断来源，不从 v3 stream event 的 values/params 推断打断。
+LangGraph 在 `interrupt()` 暂停图时把打断信息写入 checkpoint。沿用现有调用链：
 
-`save_message_from_langgraph_state` 保持现有职责和 `None` 返回值，不承担打断检测。
-打断检测封装为同文件内的异步 `check_agent_interrupt_handler`：函数根据当前
-Agent context 获取 graph，调用 `graph.aget_state(config)`，读取 `state.interrupts`，并把
-`Interrupt.value` 交给 `build_agent_interrupt_message`，按 ask_user 工具合同构造
-`kind/questions` payload。
-
-第一版只接受单个 `ask_user` interrupt：无 interrupt 返回 `None`；单个合法 interrupt 返回
-builder 构造的 payload；多个 interrupt、非字典 value、错误 kind、空 question 或空/非法
-options 必须抛出明确异常，不得当作“未打断”继续发送 `finished`。每个问题须有唯一 question_id、非空 question 和有效 label/value 选项。
-builder 不生成回答；answers 只在 Resume 请求中出现。
-
-普通或 Resume graph stream 结束后，对应 Thread Service 入口必须先保存 checkpoint 消息，
-再调用该函数。普通入口使用其内部的 `make_agent_stream_event`，Resume 入口使用其内部的
-`make_agent_resume_event`；两个 builder 不共享，只保持相同的 bytes 字段合同：
-
-```python
-await save_message_from_langgraph_state(...)
-interrupt_payload = await check_agent_interrupt_handler(
-    agent_instance=agent_instance,
-    context=agent_context,
-)
-if interrupt_payload is not None:
-    # Resume 入口在相同位置调用 make_agent_resume_event。
-    yield make_agent_stream_event(
-        status="interrupted",
-        interrupt=interrupt_payload,
-    )
-    return
+```text
+check_agent_interrupt_handler
+  -> graph.aget_state(config)
+  -> _reslove_agent_interrupt
+  -> build_agent_interrupt_message
+  -> chunk_iterator
 ```
 
-该 bytes chunk 经既有 `_cancellable_stream` 进入 `process_agent_run`，再由
-`_normalize_steam_agent_chunk` 解码为事件字典。只有 Worker 解释 `status="interrupted"`
-并执行运行状态收敛；`stream_agent_response` 不发送 `finished`，也不写 Run 状态、
-`interaction_required` 或 `end`。Thread Service 在 yield interrupted chunk 后返回；Worker
-循环内只按每个 chunk 的 `status` 处理，不使用 `terminal_flag` 判断是否继续处理，也不使用
-`break`、`continue` 或立即 `return` 控制消费循环，而是在状态收敛后等待该 stream 自然耗尽。
+`check_agent_interrupt_handler` 保持异步生成器，接收 `agent_instance`、
+`runtime_metadata`、`chunk_iterator` 和 `context`，产出 bytes chunk。
+`_reslove_agent_interrupt` 现从 checkpoint 的 tasks 中提取首个中断；本轮不替换读取路径。
+`build_agent_interrupt_message` 保留现有格式化、实体构建及字典转换职责；
+handler 将其 `status` 交给调用方提供的 builder，并传入 `pending_interrupt` 和
+`runtime_metadata`。调用方使用 `async for` 消费，不能把该生成器当作返回 payload 的协程。
 
-参考：[LangGraph Interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)、
-[LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)。
+`save_message_from_langgraph_state` 保持现有职责和 `None` 返回值，不承担打断检测。
+普通入口与恢复入口分别使用自己的 chunk builder，复用现有检测与保存函数。
+问题字段及回答校验仍按 RUN-HIL-004 归 Run Service，不向解析函数或 dataclass 增加验证。
+
+中断事件最终由 Worker 收敛 Run 状态并发布 RUN-HIL-009 的交互事件。
+Worker 按 handler 已有的 `ask_human/pending_interrupt` 读取中断问题，调用
+`_finalize_run(status="interrupted", payload=...)`。普通入口保留中断标志和状态解析，但先暂存
+handler 生成的中断 chunk；checkpoint 消息保存成功后才向 Worker 发出该 chunk 并返回。
+恢复入口同样先保存再消费中断 chunk。两个入口均不在中断后发送 finished；保存失败时只发出
+error，不得先把 Run 收口为 interrupted。handler 和终态函数保持现有实现。
 
 `stream_agent_response` 只处理普通消息输入，不根据 `run_type` 选择 Resume 输入，也不从
 metadata 中提取 answer。Resume 由同级 `resume_agent_response` 和 BaseAgent 专用
@@ -228,7 +213,7 @@ metadata 中提取 answer。Resume 由同级 `resume_agent_response` 和 BaseAge
 ### RUN-HIL-006 Unified finalization and publish ownership
 
 Worker 的 `process_agent_run` 必须以解码后的 chunk `status` 驱动控制操作。过程状态继续
-转发或缓冲；Thread Service 只使用 `finished`、`error` 和 `interrupted` 三种停止信号并统一调用
+转发或缓冲；Thread Service 使用 `finished`、`error` 和 `ask_human` 三种停止信号，Worker 统一调用
 `_finalize_run`，不得为 interrupt 保留 `_finalize_interrupted_run`，也不得在对应 case 中
 用 `break` 或立即 `return` 截断 stream。
 
@@ -245,7 +230,7 @@ Worker 的 `process_agent_run` 必须以解码后的 chunk `status` 驱动控制
 `completed/failed/cancelled` 发布 `end`；`interrupted` 依次发布
 `interaction_required` 和 `end(status=interrupted)`。
 
-父 Run 的 `finished/error/interrupted` case 在 `_finalize_run` 返回后继续处理同一次结果：
+父 Run 的 `finished/error/ask_human` case 在 `_finalize_run` 返回后继续处理同一次结果：
 
 - `changed=True` 时，当前 case 再调用一次 `write_end_stream_event`；payload 顶层
   `status` 使用实际 `agent_status`，`chunk` 保存当前 Thread Service 原始停止消息；
@@ -376,13 +361,13 @@ pending_interaction: InteractionRequired | null
   `check_agent_interrupt_handler` 独立获取 state，并通过 `build_agent_interrupt_message`
   构造 questions；
   普通入口内部使用 `make_agent_stream_event`，Resume 入口内部使用
-  `make_agent_resume_event`，两者 yield 相同字段合同的 interrupted chunk；
+  `make_agent_resume_event`，按现有异步生成器合同消费中断；内部事件接通后由 Worker 收敛为 interrupted；
   `process_agent_run` 按 chunk status 调用统一 `_finalize_run`，并等待 stream 自然耗尽；
 - `_finalize_interrupted_run`、`set_run_interrupted` 和 Repository `set_interrupted` 均不存在；
   interrupted 与其他终态共用 `set_run_terminal -> set_agent_terminal`；
 - `_finalize_run` 保留现有 changed-only 发布；`changed=True` 时当前 case 再发布携带原始
   chunk 的 `end`，`changed=False` 时不二次发布；
-- `error/finished/interrupted` 分别在 case 内根据实际 `agent_status` 设置 `terminal_flag`；
+- `error/finished/ask_human` 分别在 case 内根据实际 `agent_status` 设置 `terminal_flag`；
 - 只有显式 `finished` chunk 能收敛为 completed，无停止状态的流耗尽收敛为 failed；
 - Thread Service 内部只发送 `error`，Worker 将其映射为 PostgreSQL 和 `end` 事件的 `failed`；
 - 重复恢复、越权、错误 Thread 和缺失 checkpoint 均有确定结果；

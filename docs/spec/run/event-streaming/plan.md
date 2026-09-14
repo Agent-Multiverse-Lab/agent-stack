@@ -32,11 +32,12 @@
    `id/event/data`、校验联合类型、把每个事件交给调用方并返回最终 `end`；重连时
    发送最后成功处理的 `Last-Event-ID`。
 10. 修改 `web/src/composables/useChat.ts`，按外层 `type` 更新 Run UI 状态、流式
-    Assistant `ThreadMessageResponse`、最新 Agent state 和工具执行状态。新增
-    `web/src/components/chat/ChatLoadingStateComponent.vue`，拥有 3x3 像素波、shimmer
-    文案、经过时间和 reduced-motion 降级，同时复用于 Thread Detail
+    Assistant `ThreadMessageResponse`、最新 Agent state 和工具执行状态。
+    `web/src/components/chat/loading/ChatThinkingGroupComponent.vue` 拥有 3x3 像素波、
+    shimmer 文案、经过时间和 reduced-motion 降级，同时复用于 Thread Detail
     读取和 Run 等待；`ChatView.vue` 只渲染归并后的数据，并在当前
-    Run 产生首个非空 Assistant 文本或首个 Agent tool 消息后卸载等待组件。
+    Run 产生首个非空 Assistant 文本或等待用户交互后卸载等待组件；有效 Agent tool
+    消息独立同级放在 Thinking 后方，并在正文输出和终态收口后保留。
 11. 更新后端定向 unittest、前端 typecheck/build 覆盖；本次不修改 `AGENTS.md`。
 
 ## 2. Ownership
@@ -154,40 +155,44 @@ const applyRunEvent = (event: AgentRunEvent) => {
 流式 Assistant 消息继续复用 `ThreadMessageResponse` 形状，不新增平行的
 `LocalMessage` 或 display DTO。
 
-`Thinking...` 的可见性直接从当前 `messages + runId` 派生，不新增一份
-布尔状态。当前 Run 的非空 Assistant 文本和 Agent tool 消息都属于可见输出：
+`Thinking...` 的可见性和活动位置直接从当前 `messages + runId` 派生，不新增一份
+布尔状态。当前 Run 的非空 Assistant 文本结束等待展示；Agent tool 消息独立保留：
 
 ```ts
 // web/src/views/ChatView.vue
-const hasCurrentRunVisibleOutput = computed(() =>
+const hasCurrentRunAssistantText = computed(() =>
   messages.value.some((message) => {
-    if (message.type !== "ai") return false
+    if (message.type !== "ai" || message.payload.type !== "text") return false
     const event = isRecord(message.payload.event)
       ? message.payload.event
       : null
     if (event?.run_id !== runId.value) return false
-    if (message.payload.type === "tool") return true
-    return message.payload.type === "text" &&
-      typeof event.content === "string" &&
+    return typeof event.content === "string" &&
       event.content.trim().length > 0
   })
+)
+
+const firstCurrentRunActivityIndex = computed(() =>
+  messages.value.findIndex(isCurrentRunActivityMessage)
 )
 ```
 
 ```vue
 <!-- web/src/views/ChatView.vue -->
-<ChatLoadingStateComponent
-  v-if="isRunActive && !hasCurrentRunVisibleOutput"
+<ChatThinkingGroupComponent
+  v-if="showThinkingGroup && index === firstCurrentRunActivityIndex"
   :key="runId ?? 'pending'"
-  label="Thinking"
 />
+<div v-if="isActivityMessage(message)" class="activity-detail">
+  <ChatMessageComponent :message="message" />
+</div>
 ```
 
 等待组件只保留当前需要的 Drive 像素波，不增加 Dots、Orbit、Surfer 或
 video 分支：
 
 ```vue
-<!-- web/src/components/chat/ChatLoadingStateComponent.vue -->
+<!-- web/src/components/chat/loading/ChatThinkingGroupComponent.vue -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 

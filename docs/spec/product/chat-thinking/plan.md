@@ -4,13 +4,14 @@
 
 ## 1. Implementation
 
-1. 新增 `web/src/components/chat/loading/ChatThinkingIconComponent.vue`，迁移现有 3×3
+1. 新增 `web/src/components/chat/loading/ChatThinkingIcon.vue`，迁移现有 3×3
    像素延迟计算和 `pixel-on` 动画。
-2. 修改 `ChatLoadingStateComponent.vue`，复用 icon 组件并保留现有 label、计时和
-   shimmer 文案。
-3. 新增 `ChatThinkingGroupComponent.vue`，负责标题、计时、可选 slot 和展开状态。
-4. 修改 `ChatView.vue`，只把 Run 活跃期间的 Thinking 占位替换为 Group；Conversation
-   加载入口保持 `ChatLoadingStateComponent`。
+2. `ChatThinkingGroupComponent.vue` 直接负责 icon、label、计时、shimmer、可选 slot
+   和展开状态；删除只做中转的 `ChatLoadingStateComponent.vue`。
+3. 修改 `ChatView.vue`，Conversation 加载和 Agent Thinking 都直接使用 Thinking
+   Group；在当前 Run 首个 Tool 状态之前显示 Thinking，并把 Tool 消息
+   作为独立的同级紧凑组件保留；Assistant 正文或等待用户交互只卸载 Thinking，不卸载
+   Tool 组件。
 
 ## 2. Component contracts
 
@@ -27,5 +28,5 @@
 ## 3. Validation
 
 - `npm.cmd run typecheck`
-- `.\node_modules\.bin\eslint.cmd --no-warn-ignored src/components/chat/loading/ChatThinkingIconComponent.vue src/components/chat/loading/ChatThinkingGroupComponent.vue src/components/chat/loading/ChatLoadingStateComponent.vue src/views/ChatView.vue`
+- `.\node_modules\.bin\eslint.cmd --no-warn-ignored src/components/chat/loading/ChatThinkingIcon.vue src/components/chat/loading/ChatThinkingGroupComponent.vue src/views/ChatView.vue`
 - `git diff --check -- web docs/spec/product/chat-thinking docs/spec/README.md`

@@ -1,128 +1,94 @@
-# Resume 输入与流式执行补齐
+﻿# Resume 输入与事件接线实施
 
 计划版本：v0.3.0
 
-状态：待用户确认；仅完成设计，尚未修改生产代码。
+状态：本轮接线实施与定向验证完成；完整能力的真实服务联调未执行。
+保留现有工具、解析、handler、消息保存和终态函数，只补齐恢复入口及前后端调用处的参数、事件接线。
 
-## 范围与选择
+## 1. 现有依赖与边界
 
-落实 RUN-HIL-001 至 RUN-HIL-011 的多问题恢复闭环。保留现有恢复 URL、父子 Run、
-ARQ 和 SSE 架构。输入统一为 `thread_metadata.resume.answers`，替换旧字符串 answer。
-Thread Service 使用显式参数 `resume_input` 接收已校验回答。
-中断只发生在主 Agent，恢复入口不接收 agent_slug，直接从现有 manager 获取 LeaderAgent。
-本轮只支持现有 ask_user 的每题单选；自由文本需要另行明确工具题型与校验合同。
+直接使用 `ask_user`、`AskHumanPayload`、`parse_interrupt_questions`、中断格式化与构建函数、
+`_reslove_agent_interrupt`、异步生成器 `check_agent_interrupt_handler`、运行上下文构建、
+`_stream_agent_event_chunks`、消息保存函数、`BaseAgent.stream_message_by_resume` 和
+`_finalize_run -> set_run_terminal -> set_agent_terminal`。这些函数的签名和实现保持现状。
 
-按 ponytail-review 检查复杂度：复用既有 `_stream_agent_event_chunks`、上下文构建与消息保存函数；
-两个入口分别组织流程并保留自己的 chunk builder，不增加公共执行器、策略类、新表或兼容分支。
-不改动当前工作区其他功能的未提交修改。
+父子 Run、鉴权与锁、队列、SSE、新 Run 切换沿用原流程。按 ponytail-review 收敛：
+不增加包装器、公共执行器、新表、兼容路径或替代实现。
+现有解析函数的单字典行为和空问题默认题属于范围外差异，本次只接入工具原生 questions 列表。
 
-## 1. 请求与持久化（RUN-HIL-001 至 004、009 至 011）
+## 2. 实施顺序与落点
 
-`ChatAskUserComponent.vue` 按问题 ID 收集回答，`ChatView.vue:submitResume` 构造：
+1. RUN-HIL-002 至 004、007：`server/entities/agent.py:AgentRunResumeRequest` 与
+   `server/service/agent_run_service.py:create_resume_agent_run_service` 将调用输入接为
+   `thread_metadata.resume.answers`。Service 按父 Run questions 校验完整键集合及合法 value，
+   同请求同回答复用子 Run、同键不同回答拒绝；沿用父 Run 身份并复制 model 配置。
+2. RUN-HIL-005、007、008：`server/service/thread_service.py:resume_agent_response` 接收显式
+   `resume_input`，获取 LeaderAgent，调用现有上下文构建和会话校验函数，检查待恢复 checkpoint，
+   将 `Command(resume=resume_input)` 原样交给现有 BaseAgent 方法。补传 accumulated_msg；
+   保存后按现有 handler 签名消费异步生成器；异常调用既有保存函数并输出 error。
+3. RUN-HIL-005、006、009：普通入口保留 interrupted、interrupt_type、interrupt_message
+   和中断状态解析，暂存 handler 生成的中断 chunk；删除前面的重复保存调用，checkpoint 保存
+   成功后才发出暂存的中断 chunk 并返回，只有正常结束才发送 finished。恢复入口同样在保存后
+   消费 handler，中断后返回。
+   `server/worker.py:process_agent_run` 调用恢复入口时传 answers；
+   按 handler 现有 ask_human/pending_interrupt 字段调用既有 `_finalize_run(status="interrupted")`。
+   保留三个停止分支的终态调用与发布规则；无停止信号时调用既有失败收口，取消检查使用 await。
+4. RUN-HIL-009 至 011：`server/entities/thread.py:InteractionRequired`、`web/src/types/chat.ts`、`useAgentRun` 的交互事件读取、
+   `ChatAskUserComponent.vue` 与 `ChatView.vue:submitResume` 接入 questions/answers。
+   每题独立单选，全部回答后一次提交 label 对应的 value；父 Run 变化清空选择。
+   页面继续使用现有恢复 API、Run 切换与线程详情读取。
+
+### 核心调用示例
+
+`server/service/thread_service.py:resume_agent_response`：
+
+```python
+stream_events = agent_instance.stream_message_by_resume(
+    Command(resume=resume_input), runtime_context=agent_runtime_context,
+)
+# 消费现有事件转换器并保存后：
+async for interrupt_chunk in check_agent_interrupt_handler(
+    agent_instance=agent_instance,
+    runtime_metadata=runtime_metadata,
+    chunk_iterator=make_agent_resume_event,
+    context=agent_context,
+):
+    yield interrupt_chunk
+    return
+```
+
+`server/worker.py:process_agent_run` 的中断分支读取 `pending_interrupt`，向现有终态函数传
+`status="interrupted"` 和问题 payload。不改变 handler、chunk builder 和终态函数实现。
+
+`web/src/views/ChatView.vue:submitResume` 提交示例：
 
 ```json
-{
-  "thread_id": "thread-1",
-  "thread_metadata": {
-    "request_id": "resume-request-1",
-    "resume": {
-      "answers": {"database": "postgresql", "environment": "local"}
-    }
-  }
-}
+{"thread_id":"thread-1","thread_metadata":{"request_id":"resume-request-1","resume":{"answers":{"database":"postgresql","environment":"local"}}}}
 ```
 
-`server/service/agent_run_service.py:create_resume_agent_run_service` 在原有父 Run 锁与
-身份校验内按 questions 校验回答。只接受完整 ID 集合和各题合法 value，不修剪或转换选项值。
-同 request_id、同回答返回已有子 Run；同键不同回答或其他重复提交返回 409。
-新 Resume Run 沿用父 Run 的 agent_id、thread_id、uid 和 model 配置，保存 answers，
-trigger_message_id 仍为空；新 Run ID 入队。父 Run 保持 interrupted。
-模型继承是复制父 Run 持久化配置，不保证恢复期间外部模型服务配置保持不变。
+## 3. 失败与验证
 
-`web/src/types/chat.ts`、事件解析与线程详情恢复同步采用 questions；组件全答后一次提交，
-运行切换仍使用现有 useAgentRun。父 Run ID 变化时清空回答。
+- 请求/Service：漏答、多答、非法 value、无效问题结构、越权、错线程、重复恢复和幂等冲突。
+- 恢复入口：原字典进入 Command，同 thread/uid checkpoint；初始化、缺失 checkpoint、执行和保存失败输出 error。
+- 真实内存 checkpoint：正式 ask_user 两题暂停、恢复为关联原 tool_call_id 的 ToolMessage，再次中断。
+- Worker：恢复分支不读取 HumanMessage；handler 事件能进入既有中断终态调用；无停止信号失败。
+- 前端：两题独立选择、全答后提交、label/value、切换 Run 和线程详情恢复；执行构建与可用的浏览器验证。
+- 源码检查：受保护函数体不变；git diff --check；按 docs/development.md 执行定向检查。
 
-## 2. Worker 显式传递恢复输入（RUN-HIL-007）
+本轮不部署、不迁移。真实数据库/队列/模型未验证时明确记录，不以构建或内存测试替代线上证据。
 
-`server/worker.py:process_agent_run` 保留 run_type 分支：
+## 4. 验证记录（2026-09-14）
 
-```python
-stream_thread_events = resume_agent_response(
-    resume_input=metadata["resume"]["answers"],
-    thread_id=thread_id,
-    runtime_metadata=metadata,
-    current_user=user,
-    db=db,
-)
-```
+- `.venv/Scripts/python.exe -m unittest test.test_agent_run_interrupt_resume test.test_ask_user_tool`：
+  19 个测试通过。覆盖 Service 输入、身份、模型继承与幂等；真实内存 checkpoint 多题恢复和再次中断；
+  普通入口保留状态解析、保存一次、保存后才发中断及失败后不发 finished；Worker 参数与中断/取消/协议错误接线。
+  数据库、队列和模型被隔离，checkpoint 为真实 InMemorySaver。
+- `npm.cmd run build`：类型检查与 Vite 构建通过；存在现有大体积 chunk 提示。
+- 本地无界面 Edge 加载真实问题组件与 useAgentRun，模拟 Thread/Resume/SSE API：
+  两题独立选中、全答后提交 value、新 Run SSE 再次提问、父 Run 切换清空、刷新恢复通过；
+  390px 和 1280px 视口无横向溢出。临时测试页及脚本在验证后清理。
+- 变更文件 compileall、git diff --check 通过；AST 比对确认现有 handler、解析、上下文、
+  流转换、保存与终态辅助函数保持不变；工具、解析文件、BaseAgent 和 Run Repository 无差异。
 
-恢复分支不读取普通消息。持久化输入缺失时走 Worker 原有失败收口。
-
-## 3. 恢复入口（RUN-HIL-005、007、008）
-
-`server/service/thread_service.py:resume_agent_response` 目标签名：
-
-```python
-async def resume_agent_response(
-    *, resume_input: dict[str, str], thread_id: str,
-    runtime_metadata: dict, current_user: AuthenticatedUser, db: AsyncSession,
-) -> AsyncIterator[bytes]:
-    ...
-```
-
-执行顺序：
-
-1. 校验 thread_id 和当前 Run 身份；不得为恢复生成新 thread_id。
-2. `agent_manager.get_agent("LeaderAgent")` 获取主 Agent，构造当前 Run 的 runtime context；
-   使用现有 `_require_thread` 校验当前用户的顶层会话，不再调用依赖 agent_item 的
-   `_build_agent_runtime` / `_check_conv_status`。父 Run 与 Thread 的匹配仍由创建恢复 Run 的
-   Service 校验。初始化错误也进入恢复入口的 error 处理。
-3. 用同 thread_id、uid 读取 checkpoint，确认存在待恢复中断；不存在则报错，不退回普通输入。
-4. 调用 `stream_message_by_resume(Command(resume=resume_input), runtime_context=...)`。
-5. 消费 `_stream_agent_event_chunks`，传入独立 builder 和 accumulated_msg，逐块 yield。
-6. 流结束后调用一次 `save_message_from_langgraph_state`。
-7. 检测再次中断：有则 yield interrupted 后 return；没有则 yield finished。
-8. 异常时沿用普通入口的累计输出保存机制，以独立数据库会话调用 save_interrupt_message；
-   保存失败记录日志且仍输出原始 error，不发送 finished。取消交由 Worker 处理。
-
-普通入口仅修正同一收尾合同：删除重复保存、保存失败后停止成功路径、中断后 return。
-不改变其 HumanMessage 输入方式。
-
-## 4. 中断和停止状态（RUN-HIL-005、006、009）
-
-当前 handler 产生 ask_human/pending_interrupt，而 Worker 消费 interrupted/interrupt，二者不一致。
-`check_agent_interrupt_handler` 按 spec 变为返回 payload 或 None 的异步函数，直接读取
-StateSnapshot.interrupts；构建问题仍用 build_agent_interrupt_message。
-builder 输出纯问题 payload，不夹带内部 status；无效/空问题不生成默认答案或问题。
-只接受单个 ask_user interrupt，多个独立 interrupt 明确失败。
-
-两个入口在完成一次消息保存后执行同样的控制流；下面示例属于 resume_agent_response：
-
-```python
-interrupt_payload = await check_agent_interrupt_handler(
-    agent_instance=agent_instance, context=agent_context,
-)
-if interrupt_payload is not None:
-    yield make_agent_resume_event(status="interrupted", interrupt=interrupt_payload)
-    return
-yield make_agent_resume_event(status="finished", runtime_metadata=runtime_metadata)
-```
-
-`process_agent_run` 继续拥有终态落库和对外 interaction_required/end 发布。
-去除无停止信号时默认 completed 的分支；未取消的无停止信号流按现有协议错误路径 failed。
-保留 RUN-HIL-006 既有 changed-only 发布、case 内二次 end 与 terminal_flag 规则。
-
-## 5. 验证与实施边界
-
-实施前按 docs/development.md 选择本仓库验证命令。必要覆盖：
-
-- Service：两题合法回答、漏答/多答/非法选项、越权、错线程、重复恢复和幂等冲突。
-- Thread Service：Command 收到原字典、相同 checkpoint 身份、事件转换累计输出、消息只保存一次。
-- 真实内存 checkpoint：ask_user 暂停后用两题回答恢复，原工具返回答案并继续输出；再次提问仍能暂停。
-- 收尾：再次中断无 finished；初始化/执行/保存失败输出 error；缺失 checkpoint 失败；取消沿用现有状态。
-- Worker：恢复分支不读取 HumanMessage；没有停止信号不得 completed。
-- 消息持久化：重读父消息不重复落库，也不改写为 Resume Run 的输出归属。
-- 前端：两题独立选中、未答完禁用提交、显示 label/提交 value、切换新 Run 及刷新恢复待回答问题。
-
-生产实施涉及 Thread Service、Run Service、Worker、相关前端类型/解析/组件与已有测试。
-本计划不拆 implementation 文件。当前仅验证文档差异；设计不能作为运行时验证证据。
+限制：未连接真实 PostgreSQL/Redis/ARQ 或模型服务，未验证真实消息落库去重与线上恢复。
+现有解析函数的单字典行为、空列表默认题保留原样，不属于本轮实施范围；不据此宣称整个 spec 已验收。

@@ -817,16 +817,22 @@ const { assistantContent } = storeToRefs(chatStore)
 终态后 `finalizeActiveRun()` 重新读取 Thread Detail；`clearActiveRun()` 清空
 `assistantContent`，最终 Assistant 消息由 PostgreSQL 返回的 `messages` 渲染。
 
-`ChatLoadingStateComponent.vue` 统一渲染 Chat 的等待状态。它接收一个
+`ChatThinkingGroupComponent.vue` 统一渲染 Chat 的等待状态。它接收一个
 `label` 文案，Thread Detail 读取传入 `Loading conversation`，活跃 Run
 使用默认的 `Thinking`；组件内部显示 3x3 方形像素
 波、单色 shimmer 文案和 0.1 秒精度的经过时间。组件卸载时必须清理
 计时器；用户设置 reduced motion 时停止像素和 shimmer 动画，计时仍继续。
 
-`ChatView.vue` 只决定何时挂载该组件：当前 Run 仍活跃且还没有产生
-可见 Assistant 文本或 Agent tool 状态时显示；首个非空文本增量或首个 tool
-消息被并入页面消息后立即隐藏。其他 Run 的历史消息和空白增量不得改变
-该判断。可见性根据现有 `messages + runId` 派生，不新增 Store 字段或后端事件。
+`ChatView.vue` 只决定何时挂载该组件：当前 Run 仍活跃、尚未产生可见 Assistant 文本
+且未等待用户交互时显示。当前 Run 的有效 Agent tool 状态紧随 Thinking，以独立的同级
+紧凑组件展示；首个非空文本增量只隐藏 Thinking，不删除 Tool 组件。其他 Run 的历史消息和
+空白增量不得改变 Thinking 判断。状态和可见性根据现有 `messages + runId` 派生，不新增
+Store 字段或后端事件。同一 Run 的 Agent state 事件按 `run_id + name` 覆盖；没有有效
+Todo 时不创建 Tool 组件，并移除该 Run 先前的 Agent state 组件。
+
+Run 终态重新读取 Thread Detail 时，`useChat.applyThreadDetail` 保留当前页面已经收到的
+流式 Tool 消息，并按关联 Run 放回持久化 Assistant 消息之前。整页刷新后的 Tool 历史恢复
+不属于本次事件流展示范围。
 
 ### 10.8 Stop current Run
 
@@ -910,11 +916,11 @@ PostgreSQL 保存权威 Run，Pinia 保存当前运行态，`localStorage` 以
 
 ### RUN-ES-009 Output-aware activity indicator
 
-`ChatLoadingStateComponent` 拥有等待状态的展示、经过时间和动画降级；
-`ChatView` 拥有可见性。`Thinking` 只表示当前活跃 Run 尚未产生可见
-Assistant 文本或 Agent tool 状态。当前 Run 一旦出现首个非空文本增量或首个
-tool 消息，页面必须卸载该组件，不得同时展示 Assistant 文本、Agent tool 状态
-和等待指示器。
+`ChatThinkingGroupComponent` 拥有等待状态的展示、经过时间和动画降级；
+`ChatView` 拥有可见性和活动组件编排。`Thinking` 表示当前活跃 Run 尚未产生可见
+Assistant 文本；有效 Agent tool 状态作为其后的独立同级紧凑组件展示。当前 Run 一旦出现首个
+非空文本增量或等待用户交互，页面只卸载 Thinking Group，必须保留已有 Tool 组件；
+Run 终态刷新 Thread Detail 时也不得从当前页面删除该组件。
 
 ## 12. Acceptance Criteria
 
@@ -928,12 +934,14 @@ tool 消息，页面必须卸载该组件，不得同时展示 Assistant 文本�
   直接读取 Thread Detail。
 - 前端消费 `status/messages/custom/end`，不再只等待 `end`。
 - 文本增量来自真实 `messages.items[].stream_event[]`。
-- 当前 Run 尚无可见 Assistant 文本或 Agent tool 状态时，
-  `ChatLoadingStateComponent` 显示 `Thinking`、3x3 像素波和经过时间；首个非空
-  文本增量或首个 tool 消息渲染后立即卸载，且不受其他 Run 的消息影响。
-- Thinking 与当前 Run 的 Agent tool 状态互斥；tool 状态可见期间不得重新显示
-  Thinking。
+- 当前 Run 尚无可见 Assistant 文本且未等待用户交互时，Thinking Group 显示
+  `Thinking`、3x3 像素波和经过时间；首个非空文本增量渲染后立即卸载，且不受其他
+  Run 的消息影响。
+- Thinking 与当前 Run 的有效 Agent tool 状态依次同级显示，不额外缩进；空 Agent state
+  不渲染。Thinking 卸载、正文输出和 Run 终态收口不删除 Tool 组件。
 - reduced motion 停止等待组件的像素和 shimmer 动画，但经过时间继续。
+- Conversation 加载与 Agent Thinking 直接复用 Thinking Group，不存在额外 Loading
+  中转组件。
 - 页面未刷新且 Pinia cursor 仍在内存时，SSE 续连同一个 Run 并从
   `Last-Stream-ID` 之后开始；整页刷新从 `0-0` 重放。
 - 前端点击停止后显示 `cancel_requested`，直到收到 `cancelled` 终态。

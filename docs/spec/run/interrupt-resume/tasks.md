@@ -1,9 +1,9 @@
-# Resume 实施任务
+﻿# Resume 接线实施任务
 
-状态：待用户确认。计划见 plan.md v0.3.0。
+状态：本轮接线实施与定向验证完成。计划见 plan.md v0.3.0；完整能力的真实服务联调未执行。
 
-- [ ] T1（RUN-HIL-001 至 004）：Run Service 接收 answers、校验问题和选项、继承运行身份及模型，覆盖幂等恢复。
-- [ ] T2（RUN-HIL-005、007、008）：补齐 resume_agent_response 和显式 resume_input，去掉 agent_slug 参数并直接获取主 Agent；统一中断载荷及两入口收尾，验证 checkpoint 恢复和消息保存。
-- [ ] T3（RUN-HIL-006、007、009）：Worker 传入回答字典，去除无停止信号默认成功，验证终态和取消。
-- [ ] T4（RUN-HIL-009 至 011）：前端类型、事件/详情解析、问题组件和提交适配 questions/answers，验证多题提交与刷新恢复。
-- [ ] T5（RUN-HIL-001 至 011）：完成计划所列集成与浏览器验证，记录实际证据；通过后归档本版本 plan/tasks。
+- [x] T1（RUN-HIL-002 至 004、007）：接入 answers 请求与校验、幂等回答比较、父模型配置传递。
+- [x] T2（RUN-HIL-005、007、008）：补齐恢复入口参数、checkpoint 验证、现有 handler 调用和消息保存接线。
+- [x] T3（RUN-HIL-005、006、009）：Worker 传递 answers，接收 handler 原有字段并调用既有终态函数；普通入口暂存中断 chunk，保存 checkpoint 后再发出并依据 interrupted 返回。
+- [x] T4（RUN-HIL-009 至 011）：前端多题单选、answers 提交、事件与刷新恢复。
+- [x] T5：19 个定向测试、前端构建、模拟 API 的浏览器核验、源码编译与受保护函数差异检查通过；证据及范围外限制见 plan.md。
