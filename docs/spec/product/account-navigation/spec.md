@@ -59,13 +59,16 @@ Avatar 是装饰内容。Profile 使用 dialog 语义、可访问标题、遮罩
 
 ### AM-ACCOUNT-007 Route access guard
 
-现有 `web/src/router/index.ts` 全局 `beforeEach` 是 Web 入口 access token 检查的唯一
-所有者。每次进入非 Login 路由时，没有 access token 必须重定向到 `/login`；存在
-access token 时允许进入。访问 Login 且已有 access token 时重定向到 Chat，避免重复
-登录。View 和 Component 不重复实现该判断。
+现有 `web/src/router/index.ts` 全局 `beforeEach` 是 Web 入口认证检查的唯一导航所有者。
+首次进入或刷新页面时，守卫必须等待 Auth Store 恢复完成；Store 用 `/api/auth/me` 验证
+持久化 access token 并恢复用户。只有 token 存在且验证成功才允许进入非 Login 路由；
+没有 token、过期 token、格式错误 token或服务端返回 401 时，Store 清除本地认证状态，
+守卫重定向到 `/login`，不得先渲染 Chat 或其他受保护页面。
 
-本要求只检查 token 是否存在；token 有效性继续由现有 Auth Store restore 和 API 认证
-错误处理负责，不在 Router 中重复请求 `/api/auth/me`。
+访问 Login 时同样等待恢复：验证成功才重定向到 Chat，否则停留 Login。
+`AuthenticationView` 不根据 token 字符串自行跳转；View 和 Component 不重复实现认证判断。
+恢复只在当前 token 尚未验证时请求 `/api/auth/me`，同一 token 已恢复用户后不在每次导航
+重复请求；access token 到期后再次进入路由或服务端认证失败时必须回到 Login。
 
 ## 3. Non-goals
 
@@ -90,7 +93,8 @@ access token 时允许进入。访问 Login 且已有 access token 时重定向�
 - Settings Account section 不再把已登录用户显示为 `Not logged in`。
 - Log out 清理现有认证 Store 并进入 `/login`。
 - 直接进入或切换到任何受保护路由时，没有 access token 会进入 `/login`；Login
-  不产生重定向循环。
+  不产生重定向循环。刷新时持久化 token 必须先通过 `/api/auth/me` 验证；缺失、过期、
+  格式错误或返回 401 的 token 不得短暂进入 Chat，也不得被 Login 页面再次送回 Chat。
 - 没有新增 API、Store、依赖或模拟业务数据。
 - 定向 ESLint、typecheck、Vite build 和 scoped diff check 通过。
 
