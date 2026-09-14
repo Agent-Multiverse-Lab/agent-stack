@@ -4,7 +4,7 @@
 
 `web/AGENTS.md` 只描述长期有效的架构职责、目录边界、依赖方向、代码归属和验证方式。
 
-- 不把一次任务的实现方案写成永久架构；任务方案放在仓库根目录的 `doc/spec/`。
+- 不把一次任务的实现方案写成永久架构；需要保留的任务方案按需放入仓库的 `docs/spec/`。
 - 不把运行时数据、测试结果、部署状态或排障结论写入本文件。
 - 只有目录所有权、公共契约或工作流程发生变化时，才同步更新本文件。
 - 代码与本文件不一致时，先核对真实调用链；如果代码变更确实改变了长期边界，在同一任务中修正文档。
@@ -18,8 +18,8 @@
 - Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
 - Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
-- 前端数据合同以后端公开协议为准，前端样式优先使用 Tailwind CSS v4；具体字段映射和组件
-  样式写入对应 `doc/spec/`，不在本文件展开。
+- 前端数据合同以后端公开协议为准，前端样式优先使用 Tailwind CSS v4；需要长期记录的字段映射
+  和组件样式按需写入对应 `docs/spec/`，不在本文件展开。
 
 补充执行原则：
 
@@ -84,13 +84,13 @@ src/main.ts
 
 ## 任务归属规则
 
-每个代码任务都必须遵循以下顺序：
+每个代码任务遵循以下顺序：
 
 1. 根据用户目标确定一个主要任务区域。
-2. 按根 `AGENTS.md` 要求，在 `doc/spec/` 写明行为、边界、文件计划和验证方式，并等待确认。
-3. 只修改该任务区域以及完成调用链所必需的直接边界。
-4. 新代码放入现有责任所有者；没有真实复用时，不提升到公共目录。
-5. 修改完成后删除旧路径和残留引用，并验证完整执行链。
+2. 只修改该任务区域以及完成调用链所必需的直接边界。
+3. 新代码放入现有责任所有者；没有真实复用时，不提升到公共目录。
+4. 修改完成后删除旧路径和残留引用，并验证完整执行链。
+5. 规格、计划和任务文档仅在用户明确要求，或现有长期文档需要同步时按需维护；不作为编码前置条件。
 
 具体约束：
 
@@ -186,7 +186,6 @@ styles/assets <- views/components
 
 - 先读取真实定义、调用点和类型，不依据文件名猜职责。
 - 列出主要任务区域和具体文件边界。
-- 需要代码、API、数据模型、架构或交互设计时，先按根规则提交 `doc/spec/` 并等待确认。
 - 工作区存在其他改动时，保留用户改动，不顺手格式化或重构无关文件。
 
 代码变更后，从 `web/` 运行：

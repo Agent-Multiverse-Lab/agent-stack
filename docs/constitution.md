@@ -22,8 +22,8 @@
 `cancelled` 不得覆盖 `completed/failed`。  
 `cancel_requested` 只是中间态，最终落库必须通过终态确定。
 
-### C7. Stop at Spec
-所有可观察行为改动先更新 `docs/spec` 的规格，再进入实现修改。
+### C7. Documentation on Demand
+文档按实际需要维护，不作为功能实现的前置门禁。普通功能变更不强制创建或更新 `docs/spec`。
 
 ### C8. 可验证
 关键行为（状态、取消、终态事件）必须有对应验收标准并可追踪测试点。

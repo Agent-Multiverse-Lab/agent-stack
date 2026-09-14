@@ -31,6 +31,6 @@ capability 的现行 spec；只有需要设计或实施时才加载该 capabilit
 
 - `docs/spec/` 仅保留按能力组织的规格（run、agent、knowledge、persistence、product）与实施计划，
   不镜像源码目录。
-- 任何行为变更先改 `docs/spec/` 的 spec，再由实现代码同步。
+- `docs/spec/` 按需维护；普通功能变更不要求先写 spec、plan 或 tasks，也不以文档确认阻塞实现。
 - `history/` 只保存已完成计划快照，不参与默认上下文；不要为了了解当前契约读取历史版本。
 - 如果文档、测试和实现之间存在冲突，先识别冲突并确定权威文档，再继续修改。
