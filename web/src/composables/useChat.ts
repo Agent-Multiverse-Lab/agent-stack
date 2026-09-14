@@ -27,6 +27,26 @@ const chatMessageEvent = (message: ChatMessage) =>
 const chatMessageId = (message: ChatMessage) =>
   chatMessageEvent(message)?.message_id
 
+const chatMessageRunId = (message: ChatMessage) => {
+  const event = chatMessageEvent(message)
+  if (typeof event?.run_id === "string") return event.run_id
+  if (!isRecord(event?.run) || typeof event.run.run_id !== "string") return null
+  return event.run.run_id
+}
+
+const hasAgentTodo = (event: AgentRunStreamEvent) => {
+  if (!isRecord(event.agent_state)) return false
+  const todos = event.agent_state.agent_todo
+  return Array.isArray(todos) && todos.some((todo) =>
+    isRecord(todo) &&
+    typeof todo.content === "string" &&
+    todo.content.trim().length > 0 &&
+    (todo.status === "pending" ||
+      todo.status === "in_progress" ||
+      todo.status === "completed")
+  )
+}
+
 export const useChat = () => {
   const thread = ref<ThreadSummaryResponse | null>(null)
   const messages = ref<ChatMessage[]>([])
@@ -49,7 +69,25 @@ export const useChat = () => {
 
   const applyThreadDetail = (detail: ThreadDetailResponse) => {
     thread.value = detail.thread
-    messages.value = detail.messages.map(toChatMessage)
+    const historyMessages = detail.messages.map(toChatMessage)
+    const retainedActivities = messages.value.filter(
+      (message) => message.type === "ai" && message.payload.type === "tool"
+    )
+    for (const activity of [...retainedActivities].reverse()) {
+      const activityRunId = chatMessageRunId(activity)
+      const insertAt = historyMessages.findIndex(
+        (message) =>
+          message.type === "ai" &&
+          message.payload.type === "text" &&
+          chatMessageRunId(message) === activityRunId
+      )
+      historyMessages.splice(
+        insertAt === -1 ? historyMessages.length : insertAt,
+        0,
+        activity
+      )
+    }
+    messages.value = historyMessages
   }
 
   const applyCreatedThread = (
@@ -176,16 +214,26 @@ export const useChat = () => {
       applyAiTextDelta(event, monitoredRunId)
       return
     }
-    if (event.type !== "custom" || event.name !== "agent_state") return
+    if (
+      event.type !== "custom" ||
+      event.name !== "agent_state"
+    ) return
 
     const messageIndex = messages.value.findIndex((message) => {
       const messageEvent = chatMessageEvent(message)
       return (
         message.type === "ai" &&
         message.payload.type === "tool" &&
-        messageEvent?.id === event.id
+        messageEvent?.run_id === monitoredRunId &&
+        messageEvent?.name === "agent_state"
       )
     })
+    if (!hasAgentTodo(event)) {
+      if (messageIndex !== -1) {
+        messages.value = messages.value.filter((_, index) => index !== messageIndex)
+      }
+      return
+    }
     const toolMessage: ChatMessage = {
       type: "ai",
       payload: {

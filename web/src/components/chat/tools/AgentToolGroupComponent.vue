@@ -58,6 +58,7 @@ const formattedTodo = (todo: AgentTodo) => JSON.stringify(todo, null, 2)
 
 <template>
   <details
+    v-if="todos.length"
     class="agent-tool-group w-full max-w-2xl text-sm"
     open
   >
@@ -135,13 +136,6 @@ const formattedTodo = (todo: AgentTodo) => JSON.stringify(todo, null, 2)
         </div>
       </details>
     </div>
-
-    <p
-      v-else
-      class="mt-1.5 mb-0 px-1 text-xs text-slate"
-    >
-      No task state reported.
-    </p>
   </details>
 </template>
 

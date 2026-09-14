@@ -40,12 +40,16 @@ export interface ThreadRunMetadataResponse {
   finished_at: IsoDateTime | null
 }
 
-// FIXEME: 第一版只承载 ask_user 的单选问题。
+export interface HumanQuestion {
+  question_id: string
+  question: string
+  options: { label: string; value: string }[]
+}
+
 export interface InteractionRequired {
   kind: "ask_user"
   parent_run_id: string
-  question: string
-  options: string[]
+  questions: HumanQuestion[]
 }
 
 export interface ThreadMessageResponse {
@@ -78,13 +82,13 @@ export interface AgentRunCreateResponse {
   stream_url: string
 }
 
-// FIXEME: Resume 请求按后端 thread_metadata 合同传递 answer 和幂等键。
+// 回答按 question_id 对应选项 value，幂等键属于本次恢复请求。
 export interface AgentRunResumeRequest {
   thread_id: string
   thread_metadata: {
     request_id: string
     resume: {
-      answer: string
+      answers: Record<string, string>
     }
   }
 }

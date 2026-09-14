@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue"
+import { computed, ref, watch } from "vue"
 
 import type { InteractionRequired } from "@/types/chat"
 
@@ -9,22 +9,27 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  submit: [answer: string]
+  submit: [answers: Record<string, string>]
 }>()
 
-// FIXEME: 第一版仅允许选择后端提供的单个 option。
-const selectedAnswer = ref("")
+const answers = ref<Record<string, string>>({})
+const allAnswered = computed(() =>
+  props.interaction.questions.length > 0 &&
+  props.interaction.questions.every((question) =>
+    question.options.some((option) => option.value === answers.value[question.question_id])
+  )
+)
 
 watch(
   () => props.interaction.parent_run_id,
   () => {
-    selectedAnswer.value = ""
+    answers.value = {}
   }
 )
 
 const submit = () => {
-  if (!selectedAnswer.value || props.disabled) return
-  emit("submit", selectedAnswer.value)
+  if (!allAnswered.value || props.disabled) return
+  emit("submit", { ...answers.value })
 }
 </script>
 
@@ -32,7 +37,7 @@ const submit = () => {
   <!-- FIXEME: 问题和选项完全来自真实 interrupt payload。 -->
   <article
     class="w-full max-w-[36rem] overflow-hidden rounded-[1.25rem] border border-graphite/10 bg-paper shadow-[0_18px_48px_rgba(13,13,13,0.08)]"
-    aria-labelledby="ask-user-question"
+    aria-label="Agent questions"
   >
     <header class="flex items-center gap-3 border-b border-graphite/8 px-5 py-4">
       <span
@@ -64,43 +69,47 @@ const submit = () => {
       </div>
     </header>
 
-    <fieldset class="m-0 border-0 px-5 py-5" :disabled="disabled">
+    <fieldset
+      v-for="question in interaction.questions"
+      :key="question.question_id"
+      class="m-0 min-w-0 border-0 px-5 py-5"
+      :disabled="disabled"
+    >
       <legend
-        id="ask-user-question"
-        class="w-full p-0 text-[0.95rem] font-medium leading-6 text-graphite"
+        class="w-full break-words p-0 text-[0.95rem] font-medium leading-6 text-graphite"
       >
-        {{ interaction.question }}
+        {{ question.question }}
       </legend>
 
       <div class="mt-4 grid gap-2">
         <label
-          v-for="option in interaction.options"
-          :key="option"
+          v-for="option in question.options"
+          :key="option.value"
           class="flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 text-sm transition-colors"
-          :class="selectedAnswer === option
+          :class="answers[question.question_id] === option.value
             ? 'border-graphite bg-graphite text-paper'
             : 'border-graphite/10 bg-mist/45 text-graphite hover:border-graphite/25'"
         >
           <input
-            v-model="selectedAnswer"
+            v-model="answers[question.question_id]"
             class="sr-only"
             type="radio"
-            name="ask-user-answer"
-            :value="option"
+            :name="`ask-user-${interaction.parent_run_id}-${question.question_id}`"
+            :value="option.value"
           >
           <span
             class="grid size-4 shrink-0 place-items-center rounded-full border"
-            :class="selectedAnswer === option
+            :class="answers[question.question_id] === option.value
               ? 'border-paper/70'
               : 'border-graphite/25'"
             aria-hidden="true"
           >
             <span
-              v-if="selectedAnswer === option"
+              v-if="answers[question.question_id] === option.value"
               class="size-1.5 rounded-full bg-paper"
             />
           </span>
-          <span>{{ option }}</span>
+          <span class="min-w-0 break-words">{{ option.label }}</span>
         </label>
       </div>
     </fieldset>
@@ -109,7 +118,7 @@ const submit = () => {
       <button
         type="button"
         class="rounded-full bg-graphite px-4 py-2 text-sm font-semibold text-paper transition-opacity disabled:cursor-not-allowed disabled:opacity-35"
-        :disabled="disabled || !selectedAnswer"
+        :disabled="disabled || !allAnswered"
         @click="submit"
       >
         Continue

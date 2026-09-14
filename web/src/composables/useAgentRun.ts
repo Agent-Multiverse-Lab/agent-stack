@@ -133,15 +133,22 @@ export const useAgentRun = () => {
           event.type === "interaction_required" &&
           event.kind === "ask_user" &&
           typeof event.parent_run_id === "string" &&
-          typeof event.question === "string" &&
-          Array.isArray(event.options) &&
-          event.options.every((option) => typeof option === "string")
+          Array.isArray(event.questions) &&
+          event.questions.length > 0 &&
+          event.questions.every((question) =>
+            question && typeof question.question_id === "string" &&
+            typeof question.question === "string" && Array.isArray(question.options) &&
+            question.options.every((option: unknown) =>
+              typeof option === "object" && option !== null &&
+              "label" in option && typeof option.label === "string" &&
+              "value" in option && typeof option.value === "string"
+            )
+          )
         ) {
           pendingInteraction.value = {
             kind: "ask_user",
             parent_run_id: event.parent_run_id,
-            question: event.question,
-            options: event.options
+            questions: event.questions
           }
           return
         }

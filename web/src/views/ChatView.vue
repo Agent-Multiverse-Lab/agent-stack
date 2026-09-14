@@ -10,7 +10,6 @@ import {
   listChatAgents,
   uploadChatAttachments,
 } from "@/api/agent";
-import ChatLoadingStateComponent from "@/components/chat/loading/ChatLoadingStateComponent.vue";
 import ChatMessageComponent from "@/components/chat/ChatMessageComponent.vue";
 import ChatMessageInputComponent from "@/components/chat/ChatMessageInputComponent.vue";
 import ChatThinkingGroupComponent from "@/components/chat/loading/ChatThinkingGroupComponent.vue";
@@ -304,7 +303,7 @@ const cancelCurrentRun = async () => {
 };
 
 // FIXEME: 回答提交后立即切换到后端返回的新 Resume Run Stream。
-const submitResume = async (answer: string) => {
+const submitResume = async (answers: Record<string, string>) => {
   const interaction = pendingInteraction.value;
   const currentThread = thread.value;
   if (!interaction || !currentThread || resuming.value) return;
@@ -317,7 +316,7 @@ const submitResume = async (answer: string) => {
       thread_id: currentThread.thread_id,
       thread_metadata: {
         request_id: crypto.randomUUID(),
-        resume: { answer },
+        resume: { answers },
       },
     });
     if (operation !== expectedOperation) return;
@@ -367,6 +366,29 @@ const hasCurrentRunAssistantText = computed(() => {
   });
 });
 
+const isActivityMessage = (message: ChatMessage) =>
+  message.type === "ai" && message.payload.type === "tool";
+
+const isCurrentRunActivityMessage = (message: ChatMessage) => {
+  if (!isActivityMessage(message)) return false;
+  const event = isRecord(message.payload.event)
+    ? message.payload.event
+    : null;
+  return Boolean(runId.value && event?.run_id === runId.value);
+};
+
+const firstCurrentRunActivityIndex = computed(() =>
+  messages.value.findIndex(isCurrentRunActivityMessage),
+);
+
+const showThinkingGroup = computed(
+  () =>
+    !loading.value &&
+    isRunActive.value &&
+    !pendingInteraction.value &&
+    !hasCurrentRunAssistantText.value,
+);
+
 const messageKey = (message: ChatMessage, index: number) => {
   const event = isRecord(message.payload.event) ? message.payload.event : null;
   const eventId = event?.message_id ?? event?.id;
@@ -403,17 +425,25 @@ onBeforeUnmount(stop);
       <div
         class="mx-auto grid w-full max-w-[52rem] content-start gap-7 px-[clamp(1rem,4vw,2rem)] pt-6 pb-10"
       >
-        <ChatLoadingStateComponent
+        <ChatThinkingGroupComponent
           v-if="loading"
           label="Loading conversation"
         />
 
         <template v-else>
-          <ChatMessageComponent
+          <template
             v-for="(message, index) in messages"
             :key="messageKey(message, index)"
-            :message="message"
-          />
+          >
+            <ChatThinkingGroupComponent
+              v-if="showThinkingGroup && index === firstCurrentRunActivityIndex"
+              :key="runId ?? 'pending'"
+            />
+
+            <ChatMessageComponent
+              :message="message"
+            />
+          </template>
         </template>
 
         <ChatAskUserComponent
@@ -430,7 +460,7 @@ onBeforeUnmount(stop);
           leave-to-class="opacity-0"
         >
           <ChatThinkingGroupComponent
-            v-if="!loading && isRunActive && !hasCurrentRunAssistantText"
+            v-if="showThinkingGroup && firstCurrentRunActivityIndex === -1"
             :key="runId ?? 'pending'"
           />
         </Transition>
