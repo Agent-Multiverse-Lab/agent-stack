@@ -538,7 +538,7 @@ async def process_agent_run(ctx, run_id: str):
                 # FIXEME: 两个入口参数不同，显式分支便于核验 Resume 不读取普通消息。
                 if run_type == "resume":
                     stream_thread_events: AsyncIterator = resume_agent_response(
-                        agent_slug=agent_slug,  # ty:ignore[invalid-argument-type]
+                        resume_input=metadata["resume"]["answers"],
                         thread_id=thread_id,  # ty:ignore[invalid-argument-type]
                         runtime_metadata=metadata,
                         current_user=user,
@@ -606,11 +606,11 @@ async def process_agent_run(ctx, run_id: str):
                                 raise asyncio.CancelledError(f"当前 Agent run： {run_id}已取消")
                                 
 
-                            elif status == "interrupted":
-                                interrupt_payload = strem_agent_chunk.get("interrupt")
+                            elif status == "ask_human":
+                                interrupt_payload = strem_agent_chunk.get("pending_interrupt")
                                 if not isinstance(interrupt_payload, dict):
                                     raise ValueError(
-                                        "interrupted chunk 缺少 interrupt payload"
+                                        "ask_human chunk 缺少 pending_interrupt payload"
                                     )
                                 await stream_event_smoother.release()
                                 agent_status, changed = await _finalize_run(
@@ -687,17 +687,8 @@ async def process_agent_run(ctx, run_id: str):
 
             # FIXEME: 无终态 status 时先由 Run Context 判定是否为取消。
             if not terminal_flag:
-                if run_controller.is_cancelled():
+                if await run_controller.is_cancelled():
                     raise asyncio.CancelledError(f"run {run_id} cancelled")
-                
-                finished_payload = {"status": "finished", "request_id": request_id}
-
-                await _finalize_run(
-                    run_id,
-                    status="completed",
-                    thread_id=str(thread_id),
-                    payload=finished_payload
-                )
 
 
             # FIXEME: 未取消且没有终态 status 才属于流协议错误。

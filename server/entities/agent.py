@@ -35,7 +35,7 @@ class AgentRunResumeRequest(BaseModel):
         description="Resume Run 元数据",
     )
 
-    # FIXEME: 第一版只接受 ask_user 的非空单选答案。
+    # 问题及选项的业务校验由 Resume Service 按父 Run 完成。
     @field_validator("thread_metadata")
     @classmethod
     def validate_resume_metadata(
@@ -46,10 +46,13 @@ class AgentRunResumeRequest(BaseModel):
         resume = normalized.get("resume")
         if not isinstance(resume, dict):
             raise ValueError("thread_metadata.resume 必须是对象")
-        answer = resume.get("answer")
-        if not isinstance(answer, str) or not answer.strip():
-            raise ValueError("thread_metadata.resume.answer 不能为空")
-        normalized["resume"] = {**resume, "answer": answer.strip()}
+        answers = resume.get("answers")
+        if not isinstance(answers, dict) or not answers or not all(
+            isinstance(key, str) and key and isinstance(value, str)
+            for key, value in answers.items()
+        ):
+            raise ValueError("thread_metadata.resume.answers 必须是非空回答字典")
+        normalized["resume"] = {"answers": answers}
         return normalized
 
 

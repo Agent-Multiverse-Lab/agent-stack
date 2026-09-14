@@ -58,8 +58,7 @@ class InteractionRequired(BaseModel):
 
     kind: str
     parent_run_id: str
-    question: str
-    options: list[str]
+    questions: list[dict[str, Any]]
 
 
 class ThreadMessageAttachmentResponse(BaseModel):

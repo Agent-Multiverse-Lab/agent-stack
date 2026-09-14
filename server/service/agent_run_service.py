@@ -167,11 +167,13 @@ async def create_resume_agent_run_service(
     resume = run_metadata.get("resume")
     if not isinstance(resume, dict):
         raise ValueError("thread_metadata.resume 必须是对象")
-    answer = resume.get("answer")
-    if not isinstance(answer, str) or not answer.strip():
-        raise ValueError("thread_metadata.resume.answer 不能为空")
-    answer = answer.strip()
-    run_metadata["resume"] = {**resume, "answer": answer}
+    answers = resume.get("answers")
+    if not isinstance(answers, dict) or not answers or not all(
+        isinstance(key, str) and key and isinstance(value, str)
+        for key, value in answers.items()
+    ):
+        raise ValueError("thread_metadata.resume.answers 必须是非空回答字典")
+    run_metadata["resume"] = {"answers": dict(answers)}
     request_id = str(run_metadata.get("request_id") or uuid.uuid4())
     run_metadata["request_id"] = request_id
 
@@ -196,24 +198,53 @@ async def create_resume_agent_run_service(
         raise AgentRunConflictError("父 Run 不处于 interrupted 状态")
 
     interrupt_payload = dict(parent.run_metadata or {}).get("interrupt")
-    options = (
-        interrupt_payload.get("options")
+    questions = (
+        interrupt_payload.get("questions")
         if isinstance(interrupt_payload, dict)
         else None
     )
-    if (
-        not isinstance(options, list)
-        or not all(isinstance(option, str) and option for option in options)
-        or answer not in options
-    ):
-        raise ValueError("回答不在父 Run 提供的选项中")
+    if not isinstance(questions, list) or not questions:
+        raise ValueError("父 Run 缺少有效 questions")
+    question_ids: set[str] = set()
+    for question in questions:
+        if not isinstance(question, dict):
+            raise ValueError("父 Run 的问题结构无效")
+        question_id = question.get("question_id")
+        options = question.get("options")
+        if (
+            not isinstance(question_id, str) or not question_id
+            or question_id in question_ids
+            or not isinstance(question.get("question"), str)
+            or not question["question"].strip()
+            or not isinstance(options, list) or not options
+            or not all(
+                isinstance(option, dict)
+                and isinstance(option.get("label"), str) and option["label"].strip()
+                and isinstance(option.get("value"), str) and option["value"]
+                for option in options
+            )
+        ):
+            raise ValueError("父 Run 的问题或选项结构无效")
+        question_ids.add(question_id)
+        if answers.get(question_id) not in [option["value"] for option in options]:
+            raise ValueError("回答不在父 Run 对应问题的选项中")
+    if set(answers) != question_ids:
+        raise ValueError("回答必须覆盖父 Run 的全部问题，且不能包含多余问题")
 
     existing = await run_repository.get_resume_child(interrupted_run_id)
     if existing is not None:
         if str(existing.request_id) == request_id:
+            if dict(existing.run_metadata or {}).get("resume", {}).get("answers") != answers:
+                raise AgentRunConflictError("相同 request_id 不能提交不同回答")
             await db.commit()
             return existing
         raise AgentRunConflictError("当前问题已经回答")
+
+    # 模型配置由父 Run 决定，回答请求不能替换模型。
+    run_metadata.pop("model", None)
+    parent_metadata = dict(parent.run_metadata or {})
+    if "model" in parent_metadata:
+        run_metadata["model"] = parent_metadata["model"]
 
     resume_run = await run_repository.create_run(
         run_id=str(uuid.uuid4()),

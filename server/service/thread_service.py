@@ -596,7 +596,7 @@ def _lc_message_v2_dispather(
         "message_id": message_id,
         "thread_id": thread_id,
     }
-    message_event["cotent_delta"] = content if isinstance(content, str) else None
+    message_event["content_delta"] = content if isinstance(content, str) else None
     message_event["reasoning_content_delta"] = (
         reasoning_content
         if isinstance(reasoning_content, str) and reasoning_content
@@ -1267,18 +1267,11 @@ async def stream_agent_response(
         ):
             yield chunk
 
-        await save_message_from_langgraph_state(
-            thread_id=thread_id,
-            run_id=run_id,
-            context=agent_context,
-            agent_instance=agent_instance,
-            db=db,
-        )
-
         # 打断系统，interrupt 隶属于 正常的异常
         interrupted = False
         interrupt_message = None
         interrupt_type = None
+        interrupt_chunks: list[bytes] = []
         async for interrupt_chunk in check_agent_interrupt_handler(
             agent_instance=agent_instance,
             runtime_metadata=runtime_metadata,
@@ -1289,7 +1282,7 @@ async def stream_agent_response(
             interrupt_type, interrupt_message = _reslove_interrupt_state(
                 interrupt_chunk
             )
-            yield interrupt_chunk
+            interrupt_chunks.append(interrupt_chunk)
 
         # finish之前先save所有的的信息
         try:
@@ -1298,14 +1291,21 @@ async def stream_agent_response(
                 run_id=runtime_metadata.get("run_id"),
                 context=agent_context,
                 agent_instance=agent_instance,
-                db=db
-
+                db=db,
             )
         except Exception as e:
             logger.exception(f"保存信息出错:{e}")
             yield make_agent_stream_event(
-                status="error"
+                status="error",
+                error=str(e),
+                error_type=type(e).__name__,
             )
+            return
+
+        if interrupted:
+            for interrupt_chunk in interrupt_chunks:
+                yield interrupt_chunk
+            return
 
         yield make_agent_stream_event(
             status="finished",
@@ -1340,18 +1340,15 @@ async def stream_agent_response(
 # FIXEME: Resume 与普通入口同级，直接把 Command 交给 BaseAgent 专用方法。
 async def resume_agent_response(
     *,
-    agent_slug: str,
+    resume_input: dict[str, str],
     thread_id: str,
     runtime_metadata: dict,
     current_user: AuthenticatedUser,
     db: AsyncSession,
-) -> AsyncIterator[Any]:
+) -> AsyncIterator[bytes]:
     runtime_metadata = dict(runtime_metadata or {})
-    run_id = str(runtime_metadata["run_id"])
-    resume = runtime_metadata.get("resume")
-    answer = resume.get("answer") if isinstance(resume, dict) else None
-    if not isinstance(answer, str) or not answer.strip():
-        raise ValueError("Resume Run 缺少非空 answer")
+    run_id = runtime_metadata.get("run_id")
+    accumulated_msg: list[str] = []
 
     # FIXEME: Resume Run 使用自己的 chunk builder，不复用普通 Run builder。
     def make_agent_resume_event(
@@ -1378,45 +1375,42 @@ async def resume_agent_response(
             + b"\n"
         )
 
-    agent_item, agent_instance = await _build_agent_runtime(
-        agent_slug=agent_slug,
-        user=current_user,
-        thread_id=thread_id,
-        db=db,
-        run_type="resume",
-    )
-    runtime_metadata.update(
-        {
-            "agent_slug": agent_item.slug,
-            "thread_id": thread_id,
-            "uid": current_user.uid,
-        }
-    )
-    agent_runtime_context = await _build_agent_runtime_context(
-        uid=current_user.uid,  # ty:ignore[invalid-argument-type]
-        run_id=run_id,
-        thread_id=thread_id,
-        request_id=str(runtime_metadata["request_id"]),
-        model=runtime_metadata.get("model"),
-    )
-    agent_context = agent_instance.agent_context()
-    agent_context.update_context(agent_runtime_context)
-
     try:
-        await _check_conv_status(
-            conv_repo=ConversationRepository(db),
+        if not thread_id or not run_id or not runtime_metadata.get("request_id"):
+            raise ValueError("Resume Run 缺少 thread_id、run_id 或 request_id")
+        if not isinstance(resume_input, dict) or not resume_input:
+            raise ValueError("Resume Run 缺少回答字典")
+        await _require_thread(
+            conversations=ConversationRepository(db),
             thread_id=thread_id,
-            uid=current_user.uid,  # ty:ignore[invalid-argument-type]
-            agent_item=agent_item,
+            uid=current_user.uid,
         )
+        agent_instance = agent_manager.get_agent("LeaderAgent")
+        runtime_metadata.update({"thread_id": thread_id, "uid": current_user.uid})
+        agent_runtime_context = await _build_agent_runtime_context(
+            uid=current_user.uid,
+            run_id=run_id,
+            thread_id=thread_id,
+            request_id=runtime_metadata["request_id"],
+            model=runtime_metadata.get("model"),
+        )
+        agent_context = agent_instance.agent_context()
+        agent_context.update_context(agent_runtime_context)
+        graph = await agent_instance.get_agent(agent_context)
+        checkpoint = await graph.aget_state(
+            {"configurable": {"thread_id": thread_id, "uid": current_user.uid}}
+        )
+        if _reslove_agent_interrupt(checkpoint) is None:
+            raise ValueError("当前 checkpoint 没有待恢复中断")
         stream_events = agent_instance.stream_message_by_resume(
-            Command(resume=answer.strip()),
+            Command(resume=resume_input),
             runtime_context=agent_runtime_context,
         )
         async for chunk in _stream_agent_event_chunks(
             stream_events=stream_events,
             thread_id=thread_id,
             make_event=make_agent_resume_event,
+            accumulated_msg=accumulated_msg,
         ):
             yield chunk
 
@@ -1427,15 +1421,13 @@ async def resume_agent_response(
             agent_instance=agent_instance,
             db=db,
         )
-        interrupt_payload = await check_agent_interrupt_handler(
+        async for interrupt_chunk in check_agent_interrupt_handler(
             agent_instance=agent_instance,
+            runtime_metadata=runtime_metadata,
+            chunk_iterator=make_agent_resume_event,
             context=agent_context,
-        )
-        if interrupt_payload is not None:
-            yield make_agent_resume_event(
-                status="interrupted",
-                interrupt=interrupt_payload,
-            )
+        ):
+            yield interrupt_chunk
             return
 
         yield make_agent_resume_event(
@@ -1444,6 +1436,21 @@ async def resume_agent_response(
         )
     except Exception as exc:
         logger.exception("Agent Resume stream 响应失败")
+        if accumulated_msg:
+            try:
+                async with postgres_manager.get_async_session_context() as error_db:
+                    await save_interrupt_message(
+                        db=error_db,
+                        thread_id=thread_id,
+                        uid=current_user.uid,
+                        accumulated_msg=AIMessage(content="\n".join(accumulated_msg)),
+                        error=str(exc),
+                        error_type=type(exc).__name__,
+                        agent_run_id=run_id,
+                        request_id=runtime_metadata.get("request_id"),
+                    )
+            except Exception:
+                logger.exception("保存 Resume 累计输出失败")
         # FIXEME: Resume Run 使用自己的 builder 输出相同字段合同的 error chunk。
         yield make_agent_resume_event(
             status="error",
