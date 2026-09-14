@@ -81,23 +81,15 @@ const router = createRouter({
   scrollBehavior: () => ({ top: 0 })
 })
 
-router.beforeEach((to, _from, next) => {
+router.beforeEach(async (to) => {
   const authStore = useAuthStore()
-  const isAuthenticated = Boolean(authStore.accessToken)
+  const isAuthenticated = await authStore.restore()
 
   if (to.name === "login") {
-    if (isAuthenticated) {
-      next({ name: "chat" })
-    } else {
-      next()
-    }
-  } else {
-    if (!isAuthenticated) {
-      next({ name: "login" })
-    } else {
-      next()
-    }
+    return isAuthenticated ? { name: "chat" } : true
   }
+
+  return isAuthenticated ? true : { name: "login" }
 })
 
 export default router
