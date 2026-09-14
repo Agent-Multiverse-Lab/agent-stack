@@ -26,6 +26,88 @@ ChatGPT 的交互体验，并验证多智能体编排、任务协作与工具调
 项目将在上述形态演进的基础上，持续扩展智能体协作、知识检索、工具调用、内容生成、
 任务自动化及其他通用能力。
 
+## 🛰️ 数据中台与专项 Agent 规划
+
+项目计划从卫星与图像数据切入，验证 Agent 在多数据源检索、结构化数据分析、图像推理和
+受控数据操作中的完整执行链。目标形态不是让 Agent 直接访问数据库或模型，而是由 Agent
+理解任务和编排能力，通过 MCP 调用数据中台及图像处理服务。
+
+### Agent 职责
+
+| Agent | 状态 | 职责 |
+| --- | --- | --- |
+| `LeaderAgent` | 已实现 | 理解用户目标、选择专项 Agent、协调子 Run，并汇总最终结果 |
+| `SearchAgent` | 已实现 | 执行有界的网络与知识库检索，返回去重、可追溯的检索证据，不负责完整研究结论 |
+| `CitationAgent` | 已实现 | 校验声明与实际检索片段的对应关系，发现缺失、错误或不足的引用 |
+| `SatelliteAgent` | 已实现 | 连接多个卫星数据源，根据任务选择目录检索、单时相解译或多时相变化分析工具 |
+| `ResearchAgent` | 规划中 | 拆解研究问题、组织多轮证据收集、识别冲突与证据缺口，并形成结构化研究简报 |
+| `DataAnalysisAgent` | 规划中 | 分析跨数据源的表格、指标和时序数据，执行统计计算并返回可复核的数据结论 |
+
+`ResearchAgent` 与 `SearchAgent` 的边界是“研究”与“检索”：前者负责问题分解、证据覆盖、
+冲突处理和研究综合，后者只负责从指定来源取得证据。`CitationAgent` 保持独立，负责在交付前
+验证关键声明，不与搜索过程合并。
+
+图像模型、数据 CRUD 和文件处理不单独设计为 Agent。它们输入输出明确，应作为 MCP Tool
+或 Sandbox Tool 供专项 Agent 调用：
+
+- 图像 Embedding、目标检测、分割、配准和变化检测由 Python Image Processing MCP 提供。
+- 数据资产增删改查、权限、任务、版本和血缘由 Go Data Platform MCP 提供。
+- 裁剪、格式转换、报告和产物生成等确定性操作由 Sandbox Tool 执行。
+- 创建、修改、发布和删除等有副作用的操作必须经过权限校验、幂等控制和必要的用户确认。
+
+### 目标协作拓扑
+
+```mermaid
+flowchart TB
+    User[用户] --> Leader[LeaderAgent]
+
+    Leader --> Research[ResearchAgent<br/>规划中]
+    Leader --> Search[SearchAgent]
+    Leader --> Satellite[SatelliteAgent]
+    Leader --> Analysis[DataAnalysisAgent<br/>规划中]
+    Leader --> Citation[CitationAgent]
+
+    Search --> WebTools[网络与知识检索工具]
+    Satellite --> GoMCP[Go Data Platform MCP]
+    Satellite --> ImageMCP[Python Image Processing MCP]
+    Analysis --> GoMCP
+    Analysis --> Sandbox[Sandbox 计算工具]
+
+    GoMCP --> Catalog[资产目录 / 权限 / 任务 / 血缘]
+    Catalog --> PostgreSQL[(PostgreSQL)]
+    Catalog --> MinIO[(MinIO)]
+    Catalog --> Milvus[(Milvus)]
+
+    ImageMCP --> Models[Embedding / 检测 / 分割 / 变化检测]
+    ImageMCP --> MinIO
+```
+
+### 数据中台边界
+
+Go 数据中台是业务状态与数据生命周期的所有者，对 Web 提供普通 HTTP API，对 Agent 提供
+MCP Tool；两种入口复用同一组 Application Service，不维护两套 CRUD 逻辑。它负责资产目录、
+权限、版本、处理任务、幂等、审计和输入输出血缘，并协调 PostgreSQL、MinIO 与 Milvus。
+
+Python Image Processing MCP 负责模型加载和图像计算。短任务可以同步返回结构化结果；耗时的
+GPU 推理和批量处理创建异步任务并返回 `job_id`。图像输入输出使用 `asset_id` 和受控对象地址，
+不把大型 Base64、数据库凭据或永久对象存储凭据交给 Agent。
+
+```text
+SatelliteAgent / DataAnalysisAgent
+    -> MCP Tool
+    -> Go 数据中台业务服务
+    -> PostgreSQL / MinIO / Milvus / 外部数据源
+
+SatelliteAgent
+    -> Python Image Processing MCP
+    -> Python / GPU Worker
+    -> Go 数据中台登记结果资产与数据血缘
+```
+
+首个端到端场景计划使用卫星图像：由 `SatelliteAgent` 从多个目录查找影像，调用 Python MCP
+完成预处理和推理，再通过 Go MCP 保存数据资产、任务状态和处理结果。单时相与多时相属于同一
+Agent 下的不同工具策略，不拆成多个 Agent。
+
 ## 🛠️ 主要技术栈
 
 | 领域 | 技术 |
