@@ -10,7 +10,7 @@
 | Persistence | 状态和存储所有权 | [persistence/README.md](persistence/README.md) |
 | Model | 平台供应商管理与运行时连接配置 | [model/README.md](model/README.md) |
 | Product | 产品身份和跨页面体验 | [product/README.md](product/README.md) |
-| Data Platform | 通用数据资产、加工任务、成果血缘与 Agent 接管 | [data-platform/README.md](data-platform/README.md) |
+| Data Platform | 卫星影像多来源目录、空间检索与 Agent 接管 | [data-platform/README.md](data-platform/README.md) |
 
 ## Capability 结构
 

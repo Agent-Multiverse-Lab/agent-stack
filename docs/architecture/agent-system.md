@@ -57,6 +57,8 @@ agent 运行上下文只来自：
 `AgentManager` 负责发现公共和内部 Agent，内部 Agent 不进入公共对话 Agent 列表。
 `SearchAgent`、`CitationAgent` 的专门行为属于各自 Agent 能力，不在
 本架构文档重复展开。
+`SatelliteAgent` 通过 gRPC 目录工具检索场景和资产，再按需调用 MCP 影像处理工具；它不直接连接
+PostgreSQL/PostGIS 或 MinIO。
 
 ## 7. Implementation Invariants
 

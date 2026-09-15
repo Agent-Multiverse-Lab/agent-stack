@@ -22,10 +22,27 @@ uv run --no-sync alembic upgrade head
 uv run --no-sync alembic downgrade -1
 ```
 
+卫星目录迁移完成后，可显式加载固定测试目录：
+
+```bash
+uv run --no-sync python scripts/load_satellite_catalog_fixture.py
+```
+
+## Satellite Gateway
+
+```bash
+cd gateway
+go test ./...
+go run ./cmd/server
+```
+
+启动前设置 `DATABASE_URL`（普通 PostgreSQL DSN）和 `GATEWAY_SHARED_TOKEN`。Python API/Worker
+使用相同的 `SATELLITE_GATEWAY_TOKEN`，并通过 `SATELLITE_GATEWAY_TARGET` 指向 gRPC 服务。
+
 ## 本地基础设施和 Worker
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d postgres redis minio sandbox worker
+docker compose -f docker/docker-compose.yml up -d postgres redis minio sandbox gateway worker
 ```
 
 ## 后端定向验证
@@ -35,7 +52,7 @@ uv run --no-sync python -m compileall server/router server/service server/worker
 git diff --check
 ```
 
-当前项目依赖中没有声明 `pytest`。除非已经安装并实际运行测试，否则不要报告 pytest 验证结果。
+除非已经安装并实际运行对应测试，否则不要报告验证结果。
 如果 `uv run` 因本地缓存权限受阻，请使用仓库虚拟环境，例如
 `.venv/bin/python -m compileall -q <paths>`。
 

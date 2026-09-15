@@ -10,6 +10,7 @@
 
 ### PostgreSQL (Source of Truth)
 - `User / Agent / Conversation / Message / Attachment / AgentRun / KnowledgeFile` 等业务状态。
+- 卫星目录的 `Source / Collection / Scene / SceneAsset`；空间范围由 PostGIS 保存和索引。
 - 状态变更要求事务可见、可幂等、可追溯。
 
 ### Redis
@@ -18,6 +19,7 @@
 
 ### MinIO
 - 原始上传文件、解析产物、Markdown 快照。
+- 卫星栅格、波段、质量掩膜和预览对象；PostgreSQL 只保存对象引用。
 
 ### Milvus
 - 知识检索向量与元数据。
