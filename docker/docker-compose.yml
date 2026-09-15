@@ -7,6 +7,9 @@ x-api-worker-env: &api-worker-env
   ENABLE_RUN_QUEUE: "true"
   ARQ_MAX_JOBS: "${ARQ_MAX_JOBS:-64}"
   SANDBOX_PROVISIONER_URL: http://sandbox:8002
+  SATELLITE_GATEWAY_TARGET: gateway:50051
+  SATELLITE_GATEWAY_PROJECT_ID: ${SATELLITE_GATEWAY_PROJECT_ID:-demo-satellite}
+  SATELLITE_GATEWAY_TOKEN: ${SATELLITE_GATEWAY_TOKEN:-development-only-change-me}
 
 services:
   minio:
@@ -26,7 +29,7 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: postgres:17-alpine
+    image: postgis/postgis:17-3.5-alpine
     container_name: s2c-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -36,6 +39,37 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - ./volume/postgres/data:/var/lib/postgresql/data
+    networks:
+      - s2c-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-multi_agent_s2c}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: docker/gateway.Dockerfile
+    image: multi-agent-s2c-gateway:${VERSION:-0.1.0}
+    container_name: s2c-gateway
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-multi_agent_s2c}
+      GATEWAY_GRPC_ADDRESS: ":50051"
+      GATEWAY_HEALTH_ADDRESS: ":8080"
+      GATEWAY_SHARED_TOKEN: ${SATELLITE_GATEWAY_TOKEN:-development-only-change-me}
+    ports:
+      - "${SATELLITE_GATEWAY_PORT:-50051}:50051"
+      - "${SATELLITE_GATEWAY_HEALTH_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks:
       - s2c-network
     restart: unless-stopped
@@ -96,10 +130,12 @@ services:
       <<: *api-worker-env
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_healthy
       sandbox:
+        condition: service_healthy
+      gateway:
         condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -125,10 +161,12 @@ services:
       <<: *api-worker-env
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_healthy
       sandbox:
+        condition: service_healthy
+      gateway:
         condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"

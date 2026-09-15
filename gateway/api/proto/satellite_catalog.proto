@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package satellite.catalog.v1;
+
+option go_package = "github.com/Agent-Multiverse-Lab/agent-stack/gateway/api/gen;satellitev1";
+
+service SatelliteCatalogService {
+  rpc ListSources(ListSourcesRequest) returns (ListSourcesResponse);
+  rpc SearchScenes(SearchScenesRequest) returns (SearchScenesResponse);
+  rpc GetScene(GetSceneRequest) returns (SceneDetail);
+}
+
+message ListSourcesRequest {}
+
+message Source {
+  string source_id = 1;
+  string name = 2;
+  string provider = 3;
+}
+
+message ListSourcesResponse {
+  repeated Source sources = 1;
+}
+
+message BoundingBox {
+  double west = 1;
+  double south = 2;
+  double east = 3;
+  double north = 4;
+}
+
+message SearchScenesRequest {
+  BoundingBox bbox = 1;
+  string acquired_from = 2;
+  string acquired_to = 3;
+  repeated string source_ids = 4;
+  repeated string collection_ids = 5;
+  repeated string satellites = 6;
+  repeated string sensors = 7;
+  repeated string processing_levels = 8;
+  optional double max_cloud_cover = 9;
+  uint32 limit = 10;
+  string page_token = 11;
+}
+
+message SceneSummary {
+  string scene_id = 1;
+  string source_id = 2;
+  string collection_id = 3;
+  string provider_scene_id = 4;
+  string satellite = 5;
+  string sensor = 6;
+  string processing_level = 7;
+  string acquired_at = 8;
+  BoundingBox bbox = 9;
+  optional double cloud_cover = 10;
+  string crs = 11;
+  optional double ground_sample_distance = 12;
+  string version = 13;
+  bool quality_blocked = 14;
+  repeated string quality_codes = 15;
+}
+
+message SearchScenesResponse {
+  repeated SceneSummary scenes = 1;
+  string next_page_token = 2;
+}
+
+message GetSceneRequest {
+  string scene_id = 1;
+}
+
+message SceneAsset {
+  string asset_id = 1;
+  string role = 2;
+  string band = 3;
+  string object_ref = 4;
+  string content_type = 5;
+  string checksum = 6;
+  int64 size_bytes = 7;
+  repeated string quality_codes = 8;
+}
+
+message SceneDetail {
+  SceneSummary scene = 1;
+  string footprint_wkt = 2;
+  string metadata_json = 3;
+  repeated SceneAsset assets = 4;
+}
