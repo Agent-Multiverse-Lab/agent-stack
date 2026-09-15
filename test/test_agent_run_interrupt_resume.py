@@ -151,7 +151,7 @@ class FixtureAgent:
     async def get_agent(self, _context):
         return self.graph
 
-    async def stream_message_by_resume(self, command, runtime_context):
+    async def stream_message_by_resume(self, command, runtime_context, **_kwargs):
         self.command = command
         await self.graph.ainvoke(command, {"configurable": {
             "thread_id": runtime_context["thread_id"], "uid": runtime_context["uid"]}})
@@ -276,7 +276,13 @@ class NormalStreamFinalizationTest(unittest.IsolatedAsyncioTestCase):
             async for chunk in thread_service.stream_agent_response(
                 agent_slug="LeaderAgent", thread_id="thread-1",
                 runtime_metadata={"run_id": "parent-run", "request_id": "request-1"},
-                thread_input_message=SimpleNamespace(content="开始", image_content=None, langchain_msg=HumanMessage(content="开始")),
+                thread_input_message=SimpleNamespace(
+                    content="开始",
+                    image_content=None,
+                    msg_type="text",
+                    msg_metadata={"attachment_file_ids": []},
+                    langchain_msg=HumanMessage(content="开始"),
+                ),
                 current_user=SimpleNamespace(uid="user-1"), db=SimpleNamespace(),
             ):
                 chunks.append(json.loads(chunk))
@@ -305,6 +311,7 @@ class ResumeWorkerTest(unittest.IsolatedAsyncioTestCase):
     async def run_stream(self, chunks, cancelled=False):
         run = SimpleNamespace(agent_status="pending", uid="user-1", agent_id="LeaderAgent",
                               request_id="request-1", thread_id="thread-1", run_type="resume",
+                              trigger_message_id=None,
                               run_metadata={"resume": {"answers": ANSWERS}})
         @asynccontextmanager
         async def session():

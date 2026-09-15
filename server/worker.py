@@ -499,6 +499,11 @@ async def process_agent_run(ctx, run_id: str):
         **dict(agent_run_event.run_metadata or {}),
         "run_id": run_id,
         "request_id": request_id,
+        "trigger_message_id": (
+            str(agent_run_event.trigger_message_id)
+            if agent_run_event.trigger_message_id is not None
+            else None
+        ),
         "agent_slug": agent_slug,
         "thread_id": thread_id,
         "uid": user.uid,  # ty:ignore[unresolved-attribute]

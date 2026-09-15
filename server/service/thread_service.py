@@ -13,6 +13,7 @@ from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.service.input_message_service import AgentInputMsg
+from server.service.langfuse_service import with_langfuse_config
 from server.utils.auth import AuthenticatedUser
 from server.utils.interrupt_utils import AskHumanPayload, parse_interrupt_questions
 from src.agents import BaseAgent, agent_manager
@@ -1255,9 +1256,29 @@ async def stream_agent_response(
             uid=current_user.uid,  # ty:ignore[invalid-argument-type]
             agent_item=agent_item,
         )
+        attachment_file_ids = thread_input_message.msg_metadata.get(
+            "attachment_file_ids", []
+        )
+        langfuse_config = with_langfuse_config(
+            user_id=str(current_user.uid),
+            conversation_id=thread_id,
+            agent_id=str(agent_item.slug),
+            user_message_id=str(
+                runtime_metadata.get("trigger_message_id")
+                or runtime_metadata["request_id"]
+            ),
+            message_type=thread_input_message.msg_type,
+            attachment_count=len(attachment_file_ids),
+            request_config={
+                "run_id": run_id,
+                "request_id": runtime_metadata["request_id"],
+                "run_type": str(runtime_metadata.get("run_type") or "chat"),
+            },
+        )
         stream_events = agent_instance.stream_messages_with_event(
             [human_msg],
             runtime_context=agent_runtime_context,
+            **langfuse_config,
         )
         async for chunk in _stream_agent_event_chunks(
             stream_events=stream_events,
@@ -1402,9 +1423,23 @@ async def resume_agent_response(
         )
         if _reslove_agent_interrupt(checkpoint) is None:
             raise ValueError("当前 checkpoint 没有待恢复中断")
+        langfuse_config = with_langfuse_config(
+            user_id=str(current_user.uid),
+            conversation_id=thread_id,
+            agent_id=str(runtime_metadata.get("agent_slug") or "LeaderAgent"),
+            user_message_id=str(runtime_metadata["request_id"]),
+            message_type="resume",
+            attachment_count=0,
+            request_config={
+                "run_id": run_id,
+                "request_id": runtime_metadata["request_id"],
+                "run_type": "resume",
+            },
+        )
         stream_events = agent_instance.stream_message_by_resume(
             Command(resume=resume_input),
             runtime_context=agent_runtime_context,
+            **langfuse_config,
         )
         async for chunk in _stream_agent_event_chunks(
             stream_events=stream_events,

@@ -13,6 +13,27 @@ from src.utils.logger import logger
 from .base_context import BaseContext
 
 
+def _build_event_input_config(
+    context: BaseContext,
+    *,
+    callbacks: list[Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
+    """构建仅供 LangChain/LangGraph 单次执行使用的 RunnableConfig。"""
+
+    input_config: dict[str, Any] = {
+        "configurable": {"thread_id": context.thread_id, "uid": context.uid}
+    }
+    if callbacks:
+        input_config["callbacks"] = list(callbacks)
+    if metadata:
+        input_config["metadata"] = dict(metadata)
+    if tags:
+        input_config["tags"] = list(tags)
+    return input_config
+
+
 def unpack_data(data: Any) -> Any:
     """拆解Tool输出内容
 
@@ -100,7 +121,14 @@ class BaseAgent:
                 yield mode, chunk
 
     async def stream_messages_with_event(
-        self, messages: list[str], runtime_context=None, **kwargs
+        self,
+        messages: list[str],
+        runtime_context=None,
+        *,
+        callbacks: list[Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
+        **kwargs,
     ):
         """使用lanchain 的stream as event 方法输出内容，以便形成可观测的输出模式
 
@@ -117,12 +145,12 @@ class BaseAgent:
         logger.info(f"智能体：{agent} 初始化成功")
 
         # 配置运行中的 configuarable 参数， 具体可看 agent 的stream方法
-        input_config = {
-            "configurable": {"thread_id": context.thread_id, "uid": context.uid}
-        }
-
-        # TODO
-        # 需要加上 langfuse callback 的调度器，这里不写
+        input_config = _build_event_input_config(
+            context,
+            callbacks=callbacks,
+            metadata=metadata,
+            tags=tags,
+        )
 
         # 以 v3 的形式返回，主要是看看效果啥样
         async with await agent.astream_events(
@@ -179,15 +207,22 @@ class BaseAgent:
         self,
         resume_input: Command,
         runtime_context=None,
+        *,
+        callbacks: list[Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
         **kwargs,
     ):
         context: BaseContext = self.agent_context()
         context.update_context(runtime_context or {})
         agent: CompiledStateGraph = await self.get_agent(context)
         logger.info(f"智能体：{agent} Resume 初始化成功")
-        input_config = {
-            "configurable": {"thread_id": context.thread_id, "uid": context.uid}
-        }
+        input_config = _build_event_input_config(
+            context,
+            callbacks=callbacks,
+            metadata=metadata,
+            tags=tags,
+        )
 
         async with await agent.astream_events(
             input=resume_input,

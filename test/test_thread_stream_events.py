@@ -52,6 +52,8 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
         input_message = SimpleNamespace(
             content="hello",
             image_content=None,
+            msg_type="text",
+            msg_metadata={"attachment_file_ids": []},
             langchain_msg=HumanMessage(content="hello"),
         )
         current_user = SimpleNamespace(uid="user-1")
