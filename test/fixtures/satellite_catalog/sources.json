@@ -1,0 +1,22 @@
+[
+  {
+    "source_id": "source-sentinel",
+    "project_id": "demo-satellite",
+    "name": "Sentinel public catalog",
+    "provider": "copernicus",
+    "metadata": {
+      "time_format": "RFC3339",
+      "priority": 10
+    }
+  },
+  {
+    "source_id": "source-landsat",
+    "project_id": "demo-satellite",
+    "name": "Landsat mirror catalog",
+    "provider": "usgs-mirror",
+    "metadata": {
+      "time_format": "local-offset",
+      "priority": 20
+    }
+  }
+]

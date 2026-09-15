@@ -1,0 +1,38 @@
+[
+  {
+    "collection_id": "sentinel-2-l2a",
+    "source_id": "source-sentinel",
+    "name": "Sentinel-2 Level-2A",
+    "satellite": "Sentinel-2B",
+    "sensor": "MSI",
+    "processing_level": "L2A",
+    "license": "open",
+    "metadata": {
+      "bands": [
+        "B02",
+        "B03",
+        "B04",
+        "B08",
+        "SCL"
+      ]
+    }
+  },
+  {
+    "collection_id": "landsat-9-l2",
+    "source_id": "source-landsat",
+    "name": "Landsat 9 Collection 2 Level-2",
+    "satellite": "Landsat-9",
+    "sensor": "OLI-2",
+    "processing_level": "L2",
+    "license": "open",
+    "metadata": {
+      "bands": [
+        "SR_B2",
+        "SR_B3",
+        "SR_B4",
+        "SR_B5",
+        "QA_PIXEL"
+      ]
+    }
+  }
+]

@@ -150,6 +150,27 @@ class Config(BaseSettings):
         description="单进程 MCP 工具最大并发调用数",
     )
 
+    # ---------- Satellite Gateway ----------
+    satellite_gateway_target: str = Field(
+        default="localhost:50051",
+        description="卫星影像目录 gRPC Gateway 地址",
+    )
+    satellite_gateway_project_id: str = Field(
+        default="demo-satellite",
+        description="由服务端配置的卫星目录项目范围",
+    )
+    satellite_gateway_token: SecretStr = Field(
+        default=SecretStr(""),
+        repr=False,
+        description="Python Worker 调用卫星 Gateway 的内部凭据",
+    )
+    satellite_gateway_timeout_seconds: float = Field(
+        default=15.0,
+        gt=0,
+        le=120,
+        description="卫星目录 gRPC 调用超时",
+    )
+
     # ---------- Document Parser APIs ----------
     mineru_api_url: str = Field(default="", description="MinerU parsing API URL")
     mineru_api_key: str = Field(default="", description="MinerU parsing API key")

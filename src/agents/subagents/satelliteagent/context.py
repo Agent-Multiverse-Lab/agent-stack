@@ -10,3 +10,8 @@ class SatelliteAgentContext(BaseContext):
 
     system_prompt: str = field(default="")
     model: str = field(default=sys_config.default_model)
+    gateway_target: str = field(default=sys_config.satellite_gateway_target)
+    gateway_project_id: str = field(default=sys_config.satellite_gateway_project_id)
+    gateway_timeout_seconds: float = field(
+        default=sys_config.satellite_gateway_timeout_seconds
+    )

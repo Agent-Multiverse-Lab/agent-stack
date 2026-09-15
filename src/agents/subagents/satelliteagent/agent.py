@@ -6,6 +6,7 @@ from server.service.mcp_service import get_mcp_tools
 from src.agents.base_agent import BaseAgent
 from src.configs import config as sys_config
 from src.model import load_model
+from src.third_party.satellite_gateway.tools import build_satellite_catalog_tools
 
 from .context import SatelliteAgentContext
 from .prompt import build_prompt
@@ -26,9 +27,10 @@ class SatelliteAgent(BaseAgent):
     async def get_agent(self, context=None) -> CompiledStateGraph:
         runtime_context = context or self.context()
         tools = await get_mcp_tools(runtime_context.mcps)
+        catalog_tools = build_satellite_catalog_tools(runtime_context)
         return create_agent(
             model=load_model(runtime_context.model or sys_config.default_model),
-            tools=list(tools),
+            tools=[*catalog_tools, *tools],
             system_prompt=build_prompt(runtime_context),
             state_schema=SatelliteAgentState,
             context_schema=type(runtime_context),

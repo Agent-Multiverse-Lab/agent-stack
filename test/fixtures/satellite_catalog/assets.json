@@ -1,0 +1,59 @@
+[
+  {
+    "asset_id": "asset-s2-before-red",
+    "scene_id": "s2-before",
+    "asset_role": "data",
+    "band": "B04",
+    "object_ref": "satellite/source-sentinel/s2-before/B04.tif",
+    "content_type": "image/tiff; application=geotiff",
+    "checksum": "sha256:c54e77df46418abcb209230714952138a4faaaec8b6ddcba7aa99e7e370c08f5",
+    "size_bytes": 2048,
+    "metadata": {
+      "filename": "B04.tif"
+    }
+  },
+  {
+    "asset_id": "asset-s2-after-red",
+    "scene_id": "s2-after",
+    "asset_role": "data",
+    "band": "B04",
+    "object_ref": "satellite/source-sentinel/s2-after/B04.tif",
+    "content_type": "image/tiff; application=geotiff",
+    "checksum": "sha256:a8458c827580afd4a0d9b31ba732756a0e8f6c2445cd1a23e439a4d7a2960e9e",
+    "size_bytes": 2112,
+    "metadata": {
+      "filename": "B04.tif"
+    }
+  },
+  {
+    "asset_id": "asset-l9-duplicate-content",
+    "scene_id": "l9-same-area",
+    "asset_role": "data",
+    "band": "SR_B4",
+    "object_ref": "satellite/source-landsat/l9-same-area/SR_B4.tif",
+    "content_type": "image/tiff; application=geotiff",
+    "checksum": "sha256:c54e77df46418abcb209230714952138a4faaaec8b6ddcba7aa99e7e370c08f5",
+    "size_bytes": 2048,
+    "metadata": {
+      "filename": "B04.tif",
+      "warning": "same_name_cross_source"
+    }
+  },
+  {
+    "asset_id": "asset-l9-missing-object",
+    "scene_id": "l9-untrusted-metadata",
+    "asset_role": "data",
+    "band": "SR_B5",
+    "object_ref": null,
+    "content_type": null,
+    "checksum": null,
+    "size_bytes": null,
+    "metadata": {
+      "quality_codes": [
+        "missing_object",
+        "missing_checksum",
+        "missing_content_type"
+      ]
+    }
+  }
+]

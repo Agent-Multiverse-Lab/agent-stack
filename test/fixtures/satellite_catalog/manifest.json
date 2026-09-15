@@ -1,0 +1,70 @@
+[
+  {
+    "case_id": "bounded-change-pair",
+    "expected_scene_ids": [
+      "s2-before",
+      "s2-after"
+    ],
+    "warnings": []
+  },
+  {
+    "case_id": "duplicate-content-cross-source",
+    "expected_asset_ids": [
+      "asset-s2-before-red",
+      "asset-l9-duplicate-content"
+    ],
+    "warnings": [
+      "duplicate_checksum"
+    ]
+  },
+  {
+    "case_id": "cloud-blocked",
+    "expected_scene_ids": [
+      "s2-cloud-blocked"
+    ],
+    "warnings": [
+      "cloud_cover_blocked"
+    ]
+  },
+  {
+    "case_id": "late-old-version",
+    "expected_scene_ids": [
+      "s2-late-old-version"
+    ],
+    "warnings": [
+      "late_arrival"
+    ]
+  },
+  {
+    "case_id": "missing-object",
+    "expected_asset_ids": [
+      "asset-l9-missing-object"
+    ],
+    "warnings": [
+      "missing_object"
+    ]
+  },
+  {
+    "case_id": "untrusted-metadata",
+    "expected_scene_ids": [
+      "l9-untrusted-metadata"
+    ],
+    "warnings": [
+      "untrusted_metadata"
+    ]
+  },
+  {
+    "case_id": "timezone-normalization",
+    "expected_scene_ids": [
+      "s2-after",
+      "l9-same-area"
+    ],
+    "warnings": [
+      "cross_source_time_format"
+    ]
+  },
+  {
+    "case_id": "unbounded-search",
+    "expected_error": "bounded_scope_required"
+  }
+]
