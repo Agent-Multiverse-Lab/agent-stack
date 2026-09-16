@@ -2,252 +2,120 @@
 
 <div align="center">
 
-<img src="web/src/assets/logo.svg" alt="AM logo" width="64">
+<img src="web/src/assets/logo.svg" alt="agent-stack logo" width="64">
 
 # agent-stack
 
-🤖 通用多智能体系统，面向智能体编排、交互与应用开发。
-
-A general-purpose multi-agent system for agent orchestration, interaction, and application development.
+基于 FastAPI、LangGraph 和 Vue 的多智能体应用，用于技术学习与工程实践。
 
 </div>
 
-## 🎯 项目定位
+## 当前系统
 
-本仓库是用于技术学习与工程实践的阶段性项目。第一阶段聚焦 Web 应用形态，构建类似
-ChatGPT 的交互体验，并验证多智能体编排、任务协作与工具调用等核心能力。
+Web 端提供登录、会话和聊天界面。FastAPI 创建 Agent Run，Redis/ARQ Worker 执行任务，Redis Stream 承载运行事件并由 API 通过 SSE 返回给前端。PostgreSQL 保存用户、会话、消息和 Run 状态。
 
-后续阶段将依次探索以下产品形态：
+`LeaderAgent` 通过子智能体中间件委派任务，当前接入以下内部子智能体：
 
-1. 命令行工具（CLI），提供终端环境中的任务执行与自动化能力。
-2. Coding Agent，面向代码理解、生成、修改与工程协作场景。
-3. 桌面级应用，整合本地资源、工作区与更完整的交互能力。
-
-项目将在上述形态演进的基础上，持续扩展智能体协作、知识检索、工具调用、内容生成、
-任务自动化及其他通用能力。
-
-## 🛰️ 数据中台与专项 Agent 规划
-
-项目计划从卫星与图像数据切入，验证 Agent 在多数据源检索、结构化数据分析、图像推理和
-受控数据操作中的完整执行链。目标形态不是让 Agent 直接访问数据库或模型，而是由 Agent
-理解任务和编排能力，通过 MCP 调用数据中台及图像处理服务。
-
-### Agent 职责
-
-| Agent | 状态 | 职责 |
-| --- | --- | --- |
-| `LeaderAgent` | 已实现 | 理解用户目标、选择专项 Agent、协调子 Run，并汇总最终结果 |
-| `SearchAgent` | 已实现 | 执行有界的网络与知识库检索，返回去重、可追溯的检索证据，不负责完整研究结论 |
-| `CitationAgent` | 已实现 | 校验声明与实际检索片段的对应关系，发现缺失、错误或不足的引用 |
-| `SatelliteAgent` | 已实现 | 连接多个卫星数据源，根据任务选择目录检索、单时相解译或多时相变化分析工具 |
-| `ResearchAgent` | 规划中 | 拆解研究问题、组织多轮证据收集、识别冲突与证据缺口，并形成结构化研究简报 |
-| `DataAnalysisAgent` | 规划中 | 分析跨数据源的表格、指标和时序数据，执行统计计算并返回可复核的数据结论 |
-
-`ResearchAgent` 与 `SearchAgent` 的边界是“研究”与“检索”：前者负责问题分解、证据覆盖、
-冲突处理和研究综合，后者只负责从指定来源取得证据。`CitationAgent` 保持独立，负责在交付前
-验证关键声明，不与搜索过程合并。
-
-图像模型、数据 CRUD 和文件处理不单独设计为 Agent。它们输入输出明确，应作为 MCP Tool
-或 Sandbox Tool 供专项 Agent 调用：
-
-- 图像 Embedding、目标检测、分割、配准和变化检测由 Python Image Processing MCP 提供。
-- 数据资产增删改查、权限、任务、版本和血缘由 Go Data Platform MCP 提供。
-- 裁剪、格式转换、报告和产物生成等确定性操作由 Sandbox Tool 执行。
-- 创建、修改、发布和删除等有副作用的操作必须经过权限校验、幂等控制和必要的用户确认。
-
-### 目标协作拓扑
-
-```mermaid
-flowchart TB
-    User[用户] --> Leader[LeaderAgent]
-
-    Leader --> Research[ResearchAgent<br/>规划中]
-    Leader --> Search[SearchAgent]
-    Leader --> Satellite[SatelliteAgent]
-    Leader --> Analysis[DataAnalysisAgent<br/>规划中]
-    Leader --> Citation[CitationAgent]
-
-    Search --> WebTools[网络与知识检索工具]
-    Satellite --> GoMCP[Go Data Platform MCP]
-    Satellite --> ImageMCP[Python Image Processing MCP]
-    Analysis --> GoMCP
-    Analysis --> Sandbox[Sandbox 计算工具]
-
-    GoMCP --> Catalog[资产目录 / 权限 / 任务 / 血缘]
-    Catalog --> PostgreSQL[(PostgreSQL)]
-    Catalog --> MinIO[(MinIO)]
-    Catalog --> Milvus[(Milvus)]
-
-    ImageMCP --> Models[Embedding / 检测 / 分割 / 变化检测]
-    ImageMCP --> MinIO
-```
-
-### 数据中台边界
-
-Go 数据中台是业务状态与数据生命周期的所有者，对 Web 提供普通 HTTP API，对 Agent 提供
-MCP Tool；两种入口复用同一组 Application Service，不维护两套 CRUD 逻辑。它负责资产目录、
-权限、版本、处理任务、幂等、审计和输入输出血缘，并协调 PostgreSQL、MinIO 与 Milvus。
-
-Python Image Processing MCP 负责模型加载和图像计算。短任务可以同步返回结构化结果；耗时的
-GPU 推理和批量处理创建异步任务并返回 `job_id`。图像输入输出使用 `asset_id` 和受控对象地址，
-不把大型 Base64、数据库凭据或永久对象存储凭据交给 Agent。
-
-```text
-SatelliteAgent / DataAnalysisAgent
-    -> MCP Tool
-    -> Go 数据中台业务服务
-    -> PostgreSQL / MinIO / Milvus / 外部数据源
-
-SatelliteAgent
-    -> Python Image Processing MCP
-    -> Python / GPU Worker
-    -> Go 数据中台登记结果资产与数据血缘
-```
-
-首个端到端场景计划使用卫星图像：由 `SatelliteAgent` 从多个目录查找影像，调用 Python MCP
-完成预处理和推理，再通过 Go MCP 保存数据资产、任务状态和处理结果。单时相与多时相属于同一
-Agent 下的不同工具策略，不拆成多个 Agent。
-
-## 🛠️ 主要技术栈
-
-| 领域 | 技术 |
+| 子智能体 | 当前职责 |
 | --- | --- |
-| 后端服务 | Python 3.13、FastAPI、Pydantic、Uvicorn |
-| 智能体与工作流 | LangChain、LangGraph、Deep Agents |
-| 数据持久化 | PostgreSQL、SQLAlchemy、Alembic |
-| 异步任务与事件流 | Redis、ARQ、Server-Sent Events（SSE） |
-| 知识与文件存储 | Milvus、MinIO |
-| 模型与工具集成 | OpenAI-compatible API、MCP、A2A、Tavily |
-| Web 前端 | Vue 3、TypeScript、Vite 7、Vue Router 4 |
-| 工程与部署 | uv、Docker Compose、Ruff |
+| `SearchAgent` | 网络与知识库检索 |
+| `CitationAgent` | 核对回答声明与检索证据 |
+| `ImageProcessingAgent` | 装配已配置的图像处理 MCP 工具，并校验工具返回的内嵌单帧图像能否完整解码 |
+| `SatelliteAgent` | 通过 Go Gateway 查询卫星影像目录，并按需调用已配置的处理工具 |
 
-## 🖼️ 界面预览
+知识模块负责文件解析、切块、索引与检索；MinIO 保存文件和解析产物，Milvus 保存向量索引。`sandbox_server/` 提供独立的受控工具与代码执行服务。MCP 服务需单独部署并在 `.env` 中配置，未配置时相应工具不可用。
 
-### 聊天主界面
+卫星目录由 Go `gateway/` 通过 gRPC 提供来源列表、场景空间/时间检索和场景详情。Gateway 查询 Alembic 管理的 PostgreSQL/PostGIS 表；目录保存影像对象引用，不保存影像二进制。
 
-![agent-stack 聊天主界面](./docs/frontend-main.png)
+## 系统结构
 
-### 登录界面
+以下按职责分别展示；实线表示当前已有模块，虚线表示 Next Steps。
 
-![agent-stack 登录界面](./docs/frontend-home.png)
-
-## 🏗️ 系统架构
-
-<div align="center">
-
-![agent-stack 系统架构图](./docs/image.png)
-
-</div>
-
-### 后端总体架构
+### 交互与 Run
 
 ```mermaid
 flowchart TB
-    Web[Web] -->|HTTP / SSE| API[FastAPI API]
-
-    subgraph Backend[后端系统]
-        API --> RunService[Run Service]
-        RunService --> Worker[Run Worker]
-        Worker --> Context[组装本次 Run Context]
-        Context --> Leader[LeaderAgent]
-
-        subgraph Runtime[Agent Runtime]
-            Leader --> Prompt[系统 Prompt 与可用工具]
-            Prompt --> Middleware[中间件链]
-            Middleware --> Model[模型决策]
-            Model --> Tool[工具执行]
-            Tool --> Model
-        end
-
-        Middleware --> Delegation[SubAgent Middleware]
-        Delegation --> ChildRun[独立 SubAgent Run]
-        ChildRun --> Specialized[专项 Agent]
-        Specialized --> Delegation
-
-        Model --> Result[Agent 输出]
-        Result --> Worker
-        Worker --> RunService
-    end
+    Run[交互与 Run] --> Web[Vue 登录、会话与聊天]
+    Run --> API[FastAPI]
+    Run --> Worker[Redis / ARQ Worker]
+    Run --> Events[Redis Stream / SSE]
+    Run --> PG[(PostgreSQL 业务状态)]
 ```
 
-前端只通过 HTTP 发起请求，并通过 SSE 接收运行输出。后端负责 Run 编排、运行上下文组装、
-Agent 执行、工具调用和子 Agent 委派。
-
-### LeaderAgent 中间件
-
-```mermaid
-flowchart LR
-    Request[模型请求] --> SubAgent[SubAgent 委派]
-    SubAgent --> Patch[工具调用修补]
-    Patch --> ModelRetry[模型失败重试]
-    ModelRetry --> ToolRetry[工具失败重试]
-    ToolRetry --> Todo[任务规划]
-    Todo --> Model[模型]
-
-    Compression[上下文压缩 / 摘要<br/>规划能力，尚未接入] -.-> Request
-```
-
-中间件在模型与工具调用周围提供委派、修补、重试和任务规划能力。上下文压缩与摘要已有设计方向，
-但当前尚未接入 `LeaderAgent` 中间件链。
-
-### SubAgent Middleware
+### Agent 编排
 
 ```mermaid
 flowchart TB
-    Leader[LeaderAgent] --> Choose{委派方式}
-
-    Choose -->|task| Sync[启动子 Run<br/>等待最终结果]
-    Choose -->|subagent_start| Async[后台启动子 Run<br/>立即返回 run_id]
-
-    Async --> Status[subagent_status<br/>查询状态与最近进度]
-    Async --> Await[subagent_await<br/>等待最终结果]
-    Async --> Cancel[subagent_cancel<br/>请求取消]
-
-    Sync --> Result[标准化子 Agent 结果]
-    Await --> Result
-    Status --> Leader
-    Cancel --> Leader
-    Result --> Leader
+    Leader[LeaderAgent] --> Delegate[SubAgent Middleware]
+    Delegate --> Search[SearchAgent]
+    Delegate --> Citation[CitationAgent]
+    Delegate --> Image[ImageProcessingAgent]
+    Delegate --> Satellite[SatelliteAgent]
 ```
 
-`SubAgentMiddleware` 把 LeaderAgent 的工具调用转换为独立的子 Run，并始终校验子 Run 属于当前父 Run。
-专项 Agent 只返回有界结果，由 LeaderAgent 继续整合，不绕过父流程直接产生最终答案。
-
-### 后端 Run 执行链路
+### 数据与工具
 
 ```mermaid
-sequenceDiagram
-    participant Web as Vue Web
-    participant API as FastAPI
-    participant Run as Run Service
-    participant Worker as Run Worker
-    participant Agent as LeaderAgent
-    participant MW as Middleware Chain
-    participant Sub as SubAgent
-
-    Web->>API: POST /agent/runs
-    API->>Run: 创建 Run
-    API-->>Web: run_id
-    Web->>API: 连接 Run SSE
-    Run->>Worker: 执行 run_id
-    Worker->>Agent: 执行顶层 Agent
-    Agent->>MW: 处理模型与工具调用
-    opt 需要委派子任务
-        MW->>Run: 创建 Child Run
-        Run->>Sub: 执行专项 Agent
-        Sub-->>MW: 进度或最终结果
-    end
-    MW-->>Agent: 模型结果
-    Agent-->>Worker: Agent 输出
-    Worker-->>Run: 收口 Run 结果
-    Run-->>API: 运行事件与终态
-    API-->>Web: SSE 输出 / end
+flowchart TB
+    Data[数据与工具] --> Knowledge[知识处理、MinIO 与 Milvus]
+    Data --> Gateway[Go gRPC 卫星目录与 PostGIS]
+    Data --> Sandbox[Sandbox 服务]
+    Data --> MCP[已配置的外部 MCP 服务]
+    Data -.-> Plan[Next Steps]
+    Plan -.-> STAC[STAC 多来源元数据导入]
+    Plan -.-> GoMCP[Go Data Platform MCP]
+    GoMCP -.-> DataOps[受控数据资产操作]
 ```
 
-## 📖 文档
+| 目录 | 职责 |
+| --- | --- |
+| `server/` | FastAPI 路由、业务服务和 ARQ Worker |
+| `src/agents/` | LeaderAgent、子智能体、工具与中间件 |
+| `src/knowledge/` | 文件处理和知识检索 |
+| `src/database/`、`src/storage/` | 数据库仓储与基础设施适配 |
+| `gateway/` | Go gRPC 卫星目录与 PostGIS 查询 |
+| `sandbox_server/` | 独立的执行隔离服务 |
+| `web/` | Vue 前端 |
+| `migrate/` | Alembic 数据库迁移 |
+| `docker-compose.yml`、`docker/` | 服务编排与镜像配置 |
+
+## Next Steps
+
+1. **卫星数据资源库**：在现有目录表和 Go Gateway 基础上，完善 Asset key 迁移与 gRPC 契约；导入经过校验的 STAC 1.1.0 多来源元数据，并验证目标库的迁移、空间查询和项目隔离。详见[实施计划](docs/spec/data-platform/satellite-imagery-catalog/plan.md)和[任务清单](docs/spec/data-platform/satellite-imagery-catalog/tasks.md)。
+2. **Go Data Platform MCP**：先定义接口与数据所有权，再提供面向 Agent 的受控资产操作、权限校验、处理任务、版本和血缘工具。该服务尚未实现；当前卫星目录查询仍走 `SatelliteAgent → Python gRPC 客户端 → Gateway`。
+
+## 本地启动
+
+需要 Python 3.13+、uv、Docker Compose 和 Node.js/npm。先把 `.env.template` 复制为 `.env`，填写实际使用的模型及外部工具配置：
+
+```powershell
+Copy-Item .env.template .env
+uv sync
+docker compose up -d postgres redis minio milvus
+uv run --no-sync alembic upgrade head
+docker compose up -d --build gateway sandbox api worker
+```
+
+另开终端启动前端：
+
+```powershell
+cd web
+npm ci
+npm run dev
+```
+
+需要固定的卫星目录测试数据时，可在迁移后执行 `uv run --no-sync python scripts/load_satellite_catalog_fixture.py`。Compose 数据卷位于 `save/volume/`。RustFS 目前是可选独立服务，应用仍使用 MinIO。更多命令见[开发指南](docs/development.md)。
+
+## 界面预览
+
+![聊天主界面](docs/frontend-main.png)
+
+![登录界面](docs/frontend-home.png)
+
+## 文档
 
 - [系统架构与模块边界](docs/architecture/README.md)
-- [能力规格](docs/spec/README.md)
-- [本地开发、启动与验证](docs/development.md)
-- [数据库迁移样例](migrate/README.md)
-- [贡献与提交规范](CONTRIBUTING.md)
+- [能力规格索引](docs/spec/README.md)
+- [本地开发与验证](docs/development.md)
+- [卫星目录 Gateway](gateway/README.md)
+- [贡献规范](CONTRIBUTING.md)
