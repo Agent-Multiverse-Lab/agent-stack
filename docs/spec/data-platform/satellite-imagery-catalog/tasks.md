@@ -1,14 +1,16 @@
-# Tasks: Satellite Imagery Catalog
+# Tasks: 卫星数据资源库
 
 ## Task map
 
 | Task ID | Requirement | Slice | Result |
 | --- | --- | --- | --- |
-| SAT-001 | DP-SAT-001/002/003 | [catalog-data.md](implementation/catalog-data.md) | 四张目录表和固定数据可建立 |
-| SAT-002 | DP-SAT-002/004 | [gateway-runtime.md](implementation/gateway-runtime.md) | Go gRPC 检索、详情、隔离和分页可运行 |
-| SAT-003 | DP-SAT-003/005 | [agent-runtime.md](implementation/agent-runtime.md) | SatelliteAgent 使用目录工具并保留 MCP |
+| SAT-001 | DP-SAT-001/002/003/007 | [catalog-data.md](implementation/catalog-data.md) | 核对四表并迁移 Asset key 唯一约束 |
+| SAT-002 | DP-SAT-002/004/007 | [gateway-runtime.md](implementation/gateway-runtime.md) | Go gRPC 检索、详情含 Asset key、隔离和分页可运行 |
+| SAT-003 | DP-SAT-003/005/007 | [agent-runtime.md](implementation/agent-runtime.md) | SatelliteAgent 保留 Asset key 并使用目录与 MCP 工具 |
 | SAT-004 | DP-SAT-006 | [catalog-data.md](implementation/catalog-data.md) | bad-case fixture 可重复生成 |
 | SAT-005 | 全部 | 根计划 | 分层测试与部署说明完成 |
+| SAT-006 | DP-SAT-001/003/007/008 | [catalog-data.md](implementation/catalog-data.md) | STAC 1.1.0 多来源 Collection/Item 经校验后幂等导入现有四表 |
+| SAT-007 | DP-SAT-002/003/004/008 | 根计划 | 在指定目标库验证迁移、空间查询、项目隔离和资产详情 |
 
 ## Done conditions
 
