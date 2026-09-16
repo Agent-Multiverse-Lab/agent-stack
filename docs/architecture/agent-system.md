@@ -59,6 +59,10 @@ agent 运行上下文只来自：
 本架构文档重复展开。
 `SatelliteAgent` 通过 gRPC 目录工具检索场景和资产，再按需调用 MCP 影像处理工具；它不直接连接
 PostgreSQL/PostGIS 或 MinIO。
+`ImageProcessingAgent` 处理调用方提供的图像，通过 `context.mcps` 和现有 MCP service 装配工具，
+返回处理结果和产物引用；MCP 服务仍由外部部署和统一配置管理。
+包内 `ImageValidationMiddleware` 检查 MCP 工具可用性并反馈调用错误；对 MCP 返回的内嵌单帧图片
+执行有界解码、格式和完整性检查。URL/路径/资产 ID 的文件内容及图像语义正确性不视为已验证。
 
 ## 7. Implementation Invariants
 
