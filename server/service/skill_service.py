@@ -12,10 +12,7 @@ class SkillDescriptor:
 
 
 class SkillService:
-    """Registry for agent-facing skills.
-
-    This keeps skill discovery/configuration in the service layer instead of
-    inside concrete agents.
+    """Skill 服务提供skill的增删查
     """
 
     def __init__(self) -> None:

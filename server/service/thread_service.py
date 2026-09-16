@@ -465,6 +465,15 @@ async def _build_agent_runtime(
         tuple[Any, Any, Any]: _description_
     """
     agent_repo = AgentRepository(db)
+    conv_repo = ConversationRepository(db)
+
+    current_thread = await conv_repo.get_conversation_by_id(conversation_id=thread_id)
+    
+    if not current_thread or current_thread.uid != str(user.uid):
+        raise ValueError("当前会话不存在")
+    
+    
+    
 
     if not agent_slug:
         raise ValueError("未配置agent")
