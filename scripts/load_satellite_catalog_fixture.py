@@ -95,17 +95,18 @@ async def load_fixture(database_url: str, root: Path) -> None:
                 await connection.execute(
                     """
                     INSERT INTO satellite_scene_assets
-                        (asset_id, scene_id, asset_role, band, object_ref,
+                        (asset_id, scene_id, asset_key, asset_role, band, object_ref,
                          content_type, checksum, size_bytes, metadata)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
                     ON CONFLICT (asset_id) DO UPDATE SET
+                        asset_key = EXCLUDED.asset_key,
                         object_ref = EXCLUDED.object_ref,
                         content_type = EXCLUDED.content_type,
                         checksum = EXCLUDED.checksum,
                         size_bytes = EXCLUDED.size_bytes,
                         metadata = EXCLUDED.metadata
                     """,
-                    asset["asset_id"], asset["scene_id"], asset["asset_role"],
+                    asset["asset_id"], asset["scene_id"], asset["asset_key"], asset["asset_role"],
                     asset["band"], asset["object_ref"], asset["content_type"],
                     asset["checksum"], asset["size_bytes"],
                     json.dumps(asset["metadata"]),

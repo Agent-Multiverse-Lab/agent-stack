@@ -127,6 +127,7 @@ def build_fixture() -> dict[str, list[dict[str, Any]]]:
         {
             "asset_id": "asset-s2-before-red",
             "scene_id": "s2-before",
+            "asset_key": "B04",
             "asset_role": "data",
             "band": "B04",
             "object_ref": "satellite/source-sentinel/s2-before/B04.tif",
@@ -138,6 +139,7 @@ def build_fixture() -> dict[str, list[dict[str, Any]]]:
         {
             "asset_id": "asset-s2-after-red",
             "scene_id": "s2-after",
+            "asset_key": "B04",
             "asset_role": "data",
             "band": "B04",
             "object_ref": "satellite/source-sentinel/s2-after/B04.tif",
@@ -149,6 +151,7 @@ def build_fixture() -> dict[str, list[dict[str, Any]]]:
         {
             "asset_id": "asset-l9-duplicate-content",
             "scene_id": "l9-same-area",
+            "asset_key": "SR_B4",
             "asset_role": "data",
             "band": "SR_B4",
             "object_ref": "satellite/source-landsat/l9-same-area/SR_B4.tif",
@@ -160,6 +163,7 @@ def build_fixture() -> dict[str, list[dict[str, Any]]]:
         {
             "asset_id": "asset-l9-missing-object",
             "scene_id": "l9-untrusted-metadata",
+            "asset_key": "SR_B5",
             "asset_role": "data",
             "band": "SR_B5",
             "object_ref": None,
