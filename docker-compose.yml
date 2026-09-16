@@ -1,4 +1,4 @@
-name: multi-agent-s2c
+name: agent-stack
 
 x-api-worker-env: &api-worker-env
   DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/multi_agent_s2c
@@ -23,7 +23,28 @@ services:
       - "${MINIO_API_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
-      - ./volume/minio/data:/data
+      - ./save/volume/minio/data:/data
+    networks:
+      - s2c-network
+    restart: unless-stopped
+
+  rustfs:
+    image: rustfs/rustfs:1.0.0-rc.6
+    container_name: s2c-rustfs
+    profiles:
+      - rustfs
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-rustfsadmin}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-rustfsadmin}
+    ports:
+      - "127.0.0.1:${RUSTFS_API_PORT:-29000}:9000"
+      - "127.0.0.1:${RUSTFS_CONSOLE_PORT:-29001}:9001"
+    volumes:
+      - ./save/volume/rustfs/data:/data
     networks:
       - s2c-network
     restart: unless-stopped
@@ -38,7 +59,7 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - ./volume/postgres/data:/var/lib/postgresql/data
+      - ./save/volume/postgres/data:/var/lib/postgresql/data
     networks:
       - s2c-network
     healthcheck:
@@ -50,7 +71,7 @@ services:
 
   gateway:
     build:
-      context: ..
+      context: .
       dockerfile: docker/gateway.Dockerfile
     image: multi-agent-s2c-gateway:${VERSION:-0.1.0}
     container_name: s2c-gateway
@@ -80,7 +101,7 @@ services:
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
-      - ./volume/redis/data:/data
+      - ./save/volume/redis/data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -92,7 +113,7 @@ services:
 
   sandbox:
     build:
-      context: ../sandbox_server
+      context: ./sandbox_server
       dockerfile: Dockerfile
     image: multi-agent-s2c-sandbox:${VERSION:-0.1.0}
     container_name: s2c-sandbox
@@ -103,7 +124,7 @@ services:
       - "${SANDBOX_PROVISIONER_PORT:-8002}:8002"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./volume/sandbox:/app/saves
+      - ./save/volume/sandbox:/app/saves
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -118,14 +139,14 @@ services:
 
   api:
     build:
-      context: ..
+      context: .
       dockerfile: docker/api.Dockerfile
     image: multi-agent-s2c:${VERSION:-0.1.0}
     container_name: s2c-api
     ports:
       - "5050:5050"
     env_file:
-      - ../.env
+      - ./.env
     environment:
       <<: *api-worker-env
     depends_on:
@@ -145,7 +166,7 @@ services:
 
   worker:
     build:
-      context: ..
+      context: .
       dockerfile: docker/api.Dockerfile
     image: multi-agent-s2c:${VERSION:-0.1.0}
     container_name: s2c-arq-worker
@@ -156,7 +177,7 @@ services:
       - arq
       - server.worker.WorkerSettings
     env_file:
-      - ../.env
+      - ./.env
     environment:
       <<: *api-worker-env
     depends_on:
@@ -185,7 +206,7 @@ services:
       - "${MILVUS_PORT:-19530}:19530"
       - "${MILVUS_METRICS_PORT:-9091}:9091"
     volumes:
-      - ./volume/milvus/data:/var/lib/milvus
+      - ./save/volume/milvus/data:/var/lib/milvus
     networks:
       - s2c-network
     restart: unless-stopped
@@ -199,10 +220,10 @@ services:
       - "${NEO4J_HTTP_PORT:-7474}:7474"
       - "${NEO4J_BOLT_PORT:-7687}:7687"
     volumes:
-      - ./volume/neo4j/data:/data
-      - ./volume/neo4j/logs:/logs
-      - ./volume/neo4j/import:/var/lib/neo4j/import
-      - ./volume/neo4j/plugins:/plugins
+      - ./save/volume/neo4j/data:/data
+      - ./save/volume/neo4j/logs:/logs
+      - ./save/volume/neo4j/import:/var/lib/neo4j/import
+      - ./save/volume/neo4j/plugins:/plugins
     networks:
       - s2c-network
     restart: unless-stopped

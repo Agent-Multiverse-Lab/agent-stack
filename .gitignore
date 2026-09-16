@@ -33,6 +33,7 @@ web/tsconfig.tsbuildinfo
 Thumbs.db
 
 # Local container volumes
+volume/
 docker/volume/
 .docker/
 

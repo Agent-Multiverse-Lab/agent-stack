@@ -42,8 +42,17 @@ go run ./cmd/server
 ## 本地基础设施和 Worker
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d postgres redis minio sandbox gateway worker
+docker compose up -d postgres redis minio sandbox gateway worker
 ```
+
+RustFS 是独立的可选服务，不替换当前 MinIO。需要单独试用时运行 `docker compose up -d rustfs`；
+默认仅在本机 `29000`（S3 API）和 `29001`（控制台）开放，数据写入 `save/volume/rustfs/data/`。
+访问密钥和主机端口可通过 `.env` 中的 `RUSTFS_*` 变量调整。Linux bind mount 目录需允许容器用户
+UID/GID `10001:10001` 写入。
+
+Compose 文件位于仓库根目录 `docker-compose.yml`，镜像构建文件仍在 `docker/`。
+数据卷路径相对仓库根目录，写入 `save/volume/`。已有部署若在 `volume/` 或 `docker/volume/`
+保存数据，应在启动新 Compose 配置前把对应数据迁至 `save/volume/`，避免数据库和对象存储以空目录启动。
 
 ## 后端定向验证
 

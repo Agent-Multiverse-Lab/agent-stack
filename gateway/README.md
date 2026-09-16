@@ -40,5 +40,5 @@ uv run alembic upgrade head
 uv run python scripts/load_satellite_catalog_fixture.py
 ```
 
-Then start through `docker/docker-compose.yml`, or provide `DATABASE_URL`,
+Then start through the root `docker-compose.yml`, or provide `DATABASE_URL`,
 `GATEWAY_SHARED_TOKEN`, `GATEWAY_GRPC_ADDRESS`, and `GATEWAY_HEALTH_ADDRESS` directly.
