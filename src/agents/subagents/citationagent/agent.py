@@ -5,6 +5,8 @@ from langgraph.graph.state import CompiledStateGraph
 from src.agents.base_agent import BaseAgent
 from src.configs import config as sys_config
 from src.model import load_model
+from src.agents.backends.composite_backend import create_custom_filesystem_middleware
+from src.agents.middlewares.sandbox_middleware import create_sandbox_middleware
 
 from .context import CitationAgentContext
 from .prompt import build_prompt
@@ -34,6 +36,8 @@ class CitationAgent(BaseAgent):
             checkpointer=self.get_checkpointer(),
             store=self.get_store(),
             middleware=[
+                create_sandbox_middleware(),
+                create_custom_filesystem_middleware(context=runtime_context),
                 ModelRetryMiddleware(max_retries=1, on_failure="continue"),
             ],
         )  # ty:ignore[invalid-return-type]

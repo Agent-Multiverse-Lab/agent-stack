@@ -5,6 +5,8 @@ from langgraph.graph.state import CompiledStateGraph
 from src.agents.base_agent import BaseAgent
 from src.model import load_model
 from src.configs import config as sys_config
+from src.agents.backends.composite_backend import create_custom_filesystem_middleware
+from src.agents.middlewares.sandbox_middleware import create_sandbox_middleware
 
 from .context import SearchAgentContext
 from .tools import knowledge_search, web_search_one, web_search_parallel
@@ -78,14 +80,18 @@ class SearchAgent(BaseAgent):
     context = SearchAgentContext
 
     async def get_agent(self, context=None) -> CompiledStateGraph:
+        runtime_context = context or SearchAgentContext()
         model = load_model(model=sys_config.flash_model)
         return create_agent(
             model=model,
             tools=[knowledge_search, web_search_parallel, web_search_one],
             system_prompt=SEARCH_AGENT_SYSTEM_PROMPT,
+            context_schema=SearchAgentContext,
             checkpointer=self.get_checkpointer(),
             store=self.get_store(),
             middleware=[
+                create_sandbox_middleware(),
+                create_custom_filesystem_middleware(context=runtime_context),
                 ModelRetryMiddleware(max_retries=1, on_failure="continue"),
             ],
         )

@@ -19,6 +19,7 @@ from server.service.input_message_service import build_agent_input_msg
 from server.service.thread_service import resume_agent_response, stream_agent_response
 from server.utils.woker_utils import reslove_thread_id
 from src.agents import agent_manager
+from src.agents.backends.sandbox import init_sandbox_provider, shutdown_sandbox_provider
 from src.configs import config
 from src.database import postgres_manager
 from src.database.models import AgentRun, Message, User
@@ -143,20 +144,23 @@ async def ensure_agents_exist() -> None:
 async def startup(ctx) -> None:
     """初始化 worker 数据库资源，并单点确保表和固定 Agent 注册。"""
 
-    await postgres_manager.initialize()
+    init_sandbox_provider()
     try:
+        await postgres_manager.initialize()
         await postgres_manager.ensure_tables_exist()
         await postgres_manager.setup_langgraph_persistence()
         await ensure_agents_exist()
     except Exception:
         logger.exception("Worker 启动资源初始化失败")
         await postgres_manager.dispose()
+        await shutdown_sandbox_provider()
         raise
 
 
 async def shutdown(ctx) -> None:
-    """Worker 退出时只释放自己持有的 PostgreSQL 资源。"""
+    """释放 Worker 自己持有的 PostgreSQL 和 Sandbox 资源。"""
 
+    await shutdown_sandbox_provider()
     await postgres_manager.dispose()
 
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from dataclasses import replace
 from typing import Any, NotRequired, TypedDict, override
@@ -188,7 +187,7 @@ class SandboxMiddleware(AgentMiddleware[SandboxMiddlewareState]):
         sandbox_id = self._read_sandbox_id(state)
         if sandbox_id is None:
             return None
-        await asyncio.to_thread(get_sandbox_provider().release, sandbox_id)
+        get_sandbox_provider().release(sandbox_id)
         return {"sandbox": None}
 
 

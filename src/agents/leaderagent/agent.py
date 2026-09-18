@@ -10,6 +10,8 @@ from langgraph.graph.state import CompiledStateGraph
 
 from server.service.mcp_service import get_mcp_tools
 from src.agents.base_agent import BaseAgent
+from src.agents.backends.composite_backend import create_custom_filesystem_middleware
+from src.agents.middlewares.sandbox_middleware import create_sandbox_middleware
 from src.agents.middlewares.subagent_middlware import create_subagent_middleware
 from src.agents.subagents.citationagent import CitationAgent
 from src.agents.subagents.imageprocessingagent import ImageProcessingAgent
@@ -36,7 +38,8 @@ class LeaderAgent(BaseAgent):
 
     def _create_middlewares(self, context):
         return [
-            # create_custom_filesystem_middleware(context=context),
+            create_sandbox_middleware(),
+            create_custom_filesystem_middleware(context=context),
             create_subagent_middleware(
                 subagents=[
                     SearchAgent(),

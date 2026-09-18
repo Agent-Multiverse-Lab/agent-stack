@@ -30,42 +30,67 @@ MAX_EXECUTE_OUTPUT_BYTES = 100_000
 
 
 class CustomSandbox(BaseSandbox):
-    """基于 Agent Sandbox 实现 DeepAgents 的沙箱后端。"""
+    """基于 Agent Sandbox 实现 DeepAgents 的按需连接后端。"""
 
     def __init__(
         self,
         thread_id: str,
         uid: str,
-        sandbox_url: str,
+        sandbox_url: str | None = None,
         **keywords: object,
     ) -> None:
-        sandbox_id = str(keywords.pop("sandbox_id", uid)).strip()
+        from .provider_service import sandbox_id_for_thread
+
+        sandbox_id = str(keywords.pop("sandbox_id", sandbox_id_for_thread(uid, thread_id))).strip()
         headers = keywords.pop("headers", None)
         execute_timeout = keywords.pop("execute_timeout", DEFAULT_EXECUTE_TIMEOUT)
         self._validate_init_params(
             thread_id=thread_id,
             uid=uid,
             sandbox_id=sandbox_id,
-            sandbox_url=sandbox_url,
         )
+        if sandbox_url is not None:
+            self._validate_init_params(sandbox_url=sandbox_url)
         if headers is not None and not isinstance(headers, dict):
             raise TypeError("headers 必须是 dict[str, str]")
 
         self._id = sandbox_id
         self._thread_id = thread_id
         self._uid = uid
-        self._sandbox_url = sandbox_url.rstrip("/")
+        self._sandbox_url = sandbox_url.rstrip("/") if sandbox_url else None
         self._execute_timeout = int(execute_timeout)
-        self.client = self._build_client(
-            self._sandbox_url,
-            headers={str(key): str(value) for key, value in headers.items()}
+        self._headers = (
+            {str(key): str(value) for key, value in headers.items()}
             if isinstance(headers, dict)
-            else None,
+            else None
+        )
+        self._client = (
+            self._build_client(self._sandbox_url, headers=self._headers)
+            if self._sandbox_url is not None
+            else None
         )
 
     @property
     def id(self) -> str:
         return self._id
+
+    @property
+    def client(self) -> AgentSandboxClient:
+        """首次文件或命令操作时取得本会话的 Sandbox 连接。"""
+        if self._client is None:
+            from .provider_service import get_sandbox_provider
+
+            provider = get_sandbox_provider()
+            sandbox = provider.get(self._id)
+            if sandbox is None:
+                sandbox_id = provider.acquire(self._uid, self._thread_id)
+                sandbox = provider.get(sandbox_id)
+            if sandbox is None or sandbox is self:
+                raise RuntimeError("Sandbox provisioned but execution backend is unavailable.")
+            self._id = sandbox.id
+            self._sandbox_url = sandbox._sandbox_url
+            self._client = sandbox.client
+        return self._client
 
     def _build_client(
         self,

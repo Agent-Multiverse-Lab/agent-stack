@@ -28,7 +28,8 @@ def _build_cache_key(uid: str, thread_id: str) -> SandboxCacheKey:
     return _required(uid, "uid"), _required(thread_id, "thread_id")
 
 
-def _build_sandbox_id(key: SandboxCacheKey) -> str:
+def sandbox_id_for_thread(uid: str, thread_id: str) -> str:
+    key = _build_cache_key(uid, thread_id)
     digest = hashlib.sha256("\0".join(key).encode("utf-8")).hexdigest()[:16]
     return f"s2c-{digest}"
 
@@ -89,7 +90,7 @@ class SandboxProviderService:
             with self._state_lock:
                 current = self._buckets.get(key)
 
-            sandbox_id = current.sandbox_id if current else _build_sandbox_id(key)
+            sandbox_id = current.sandbox_id if current else sandbox_id_for_thread(*key)
             provision = self._client.get(sandbox_id)
             if provision is None:
                 provision = self._client.create(
@@ -212,7 +213,7 @@ class SandboxProviderService:
         self._client.close()
 
     async def shutdown_async(self) -> None:
-        await asyncio.to_thread(self.shutdown)
+        self.shutdown()
 
     def _get_acquire_lock(self, key: SandboxCacheKey) -> Lock:
         with self._state_lock:

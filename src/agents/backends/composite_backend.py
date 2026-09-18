@@ -62,7 +62,7 @@ class CustomFilesystemMiddleware(FilesystemMiddleware):
         if request.tool_call["name"] in EVICT_TOOL_EXEMPT:
             return tool_results
 
-        return self._aintercept_large_tool_result(tool_results, request.runtime)
+        return await self._aintercept_large_tool_result(tool_results, request.runtime)
 
     def wrap_tool_call(self, request, handler):
         tool_results = handler(request)
@@ -79,10 +79,10 @@ class CustomFilesystemMiddleware(FilesystemMiddleware):
 def create_custom_filesystem_middleware(
     tool_token_limit_before_evict: int | None = None,
     *,
-    context=None
+    context: BaseContext,
 ) -> CustomFilesystemMiddleware:
-    """创建绑定 CompositeBackend factory 的文件系统 middleware。"""
+    """为本次 Agent 运行构建按需连接的 Sandbox 文件系统中间件。"""
     return CustomFilesystemMiddleware(
-        backend=create_composite_backend,
+        backend=S2CSandbox(thread_id=context.thread_id, uid=context.uid),
         tool_token_limit_before_evict=tool_token_limit_before_evict,
     )
