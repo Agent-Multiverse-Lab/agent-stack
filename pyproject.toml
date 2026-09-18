@@ -62,6 +62,8 @@ dependencies = [
     "umap-learn>=0.5.9.post2",
     "grpcio>=1.84.0",
     "grpcio-tools>=1.81.1",
+    "duckdb>=1.5.5",
+    "langchain-typesafe>=0.0.1a2",
 ]
 
 [dependency-groups]
