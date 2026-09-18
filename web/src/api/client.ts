@@ -1,4 +1,5 @@
 import { getAccessToken } from "@/api/session"
+import i18n from "@/i18n"
 
 export type ApiFetchOptions = RequestInit & {
   requiresAuth: boolean
@@ -42,7 +43,7 @@ export class FetchApiClient implements ApiClient {
 
     if (requiresAuth) {
       const accessToken = getAccessToken()
-      if (!accessToken) throw new Error("请先登录后再继续")
+      if (!accessToken) throw new Error(i18n.t("Please log in to continue"))
       headers.set("Authorization", `Bearer ${accessToken}`)
     }
 
@@ -103,7 +104,7 @@ export class FetchApiClient implements ApiClient {
     } | null
     return typeof payload?.detail === "string"
       ? payload.detail
-      : `请求失败（${response.status}）`
+      : i18n.t("Request failed ({{status}})", { status: response.status })
   }
 
   protected async readResponse<T>(response: Response): Promise<T> {
