@@ -62,6 +62,7 @@ dependencies = [
     "umap-learn>=0.5.9.post2",
     "grpcio>=1.84.0",
     "grpcio-tools>=1.81.1",
+    "vane-ai>=0.1.0",
 ]
 
 [dependency-groups]
