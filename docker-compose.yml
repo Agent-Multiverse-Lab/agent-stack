@@ -7,14 +7,11 @@ x-api-worker-env: &api-worker-env
   ENABLE_RUN_QUEUE: "true"
   ARQ_MAX_JOBS: "${ARQ_MAX_JOBS:-64}"
   SANDBOX_PROVISIONER_URL: http://sandbox:8002
-  SATELLITE_GATEWAY_TARGET: gateway:50051
-  SATELLITE_GATEWAY_PROJECT_ID: ${SATELLITE_GATEWAY_PROJECT_ID:-demo-satellite}
-  SATELLITE_GATEWAY_TOKEN: ${SATELLITE_GATEWAY_TOKEN:-development-only-change-me}
 
 services:
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    container_name: s2c-minio
+    container_name: agent-stack-minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
@@ -25,12 +22,12 @@ services:
     volumes:
       - ./save/volume/minio/data:/data
     networks:
-      - s2c-network
+      - agent-stack-network
     restart: unless-stopped
 
   rustfs:
     image: rustfs/rustfs:1.0.0-rc.6
-    container_name: s2c-rustfs
+    container_name: agent-stack-rustfs
     profiles:
       - rustfs
     environment:
@@ -46,12 +43,12 @@ services:
     volumes:
       - ./save/volume/rustfs/data:/data
     networks:
-      - s2c-network
+      - agent-stack-network
     restart: unless-stopped
 
   postgres:
     image: postgis/postgis:17-3.5-alpine
-    container_name: s2c-postgres
+    container_name: agent-stack-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -61,7 +58,7 @@ services:
     volumes:
       - ./save/volume/postgres/data:/var/lib/postgresql/data
     networks:
-      - s2c-network
+      - agent-stack-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-multi_agent_s2c}"]
       interval: 10s
@@ -70,11 +67,13 @@ services:
     restart: unless-stopped
 
   gateway:
+    profiles:
+      - gateway
     build:
       context: .
       dockerfile: docker/gateway.Dockerfile
-    image: multi-agent-s2c-gateway:${VERSION:-0.1.0}
-    container_name: s2c-gateway
+    image: agent-stack-gateway:${VERSION:-0.1.0}
+    container_name: agent-stack-gateway
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-multi_agent_s2c}
       GATEWAY_GRPC_ADDRESS: ":50051"
@@ -92,12 +91,12 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - s2c-network
+      - agent-stack-network
     restart: unless-stopped
 
   redis:
     image: redis:8-alpine
-    container_name: s2c-redis
+    container_name: agent-stack-redis
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
@@ -108,18 +107,19 @@ services:
       timeout: 3s
       retries: 5
     networks:
-      - s2c-network
+      - agent-stack-network
     restart: unless-stopped
 
   sandbox:
     build:
       context: ./sandbox_server
       dockerfile: Dockerfile
-    image: multi-agent-s2c-sandbox:${VERSION:-0.1.0}
-    container_name: s2c-sandbox
+    image: agent-stack-sandbox:${VERSION:-0.1.0}
+    container_name: agent-stack-sandbox
     environment:
       PROVISIONER_BACKEND: docker
       DOCKER_SANDBOX_HOST: host.docker.internal
+      DOCKER_SANDBOX_PREFIX: agent-stack-sandbox
     ports:
       - "${SANDBOX_PROVISIONER_PORT:-8002}:8002"
     volumes:
@@ -134,15 +134,15 @@ services:
       retries: 10
       start_period: 10s
     networks:
-      - s2c-network
+      - agent-stack-network
     restart: unless-stopped
 
   api:
     build:
       context: .
       dockerfile: docker/api.Dockerfile
-    image: multi-agent-s2c:${VERSION:-0.1.0}
-    container_name: s2c-api
+    image: agent-stack:${VERSION:-0.1.0}
+    container_name: agent-stack-api
     ports:
       - "5050:5050"
     env_file:
@@ -156,20 +156,18 @@ services:
         condition: service_healthy
       sandbox:
         condition: service_healthy
-      gateway:
-        condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - s2c-network
+      - agent-stack-network
     restart: unless-stopped
 
   worker:
     build:
       context: .
       dockerfile: docker/api.Dockerfile
-    image: multi-agent-s2c:${VERSION:-0.1.0}
-    container_name: s2c-arq-worker
+    image: agent-stack:${VERSION:-0.1.0}
+    container_name: agent-stack-arq-worker
     command:
       - uv
       - run
@@ -187,17 +185,15 @@ services:
         condition: service_healthy
       sandbox:
         condition: service_healthy
-      gateway:
-        condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - s2c-network
+      - agent-stack-network
     restart: unless-stopped
 
   milvus:
     image: milvusdb/milvus:v2.6.4
-    container_name: s2c-milvus
+    container_name: agent-stack-milvus
     command: ["milvus", "run", "standalone"]
     environment:
       ETCD_USE_EMBED: "true"
@@ -208,12 +204,12 @@ services:
     volumes:
       - ./save/volume/milvus/data:/var/lib/milvus
     networks:
-      - s2c-network
+      - agent-stack-network
     restart: unless-stopped
 
   neo4j:
     image: neo4j:5-community
-    container_name: s2c-neo4j
+    container_name: agent-stack-neo4j
     environment:
       NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/password}
     ports:
@@ -225,9 +221,9 @@ services:
       - ./save/volume/neo4j/import:/var/lib/neo4j/import
       - ./save/volume/neo4j/plugins:/plugins
     networks:
-      - s2c-network
+      - agent-stack-network
     restart: unless-stopped
 
 networks:
-  s2c-network:
+  agent-stack-network:
     driver: bridge
