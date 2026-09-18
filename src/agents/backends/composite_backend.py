@@ -1,7 +1,7 @@
 """
-基于 deepagent 的 backend 以及 filesystem 构建通往 sandbox 的路径。
+基于 deepagents 后端和文件系统构建通往沙箱的路径。
 
-CompositeBackend 用虚拟路径前缀做路由，各 backend 路径直接来自运行时 context。
+CompositeBackend 按虚拟路径前缀路由，各后端路径直接来自运行时上下文。
 """
 from __future__ import annotations
 
@@ -16,16 +16,16 @@ from src.agents.backends.sandbox import S2CSandbox
 from src.agents.base_context import BaseContext
 from src.configs.config import config as sys_config
 
-EVICT_TOOL_EXEMPT = {"read_file"}  # read_file 的长结果直接返回，避免落入部分 backend
+EVICT_TOOL_EXEMPT = {"read_file"}  # 直接返回 read_file 的长结果，避免写入部分后端
 
-# Agent 可见的虚拟路径前缀（Composite 路由 key，建议以 / 结尾）
+# 智能体可见的虚拟路径前缀（组合路由的键，建议以 / 结尾）
 ROUTE_SKILL = "/skill/"
 ROUTE_MEMORY = "/memory/"
 ROUTE_WORKSPACE = "/workspace/"
 
 
 def create_composite_backend(runtime: ToolRuntime) -> CompositeBackend:
-    """从 deepagents 绑定的运行时 context 构建 CompositeBackend。"""
+    """从 deepagents 绑定的运行时上下文构建 CompositeBackend。"""
     context: BaseContext = runtime.context
     skill_root = Path(
         context.skill_root or Path(sys_config.save_dir) / "skills"
@@ -50,7 +50,7 @@ def create_composite_backend(runtime: ToolRuntime) -> CompositeBackend:
     )
 
 
-# 要记住一点：原生 FilesystemMiddleware 会把工具直接绑到 backend
+# 原生 FilesystemMiddleware 会将工具直接绑定到后端。
 class CustomFilesystemMiddleware(FilesystemMiddleware):
 
     async def awrap_tool_call(self, request, handler):
@@ -81,7 +81,7 @@ def create_custom_filesystem_middleware(
     *,
     context=None
 ) -> CustomFilesystemMiddleware:
-    """创建绑定 CompositeBackend factory 的文件系统 middleware。"""
+    """创建使用组合后端工厂的文件系统中间件。"""
     return CustomFilesystemMiddleware(
         backend=create_composite_backend,
         tool_token_limit_before_evict=tool_token_limit_before_evict,

@@ -1,5 +1,3 @@
-"""数据库模型凭据的认证加密；不接受旧明文作为解密回退。"""
-
 import json
 
 from cryptography.fernet import Fernet, InvalidToken
