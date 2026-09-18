@@ -1,5 +1,10 @@
 ﻿@import "tailwindcss";
 
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
 /* ============================================================
    Design tokens
    将原 tokens.css 的调色板/字体/圆角注册为 Tailwind v4 @theme 令牌,
@@ -33,6 +38,76 @@
   --radius-knowledge-container: 16px;
   --radius-composer: 28px;
   --radius-pill: 999px;
+}
+
+/* shadcn/ui semantic colors use the existing AM palette. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: var(--color-paper);
+  --foreground: var(--color-graphite);
+  --card: var(--color-paper);
+  --card-foreground: var(--color-graphite);
+  --popover: var(--color-paper);
+  --popover-foreground: var(--color-graphite);
+  --primary: var(--color-graphite);
+  --primary-foreground: var(--color-paper);
+  --secondary: var(--color-mist);
+  --secondary-foreground: var(--color-graphite);
+  --muted: var(--color-mist);
+  --muted-foreground: var(--color-slate);
+  --accent: var(--color-mist);
+  --accent-foreground: var(--color-graphite);
+  --destructive: var(--color-danger);
+  --border: #e5e5e5;
+  --input: #e5e5e5;
+  --ring: var(--color-slate);
+  --chart-1: #547da7;
+  --chart-2: #5b927c;
+  --chart-3: #b18062;
+  --chart-4: #8471ab;
+  --chart-5: #ad6f75;
+  --sidebar: var(--color-mist);
+  --sidebar-foreground: var(--color-graphite);
+  --sidebar-primary: var(--color-graphite);
+  --sidebar-primary-foreground: var(--color-paper);
+  --sidebar-accent: #ededed;
+  --sidebar-accent-foreground: var(--color-graphite);
+  --sidebar-border: #e5e5e5;
+  --sidebar-ring: var(--color-slate);
 }
 
 /* ============================================================
