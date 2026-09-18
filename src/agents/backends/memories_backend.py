@@ -1,12 +1,12 @@
-"""长期记忆 backends（本地 FilesystemBackend）。
+"""长期记忆后端（基于本地 FilesystemBackend）。
 
-两种 scope：
-- user-scoped：uid
-- agent-scoped：uid + agent_slug（该用户对该 agent 的长期记忆，跨 thread）
+两种隔离范围：
+- 用户级：按 uid 隔离
+- 智能体级：按 uid 和 agent_slug 隔离（该用户对该智能体的长期记忆，跨会话）
 
-存储默认落盘，不走 PostgresStore。不含 thread_id（本轮草稿走 workspace/State）。
+存储默认落盘，不使用 PostgresStore。不含 thread_id（本轮草稿存放在工作区或状态中）。
 
-Composite 路由示例::
+组合后端路由示例::
 
     routes={
         "/memory/": UserMemoriesBackend.from_context(context),
@@ -32,7 +32,7 @@ from deepagents.backends.filesystem import FilesystemBackend
 from src.agents.base_context import BaseContext
 from src.configs.config import config as sys_config
 
-# Composite 虚拟前缀
+# 组合后端的虚拟路径前缀
 MEMORY_ROUTE_PREFIX = "/memory/"
 AGENT_MEMORY_ROUTE_PREFIX = "/agent_memory/"
 
@@ -47,7 +47,7 @@ def _memories_base(base: str | Path | None = None) -> Path:
 
 
 def memory_root_for_uid(uid: str, *, base: str | Path | None = None) -> Path:
-    """user-scoped：{base}/users/{uid}。"""
+    """用户级记忆目录：{base}/users/{uid}。"""
     return (_memories_base(base) / "users" / _safe_id(uid, default="anonymous")).resolve()
 
 
@@ -57,7 +57,7 @@ def memory_root_for_user_agent(
     *,
     base: str | Path | None = None,
 ) -> Path:
-    """agent-scoped（uid + agent_slug）：{base}/users/{uid}/agents/{agent_slug}。"""
+    """记忆目录（uid 和 agent_slug）：{base}/users/{uid}/agents/{agent_slug}。"""
     return (
         _memories_base(base)
         / "users"
@@ -68,7 +68,7 @@ def memory_root_for_user_agent(
 
 
 class _MemoriesFilesystemBackend(FilesystemBackend):
-    """记忆 backend 公共初始化。"""
+    """记忆后端的通用初始化。"""
 
     scope: str
     memory_root: Path
@@ -97,7 +97,7 @@ class _MemoriesFilesystemBackend(FilesystemBackend):
 
 
 class UserMemoriesBackend(_MemoriesFilesystemBackend):
-    """User-scoped 记忆：仅 uid，跨 thread。"""
+    """用户级记忆：仅按 uid 隔离，跨会话共享。"""
 
     def __init__(
         self,
@@ -136,10 +136,10 @@ class UserMemoriesBackend(_MemoriesFilesystemBackend):
 
 
 class AgentMemoriesBackend(_MemoriesFilesystemBackend):
-    """Agent 记忆：uid + agent_slug，跨 thread。
+    """智能体级记忆：按 uid 和 agent_slug 隔离，跨会话共享。
 
-    同一用户、同一 agent 的长期偏好/产物；不同用户互不可见。
-    不含 thread_id（本轮草稿请用 workspace / StateBackend）。
+    保存同一用户对同一智能体的长期偏好和产物；不同用户互不可见。
+    不含 thread_id（本轮草稿请使用工作区或 StateBackend）。
     """
 
     def __init__(
@@ -174,9 +174,9 @@ class AgentMemoriesBackend(_MemoriesFilesystemBackend):
         root_dir: str | Path | None = None,
         **kwargs: Any,
     ) -> AgentMemoriesBackend:
-        """uid 来自 context；agent_slug 优先显式参数。
+        """uid 来自运行时上下文；agent_slug 优先使用显式参数。
 
-        agent_slug 回退：context.agent_slug / context.agent_id / context 类型名。
+        agent_slug 的后备来源：context.agent_slug / context.agent_id / context 类型名。
         """
         uid = getattr(context, "uid", None) or "anonymous"
         resolved_slug = (

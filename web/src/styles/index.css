@@ -1,5 +1,9 @@
-@import "tailwindcss";
-@import "markstream-vue/index.css";
+﻿@import "tailwindcss";
+
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
 
 /* ============================================================
    Design tokens
@@ -34,6 +38,76 @@
   --radius-knowledge-container: 16px;
   --radius-composer: 28px;
   --radius-pill: 999px;
+}
+
+/* shadcn/ui semantic colors use the existing AM palette. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: var(--color-paper);
+  --foreground: var(--color-graphite);
+  --card: var(--color-paper);
+  --card-foreground: var(--color-graphite);
+  --popover: var(--color-paper);
+  --popover-foreground: var(--color-graphite);
+  --primary: var(--color-graphite);
+  --primary-foreground: var(--color-paper);
+  --secondary: var(--color-mist);
+  --secondary-foreground: var(--color-graphite);
+  --muted: var(--color-mist);
+  --muted-foreground: var(--color-slate);
+  --accent: var(--color-mist);
+  --accent-foreground: var(--color-graphite);
+  --destructive: var(--color-danger);
+  --border: #e5e5e5;
+  --input: #e5e5e5;
+  --ring: var(--color-slate);
+  --chart-1: #547da7;
+  --chart-2: #5b927c;
+  --chart-3: #b18062;
+  --chart-4: #8471ab;
+  --chart-5: #ad6f75;
+  --sidebar: var(--color-mist);
+  --sidebar-foreground: var(--color-graphite);
+  --sidebar-primary: var(--color-graphite);
+  --sidebar-primary-foreground: var(--color-paper);
+  --sidebar-accent: #ededed;
+  --sidebar-accent-foreground: var(--color-graphite);
+  --sidebar-border: #e5e5e5;
+  --sidebar-ring: var(--color-slate);
 }
 
 /* ============================================================
@@ -170,144 +244,40 @@
   }
 }
 
-/* ============================================================
-   antd integration
-   原组件中 :deep() 穿透的 antd 内部类样式,收敛到这一节。
-   这些类由 antd 运行时生成,无法用内联工具类表达。
-   组件模板中的 antd 组件保留各自的 hook 类名供此处定位。
-   ============================================================ */
+/* Chat markdown */
+.chat-markdown > :first-child { margin-top: 0; }
+.chat-markdown > :last-child { margin-bottom: 0; }
+.chat-markdown p,
+.chat-markdown ul,
+.chat-markdown ol,
+.chat-markdown pre,
+.chat-markdown blockquote,
+.chat-markdown table { margin: 0.75rem 0; }
+.chat-markdown ul { list-style: disc; padding-left: 1.5rem; }
+.chat-markdown ol { list-style: decimal; padding-left: 1.5rem; }
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3 { margin: 1.1rem 0 0.5rem; font-weight: 600; line-height: 1.35; }
+.chat-markdown h1 { font-size: 1.4rem; }
+.chat-markdown h2 { font-size: 1.2rem; }
+.chat-markdown h3 { font-size: 1.05rem; }
+.chat-markdown a { text-decoration: underline; text-underline-offset: 2px; }
+.chat-markdown pre { overflow-x: auto; border-radius: 0.75rem; background: var(--color-mist); padding: 0.85rem; font-size: 0.85rem; line-height: 1.5; }
+.chat-markdown :not(pre) > code { border-radius: 0.25rem; background: var(--color-mist); padding: 0.1rem 0.25rem; font-size: 0.9em; }
+.chat-markdown blockquote { border-left: 3px solid #d4d4d4; padding-left: 0.9rem; color: var(--color-slate); }
+.chat-markdown table { display: block; overflow-x: auto; border-collapse: collapse; font-size: 0.9rem; }
+.chat-markdown th,
+.chat-markdown td { border: 1px solid #e3e3e3; padding: 0.35rem 0.7rem; }
+.chat-markdown th { background: var(--color-mist); text-align: left; }
 
-/* 空状态:自定义图片占位与描述 */
-.ant-empty-image {
-  display: grid;
-  place-items: center;
-  height: auto;
-  margin-bottom: 0.9rem;
-}
-
-.ant-empty-description {
-  color: var(--color-slate);
-}
-
-/* Knowledge 自定义空状态覆盖 antd 的默认图片高度、SVG 拉伸与外边距。 */
-.knowledge-chat-empty.ant-empty,
-.knowledge-file-list-empty.ant-empty {
-  margin: 0;
-}
-
-.knowledge-chat-empty.ant-empty {
-  margin-inline: auto;
-}
-
-:is(.knowledge-chat-empty, .knowledge-file-list-empty).ant-empty .ant-empty-image {
-  height: auto;
-  margin-bottom: 0.9rem;
-}
-
-:is(.knowledge-chat-empty, .knowledge-file-list-empty).ant-empty .ant-empty-image svg {
-  height: auto;
-}
-
-/* 文件列表:去掉 antd List 默认行距 */
-.ant-list-items {
-  display: grid;
-  gap: 0.25rem;
-}
-
-/* 抽屉(content/body 通过 Teleport 渲染到 body,无法 scoped 命中) */
-.knowledge-actions-drawer .ant-drawer-content,
-.knowledge-files-drawer .ant-drawer-content {
-  background: var(--color-mist);
-}
-
-.knowledge-actions-drawer .ant-drawer-body,
-.knowledge-files-drawer .ant-drawer-body {
-  padding: 0.65rem;
-}
-
-/* 输入控件重置:antd 的 unlayered 样式会压过 Tailwind utilities,
-   因此在全局层显式覆盖,避免在每个 antd 组件上追加 !important。 */
-.knowledge-composer-input.ant-input,
-.knowledge-composer-input textarea {
-  min-height: 2.1rem;
-  padding: 0.38rem 0;
-  border: 0;
-  color: var(--color-graphite);
-  background: transparent;
-  box-shadow: none;
-  line-height: 1.5;
-  resize: none;
-  user-select: text;
-  caret-color: auto;
-}
-
-.knowledge-composer-input.ant-input-disabled {
-  color: var(--color-slate);
-}
-
-.knowledge-composer-input::placeholder,
-.knowledge-composer-input textarea::placeholder {
-  color: var(--color-graphite);
-  opacity: 0.42;
-}
-
-.knowledge-file-search-input.ant-input {
-  min-width: 0;
-  padding: 0.25rem 0.35rem;
-  border: 0;
-  user-select: text;
-  caret-color: auto;
-  color: var(--color-graphite);
-  background: transparent;
-  box-shadow: none;
-}
-
-.knowledge-file-search-input.ant-input:hover,
-.knowledge-file-search-input.ant-input:focus {
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.knowledge-file-search-input.ant-input::placeholder {
-  color: var(--color-graphite);
-  opacity: 0.42;
-}
-
-/* 上传拖拽区:统一 48px 高度与虚线框 */
-.knowledge-file-add.ant-upload-wrapper .ant-upload-drag {
-  box-sizing: border-box;
-  height: 48px;
-  min-height: 48px;
-  max-height: 48px;
-  overflow: hidden;
-  border: 1px dashed
-    color-mix(in srgb, var(--color-graphite) 16%, transparent);
-  border-radius: 96px;
-  background: var(--color-mist);
-  transition:
-    border-color 140ms ease,
-    background-color 140ms ease;
-}
-
-.knowledge-file-add.ant-upload-wrapper .ant-upload-drag:not(.ant-upload-disabled):hover,
-.knowledge-file-add.ant-upload-wrapper .ant-upload-drag-hover {
-  border-color: color-mix(
-    in srgb,
-    var(--color-graphite) 22%,
-    transparent
-  );
-  background: color-mix(in srgb, var(--color-graphite) 6%, var(--color-paper));
-}
-
-.knowledge-file-add.ant-upload-wrapper .ant-upload-drag .ant-upload-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 0.65rem;
-}
-
-.knowledge-file-add.ant-upload-wrapper .ant-upload-drag-container {
-  display: block;
-  min-width: 0;
+@media (max-width: 720px) {
+  .knowledge-workspace {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: none;
+    grid-template-areas: "chat" "files" "actions";
+    grid-auto-rows: calc(100dvh - 92px);
+  }
+  .knowledge-workspace > section:nth-child(1) { grid-area: files; }
+  .knowledge-workspace > section:nth-child(2) { grid-area: chat; }
+  .knowledge-workspace > section:nth-child(3) { grid-area: actions; }
 }

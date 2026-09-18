@@ -1,4 +1,5 @@
 import { apiClient } from "@/api/client"
+import i18n from "@/i18n"
 import type { UploadedAttachmentResponse } from "@/types/attachment"
 import type {
   AgentRunCancelResponse,
@@ -141,7 +142,7 @@ export const consumeAgentRunStream = async (
     cache: "no-store",
     signal
   })
-  if (!response.body) throw new Error("Agent Run 事件流不可读")
+  if (!response.body) throw new Error(i18n.t("Agent Run event stream is unreadable"))
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
@@ -166,7 +167,7 @@ export const consumeAgentRunStream = async (
   } finally {
     reader.releaseLock()
   }
-  throw new Error("Agent Run 事件流在终态前结束")
+  throw new Error(i18n.t("Agent Run event stream ended before a terminal status"))
 }
 
 export const cancelAgentRun = (runId: string) =>

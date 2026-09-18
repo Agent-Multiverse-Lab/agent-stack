@@ -63,6 +63,8 @@ dependencies = [
     "grpcio>=1.84.0",
     "grpcio-tools>=1.81.1",
     "vane-ai>=0.1.0",
+    "duckdb>=1.5.5",
+    "langchain-typesafe>=0.0.1a2",
 ]
 
 [dependency-groups]

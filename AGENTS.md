@@ -14,7 +14,7 @@
 - MinIO 保存文件和解析产物，Milvus 承载知识检索向量。
 - `sandbox_server/` 提供独立的工具和代码执行隔离。
 - `gateway/` 提供 Go gRPC 卫星影像目录和 PostGIS 空间检索。
-- `web/` 是 Vue/TypeScript 前端，负责 API 消费、页面状态和展示。
+- `web/` 是 React/TypeScript 前端，负责 API 消费、页面状态和展示。
 
 当前目录职责、依赖方向和数据所有权见
 [docs/architecture/overview.md](docs/architecture/overview.md)。

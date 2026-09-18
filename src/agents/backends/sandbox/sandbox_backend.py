@@ -98,7 +98,7 @@ class CustomSandbox(BaseSandbox):
         *,
         headers: dict[str, str] | None = None,
     ) -> AgentSandboxClient:
-        """创建连接远程 Agent Box 的客户端。"""
+        """创建连接远程沙箱的客户端。"""
         return AgentSandboxClient(
             base_url=sandbox_url,
             headers=headers,
@@ -159,7 +159,7 @@ class CustomSandbox(BaseSandbox):
         )
 
     def ls(self, path: str) -> LsResult:
-        """通过 Agent Box 文件 API 列出目录。"""
+        """通过沙箱文件接口列出目录。"""
         try:
             response = self.client.file.list_path(
                 path=path,
@@ -187,7 +187,7 @@ class CustomSandbox(BaseSandbox):
         offset: int = 0,
         limit: int = 2000,
     ) -> ReadResult:
-        """通过 Agent Box 文件 API 分页读取文件。"""
+        """通过沙箱文件接口分页读取文件。"""
         try:
             response = self.client.file.read_file(
                 file=file_path,
@@ -206,7 +206,7 @@ class CustomSandbox(BaseSandbox):
             return ReadResult(error=str(exc) or f"Failed to read '{file_path}'")
 
     def write(self, file_path: str, content: str) -> WriteResult:
-        """通过 Agent Box 文件 API 写入 UTF-8 文本。"""
+        """通过沙箱文件接口写入 UTF-8 文本。"""
         try:
             response = self.client.file.write_file(
                 file=file_path,
@@ -228,7 +228,7 @@ class CustomSandbox(BaseSandbox):
         new_string: str,
         replace_all: bool = False,
     ) -> EditResult:
-        """通过 Agent Box 文件 API 替换文本。"""
+        """通过沙箱文件接口替换文本。"""
         if not old_string:
             return EditResult(error="old_string must not be empty")
         try:
@@ -268,7 +268,7 @@ class CustomSandbox(BaseSandbox):
         path: str | None = None,
         glob: str | None = None,
     ) -> GrepResult:
-        """通过远端 execute 搜索文件内容。"""
+        """通过远端命令执行接口搜索文件内容。"""
         search_path = path or "."
         include = f" --include={shlex.quote(glob)}" if glob else ""
         command = (
@@ -292,7 +292,7 @@ class CustomSandbox(BaseSandbox):
         return GrepResult(matches=matches)
 
     def glob(self, pattern: str, path: str | None = None) -> GlobResult:
-        """通过 Agent Box 文件 API 匹配路径。"""
+        """通过沙箱文件接口匹配路径。"""
         search_path = path or "/"
         try:
             response = self.client.file.find_files(
