@@ -1,5 +1,23 @@
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Dropdown, message } from "antd";
+import { toast } from "sonner";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   ChevronDown,
   FileText,
@@ -16,12 +34,13 @@ import {
   Search,
   Sparkles,
   StickyNote,
-  Table,
+  Table as TableIcon,
   UploadCloud,
   X,
 } from "lucide-react";
 import { INITIAL_MOCK_ITEMS } from "@/pages/library/mockData";
 import CreateDialog from "@/pages/library/components/CreateDialog";
+import { useTranslation } from "@/i18n";
 import type {
   CreateNotePayload,
   LibraryCategory,
@@ -58,7 +77,7 @@ const sources: { value: LibraryItemSource | "all"; label: string }[] = [
 const icons = {
   image: ImageIcon,
   document: FileText,
-  spreadsheet: Table,
+  spreadsheet: TableIcon,
   presentation: Presentation,
   folder: Folder,
   note: StickyNote,
@@ -72,6 +91,7 @@ function formatBytes(bytes: number) {
 }
 
 export default function LibraryPage() {
+  const { t } = useTranslation();
   const [items, setItems] = useState<LibraryItem[]>([...INITIAL_MOCK_ITEMS]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<LibraryCategory>("all");
@@ -146,7 +166,7 @@ export default function LibraryPage() {
       createdAt: stamp(),
     }));
     setItems((previous) => [...additions, ...previous]);
-    void message.success(`Successfully uploaded ${additions.length} file(s)`);
+    toast.success(t("Successfully uploaded {{files}} file(s)", { files: additions.length }));
   }
   function create(value: string | CreateNotePayload) {
     const now = stamp();
@@ -164,7 +184,7 @@ export default function LibraryPage() {
         },
         ...previous,
       ]);
-      void message.success(`Folder "${value}" created`);
+      toast.success(t("Folder \"{{name}}\" created", { name: value }));
     } else {
       setItems((previous) => [
         {
@@ -179,54 +199,55 @@ export default function LibraryPage() {
         },
         ...previous,
       ]);
-      void message.success(`Note "${value.title}" created`);
+      toast.success(t("Note \"{{name}}\" created", { name: value.title }));
     }
   }
   const actions = (item: LibraryItem) => (
-    <Dropdown
-      trigger={["click"]}
-      placement="bottomRight"
-      menu={{
-        items: [
-          { key: "download", label: "Download" },
-          { key: "copy", label: "Copy link" },
-          { key: "delete", label: "Delete", danger: true },
-        ],
-        onClick: ({ key }) => {
-          if (key === "download")
-            void message.info(`Downloading ${item.name}...`);
-          if (key === "copy")
-            void message.success(`Copied link for ${item.name}`);
-          if (key === "delete") {
-            setItems((previous) =>
-              previous.filter((value) => value.id !== item.id),
-            );
-            void message.info("Item deleted");
-          }
-        },
-      }}
-    >
-      <button
+    <DropdownMenu>
+      <DropdownMenuTrigger
         type="button"
-        aria-label="Item actions"
-        title="Actions"
+        aria-label={t("Item actions")}
+        title={t("Actions")}
         className="grid size-7 place-items-center rounded-md text-[#64748B] hover:bg-mist"
       >
         <MoreHorizontal size={16} />
-      </button>
-    </Dropdown>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem
+          onClick={() => toast.info(t("Downloading {{name}}...", { name: item.name }))}
+        >
+          {t("Download")}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => toast.success(t("Copied link for {{name}}", { name: item.name }))}
+        >
+          {t("Copy link")}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          variant="destructive"
+          onClick={() => {
+            setItems((previous) =>
+              previous.filter((value) => value.id !== item.id),
+            );
+            toast.info(t("Item deleted"));
+          }}
+        >
+          {t("Delete")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
   return (
     <main
       className="flex h-full min-h-0 w-full justify-center bg-paper text-graphite"
-      aria-label="Library"
+      aria-label={t("Library")}
     >
       <div className="flex h-full min-h-0 w-full max-w-[920px] flex-col bg-paper">
         <header className="flex flex-wrap items-center justify-between gap-4 px-4 py-4">
           <div className="flex items-center gap-2.5">
             <Library size={22} />
             <h1 className="text-xl font-semibold tracking-[-0.02em]">
-              Library
+              {t("Library")}
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-3">
@@ -235,24 +256,24 @@ export default function LibraryPage() {
                 className="pointer-events-none absolute left-3 text-[#64748B]"
                 size={16}
               />
-              <input
+              <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search..."
+                placeholder={t("Search...")}
                 className="h-9 w-48 rounded-[16px] bg-mist/70 pr-8 pl-9 text-sm outline-none focus:w-60"
               />
               {query && (
-                <button
+                <Button variant="ghost"
                   type="button"
-                  aria-label="Clear search"
+                  aria-label={t("Clear search")}
                   onClick={() => setQuery("")}
                   className="absolute right-2.5"
                 >
                   <X size={12} />
-                </button>
+                </Button>
               )}
             </div>
-            <input
+            <Input
               ref={fileInput}
               type="file"
               multiple
@@ -262,104 +283,113 @@ export default function LibraryPage() {
                 event.target.value = "";
               }}
             />
-            <Dropdown
-              placement="bottomRight"
-              trigger={["click"]}
-              menu={{
-                items: [
-                  { key: "upload", label: "Upload files" },
-                  { key: "folder", label: "New folder" },
-                  { key: "note", label: "Quick note" },
-                ],
-                onClick: ({ key }) => {
-                  if (key === "upload") fileInput.current?.click();
-                  else setDialog(key as "folder" | "note");
-                },
-              }}
-            >
-              <button
+            <DropdownMenu>
+              <DropdownMenuTrigger
                 type="button"
                 className="inline-flex h-9 items-center gap-1.5 rounded-[16px] bg-[#0F172A] px-3.5 text-sm font-medium text-paper"
               >
                 <Plus size={15} />
-                New
-              </button>
-            </Dropdown>
+                {t("New")}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => fileInput.current?.click()}>
+                  {t("Upload files")}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setDialog("folder")}>
+                  {t("New folder")}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setDialog("note")}>
+                  {t("Quick note")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </header>
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2">
           <div className="flex h-8 items-center gap-0.5 rounded-[12px] bg-mist/80 p-0.5">
             {categories.map(({ id, label, icon: Icon }) => (
-              <button
+              <Button variant="ghost"
                 key={id}
                 type="button"
                 onClick={() => setCategory(id)}
                 className={`inline-flex h-7 items-center gap-1.5 rounded-[10px] px-3 text-xs ${category === id ? "bg-paper font-medium text-[#0F172A] shadow-sm" : "text-[#64748B]"}`}
               >
                 <Icon size={14} />
-                {label}
-              </button>
+                {t(label)}
+              </Button>
             ))}
           </div>
           <div className="flex items-center gap-2">
-            <Dropdown
-              trigger={["click"]}
-              menu={{
-                items: types.map((item) => ({
-                  key: item.value,
-                  label: item.label,
-                })),
-                selectedKeys: [fileType],
-                onClick: ({ key }) =>
-                  setFileType(key as LibraryItemType | "all"),
-              }}
-            >
-              <button
+            <DropdownMenu>
+              <DropdownMenuTrigger
                 type="button"
                 className="flex h-8 items-center gap-1.5 rounded-[10px] bg-mist/70 px-2.5 text-xs"
               >
                 <Filter size={14} />
-                {types.find((item) => item.value === fileType)?.label}
+                {t(types.find((item) => item.value === fileType)?.label ?? "")}
                 <ChevronDown size={14} />
-              </button>
-            </Dropdown>
-            <Dropdown
-              trigger={["click"]}
-              menu={{
-                items: sources.map((item) => ({
-                  key: item.value,
-                  label: item.label,
-                })),
-                selectedKeys: [source],
-                onClick: ({ key }) =>
-                  setSource(key as LibraryItemSource | "all"),
-              }}
-            >
-              <button
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuRadioGroup
+                  value={fileType}
+                  onValueChange={(value) =>
+                    setFileType(value as LibraryItemType | "all")
+                  }
+                >
+                  {types.map((item) => (
+                    <DropdownMenuRadioItem
+                      key={item.value}
+                      value={item.value}
+                    >
+                      {t(item.label)}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger
                 type="button"
                 className="flex h-8 items-center gap-1.5 rounded-[10px] bg-mist/70 px-2.5 text-xs"
               >
-                {sources.find((item) => item.value === source)?.label}
+                {t(sources.find((item) => item.value === source)?.label ?? "")}
                 <ChevronDown size={14} />
-              </button>
-            </Dropdown>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuRadioGroup
+                  value={source}
+                  onValueChange={(value) =>
+                    setSource(value as LibraryItemSource | "all")
+                  }
+                >
+                  {sources.map((item) => (
+                    <DropdownMenuRadioItem
+                      key={item.value}
+                      value={item.value}
+                    >
+                      {t(item.label)}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <div className="flex h-8 rounded-[12px] bg-mist/80 p-0.5">
-              <button
+              <Button variant="ghost"
                 type="button"
-                aria-label="List view"
+                aria-label={t("List view")}
                 onClick={() => setViewMode("list")}
                 className={`grid size-7 place-items-center rounded-[10px] ${viewMode === "list" ? "bg-paper" : ""}`}
               >
                 <LayoutList size={14} />
-              </button>
-              <button
+              </Button>
+              <Button variant="ghost"
                 type="button"
-                aria-label="Grid view"
+                aria-label={t("Grid view")}
                 onClick={() => setViewMode("grid")}
                 className={`grid size-7 place-items-center rounded-[10px] ${viewMode === "grid" ? "bg-paper" : ""}`}
               >
                 <Grid size={14} />
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -367,28 +397,27 @@ export default function LibraryPage() {
           {!visible.length ? (
             <div className="my-auto grid justify-items-center py-16 text-center">
               <Folder size={24} className="mb-3 text-slate" />
-              <h3 className="text-sm font-medium">No items found</h3>
+              <h3 className="text-sm font-medium">{t("No items found")}</h3>
               <p className="mt-1 text-xs text-slate">
-                No files, notes, or folders match your search or filter
-                criteria.
+                {t("No files, notes, or folders match your search or filter criteria.")}
               </p>
             </div>
           ) : viewMode === "list" ? (
-            <table className="w-full border-collapse text-left text-xs">
-              <thead>
-                <tr className="text-[#94A3B8]">
-                  <th className="px-2 pb-3 text-left font-medium">NAME</th>
-                  <th className="px-4 pb-3 text-left font-medium">MODIFIED</th>
-                  <th className="px-4 pb-3 text-left font-medium">SIZE</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="w-full border-collapse text-left text-xs">
+              <TableHeader>
+                <TableRow className="border-0 text-[#94A3B8] hover:bg-transparent">
+                  <TableHead className="h-auto px-2 pb-3 text-left font-medium">{t("NAME")}</TableHead>
+                  <TableHead className="h-auto px-4 pb-3 text-left font-medium">{t("MODIFIED")}</TableHead>
+                  <TableHead className="h-auto px-4 pb-3 text-left font-medium">{t("SIZE")}</TableHead>
+                  <TableHead className="h-auto" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {visible.map((item) => {
                   const Icon = icons[item.type];
                   return (
-                    <tr key={item.id} className="group h-[46px]">
-                      <td className="py-3 pr-4 pl-2">
+                    <TableRow key={item.id} className="group h-[46px] border-0 hover:bg-transparent">
+                      <TableCell className="py-3 pr-4 pl-2">
                         <div className="flex items-center gap-3">
                           <Icon size={18} className="shrink-0 text-[#64748B]" />
                           <span
@@ -398,23 +427,23 @@ export default function LibraryPage() {
                             {item.name}
                           </span>
                         </div>
-                      </td>
-                      <td className="px-4 py-3 text-[13px] text-[#64748B]">
+                      </TableCell>
+                      <TableCell className="px-4 py-3 text-[13px] text-[#64748B]">
                         {item.createdAt || item.updatedAt}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-[13px] text-[#64748B]">
+                      </TableCell>
+                      <TableCell className="px-4 py-3 font-mono text-[13px] text-[#64748B]">
                         {formatBytes(item.sizeBytes)}
-                      </td>
-                      <td className="px-2 py-3 text-right">
+                      </TableCell>
+                      <TableCell className="px-2 py-3 text-right">
                         <div className="flex justify-end opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
                           {actions(item)}
                         </div>
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-5 py-2">
               {visible.map((item) => {
@@ -440,7 +469,7 @@ export default function LibraryPage() {
                         ) : (
                           <UploadCloud size={9} />
                         )}
-                        {item.source}
+                        {t(item.source)}
                       </div>
                       <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
                         {actions(item)}
@@ -466,9 +495,9 @@ export default function LibraryPage() {
             className="mt-6 flex justify-center py-4 text-xs text-[#64748B]"
           >
             {loadingMore
-              ? "Loading more items..."
+              ? t("Loading more items...")
               : !hasMore && visible.length > 0
-                ? "All items loaded (Max 10 per page)"
+                ? t("All items loaded (Max 10 per page)")
                 : ""}
           </div>
         </div>

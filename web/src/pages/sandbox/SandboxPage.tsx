@@ -1,10 +1,12 @@
 import { SquareTerminal } from "lucide-react";
+import { useTranslation } from "@/i18n";
 
 export default function SandboxPage() {
+  const { t } = useTranslation();
   return (
     <main
       className="flex h-full min-h-0 w-full items-center justify-center bg-paper px-5 pb-[6rem] text-graphite"
-      aria-label="Sandbox"
+      aria-label={t("Sandbox")}
     >
       <section
         className="flex w-full max-w-[30rem] flex-col items-center text-center"
@@ -21,17 +23,16 @@ export default function SandboxPage() {
             className="h-[5px] w-[5px] rounded-full bg-graphite/58"
             aria-hidden
           />
-          <span>Backend not connected</span>
+          <span>{t("Backend not connected")}</span>
         </p>
         <h2
           id="sandbox-heading"
           className="m-0 text-[clamp(1.6rem,4vw,2rem)] font-[550] leading-[1.25] tracking-[-0.035em]"
         >
-          Sandbox is not connected
+          {t("Sandbox is not connected")}
         </h2>
         <p className="m-0 mt-3 max-w-[27rem] text-sm leading-[1.625] text-slate">
-          Sandbox sessions will appear here after runtime services are
-          connected.
+          {t("Sandbox sessions will appear here after runtime services are connected.")}
         </p>
       </section>
     </main>

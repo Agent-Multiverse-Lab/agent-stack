@@ -1,10 +1,12 @@
 import { Bot } from "lucide-react";
+import { useTranslation } from "@/i18n";
 
 export default function AgentPage() {
+  const { t } = useTranslation();
   return (
     <main
       className="flex h-full min-h-0 w-full items-center justify-center bg-paper px-5 pb-[6rem] text-graphite"
-      aria-label="Agent"
+      aria-label={t("Agent")}
     >
       <section
         className="flex w-full max-w-[30rem] flex-col items-center text-center"
@@ -21,17 +23,16 @@ export default function AgentPage() {
             className="h-[5px] w-[5px] rounded-full bg-graphite/58"
             aria-hidden
           />
-          <span>Backend not connected</span>
+          <span>{t("Backend not connected")}</span>
         </p>
         <h2
           id="agent-heading"
           className="m-0 text-[clamp(1.6rem,4vw,2rem)] font-[550] leading-[1.25] tracking-[-0.035em]"
         >
-          Agent setup is not connected
+          {t("Agent setup is not connected")}
         </h2>
         <p className="m-0 mt-3 max-w-[27rem] text-sm leading-[1.625] text-slate">
-          Agent configuration will be available here after the backend is
-          connected.
+          {t("Agent configuration will be available here after the backend is connected.")}
         </p>
       </section>
     </main>

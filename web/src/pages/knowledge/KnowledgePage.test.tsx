@@ -30,3 +30,23 @@ it("adds local files and filters the file list by name", () => {
   expect(screen.getByText("alpha.pdf")).toBeTruthy()
   expect(screen.queryByText("beta.txt")).toBeNull()
 })
+
+it("keeps a file until removal is confirmed", async () => {
+  const { container } = render(<MemoryRouter><KnowledgePage /></MemoryRouter>)
+  fireEvent.change(container.querySelector('input[type="file"]')!, {
+    target: { files: [new File(["alpha"], "alpha.pdf", { type: "application/pdf" })] }
+  })
+
+  fireEvent.click(screen.getByRole("button", { name: "Open file actions" }))
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Remove from list" }))
+  expect(screen.getByRole("dialog", { name: "Remove this file?" })).toBeTruthy()
+  expect(screen.getByText("alpha.pdf")).toBeTruthy()
+
+  fireEvent.click(screen.getByRole("button", { name: "Keep file" }))
+  expect(screen.getByText("alpha.pdf")).toBeTruthy()
+
+  fireEvent.click(screen.getByRole("button", { name: "Open file actions" }))
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Remove from list" }))
+  fireEvent.click(screen.getByRole("button", { name: "Remove" }))
+  expect(screen.queryByText("alpha.pdf")).toBeNull()
+})

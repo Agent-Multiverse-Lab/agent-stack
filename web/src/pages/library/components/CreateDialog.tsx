@@ -1,6 +1,20 @@
+import { Label } from "@/components/ui/label";
 import { useState } from "react";
 import { FolderPlus, StickyNote, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import type { CreateNotePayload } from "@/types/library";
+import { useTranslation } from "@/i18n";
 
 export default function CreateDialog({
   kind,
@@ -11,29 +25,32 @@ export default function CreateDialog({
   close: () => void;
   create: (value: string | CreateNotePayload) => void;
 }) {
+  const { t } = useTranslation();
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-graphite/40 p-4 backdrop-blur-xs"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) close();
-      }}
-    >
-      <div className="w-full max-w-md overflow-hidden rounded-xl border border-graphite/12 bg-paper p-5 shadow-lg">
-        <header className="flex items-center justify-between border-b border-graphite/8 pb-3">
-          <h3 className="flex items-center gap-2 text-sm font-semibold">
+    <Dialog open onOpenChange={(open) => { if (!open) close(); }}>
+      <DialogContent
+        showCloseButton={false}
+        overlayClassName="bg-graphite/40"
+        className="w-full max-w-md gap-0 overflow-hidden rounded-xl border border-graphite/12 bg-paper p-5 text-graphite shadow-lg sm:max-w-md"
+      >
+        <DialogHeader className="flex flex-row items-center justify-between border-b border-graphite/8 pb-3">
+          <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
             {kind === "folder" ? (
               <FolderPlus size={18} />
             ) : (
               <StickyNote size={18} />
             )}
-            {kind === "folder" ? "Create New Folder" : "Create Quick Note"}
-          </h3>
-          <button type="button" aria-label="Close" onClick={close}>
+            {kind === "folder" ? t("Create New Folder") : t("Create Quick Note")}
+          </DialogTitle>
+          <DialogClose render={<Button variant="ghost" size="icon-sm" />} aria-label={t("Close")}>
             <X size={14} />
-          </button>
-        </header>
+          </DialogClose>
+        </DialogHeader>
+        <DialogDescription className="sr-only">
+          {kind === "folder" ? t("Create a folder in your library.") : t("Create a quick note in your library.")}
+        </DialogDescription>
         <form
           className="mt-4 grid gap-4"
           onSubmit={(event) => {
@@ -47,48 +64,51 @@ export default function CreateDialog({
             close();
           }}
         >
-          <label className="grid gap-1 text-xs font-medium text-slate">
-            {kind === "folder" ? "Folder Name" : "Title"}
-            <input
+          <Label className="grid gap-1 text-xs font-medium text-slate">
+            {kind === "folder" ? t("Folder Name") : t("Title")}
+            <Input
               autoFocus
               required
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               placeholder={
-                kind === "folder" ? "e.g. Project Assets" : "Note title..."
+                kind === "folder" ? t("e.g. Project Assets") : t("Note title...")
               }
-              className="h-9 rounded-md border border-graphite/14 bg-mist/40 px-3 text-xs text-graphite outline-none"
+              className="h-9 rounded-md border-graphite/14 bg-mist/40 px-3 text-xs text-graphite"
             />
-          </label>
+          </Label>
           {kind === "note" && (
-            <label className="grid gap-1 text-xs font-medium text-slate">
-              Content
-              <textarea
+            <Label className="grid gap-1 text-xs font-medium text-slate">
+              {t("Content")}
+              <Textarea
                 value={content}
                 onChange={(event) => setContent(event.target.value)}
                 rows={4}
-                placeholder="Write your note content here..."
-                className="rounded-md border border-graphite/14 bg-mist/40 p-3 text-xs text-graphite outline-none"
+                placeholder={t("Write your note content here...")}
+                className="rounded-md border-graphite/14 bg-mist/40 p-3 text-xs text-graphite"
               />
-            </label>
+            </Label>
           )}
-          <div className="flex justify-end gap-2 pt-2">
-            <button
+          <DialogFooter className="-mx-0 -mb-0 flex-row justify-end border-0 bg-transparent p-0 pt-2">
+            <Button
               type="button"
-              className="rounded-md px-3 py-2 text-xs text-slate hover:bg-mist"
+              variant="ghost"
+              size="sm"
+              className="text-xs text-slate"
               onClick={close}
             >
-              Cancel
-            </button>
-            <button
+              {t("Cancel")}
+            </Button>
+            <Button
               type="submit"
-              className="rounded-md bg-graphite px-4 py-2 text-xs text-paper"
+              size="sm"
+              className="bg-graphite px-4 text-xs text-paper hover:bg-graphite/90"
             >
-              {kind === "folder" ? "Create" : "Save Note"}
-            </button>
-          </div>
+              {kind === "folder" ? t("Create") : t("Save Note")}
+            </Button>
+          </DialogFooter>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
