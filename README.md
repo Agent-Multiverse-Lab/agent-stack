@@ -6,7 +6,7 @@
 
 # agent-stack
 
-基于 FastAPI、LangGraph 和 Vue 的多智能体应用，用于技术学习与工程实践。
+基于 FastAPI、LangGraph 和 React 的多智能体应用，用于技术学习与工程实践。
 
 </div>
 
@@ -35,7 +35,7 @@ Web 端提供登录、会话和聊天界面。FastAPI 创建 Agent Run，Redis/A
 
 ```mermaid
 flowchart TB
-    Run[交互与 Run] --> Web[Vue 登录、会话与聊天]
+    Run[交互与 Run] --> Web[React 登录、会话与聊天]
     Run --> API[FastAPI]
     Run --> Worker[Redis / ARQ Worker]
     Run --> Events[Redis Stream / SSE]
@@ -75,7 +75,7 @@ flowchart TB
 | `src/database/`、`src/storage/` | 数据库仓储与基础设施适配 |
 | `gateway/` | Go gRPC 卫星目录与 PostGIS 查询 |
 | `sandbox_server/` | 独立的执行隔离服务 |
-| `web/` | Vue 前端 |
+| `web/` | React 前端 |
 | `migrate/` | Alembic 数据库迁移 |
 | `docker-compose.yml`、`docker/` | 服务编排与镜像配置 |
 

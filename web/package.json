@@ -5,33 +5,38 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "typecheck": "vue-tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "test": "vitest run --environment jsdom --maxWorkers=1",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@fontsource-variable/noto-sans-sc": "^5.3.0",
-    "@lucide/vue": "^1.26.0",
-    "ant-design-vue": "^4.2.6",
-    "gsap": "^3.15.0",
-    "markstream-vue": "^1.0.7",
-    "pinia": "^4.0.2",
-    "vue": "^3.5.0",
-    "vue-router": "^4.6.0"
+    "antd": "^6.6.4",
+    "lucide-react": "^1.47.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-markdown": "^10.1.0",
+    "react-router": "^7.18.4",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^24.10.1",
-    "@vitejs/plugin-vue": "^6.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
     "eslint": "^9.39.1",
-    "eslint-plugin-vue": "^10.0.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^16.5.0",
+    "jsdom": "^29.1.1",
     "tailwindcss": "^4.3.3",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.3",
     "vite": "^7.3.1",
-    "vue-tsc": "^3.1.0"
+    "vitest": "^5.0.1"
   }
 }
