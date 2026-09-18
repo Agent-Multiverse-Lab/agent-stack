@@ -1,11 +1,25 @@
-import { useEffect, useRef, useState } from "react";
-import type { ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { useRef, useState } from "react";
+import type { ClipboardEvent, DragEvent, KeyboardEvent, SubmitEvent } from "react";
 import { ArrowUp, Paperclip, Plus, Square } from "lucide-react";
-import { Tooltip } from "antd";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { UploadedAttachmentResponse } from "@/types/attachment";
 import type { ChatModelOption } from "@/types/model";
 import { Attachment } from "@/pages/chat/components/Attachment";
 import ModelSelector from "@/pages/chat/components/ModelSelector";
+import { useTranslation } from "@/i18n";
 
 export function MessageInput({
   draft,
@@ -40,28 +54,10 @@ export function MessageInput({
   submit: () => void;
   cancel: () => void;
 }) {
+  const { t } = useTranslation();
   const input = useRef<HTMLInputElement>(null);
   const editor = useRef<HTMLTextAreaElement>(null);
-  const menuContainer = useRef<HTMLDivElement>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [composing, setComposing] = useState(false);
-  useEffect(() => {
-    if (!menuOpen) return;
-    const closeOutside = (event: MouseEvent) => {
-      if (!menuContainer.current?.contains(event.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setMenuOpen(false);
-    };
-    document.addEventListener("click", closeOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("click", closeOutside);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [menuOpen]);
   const actionDisabled =
     disabled ||
     (!running &&
@@ -90,7 +86,7 @@ export function MessageInput({
       if (!actionDisabled && !running) submit();
     }
   };
-  const onSubmit = (event: FormEvent) => {
+  const onSubmit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!actionDisabled && !running) submit();
   };
@@ -116,13 +112,15 @@ export function MessageInput({
               className="flex h-11 items-center rounded-full bg-mist px-4 text-sm text-slate"
               role="status"
             >
-              Uploading{uploading > 1 ? ` ${uploading} files` : ""}…
+              {uploading > 1
+                ? t("Uploading {{files}} files…", { files: uploading })
+                : t("Uploading…")}
             </li>
           )}
         </ul>
       )}
       <div className="flex w-full items-end gap-2">
-        <input
+        <Input
           ref={input}
           className="hidden"
           type="file"
@@ -133,40 +131,24 @@ export function MessageInput({
             event.target.value = "";
           }}
         />
-        <div ref={menuContainer} className="relative">
-          <button
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={<Button variant="ghost" />}
             type="button"
             disabled={disabled}
-            aria-expanded={menuOpen}
-            aria-haspopup="menu"
-            aria-label="Action menu"
+            aria-label={t("Action menu")}
             className="grid size-10 place-items-center rounded-full bg-graphite/6 disabled:opacity-40"
-            onClick={() => setMenuOpen(!menuOpen)}
           >
             <Plus size={19} />
-          </button>
-          {menuOpen && (
-            <div
-              className={`absolute left-0 z-50 w-48 rounded-xl border border-graphite/14 bg-paper p-2 shadow-lg ${placement === "top" ? "bottom-full mb-2" : "top-full mt-2"}`}
-              role="menu"
-              aria-label="Actions menu"
-            >
-              <button
-                type="button"
-                role="menuitem"
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-mist"
-                onClick={() => {
-                  setMenuOpen(false);
-                  input.current?.click();
-                }}
-              >
-                <Paperclip size={18} />
-                添加附件
-              </button>
-            </div>
-          )}
-        </div>
-        <textarea
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side={placement} className="w-48 p-2" aria-label={t("Actions menu")}>
+            <DropdownMenuItem onClick={() => input.current?.click()}>
+              <Paperclip size={18} />
+              {t("Add attachment")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Textarea
           ref={editor}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
@@ -174,10 +156,10 @@ export function MessageInput({
           onCompositionStart={() => setComposing(true)}
           onCompositionEnd={() => setComposing(false)}
           disabled={disabled}
-          aria-label="Message"
-          placeholder="Ask anything"
+          aria-label={t("Message")}
+          placeholder={t("Ask anything")}
           rows={1}
-          className="min-h-10 max-h-[180px] min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-2 py-2 text-[0.95rem] leading-6 outline-none disabled:opacity-60"
+          className="min-h-10 max-h-[180px] min-w-0 flex-1 resize-none overflow-y-auto border-0 bg-transparent px-2 py-2 text-[0.95rem] leading-6 focus-visible:ring-0 disabled:opacity-60"
           style={{
             height: Math.min(
               180,
@@ -193,11 +175,11 @@ export function MessageInput({
           placement={placement}
           select={selectModel}
         />
-        <Tooltip title={running ? "Cancel" : "Send"}>
-          <button
+        <Tooltip>
+          <TooltipTrigger
             type="button"
             disabled={actionDisabled}
-            aria-label={running ? "Cancel response" : "Send message"}
+            aria-label={running ? t("Cancel response") : t("Send message")}
             onClick={running ? cancel : submit}
             className="grid size-10 shrink-0 place-items-center rounded-full bg-graphite text-paper disabled:bg-graphite/18"
           >
@@ -206,7 +188,8 @@ export function MessageInput({
             ) : (
               <ArrowUp size={19} />
             )}
-          </button>
+          </TooltipTrigger>
+          <TooltipContent>{running ? t("Cancel") : t("Send")}</TooltipContent>
         </Tooltip>
       </div>
     </form>

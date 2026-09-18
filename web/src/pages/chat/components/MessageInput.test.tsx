@@ -27,13 +27,13 @@ describe("MessageInput action menu", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Action menu" }));
-    expect(screen.getByRole("menu", { name: "Actions menu" })).toBeTruthy();
+    expect(screen.getByRole("menu", { name: "Action menu" })).toBeTruthy();
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Action menu" }));
-    fireEvent.click(document.body);
+    fireEvent.pointerDown(document.body);
     expect(screen.queryByRole("menu")).toBeNull();
   });
 });

@@ -1,6 +1,11 @@
 import { File as FileIcon, X } from "lucide-react";
-import { Tooltip } from "antd";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { ChatAttachment } from "@/types/attachment";
+import { useTranslation } from "@/i18n";
 
 export function Attachment({
   attachment,
@@ -9,6 +14,7 @@ export function Attachment({
   attachment: ChatAttachment;
   remove?: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <li
       className={`grid h-11 max-w-[17rem] min-w-0 shrink-0 items-center gap-2 rounded-full border border-graphite/12 bg-paper p-1 text-graphite ${remove ? "grid-cols-[2rem_minmax(0,1fr)_2rem]" : "grid-cols-[2rem_minmax(0,1fr)] pr-3"}`}
@@ -35,15 +41,16 @@ export function Attachment({
         {attachment.file_name}
       </strong>
       {remove && (
-        <Tooltip title={`Remove ${attachment.file_name}`}>
-          <button
+        <Tooltip>
+          <TooltipTrigger
             type="button"
             className="grid size-7 place-items-center rounded-full text-graphite/58 hover:bg-graphite hover:text-paper"
-            aria-label={`Remove attachment ${attachment.file_name}`}
+            aria-label={t("Remove attachment {{name}}", { name: attachment.file_name })}
             onClick={() => remove(attachment.file_id)}
           >
             <X size={14} />
-          </button>
+          </TooltipTrigger>
+          <TooltipContent>{t("Remove attachment {{name}}", { name: attachment.file_name })}</TooltipContent>
         </Tooltip>
       )}
     </li>

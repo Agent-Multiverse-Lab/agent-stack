@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 import { useNavigate, useParams } from "react-router";
@@ -15,10 +16,9 @@ import { Thinking } from "@/pages/chat/components/Thinking";
 import { useAgentRun } from "@/pages/chat/hooks/useAgentRun";
 import { useChat } from "@/pages/chat/hooks/useChat";
 import { useModel } from "@/context/ModelContext";
+import { useTranslation } from "@/i18n";
 import type { AgentRunEndEvent, ChatMessage as ChatMessageType } from "@/types/chat";
 
-const errorText = (caught: unknown) =>
-  caught instanceof Error ? caught.message : "请求失败";
 const isAbortError = (caught: unknown) =>
   caught instanceof DOMException && caught.name === "AbortError";
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -31,6 +31,9 @@ const messageKey = (message: ChatMessageType, index: number) => {
 };
 
 export default function ChatPage() {
+  const { t } = useTranslation();
+  const errorText = (caught: unknown) =>
+    caught instanceof Error ? caught.message : t("Request failed");
   const { threadId } = useParams();
   const navigate = useNavigate();
   const {
@@ -108,7 +111,7 @@ export default function ChatPage() {
         if (!run.isActive()) {
           chat.update({
             error:
-              run.getState().runStatus === "failed" ? "Agent 执行失败" : "",
+              run.getState().runStatus === "failed" ? t("Agent execution failed") : "",
           });
           return;
         }
@@ -129,7 +132,7 @@ export default function ChatPage() {
       }
       if (operation.current !== expected) return;
       if (endEvent.status === "failed") {
-        chat.update({ error: endEvent.error || "Agent 执行失败" });
+        chat.update({ error: endEvent.error || t("Agent execution failed") });
       }
       return;
     }
@@ -221,7 +224,7 @@ export default function ChatPage() {
       if (!currentThread) {
         const agents = await listChatAgents();
         const leader = agents.find((agent) => agent.id === "LeaderAgent");
-        if (!leader) throw new Error("LeaderAgent 当前不可用");
+        if (!leader) throw new Error(t("Leader agent is unavailable"));
         const created = await createThread(leader.id);
         if (operation.current !== expected) return;
         currentThread = chat.applyCreatedThread(created);
@@ -250,7 +253,7 @@ export default function ChatPage() {
       }
       if (operation.current !== expected) return;
       if (createdRun.status === "failed")
-        chat.update({ error: "Agent 执行失败" });
+        chat.update({ error: t("Agent execution failed") });
       await monitorRun(currentThread.thread_id, expected);
     } catch (caught) {
       if (operation.current === expected && !isAbortError(caught)) {
@@ -370,10 +373,10 @@ export default function ChatPage() {
           {!docked && !chatState.loading && (
             <div className="mb-4 text-center select-none">
               <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-                Welcome to AM
+                {t("Welcome to AM")}
               </h1>
               <p className="mt-2 text-sm text-slate sm:text-base">
-                What would you like to explore or build today?
+                {t("What would you like to explore or build today?")}
               </p>
             </div>
           )}
@@ -386,10 +389,10 @@ export default function ChatPage() {
             </p>
           )}
           {docked && showScroll && (
-            <button
+            <Button variant="ghost"
               type="button"
-              aria-label="Scroll to latest message"
-              title="Scroll to latest message"
+              aria-label={t("Scroll to latest message")}
+              title={t("Scroll to latest message")}
               className="z-10 grid size-9 place-items-center justify-self-center rounded-full border border-graphite/10 bg-paper text-slate shadow-sm"
               onClick={() => {
                 scroller.current?.scrollTo({
@@ -400,7 +403,7 @@ export default function ChatPage() {
               }}
             >
               <ArrowDown size={17} />
-            </button>
+            </Button>
           )}
           {!chatState.loading && pending && (
             <AskUser

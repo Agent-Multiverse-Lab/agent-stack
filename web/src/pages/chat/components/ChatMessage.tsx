@@ -3,6 +3,7 @@ import remarkGfm from "remark-gfm";
 import type { ThreadMessageAttachmentResponse } from "@/types/attachment";
 import type { ChatMessage as ChatMessageType } from "@/types/chat";
 import { Attachment } from "@/pages/chat/components/Attachment";
+import { useTranslation } from "@/i18n";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -12,6 +13,7 @@ const isAttachment = (
   isRecord(value) && typeof value.file_id === "string";
 
 function AgentTasks({ event }: { event: Record<string, unknown> }) {
+  const { t } = useTranslation();
   const state = isRecord(event.agent_state) ? event.agent_state : {};
   const todos = Array.isArray(state.agent_todo)
     ? state.agent_todo.filter(
@@ -25,8 +27,8 @@ function AgentTasks({ event }: { event: Record<string, unknown> }) {
   return (
     <details open className="w-full max-w-2xl text-sm">
       <summary className="cursor-pointer py-1 text-xs text-slate">
-        {todos.length} {todos.length === 1 ? "task" : "tasks"} ·{" "}
-        {todos.filter((item) => item.status === "completed").length} completed
+        {t(todos.length === 1 ? "{{tasks}} task" : "{{tasks}} tasks", { tasks: todos.length })} ·{" "}
+        {t("{{completed}} completed", { completed: todos.filter((item) => item.status === "completed").length })}
       </summary>
       <div className="mt-1.5 grid gap-1">
         {todos.map((todo, index) => (
@@ -34,10 +36,10 @@ function AgentTasks({ event }: { event: Record<string, unknown> }) {
             <summary className="cursor-pointer rounded-md px-1 py-1 text-xs hover:bg-mist">
               <span className="font-medium">
                 {todo.status === "in_progress"
-                  ? "In progress"
+                  ? t("In progress")
                   : todo.status === "completed"
-                    ? "Completed"
-                    : "Pending"}
+                    ? t("Completed")
+                    : t("Pending")}
               </span>
               <span className="ml-2 text-slate">{todo.content}</span>
             </summary>
