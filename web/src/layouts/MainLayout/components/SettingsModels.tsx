@@ -1,5 +1,18 @@
+import { Label } from "@/components/ui/label";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { message, Modal } from "antd";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   Eye,
   EyeOff,
@@ -23,6 +36,7 @@ import {
   testProviderConnection,
 } from "@/api/model";
 import { useAuth } from "@/context/AuthContext";
+import { useTranslation } from "@/i18n";
 import type {
   ModelProviderId,
   ModelSettingsRequest,
@@ -56,6 +70,7 @@ const emptyDraft = (): Draft => ({
 });
 
 export default function SettingsModels() {
+  const { t, i18n } = useTranslation();
   const { accessToken } = useAuth();
   const [selected, setSelected] = useState<ModelProviderId>("deepseek");
   const [drafts, setDrafts] = useState<Partial<Record<ModelProviderId, Draft>>>(
@@ -107,12 +122,12 @@ export default function SettingsModels() {
     } catch (error) {
       if (current === version.current) {
         setLoadError(true);
-        void message.error(error instanceof Error ? error.message : "加载失败");
+        toast.error(error instanceof Error ? error.message : i18n.t("Load failed"));
       }
     } finally {
       if (current === version.current) setLoading(false);
     }
-  }, [selected]);
+  }, [selected, i18n]);
   useEffect(() => {
     void load();
     const requestVersion = version;
@@ -137,11 +152,11 @@ export default function SettingsModels() {
   async function act(action: "save" | "discover" | "test") {
     if (blocked) return;
     if (!draft.base_url.trim()) {
-      void message.error("请输入 Base URL");
+      toast.error(t("Enter a Base URL"));
       return;
     }
     if (action === "test" && !draft.models.length) {
-      void message.error("请先获取并选择聊天模型");
+      toast.error(t("Discover and select a chat model first"));
       return;
     }
     const current = version.current;
@@ -157,9 +172,8 @@ export default function SettingsModels() {
           hasKey: draft.keyEdited ? Boolean(draft.key) : draft.hasKey,
           initialized: true,
         });
-        void (result.cache_refreshed
-          ? message.success("已保存")
-          : message.warning("已保存，模型缓存刷新失败"));
+        if (result.cache_refreshed) toast.success(t("Saved"));
+        else toast.warning(t("Saved, but refreshing the model cache failed"));
       } else if (action === "discover") {
         const result = await discoverProviderModels(selected, body);
         if (current !== version.current) return;
@@ -174,37 +188,38 @@ export default function SettingsModels() {
         const result = await testProviderConnection(selected, body);
         if (current !== version.current) return;
         if (result.success)
-          void message.success(
-            `连接成功 · ${Math.round(result.elapsed_ms)} ms`,
+          toast.success(
+            t("Connection succeeded · {{ms}} ms", { ms: Math.round(result.elapsed_ms) }),
           );
         else
-          void message.error(
-            `连接失败：${result.error ?? "unknown"}${result.status_code ? ` (${result.status_code})` : ""}`,
+          toast.error(
+            `${t("Connection failed: {{error}}", { error: result.error ?? "unknown" })}${result.status_code ? ` (${result.status_code})` : ""}`,
           );
       }
     } catch (error) {
       if (current === version.current)
-        void message.error(error instanceof Error ? error.message : "操作失败");
+        toast.error(error instanceof Error ? error.message : t("Operation failed"));
     } finally {
       if (current === version.current) setBusy(null);
     }
   }
   return (
     <div className="grid min-h-full min-w-0 grid-cols-1 content-start gap-6 min-[1024px]:grid-cols-[176px_minmax(0,1fr)] min-[1024px]:gap-9">
-      <nav aria-label="模型供应商" className="min-w-0">
+      <nav aria-label={t("Model providers")} className="min-w-0">
         <div className="flex gap-1 overflow-x-auto pb-1 min-[1024px]:flex-col">
           {providers.map((item) => (
-            <button
+            <Button
               key={item.id}
               type="button"
+              variant="ghost"
               aria-pressed={selected === item.id}
               disabled={busy !== null || candidates !== null}
-              className={`flex min-h-11 shrink-0 items-center gap-3 rounded-md px-3 text-left text-sm hover:bg-graphite/5 disabled:opacity-60 ${selected === item.id ? "bg-graphite/5 font-semibold" : "text-slate"}`}
+              className={`min-h-11 shrink-0 justify-start gap-3 rounded-md px-3 text-left text-sm hover:bg-graphite/5 disabled:opacity-60 ${selected === item.id ? "bg-graphite/5 font-semibold" : "text-slate"}`}
               onClick={() => setSelected(item.id)}
             >
               <img src={item.logo} alt="" className="size-6 object-contain" />
               {item.name}
-            </button>
+            </Button>
           ))}
         </div>
       </nav>
@@ -217,17 +232,15 @@ export default function SettingsModels() {
             <img src={provider.logo} alt="" className="size-7" />
             {provider.name}
           </h3>
-          <label className="flex items-center gap-3 text-sm">
-            启用{" "}
-            <input
-              type="checkbox"
-              role="switch"
-              aria-label="启用供应商"
+          <div className="flex items-center gap-3 text-sm">
+            {t("Enabled")}{" "}
+            <Switch
+              aria-label={t("Enable provider")}
               checked={draft.is_enabled}
               disabled={blocked}
-              onChange={(event) => edit({ is_enabled: event.target.checked })}
+              onCheckedChange={(checked) => edit({ is_enabled: checked })}
             />
-          </label>
+          </div>
         </div>
         {(loading || loadError) && (
           <div className="mb-4 flex justify-center">
@@ -235,24 +248,26 @@ export default function SettingsModels() {
               <LoaderCircle
                 size={18}
                 className="animate-spin text-slate"
-                aria-label="加载中"
+                aria-label={t("Loading")}
               />
             ) : (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => void load()}
-                className="flex items-center gap-2 text-sm text-slate"
+                className="gap-2 text-sm text-slate"
               >
                 <RefreshCw size={16} />
-                重试
-              </button>
+                {t("Retry")}
+              </Button>
             )}
           </div>
         )}
         <div className="flex items-center gap-2 rounded-md bg-graphite/[0.025] px-4 py-3">
-          <label className="min-w-0 flex-1">
+          <Label className="block min-w-0 flex-1">
             <span className="mb-1.5 block text-xs text-slate">API Key</span>
-            <input
+            <Input
               value={draft.key}
               onChange={(event) =>
                 edit({ key: event.target.value, keyEdited: true })
@@ -263,20 +278,24 @@ export default function SettingsModels() {
               autoComplete="off"
               spellCheck={false}
               aria-label="API Key"
-              className="w-full bg-transparent text-sm outline-none"
+              className="w-full border-0 bg-transparent px-0 text-sm focus-visible:ring-0"
             />
-          </label>
-          <button
+          </Label>
+          <Button
             type="button"
-            aria-label={revealKey ? "隐藏 API Key" : "显示 API Key"}
+            variant="ghost"
+            size="icon-sm"
+            aria-label={revealKey ? t("Hide API Key") : t("Show API Key")}
             disabled={blocked}
             onClick={() => setRevealKey(!revealKey)}
           >
             {revealKey ? <EyeOff size={18} /> : <Eye size={18} />}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            aria-label="检测模型连接"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t("Test model connection")}
             disabled={blocked}
             onClick={() => void act("test")}
           >
@@ -285,31 +304,33 @@ export default function SettingsModels() {
             ) : (
               <Plug size={18} />
             )}
-          </button>
+          </Button>
         </div>
-        <label className="mt-3 block rounded-md bg-graphite/[0.025] px-4 py-3">
+        <Label className="mt-3 block rounded-md bg-graphite/[0.025] px-4 py-3">
           <span className="mb-1.5 block text-xs text-slate">Base URL</span>
-          <input
+          <Input
             value={draft.base_url}
             onChange={(event) => edit({ base_url: event.target.value })}
             type="url"
             disabled={blocked}
             autoComplete="off"
             spellCheck={false}
-            className="w-full bg-transparent text-sm outline-none"
+            className="w-full border-0 bg-transparent px-0 text-sm focus-visible:ring-0"
           />
-        </label>
+        </Label>
         <div className="mt-7 border-t border-graphite/8 pt-5">
           <div className="mb-3 flex items-center justify-between">
-            <h4 className="text-sm font-semibold">模型</h4>
-            <button
+            <h4 className="text-sm font-semibold">{t("Models")}</h4>
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               disabled={blocked}
               className="text-xs text-slate"
               onClick={() => void act("discover")}
             >
-              {busy === "discover" ? "获取中..." : "获取模型"}
-            </button>
+              {busy === "discover" ? t("Discovering...") : t("Discover models")}
+            </Button>
           </div>
           <ul>
             {draft.models.map((model) => (
@@ -328,68 +349,90 @@ export default function SettingsModels() {
           </ul>
         </div>
         <div className="mt-auto flex justify-end pt-10">
-          <button
+          <Button
             type="button"
             disabled={blocked}
-            className="rounded-md bg-graphite px-5 py-2 text-sm text-white disabled:opacity-40"
+            className="bg-graphite px-5 text-sm text-white hover:bg-graphite/90"
             onClick={() => void act("save")}
           >
-            {busy === "save" ? "保存中..." : "保存"}
-          </button>
+            {busy === "save" ? t("Saving...") : t("Save")}
+          </Button>
         </div>
       </div>
-      <Modal
+      <Dialog
         open={candidates !== null}
-        title="选择聊天模型"
-        okText="确定"
-        cancelText="取消"
-        zIndex={1100}
-        onOk={() => {
-          edit({
-            models: (candidates ?? []).filter((model) =>
-              chosen.includes(model.model_id),
-            ),
-          });
-          setCandidates(null);
+        onOpenChange={(open) => {
+          if (!open) setCandidates(null);
         }}
-        onCancel={() => setCandidates(null)}
       >
-        <label className="my-4 flex items-center gap-2 rounded bg-graphite/5 px-3 py-2">
-          <Search size={16} />
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            aria-label="搜索模型"
-            placeholder="搜索模型"
-            className="min-w-0 flex-1 bg-transparent text-sm outline-none"
-          />
-        </label>
-        <div className="max-h-80 overflow-y-auto">
-          {candidates
-            ?.filter((model) =>
-              model.model_id.toLowerCase().includes(search.toLowerCase()),
-            )
-            .map((model) => (
-              <label
-                key={model.model_id}
-                className="flex cursor-pointer items-center gap-3 rounded px-2 py-2.5 text-sm hover:bg-graphite/5"
-              >
-                <input
-                  type="checkbox"
-                  checked={chosen.includes(model.model_id)}
-                  onChange={(event) =>
-                    setChosen((previous) =>
-                      event.target.checked
-                        ? [...previous, model.model_id]
-                        : previous.filter((id) => id !== model.model_id),
-                    )
-                  }
-                />
-                {model.model_id}
-              </label>
-            ))}
-        </div>
-      </Modal>
+        <DialogContent
+          className="z-[1100] sm:max-w-lg"
+          overlayClassName="z-[1090]"
+        >
+          <DialogHeader>
+            <DialogTitle>{t("Select chat models")}</DialogTitle>
+            <DialogDescription className="sr-only">{t("Select chat models to enable")}</DialogDescription>
+          </DialogHeader>
+          <Label className="my-4 flex items-center gap-2 rounded bg-graphite/5 px-3 py-2">
+            <Search size={16} />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              aria-label={t("Search models")}
+              placeholder={t("Search models")}
+              className="min-w-0 flex-1 border-0 bg-transparent px-0 text-sm focus-visible:ring-0"
+            />
+          </Label>
+          <div className="max-h-80 overflow-y-auto">
+            {candidates
+              ?.filter((model) =>
+                model.model_id.toLowerCase().includes(search.toLowerCase()),
+              )
+              .map((model) => (
+                <Label
+                  key={model.model_id}
+                  className="flex cursor-pointer items-center gap-3 rounded px-2 py-2.5 text-sm hover:bg-graphite/5"
+                >
+                  <Checkbox
+                    checked={chosen.includes(model.model_id)}
+                    onCheckedChange={(checked) =>
+                      setChosen((previous) =>
+                        checked
+                          ? [...previous, model.model_id]
+                          : previous.filter((id) => id !== model.model_id),
+                      )
+                    }
+                  />
+                  {model.model_id}
+                </Label>
+              ))}
+          </div>
+          <DialogFooter className="border-0 bg-transparent p-0">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setCandidates(null)}
+              className="rounded-md px-3 py-2 text-sm hover:bg-mist"
+            >
+              {t("Cancel")}
+            </Button>
+            <Button
+              type="button"
+              className="rounded-md bg-graphite px-4 py-2 text-sm text-white"
+              onClick={() => {
+                edit({
+                  models: (candidates ?? []).filter((model) =>
+                    chosen.includes(model.model_id),
+                  ),
+                });
+                setCandidates(null);
+              }}
+            >
+              {t("Confirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
