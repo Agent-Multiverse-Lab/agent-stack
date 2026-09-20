@@ -24,10 +24,11 @@
 
 - `server/service/model_service.py::_settings_draft` 在 URL 改变时拒绝自动继承已有 Key，并清除草稿中的旧私有请求头；内部更新入口同样禁止隐式沿用 Key。
 - `server/service/model_outbound.py::resolve_public_target` 校验全部 DNS 结果并返回固定 IP，`_request_json` 保留 Host / SNI、关闭代理及重定向。本轮不提供内网白名单例外。
-- `server/router/model_router.py::ModelSettingsRoute` 拒绝 HTTP；`web/src/api/model.ts` 在提交前检查 HTTPS。
+- `server/router/model_router.py::ModelSettingsRoute` 负责认证后的脱敏错误映射，不把请求 scheme 当作模型测试结果；
+  `web/src/api/model.ts` 将当前草稿交给后端 `/test`。生产 TLS 由部署入口负责。
 - `src/database/credential_types.py` 使用 cryptography Fernet 加密 Key 与请求头，独立密钥通过服务端环境注入。
   `0010_model_credentials_encrypted` 仅在 0009 确认归属后转换历史凭据；未配置有效密钥则在写入前停止。
-- 前端请求体不做自定义加密：HTTPS 保护传输，服务端认证加密保护数据库。测试覆盖明文传输拒绝、密文存储、跨用户访问、凭据转发、DNS 混合结果及固定 IP 请求。
+- 前端请求体不做自定义加密：生产部署由 TLS 保护传输，服务端认证和加密保护数据库。测试覆盖密文存储、跨用户访问、凭据转发、DNS 混合结果及固定 IP 请求。
 
 设计依据：[OWASP TLS](https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html)、
 [OWASP SSRF](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html)、
