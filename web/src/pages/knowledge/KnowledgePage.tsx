@@ -132,22 +132,22 @@ export default function KnowledgePage() {
       ? "minmax(0,1fr) minmax(0,1.92fr) 56px"
       : "minmax(0,1fr) minmax(0,1.92fr) minmax(0,1fr)";
   return (
-    <div className="@container relative flex h-full w-full gap-2.5 overflow-hidden bg-mist p-2.5 font-sans text-graphite">
-      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-[20px] border border-graphite/10 bg-paper shadow-sm">
-        <header className="flex min-h-[46px] shrink-0 items-center border-b border-graphite/6 px-4 py-1.5">
-          <span className="text-xs font-medium uppercase tracking-wider text-slate/80">
+    <div className="@container relative flex h-full w-full gap-2.5 overflow-hidden bg-muted p-2.5 font-sans text-foreground">
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-[20px] border border-border bg-background shadow-sm">
+        <header className="flex min-h-[46px] shrink-0 items-center border-b border-border px-4 py-1.5">
+          <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
             {t("Knowledge Base")}
           </span>
         </header>
         <main
-          className="knowledge-workspace grid min-h-0 min-w-0 w-full flex-1 gap-3 overflow-hidden bg-mist p-3 text-sm [grid-template-columns:var(--knowledge-columns)] [grid-template-rows:minmax(0,1fr)] @max-[720px]:grid-cols-1 @max-[720px]:grid-rows-none @max-[720px]:overflow-y-auto"
+          className="knowledge-workspace grid min-h-0 min-w-0 w-full flex-1 gap-3 overflow-hidden bg-muted p-3 text-sm [grid-template-columns:var(--knowledge-columns)] [grid-template-rows:minmax(0,1fr)] @max-[720px]:grid-cols-1 @max-[720px]:grid-rows-none @max-[720px]:overflow-y-auto"
           style={{
             "--knowledge-columns": columns,
             transition: "grid-template-columns 240ms ease",
           } as CSSProperties}
         >
-          <section className="knowledge-files grid min-h-0 min-w-0 overflow-hidden rounded-[16px] border border-graphite/10 bg-paper [grid-template-rows:48px_minmax(0,1fr)] @max-[720px]:min-h-[calc(100dvh-92px)]">
-            <header className="flex h-12 items-center justify-between border-b border-graphite/6 px-3">
+          <section className="knowledge-files grid min-h-0 min-w-0 overflow-hidden rounded-[16px] border border-border bg-background [grid-template-rows:48px_minmax(0,1fr)] @max-[720px]:min-h-[calc(100dvh-92px)]">
+            <header className="flex h-12 items-center justify-between border-b border-border px-3">
               <h2
                 className={
                   filesCollapsed
@@ -163,7 +163,7 @@ export default function KnowledgePage() {
                 aria-expanded={!filesCollapsed}
                 aria-controls="knowledge-files-body"
                 onClick={() => setFilesCollapsed(!filesCollapsed)}
-                className="grid size-10 shrink-0 place-items-center text-slate @max-[720px]:hidden"
+                className="grid size-10 shrink-0 place-items-center text-muted-foreground @max-[720px]:hidden"
               >
                 {filesCollapsed ? (
                   <PanelLeftOpen size={18} />
@@ -197,14 +197,14 @@ export default function KnowledgePage() {
                   addFiles(Array.from(event.dataTransfer.files));
                 }}
               >
-                <span className="grid size-9 place-items-center rounded-[16px] border border-graphite/10">
+                <span className="grid size-9 place-items-center rounded-[16px] border border-border">
                   <Plus size={18} />
                 </span>
                 {t("Add Sources")}
               </Button>
               <form
                 role="search"
-                className="grid gap-1 rounded-[16px] border border-graphite/16 p-[0.45rem]"
+                className="grid gap-1 rounded-[16px] border border-border p-[0.45rem]"
                 onSubmit={(event) => {
                   event.preventDefault();
                   setAppliedQuery(query.trim());
@@ -221,11 +221,11 @@ export default function KnowledgePage() {
                   className="min-w-0 bg-transparent px-2 py-1 outline-none"
                 />
                 <div className="flex justify-between">
-                  <Globe size={18} className="text-slate" />
+                  <Globe size={18} className="text-muted-foreground" />
                   <Button variant="default"
                     type="submit"
                     aria-label={t("Search")}
-                    className="grid size-8 place-items-center rounded-full bg-graphite text-paper"
+                    className="grid size-8 place-items-center rounded-full bg-primary text-primary-foreground"
                   >
                     <Search size={18} />
                   </Button>
@@ -237,7 +237,7 @@ export default function KnowledgePage() {
                     {visible.map((file) => (
                       <li
                         key={file.id}
-                        className={`flex min-h-14 min-w-0 items-center gap-1 rounded-[16px] border px-2 hover:bg-mist ${selectedId === file.id ? "border-graphite/16 bg-graphite/6" : "border-transparent"}`}
+                        className={`flex min-h-14 min-w-0 items-center gap-1 rounded-[16px] border px-2 hover:bg-accent ${selectedId === file.id ? "border-border bg-muted" : "border-transparent"}`}
                       >
                         <Button variant="ghost"
                           type="button"
@@ -256,7 +256,7 @@ export default function KnowledgePage() {
                           <DropdownMenuTrigger
                             aria-label={t("Open file actions")}
                             title={t("File actions")}
-                            className="grid size-11 place-items-center text-slate"
+                            className="grid size-11 place-items-center text-muted-foreground"
                           >
                             <MoreHorizontal size={17} />
                           </DropdownMenuTrigger>
@@ -286,7 +286,7 @@ export default function KnowledgePage() {
                     ))}
                   </ul>
                 ) : (
-                  <div className="grid min-h-48 place-content-center justify-items-center gap-2 text-slate">
+                  <div className="grid min-h-48 place-content-center justify-items-center gap-2 text-muted-foreground">
                     <Files size={25} />
                     {t("No files")}
                   </div>
@@ -295,22 +295,22 @@ export default function KnowledgePage() {
             </div>
           </section>
           <section
-            className="grid min-h-0 min-w-0 overflow-hidden rounded-[16px] border border-graphite/10 bg-paper [grid-template-rows:48px_minmax(0,1fr)_auto] @max-[720px]:min-h-[calc(100dvh-92px)]"
+            className="grid min-h-0 min-w-0 overflow-hidden rounded-[16px] border border-border bg-background [grid-template-rows:48px_minmax(0,1fr)_auto] @max-[720px]:min-h-[calc(100dvh-92px)]"
             aria-labelledby="knowledge-chat-title"
           >
-            <header className="flex h-12 items-center border-b border-graphite/6 px-4">
+            <header className="flex h-12 items-center border-b border-border px-4">
               <h1 id="knowledge-chat-title" className="text-base font-semibold">
                 {t("Knowledge Chat")}
               </h1>
             </header>
-            <div className="grid min-h-0 place-content-center justify-items-center gap-3 overflow-y-auto bg-mist text-slate">
+            <div className="grid min-h-0 place-content-center justify-items-center gap-3 overflow-y-auto bg-muted text-muted-foreground">
               <MessagesSquare size={28} />
-              <strong className="text-graphite">
+              <strong className="text-foreground">
                 {files.length ? t("No indexed files") : t("Add a file to start")}
               </strong>
             </div>
             <form
-              className="border-t border-graphite/6 p-[0.8rem]"
+              className="border-t border-border p-[0.8rem]"
               onSubmit={(event) => {
                 event.preventDefault();
                 if (
@@ -320,7 +320,7 @@ export default function KnowledgePage() {
                   setDraft("");
               }}
             >
-              <div className="flex items-center gap-2 rounded-[16px] border border-graphite/16 bg-mist px-3 py-2">
+              <div className="flex items-center gap-2 rounded-[16px] border border-border bg-muted px-3 py-2">
                 <Textarea
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
@@ -347,15 +347,15 @@ export default function KnowledgePage() {
                     !draft.trim() ||
                     !files.some((file) => file.status === "indexed")
                   }
-                  className="grid size-11 place-items-center rounded-full bg-graphite text-paper disabled:bg-graphite/10 disabled:text-graphite/58"
+                  className="grid size-11 place-items-center rounded-full bg-primary text-primary-foreground disabled:bg-muted disabled:text-muted-foreground"
                 >
                   ↑
                 </Button>
               </div>
             </form>
           </section>
-          <section className="knowledge-actions grid min-h-0 min-w-0 overflow-hidden rounded-[16px] border border-graphite/10 bg-paper [grid-template-rows:48px_minmax(0,1fr)] @max-[720px]:min-h-[calc(100dvh-92px)]">
-            <header className="flex h-12 items-center justify-between border-b border-graphite/10 px-3">
+          <section className="knowledge-actions grid min-h-0 min-w-0 overflow-hidden rounded-[16px] border border-border bg-background [grid-template-rows:48px_minmax(0,1fr)] @max-[720px]:min-h-[calc(100dvh-92px)]">
+            <header className="flex h-12 items-center justify-between border-b border-border px-3">
               <h2
                 className={
                   toolsCollapsed
@@ -371,7 +371,7 @@ export default function KnowledgePage() {
                 aria-expanded={!toolsCollapsed}
                 aria-controls="knowledge-actions-body"
                 onClick={() => setToolsCollapsed(!toolsCollapsed)}
-                className="grid size-10 shrink-0 place-items-center text-slate @max-[720px]:hidden"
+                className="grid size-10 shrink-0 place-items-center text-muted-foreground @max-[720px]:hidden"
               >
                 {toolsCollapsed ? (
                   <PanelRightOpen size={18} />
@@ -386,12 +386,12 @@ export default function KnowledgePage() {
             >
               <div className="grid min-h-0 content-start gap-2 overflow-y-auto p-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,104px),1fr))] [grid-auto-rows:74px]">
                 {[
-                  { label: "Road Map", icon: Map, color: "bg-[#edf4ff] hover:bg-[#e2edff]" },
-                  { label: "PPT", icon: Presentation, color: "bg-[#fff1e8] hover:bg-[#ffe7d8]" },
+                  { label: "Road Map", icon: Map, color: "bg-muted hover:bg-accent" },
+                  { label: "PPT", icon: Presentation, color: "bg-muted hover:bg-accent" },
                   {
                     label: "Slides",
                     icon: PanelsTopLeft,
-                    color: "bg-[#f3efff] hover:bg-[#eae3ff]",
+                    color: "bg-muted hover:bg-accent",
                   },
                 ].map(({ label, icon: Icon, color }) => (
                   <Button variant="ghost"
@@ -405,7 +405,7 @@ export default function KnowledgePage() {
                   </Button>
                 ))}
               </div>
-              <div className="border-t border-graphite/10" />
+              <div className="border-t border-border" />
             </div>
           </section>
         </main>
@@ -424,16 +424,16 @@ export default function KnowledgePage() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="destructive"
+            <Button variant="ghost"
               type="button"
-              className="rounded-md px-3 py-2 text-sm hover:bg-mist"
+              className="rounded-md px-3 py-2 text-sm"
               onClick={() => setConfirmRemove(null)}
             >
               {t("Keep file")}
             </Button>
-            <Button variant="ghost"
+            <Button variant="destructive"
               type="button"
-              className="rounded-md bg-destructive px-3 py-2 text-sm text-white"
+              className="rounded-md px-3 py-2 text-sm"
               onClick={() => {
                 if (confirmRemove) removeFile(confirmRemove.id);
                 setConfirmRemove(null);

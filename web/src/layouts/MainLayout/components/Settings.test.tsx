@@ -1,8 +1,8 @@
-import { afterEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
 
 import i18n from "@/i18n";
-import { SettingsDialog } from "@/layouts/MainLayout/components/NavigationDialogs";
+import { Settings } from "@/layouts/MainLayout/components/Settings";
 import { installBrowserStubs } from "@/test/browserStubs";
 
 afterEach(() => {
@@ -15,7 +15,7 @@ afterEach(() => {
 
 it("switches the application language from Settings and persists the choice", async () => {
   installBrowserStubs();
-  render(<SettingsDialog open close={() => {}} user={null} />);
+  render(<Settings open close={() => {}} user={null} />);
 
   fireEvent.click(screen.getByRole("combobox", { name: "Language" }));
   const chinese = await screen.findByRole("option", { name: "简体中文" });
@@ -25,4 +25,16 @@ it("switches the application language from Settings and persists the choice", as
   expect(screen.getByRole("combobox", { name: "语言" })).toBeTruthy();
   expect(document.documentElement.lang).toBe("zh-CN");
   expect(window.localStorage.getItem("am-language")).toBe("zh-CN");
+});
+
+it("uses sidebar navigation for Settings sections", () => {
+  installBrowserStubs();
+  render(<Settings open close={() => {}} user={null} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Account" }));
+
+  expect(screen.getByRole("heading", { name: "Account" })).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Account" }).hasAttribute("data-active"),
+  ).toBe(true);
 });

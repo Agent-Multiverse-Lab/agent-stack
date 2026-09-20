@@ -39,10 +39,10 @@ export function Thinking({
         role="status"
         aria-live="polite"
       >
-        <LoaderCircle size={16} className="animate-spin text-slate" />
+        <LoaderCircle size={16} className="animate-spin text-muted-foreground" />
         <span className="text-[13px] font-medium">{t(label)}</span>
         <span
-          className="font-utility text-xs tabular-nums text-slate"
+          className="font-mono text-xs tabular-nums text-muted-foreground"
           aria-hidden="true"
         >
           {seconds < 60
@@ -61,7 +61,7 @@ export function Thinking({
         )}
       </div>
       {children && (
-        <CollapsibleContent className="relative mt-1 ml-[5px] min-w-0 border-l border-graphite/12 py-1 pl-5">
+        <CollapsibleContent className="relative mt-1 ml-[5px] min-w-0 border-l border-border py-1 pl-5">
           {children}
         </CollapsibleContent>
       )}

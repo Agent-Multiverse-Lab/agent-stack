@@ -26,5 +26,34 @@ export default [
       "react-hooks/exhaustive-deps": "warn"
     }
   },
+  {
+    files: ["src/**/*.{jsx,tsx}"],
+    ignores: ["src/components/ui/**/*.{jsx,tsx}"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...[
+          "button",
+          "input",
+          "textarea",
+          "select",
+          "option",
+          "dialog",
+          "details",
+          "summary",
+          "label",
+          "table",
+          "thead",
+          "tbody",
+          "tr",
+          "th",
+          "td"
+        ].map((name) => ({
+          selector: `JSXOpeningElement[name.name='${name}']`,
+          message: `Use the shadcn/ui ${name} primitive instead of a native <${name}> element.`
+        }))
+      ]
+    }
+  },
   { plugins: { "react-hooks": reactHooks } }
 ]

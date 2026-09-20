@@ -1,31 +1,33 @@
-import { useEffect, useState } from "react";
-import { MoreHorizontal } from "lucide-react";
-import { Outlet, useNavigate } from "react-router";
+import { type CSSProperties, useEffect, useState } from "react";
+import { Link, Outlet, useLocation } from "react-router";
 
-import { useAuth } from "@/context/AuthContext";
+import { AppSidebar } from "@/components/app-sidebar";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+import { useAuth } from "@/context/AuthContext";
+import { Separator } from "@/components/ui/separator";
 import {
   SidebarInset,
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import AppSidebar from "@/layouts/MainLayout/components/AppSidebar";
 import { useTranslation } from "@/i18n";
 import {
   ProfileDialog,
   SearchChat,
-  SettingsDialog,
 } from "@/layouts/MainLayout/components/NavigationDialogs";
+import { Settings } from "@/layouts/MainLayout/components/Settings";
 
 export default function MainLayout() {
   const { t } = useTranslation();
   const { user } = useAuth();
-  const navigate = useNavigate();
+  const location = useLocation();
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -50,32 +52,52 @@ export default function MainLayout() {
     setSettingsOpen(true);
   };
 
+  const page = location.pathname.startsWith("/c/")
+    ? "Chat"
+    : ({
+        "/": "Chat",
+        "/library": "Library",
+        "/knowledge": "Knowledge",
+        "/agent": "Agent",
+        "/static": "Static",
+        "/sandbox": "Sandbox",
+      } as Record<string, string>)[location.pathname] ?? "Chat";
+
   return (
     <>
-      <SidebarProvider className="h-dvh min-h-0 overflow-hidden bg-paper text-graphite">
+      <SidebarProvider
+        className="h-dvh min-h-0 overflow-hidden"
+        style={{ "--sidebar-width": "14rem" } as CSSProperties}
+      >
         <AppSidebar
+          variant="inset"
+          aria-label={t("Application navigation")}
           onProfile={openProfile}
           onSettings={openSettings}
           onSearch={() => setSearchOpen(true)}
         />
         <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
-          <header className="flex min-h-[52px] shrink-0 items-center justify-end gap-4 px-[clamp(0.75rem,2vw,1.25rem)] py-2">
-            <SidebarTrigger className="mr-auto md:hidden" aria-label={t("Open sidebar")} />
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                type="button"
-                className="grid size-9 place-items-center text-slate"
-                aria-label={t("More options")}
-              >
-                <MoreHorizontal size={18} />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => navigate("/")}>
-                  {t("New chat")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={openSettings}>{t("Settings")}</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+            <div className="flex items-center gap-2 px-4">
+              <SidebarTrigger className="-ml-1 md:hidden" />
+              <Separator
+                orientation="vertical"
+                className="mr-2 data-[orientation=vertical]:h-4 md:hidden"
+              />
+              <Breadcrumb>
+                <BreadcrumbList>
+                  <BreadcrumbItem className="hidden md:block">
+                    <BreadcrumbLink render={<Link to="/" />}>
+                      Agent Multiverse
+                    </BreadcrumbLink>
+                  </BreadcrumbItem>
+                  <BreadcrumbSeparator className="hidden md:block" />
+                  <BreadcrumbItem>
+                    <BreadcrumbPage>{t(page)}</BreadcrumbPage>
+                  </BreadcrumbItem>
+                </BreadcrumbList>
+              </Breadcrumb>
+            </div>
           </header>
           <div className="min-h-0 flex-1 overflow-hidden">
             <Outlet />
@@ -87,7 +109,7 @@ export default function MainLayout() {
         close={() => setProfileOpen(false)}
         user={user}
       />
-      <SettingsDialog
+      <Settings
         open={settingsOpen}
         close={() => setSettingsOpen(false)}
         user={user}

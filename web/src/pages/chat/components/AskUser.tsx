@@ -57,9 +57,9 @@ export function AskUser({ interaction, disabled = false, submit }: AskUserProps)
   return (
     <article
       aria-label={t("Agent questions")}
-      className="w-full max-w-[36rem] overflow-hidden rounded-[1.25rem] border border-graphite/10 bg-paper shadow-[0_18px_48px_rgba(13,13,13,0.08)]"
+      className="w-full max-w-[36rem] overflow-hidden rounded-[1.25rem] border border-border bg-background shadow-lg"
     >
-      <header className="border-b border-graphite/8 px-5 py-4">
+      <header className="border-b border-border px-5 py-4">
         <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
           {t("Input required")}
         </p>
@@ -113,7 +113,7 @@ export function AskUser({ interaction, disabled = false, submit }: AskUserProps)
           </QuestionnaireItem>
         ))}
 
-        <QuestionnaireActions className="border-t border-graphite/8 bg-mist/60 px-4 py-3">
+        <QuestionnaireActions className="border-t border-border bg-muted px-4 py-3">
           <QuestionnairePrevious disabled={disabled}>{t("Previous")}</QuestionnairePrevious>
           <QuestionnaireSkip disabled={disabled}>{t("Skip")}</QuestionnaireSkip>
           <QuestionnaireNext disabled={disabled}>{t("Next")}</QuestionnaireNext>

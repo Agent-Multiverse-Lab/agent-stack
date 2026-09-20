@@ -34,7 +34,7 @@ function AuthGate({
   }, [restore]);
   if (!ready)
     return (
-      <div className="grid h-dvh place-items-center text-slate">{t("Loading...")}</div>
+      <div className="grid h-dvh place-items-center text-muted-foreground">{t("Loading...")}</div>
     );
   if (login) return accessToken ? <Navigate to="/" replace /> : children;
   return accessToken ? (

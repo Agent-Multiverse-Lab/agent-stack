@@ -32,10 +32,10 @@ export default function CreateDialog({
     <Dialog open onOpenChange={(open) => { if (!open) close(); }}>
       <DialogContent
         showCloseButton={false}
-        overlayClassName="bg-graphite/40"
-        className="w-full max-w-md gap-0 overflow-hidden rounded-xl border border-graphite/12 bg-paper p-5 text-graphite shadow-lg sm:max-w-md"
+        overlayClassName="bg-primary/40"
+        className="w-full max-w-md gap-0 overflow-hidden rounded-xl border border-border bg-background p-5 text-foreground shadow-lg sm:max-w-md"
       >
-        <DialogHeader className="flex flex-row items-center justify-between border-b border-graphite/8 pb-3">
+        <DialogHeader className="flex flex-row items-center justify-between border-b border-border pb-3">
           <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
             {kind === "folder" ? (
               <FolderPlus size={18} />
@@ -64,7 +64,7 @@ export default function CreateDialog({
             close();
           }}
         >
-          <Label className="grid gap-1 text-xs font-medium text-slate">
+          <Label className="grid gap-1 text-xs font-medium text-muted-foreground">
             {kind === "folder" ? t("Folder Name") : t("Title")}
             <Input
               autoFocus
@@ -74,18 +74,18 @@ export default function CreateDialog({
               placeholder={
                 kind === "folder" ? t("e.g. Project Assets") : t("Note title...")
               }
-              className="h-9 rounded-md border-graphite/14 bg-mist/40 px-3 text-xs text-graphite"
+              className="h-9 rounded-md border-border bg-muted px-3 text-xs text-foreground"
             />
           </Label>
           {kind === "note" && (
-            <Label className="grid gap-1 text-xs font-medium text-slate">
+            <Label className="grid gap-1 text-xs font-medium text-muted-foreground">
               {t("Content")}
               <Textarea
                 value={content}
                 onChange={(event) => setContent(event.target.value)}
                 rows={4}
                 placeholder={t("Write your note content here...")}
-                className="rounded-md border-graphite/14 bg-mist/40 p-3 text-xs text-graphite"
+                className="rounded-md border-border bg-muted p-3 text-xs text-foreground"
               />
             </Label>
           )}
@@ -94,7 +94,7 @@ export default function CreateDialog({
               type="button"
               variant="ghost"
               size="sm"
-              className="text-xs text-slate"
+              className="text-xs text-muted-foreground"
               onClick={close}
             >
               {t("Cancel")}
@@ -102,7 +102,7 @@ export default function CreateDialog({
             <Button
               type="submit"
               size="sm"
-              className="bg-graphite px-4 text-xs text-paper hover:bg-graphite/90"
+              className="bg-primary px-4 text-xs text-primary-foreground hover:bg-primary/90"
             >
               {kind === "folder" ? t("Create") : t("Save Note")}
             </Button>

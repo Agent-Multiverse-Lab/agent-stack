@@ -4,7 +4,7 @@ import { expect, it, vi } from "vitest";
 import ModelSelector from "@/pages/chat/components/ModelSelector";
 import { installBrowserStubs } from "@/test/browserStubs";
 
-it("selects a model directly from the shadcn select", () => {
+it("selects a model directly from the shadcn menu", () => {
   installBrowserStubs();
   const select = vi.fn();
   render(
@@ -29,7 +29,11 @@ it("selects a model directly from the shadcn select", () => {
     />,
   );
 
-  fireEvent.click(screen.getByRole("combobox", { name: "Select model" }));
-  fireEvent.click(screen.getByRole("option", { name: "Qwen Model" }));
+  fireEvent.click(screen.getByRole("button", { name: "Select model" }));
+  const option = screen.getByRole("menuitemradio", { name: /Qwen Model/ });
+  fireEvent.pointerEnter(option);
+  expect(document.querySelector("[data-model-highlight]")).toBeTruthy();
+
+  fireEvent.click(option);
   expect(select).toHaveBeenCalledWith("qwen-model");
 });

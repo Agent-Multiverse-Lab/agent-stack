@@ -198,9 +198,9 @@ export function LoginForm({
             )}
 
             {registrationComplete && (
-              <Alert className="border-emerald-200 bg-emerald-50 text-emerald-800">
+              <Alert>
                 <CircleCheck />
-                <AlertDescription className="text-emerald-800">
+                <AlertDescription>
                   {t("Account created successfully. Please log in.")}
                 </AlertDescription>
               </Alert>

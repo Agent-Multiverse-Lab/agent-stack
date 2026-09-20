@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
-import "@fontsource-variable/noto-sans-sc";
+import "@fontsource-variable/geist";
 
 import App from "@/app/App";
 import { AuthProvider } from "@/context/AuthContext";

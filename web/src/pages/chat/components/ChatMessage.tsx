@@ -1,5 +1,12 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ChevronRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import type { ThreadMessageAttachmentResponse } from "@/types/attachment";
 import type { ChatMessage as ChatMessageType } from "@/types/chat";
 import { Attachment } from "@/pages/chat/components/Attachment";
@@ -25,15 +32,45 @@ function AgentTasks({ event }: { event: Record<string, unknown> }) {
     : [];
   if (!todos.length) return null;
   return (
-    <details open className="w-full max-w-2xl text-sm">
-      <summary className="cursor-pointer py-1 text-xs text-slate">
-        {t(todos.length === 1 ? "{{tasks}} task" : "{{tasks}} tasks", { tasks: todos.length })} ·{" "}
-        {t("{{completed}} completed", { completed: todos.filter((item) => item.status === "completed").length })}
-      </summary>
-      <div className="mt-1.5 grid gap-1">
+    <Collapsible defaultOpen className="group/task-list w-full max-w-2xl text-sm">
+      <CollapsibleTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-auto px-1 py-1 text-xs text-muted-foreground"
+          />
+        }
+      >
+        <ChevronRight className="transition-transform group-data-open/task-list:rotate-90" />
+        <span>
+          {t(todos.length === 1 ? "{{tasks}} task" : "{{tasks}} tasks", {
+            tasks: todos.length,
+          })} {" · "}
+          {t("{{completed}} completed", {
+            completed: todos.filter((item) => item.status === "completed")
+              .length,
+          })}
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-1.5 grid gap-1">
         {todos.map((todo, index) => (
-          <details key={`${todo.content}-${index}`}>
-            <summary className="cursor-pointer rounded-md px-1 py-1 text-xs hover:bg-mist">
+          <Collapsible
+            key={`${todo.content}-${index}`}
+            className="group/task"
+          >
+            <CollapsibleTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto w-full justify-start px-1 py-1 text-left text-xs"
+                />
+              }
+            >
+              <ChevronRight className="transition-transform group-data-open/task:rotate-90" />
               <span className="font-medium">
                 {todo.status === "in_progress"
                   ? t("In progress")
@@ -41,15 +78,19 @@ function AgentTasks({ event }: { event: Record<string, unknown> }) {
                     ? t("Completed")
                     : t("Pending")}
               </span>
-              <span className="ml-2 text-slate">{todo.content}</span>
-            </summary>
-            <pre className="ml-4 overflow-x-auto border-l border-graphite/10 py-1 pl-3 text-[11.5px] text-slate">
-              {JSON.stringify(todo, null, 2)}
-            </pre>
-          </details>
+              <span className="truncate text-muted-foreground">
+                {todo.content}
+              </span>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <pre className="ml-4 overflow-x-auto border-l border-border py-1 pl-3 text-[11.5px] text-muted-foreground">
+                {JSON.stringify(todo, null, 2)}
+              </pre>
+            </CollapsibleContent>
+          </Collapsible>
         ))}
-      </div>
-    </details>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
@@ -62,7 +103,7 @@ export function ChatMessage({ message }: { message: ChatMessageType }) {
   if (message.type === "human")
     return (
       <article className="flex justify-end">
-        <div className="max-w-[min(82%,42rem)] rounded-[1.15rem] bg-mist px-4 py-2.5 text-graphite">
+        <div className="max-w-[min(82%,42rem)] rounded-[1.15rem] bg-muted px-4 py-2.5 text-foreground">
           {content && (
             <p className="m-0 whitespace-pre-wrap leading-7">{content}</p>
           )}
@@ -80,7 +121,7 @@ export function ChatMessage({ message }: { message: ChatMessageType }) {
     );
   if (message.payload.type === "tool") return <AgentTasks event={event} />;
   return (
-    <article className="min-w-0 max-w-full leading-7 text-graphite">
+    <article className="min-w-0 max-w-full leading-7 text-foreground">
       {content && (
         <div className="chat-markdown max-w-none">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>

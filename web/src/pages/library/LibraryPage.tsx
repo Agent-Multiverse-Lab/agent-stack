@@ -208,7 +208,7 @@ export default function LibraryPage() {
         type="button"
         aria-label={t("Item actions")}
         title={t("Actions")}
-        className="grid size-7 place-items-center rounded-md text-[#64748B] hover:bg-mist"
+        className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent"
       >
         <MoreHorizontal size={16} />
       </DropdownMenuTrigger>
@@ -239,10 +239,10 @@ export default function LibraryPage() {
   );
   return (
     <main
-      className="flex h-full min-h-0 w-full justify-center bg-paper text-graphite"
+      className="flex h-full min-h-0 w-full justify-center bg-background text-foreground"
       aria-label={t("Library")}
     >
-      <div className="flex h-full min-h-0 w-full max-w-[920px] flex-col bg-paper">
+      <div className="flex h-full min-h-0 w-full max-w-[920px] flex-col bg-background">
         <header className="flex flex-wrap items-center justify-between gap-4 px-4 py-4">
           <div className="flex items-center gap-2.5">
             <Library size={22} />
@@ -253,14 +253,14 @@ export default function LibraryPage() {
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative flex items-center">
               <Search
-                className="pointer-events-none absolute left-3 text-[#64748B]"
+                className="pointer-events-none absolute left-3 text-muted-foreground"
                 size={16}
               />
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={t("Search...")}
-                className="h-9 w-48 rounded-[16px] bg-mist/70 pr-8 pl-9 text-sm outline-none focus:w-60"
+                className="h-9 w-48 rounded-[16px] bg-muted pr-8 pl-9 text-sm outline-none focus:w-60"
               />
               {query && (
                 <Button variant="ghost"
@@ -286,7 +286,7 @@ export default function LibraryPage() {
             <DropdownMenu>
               <DropdownMenuTrigger
                 type="button"
-                className="inline-flex h-9 items-center gap-1.5 rounded-[16px] bg-[#0F172A] px-3.5 text-sm font-medium text-paper"
+                className="inline-flex h-9 items-center gap-1.5 rounded-[16px] bg-primary px-3.5 text-sm font-medium text-primary-foreground"
               >
                 <Plus size={15} />
                 {t("New")}
@@ -306,13 +306,13 @@ export default function LibraryPage() {
           </div>
         </header>
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2">
-          <div className="flex h-8 items-center gap-0.5 rounded-[12px] bg-mist/80 p-0.5">
+          <div className="flex h-8 items-center gap-0.5 rounded-[12px] bg-muted p-0.5">
             {categories.map(({ id, label, icon: Icon }) => (
               <Button variant="ghost"
                 key={id}
                 type="button"
                 onClick={() => setCategory(id)}
-                className={`inline-flex h-7 items-center gap-1.5 rounded-[10px] px-3 text-xs ${category === id ? "bg-paper font-medium text-[#0F172A] shadow-sm" : "text-[#64748B]"}`}
+                className={`inline-flex h-7 items-center gap-1.5 rounded-[10px] px-3 text-xs ${category === id ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground"}`}
               >
                 <Icon size={14} />
                 {t(label)}
@@ -323,7 +323,7 @@ export default function LibraryPage() {
             <DropdownMenu>
               <DropdownMenuTrigger
                 type="button"
-                className="flex h-8 items-center gap-1.5 rounded-[10px] bg-mist/70 px-2.5 text-xs"
+                className="flex h-8 items-center gap-1.5 rounded-[10px] bg-muted px-2.5 text-xs"
               >
                 <Filter size={14} />
                 {t(types.find((item) => item.value === fileType)?.label ?? "")}
@@ -350,7 +350,7 @@ export default function LibraryPage() {
             <DropdownMenu>
               <DropdownMenuTrigger
                 type="button"
-                className="flex h-8 items-center gap-1.5 rounded-[10px] bg-mist/70 px-2.5 text-xs"
+                className="flex h-8 items-center gap-1.5 rounded-[10px] bg-muted px-2.5 text-xs"
               >
                 {t(sources.find((item) => item.value === source)?.label ?? "")}
                 <ChevronDown size={14} />
@@ -373,12 +373,12 @@ export default function LibraryPage() {
                 </DropdownMenuRadioGroup>
               </DropdownMenuContent>
             </DropdownMenu>
-            <div className="flex h-8 rounded-[12px] bg-mist/80 p-0.5">
+            <div className="flex h-8 rounded-[12px] bg-muted p-0.5">
               <Button variant="ghost"
                 type="button"
                 aria-label={t("List view")}
                 onClick={() => setViewMode("list")}
-                className={`grid size-7 place-items-center rounded-[10px] ${viewMode === "list" ? "bg-paper" : ""}`}
+                className={`grid size-7 place-items-center rounded-[10px] ${viewMode === "list" ? "bg-background" : ""}`}
               >
                 <LayoutList size={14} />
               </Button>
@@ -386,7 +386,7 @@ export default function LibraryPage() {
                 type="button"
                 aria-label={t("Grid view")}
                 onClick={() => setViewMode("grid")}
-                className={`grid size-7 place-items-center rounded-[10px] ${viewMode === "grid" ? "bg-paper" : ""}`}
+                className={`grid size-7 place-items-center rounded-[10px] ${viewMode === "grid" ? "bg-background" : ""}`}
               >
                 <Grid size={14} />
               </Button>
@@ -396,16 +396,16 @@ export default function LibraryPage() {
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4">
           {!visible.length ? (
             <div className="my-auto grid justify-items-center py-16 text-center">
-              <Folder size={24} className="mb-3 text-slate" />
+              <Folder size={24} className="mb-3 text-muted-foreground" />
               <h3 className="text-sm font-medium">{t("No items found")}</h3>
-              <p className="mt-1 text-xs text-slate">
+              <p className="mt-1 text-xs text-muted-foreground">
                 {t("No files, notes, or folders match your search or filter criteria.")}
               </p>
             </div>
           ) : viewMode === "list" ? (
             <Table className="w-full border-collapse text-left text-xs">
               <TableHeader>
-                <TableRow className="border-0 text-[#94A3B8] hover:bg-transparent">
+                <TableRow className="border-0 text-muted-foreground hover:bg-transparent">
                   <TableHead className="h-auto px-2 pb-3 text-left font-medium">{t("NAME")}</TableHead>
                   <TableHead className="h-auto px-4 pb-3 text-left font-medium">{t("MODIFIED")}</TableHead>
                   <TableHead className="h-auto px-4 pb-3 text-left font-medium">{t("SIZE")}</TableHead>
@@ -419,19 +419,19 @@ export default function LibraryPage() {
                     <TableRow key={item.id} className="group h-[46px] border-0 hover:bg-transparent">
                       <TableCell className="py-3 pr-4 pl-2">
                         <div className="flex items-center gap-3">
-                          <Icon size={18} className="shrink-0 text-[#64748B]" />
+                          <Icon size={18} className="shrink-0 text-muted-foreground" />
                           <span
-                            className="truncate text-sm font-medium text-[#0F172A]"
+                            className="truncate text-sm font-medium text-foreground"
                             title={item.name}
                           >
                             {item.name}
                           </span>
                         </div>
                       </TableCell>
-                      <TableCell className="px-4 py-3 text-[13px] text-[#64748B]">
+                      <TableCell className="px-4 py-3 text-[13px] text-muted-foreground">
                         {item.createdAt || item.updatedAt}
                       </TableCell>
-                      <TableCell className="px-4 py-3 font-mono text-[13px] text-[#64748B]">
+                      <TableCell className="px-4 py-3 font-mono text-[13px] text-muted-foreground">
                         {formatBytes(item.sizeBytes)}
                       </TableCell>
                       <TableCell className="px-2 py-3 text-right">
@@ -453,7 +453,7 @@ export default function LibraryPage() {
                     key={item.id}
                     className="group relative flex flex-col justify-between p-2"
                   >
-                    <div className="relative mb-2.5 flex h-26 items-center justify-center overflow-hidden rounded-xl bg-mist/50">
+                    <div className="relative mb-2.5 flex h-26 items-center justify-center overflow-hidden rounded-xl bg-muted">
                       {item.type === "image" && item.thumbnailUrl ? (
                         <img
                           src={item.thumbnailUrl}
@@ -461,9 +461,9 @@ export default function LibraryPage() {
                           className="size-full object-cover"
                         />
                       ) : (
-                        <Icon size={32} className="text-[#64748B]" />
+                        <Icon size={32} className="text-muted-foreground" />
                       )}
-                      <div className="absolute top-2 left-2 flex items-center gap-1 text-[10px] text-slate">
+                      <div className="absolute top-2 left-2 flex items-center gap-1 text-[10px] text-muted-foreground">
                         {item.source === "generated" ? (
                           <Sparkles size={9} />
                         ) : (
@@ -481,7 +481,7 @@ export default function LibraryPage() {
                     >
                       {item.name}
                     </h4>
-                    <div className="mt-1.5 flex justify-between text-[13px] text-[#64748B]">
+                    <div className="mt-1.5 flex justify-between text-[13px] text-muted-foreground">
                       <span>{item.createdAt || item.updatedAt}</span>
                       <span>{formatBytes(item.sizeBytes)}</span>
                     </div>
@@ -492,7 +492,7 @@ export default function LibraryPage() {
           )}
           <div
             ref={sentinel}
-            className="mt-6 flex justify-center py-4 text-xs text-[#64748B]"
+            className="mt-6 flex justify-center py-4 text-xs text-muted-foreground"
           >
             {loadingMore
               ? t("Loading more items...")

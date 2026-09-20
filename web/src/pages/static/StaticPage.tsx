@@ -5,7 +5,7 @@ export default function StaticPage() {
   const { t } = useTranslation();
   return (
     <main
-      className="flex h-full min-h-0 w-full items-center justify-center bg-paper px-5 pb-[6rem] text-graphite"
+      className="flex h-full min-h-0 w-full items-center justify-center bg-background px-5 pb-[6rem] text-foreground"
       aria-label={t("Static")}
     >
       <section
@@ -13,14 +13,14 @@ export default function StaticPage() {
         aria-labelledby="static-heading"
       >
         <Layers
-          className="mb-4 text-graphite"
+          className="mb-4 text-foreground"
           size={44}
           strokeWidth={1.35}
           aria-hidden
         />
-        <p className="m-0 mb-3 inline-flex items-center gap-2 font-utility text-[0.66rem] uppercase tracking-[0.04em] text-graphite/58">
+        <p className="m-0 mb-3 inline-flex items-center gap-2 font-mono text-[0.66rem] uppercase tracking-[0.04em] text-muted-foreground">
           <span
-            className="h-[5px] w-[5px] rounded-full bg-graphite/58"
+            className="h-[5px] w-[5px] rounded-full bg-muted-foreground"
             aria-hidden
           />
           <span>{t("Backend not connected")}</span>
@@ -31,7 +31,7 @@ export default function StaticPage() {
         >
           {t("Static is not connected")}
         </h2>
-        <p className="m-0 mt-3 max-w-[27rem] text-sm leading-[1.625] text-slate">
+        <p className="m-0 mt-3 max-w-[27rem] text-sm leading-[1.625] text-muted-foreground">
           {t("Static content will be available here after the backend is connected.")}
         </p>
       </section>

@@ -1,8 +1,8 @@
 import { useEffect } from "react";
 import { useLocation } from "react-router";
-import { Toaster } from "sonner";
 
 import AppRoutes from "@/app/routes";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useTranslation } from "@/i18n";
 

@@ -141,17 +141,24 @@ describe("authentication routes", () => {
 
     const sidebar = container.querySelector('[data-slot="sidebar"][data-state]')
     expect(sidebar?.getAttribute("data-state")).toBe("expanded")
-    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }))
+    const sidebarTrigger = container.querySelector(
+      '[data-sidebar="trigger"]',
+    ) as HTMLButtonElement
+    fireEvent.click(sidebarTrigger)
     expect(sidebar?.getAttribute("data-state")).toBe("collapsed")
-    fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }))
+    fireEvent.click(sidebarTrigger)
     expect(sidebar?.getAttribute("data-state")).toBe("expanded")
 
     fireEvent.click(screen.getByRole("button", { name: "Open AM User account menu" }))
     fireEvent.click(await screen.findByRole("menuitem", { name: "Settings" }))
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy()
-    fireEvent.click(screen.getByRole("tab", { name: "Account" }))
-    expect(screen.getByText("test@example.com")).toBeTruthy()
-    fireEvent.click(screen.getByRole("tab", { name: "General" }))
+    fireEvent.click(screen.getByRole("button", { name: "Account" }))
+    expect(
+      within(screen.getByRole("dialog", { name: "Settings" })).getByText(
+        "test@example.com",
+      ),
+    ).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "General" }))
     fireEvent.click(screen.getByRole("combobox", { name: "Theme" }))
     expect(screen.getByRole("option", { name: "Dark" })).toBeTruthy()
   })
@@ -162,7 +169,7 @@ describe("authentication routes", () => {
     renderRoute("/library")
     expect(await screen.findByRole("heading", { name: "Library" })).toBeTruthy()
 
-    fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }))
+    fireEvent.click(screen.getByRole("button", { name: "Toggle Sidebar" }))
     const sidebar = await screen.findByRole("dialog")
     fireEvent.click(within(sidebar).getByRole("link", { name: "Agent" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
