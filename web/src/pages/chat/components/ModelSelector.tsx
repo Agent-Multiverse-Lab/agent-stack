@@ -71,15 +71,14 @@ export default function ModelSelector({
       }}
     >
       <DropdownMenuTrigger
-        render={<Button variant="ghost" size="lg" />}
-        type="button"
+        render={<Button type="button" variant="ghost" size="sm" />}
         disabled={disabled || loading || available.length === 0}
         aria-label={t("Select model")}
-        className="h-9 min-w-0 max-w-[10rem] gap-1 rounded-xl bg-muted/70 px-2.5 text-xs shadow-none transition-transform duration-150 hover:bg-muted active:scale-[0.96] motion-reduce:transform-none"
+        className="flex h-7 min-w-0 max-w-[10rem] shrink-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-muted-foreground outline-none transition-colors duration-150 hover:bg-muted/50 hover:text-foreground focus-visible:ring-0 active:scale-[0.96] motion-reduce:transform-none"
       >
         <span className="truncate">{triggerLabel}</span>
         <ChevronDownIcon
-          className="size-3.5 transition-transform duration-200 group-aria-expanded/button:rotate-180 motion-reduce:transition-none"
+          className="size-3 shrink-0 text-muted-foreground transition-transform duration-200 group-aria-expanded/button:rotate-180 motion-reduce:transition-none"
           aria-hidden="true"
         />
       </DropdownMenuTrigger>

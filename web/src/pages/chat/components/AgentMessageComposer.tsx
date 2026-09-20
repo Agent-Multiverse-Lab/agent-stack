@@ -13,6 +13,17 @@ import {
   PlusIcon,
   SquareIcon,
 } from "lucide-react";
+import { createShader, playSweep, accentChain, ACCENTS } from "glimm";
+
+const RAINBOW = accentChain([
+  ACCENTS.red,
+  ACCENTS.orange,
+  ACCENTS.yellow,
+  ACCENTS.green,
+  ACCENTS.cyan,
+  ACCENTS.blue,
+  ACCENTS.purple,
+]);
 
 import { Button } from "@/components/ui/button";
 import {
@@ -114,6 +125,60 @@ export function AgentMessageComposer({
   const [speechSupported, setSpeechSupported] = useState<boolean | null>(null);
   const [listening, setListening] = useState(false);
   const [modelSweep, setModelSweep] = useState(0);
+  const glimmRef = useRef<HTMLCanvasElement>(null);
+  const shaderRef = useRef<ReturnType<typeof createShader> | null>(null);
+  const sweepingRef = useRef(false);
+
+  const makeShader = () => {
+    const canvas = glimmRef.current;
+    if (!canvas) return null;
+    const random = Math.random;
+    Math.random = () => 0;
+    try {
+      return createShader({
+        canvas,
+        palette: RAINBOW,
+        direction: "ltr",
+        bandTight: 10,
+        swellAmount: 0.85,
+      });
+    } finally {
+      Math.random = random;
+    }
+  };
+
+  useEffect(() => {
+    shaderRef.current = makeShader();
+    return () => {
+      shaderRef.current?.destroy();
+      shaderRef.current = null;
+    };
+  }, []);
+
+  const celebrate = () => {
+    if (sweepingRef.current) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    shaderRef.current?.destroy();
+    const shader = makeShader();
+    shaderRef.current = shader;
+    if (!shader) return;
+    sweepingRef.current = true;
+    const sweep = playSweep(shader, {
+      palette: RAINBOW,
+      direction: "ltr",
+      sweepMs: 570,
+      outroMs: 80,
+      peakAlpha: 1.3,
+      bandTight: 10,
+      brightness: 1.4,
+      swellAmount: 1,
+      waveSpeed: 1.8,
+      easing: "easeOutExpo",
+    });
+    sweep.done.finally(() => {
+      sweepingRef.current = false;
+    });
+  };
 
   setDraftRef.current = setDraft;
 
@@ -286,7 +351,10 @@ export function AgentMessageComposer({
   };
 
   const onSelectModel = (id: string) => {
-    if (id !== modelId) setModelSweep((current) => current + 1);
+    if (id !== modelId) {
+      setModelSweep((current) => current + 1);
+      celebrate();
+    }
     selectModel(id);
   };
 
@@ -302,20 +370,19 @@ export function AgentMessageComposer({
       aria-label={t("Agent message composer")}
       aria-busy={uploading > 0}
       data-expanded={expanded}
-      className="relative flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-card p-2 shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20"
+      className="relative isolate flex w-full flex-col overflow-hidden rounded-3xl border border-border bg-card p-2 shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20"
       onSubmit={onSubmit}
       onDragOver={(event) => event.preventDefault()}
       onDrop={onDrop}
       onPaste={onPaste}
     >
-      {modelSweep > 0 && (
-        <span
-          key={modelSweep}
-          aria-hidden="true"
-          data-model-sweep=""
-          className="agent-composer-model-sweep"
-        />
-      )}
+      <canvas
+        ref={glimmRef}
+        aria-hidden="true"
+        data-model-sweep={modelSweep > 0 ? "" : undefined}
+        className="pointer-events-none absolute inset-0 -z-10 h-full w-full"
+        style={{ borderRadius: "inherit" }}
+      />
 
       {(attachments.length > 0 || uploading > 0) && (
         <ul className="relative z-10 m-0 flex w-full list-none flex-wrap gap-1.5 px-1 pb-2">
