@@ -30,6 +30,24 @@ afterEach(() => {
 });
 
 describe("AgentMessageComposer", () => {
+  it("opens the file picker from the action menu and uploads selected files", () => {
+    const upload = vi.fn();
+    const { container } = render(<AgentMessageComposer {...baseProps} upload={upload} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const openPicker = vi.spyOn(input, "click");
+
+    fireEvent.click(screen.getByRole("button", { name: "Action menu" }));
+    expect(
+      screen.getByRole("menuitem", { name: /Connectors/ }).getAttribute("aria-disabled"),
+    ).toBe("true");
+    fireEvent.click(screen.getByRole("menuitem", { name: /Add attachment/ }));
+    expect(openPicker).toHaveBeenCalledOnce();
+
+    const file = new File(["hello"], "notes.txt", { type: "text/plain" });
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(upload).toHaveBeenCalledWith([file]);
+  });
+
   it("opens the shadcn action menu and closes it on Escape or outside click", () => {
     render(<AgentMessageComposer {...baseProps} />);
 
@@ -93,6 +111,37 @@ describe("AgentMessageComposer", () => {
         .getByRole("form", { name: "Agent message composer" })
         .getAttribute("data-expanded"),
     ).toBe("true");
+  });
+
+  it("shrinks a long draft back to one line and resets after clearing", () => {
+    const { rerender } = render(<AgentMessageComposer {...baseProps} />);
+    const editor = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+    const composer = screen.getByRole("form", { name: "Agent message composer" });
+    // jsdom has no layout engine; supply the heights of rendered text.
+    let contentHeight = 400;
+    Object.defineProperty(editor, "scrollHeight", { get: () => contentHeight });
+
+    rerender(<AgentMessageComposer {...baseProps} draft={"Long line\n".repeat(20)} />);
+    expect(editor.style.height).toBe("160px");
+    expect(editor.style.overflowY).toBe("auto");
+    expect(composer.getAttribute("data-expanded")).toBe("true");
+
+    contentHeight = 88;
+    rerender(<AgentMessageComposer {...baseProps} draft={"One\nTwo\nThree"} />);
+    expect(editor.style.height).toBe("88px");
+    expect(editor.style.overflowY).toBe("hidden");
+
+    contentHeight = 40;
+    rerender(<AgentMessageComposer {...baseProps} draft="Short" />);
+    expect(editor.style.height).toBe("40px");
+    expect(composer.getAttribute("data-expanded")).toBe("false");
+
+    contentHeight = 400;
+    rerender(<AgentMessageComposer {...baseProps} draft={"Long line\n".repeat(20)} />);
+    rerender(<AgentMessageComposer {...baseProps} draft="" />);
+    expect(editor.style.height).toBe("40px");
+    expect(editor.style.overflowY).toBe("hidden");
+    expect(composer.getAttribute("data-expanded")).toBe("false");
   });
 
   it("uses native browser dictation and appends recognized speech", () => {

@@ -6,9 +6,7 @@ import {
   ChevronDownIcon,
   FolderIcon,
   MoreHorizontalIcon,
-  SearchIcon,
   Trash2Icon,
-  XIcon,
 } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router"
 
@@ -32,9 +30,7 @@ import {
 import { Input } from "@/components/ui/input"
 import {
   SidebarGroup,
-  SidebarGroupAction,
   SidebarGroupLabel,
-  SidebarInput,
   SidebarMenu,
   SidebarMenuAction,
   SidebarMenuButton,
@@ -44,7 +40,7 @@ import {
 import { useTranslation } from "@/i18n"
 import type { ThreadSummaryResponse } from "@/types/chat"
 
-export function NavProjects({ onSearch }: { onSearch: () => void }) {
+export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; query?: string }) {
   const { t } = useTranslation()
   const { threadId } = useParams()
   const navigate = useNavigate()
@@ -58,9 +54,6 @@ export function NavProjects({ onSearch }: { onSearch: () => void }) {
   const [title, setTitle] = useState("")
   const [saving, setSaving] = useState(false)
   const [actionError, setActionError] = useState("")
-  const [searchOpen, setSearchOpen] = useState(false)
-  const [query, setQuery] = useState("")
-  const searchInput = useRef<HTMLInputElement>(null)
   const version = useRef(0)
 
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -118,15 +111,6 @@ export function NavProjects({ onSearch }: { onSearch: () => void }) {
     }
   }, [threadId])
 
-  useEffect(() => {
-    if (searchOpen) searchInput.current?.focus()
-  }, [searchOpen])
-
-  function closeSearch() {
-    setSearchOpen(false)
-    setQuery("")
-  }
-
   function openAction(
     thread: ThreadSummaryResponse,
     nextAction: "rename" | "delete",
@@ -174,46 +158,10 @@ export function NavProjects({ onSearch }: { onSearch: () => void }) {
         className="min-h-0 flex-1 pt-0 group-data-[collapsible=icon]:hidden"
         aria-label={t("Conversation history")}
       >
-        {searchOpen ? (
-          <div className="mb-1 flex h-8 shrink-0 items-center gap-1 rounded-md border border-input bg-background px-2 text-muted-foreground shadow-xs transition-colors focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right-2 motion-safe:duration-200">
-            <SearchIcon className="size-4 shrink-0" />
-            <SidebarInput
-              ref={searchInput}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") closeSearch()
-              }}
-              placeholder={t("Search conversations")}
-              aria-label={t("Search conversation")}
-              className="h-7 min-w-0 border-0 bg-transparent px-1 shadow-none focus-visible:border-transparent focus-visible:ring-0"
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className="shrink-0"
-              aria-label={t("Clear search")}
-              onClick={closeSearch}
-            >
-              <XIcon />
-            </Button>
-          </div>
-        ) : (
-          <>
-            <SidebarGroupLabel className="gap-1.5">
-              <ChevronDownIcon />
-              <span>{t("Conversations")}</span>
-            </SidebarGroupLabel>
-            <SidebarGroupAction
-              type="button"
-              aria-label={t("Search conversations")}
-              onClick={() => setSearchOpen(true)}
-            >
-              <SearchIcon />
-            </SidebarGroupAction>
-          </>
-        )}
+        <SidebarGroupLabel className="gap-1.5">
+          <ChevronDownIcon />
+          <span>{t("Conversations")}</span>
+        </SidebarGroupLabel>
         <SidebarMenu className="min-h-0 flex-1 overflow-y-auto">
           {visibleThreads.map((item) => (
             <SidebarMenuItem key={item.thread_id}>

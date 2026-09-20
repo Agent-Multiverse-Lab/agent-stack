@@ -10,6 +10,7 @@ import {
   LoaderCircleIcon,
   MicIcon,
   PaperclipIcon,
+  PlugIcon,
   PlusIcon,
   SquareIcon,
 } from "lucide-react";
@@ -231,8 +232,9 @@ export function AgentMessageComposer({
     const textarea = editor.current;
     if (!textarea) return;
 
+    // Measure without a height transition so shrinking never reads the old height.
     textarea.style.height = "0px";
-    const contentHeight = textarea.scrollHeight;
+    const contentHeight = draft ? textarea.scrollHeight : COMPOSER_MIN_HEIGHT;
     const nextHeight = Math.min(
       COMPOSER_MAX_HEIGHT,
       Math.max(COMPOSER_MIN_HEIGHT, contentHeight),
@@ -370,7 +372,7 @@ export function AgentMessageComposer({
       aria-label={t("Agent message composer")}
       aria-busy={uploading > 0}
       data-expanded={expanded}
-      className="relative isolate flex w-full flex-col overflow-hidden rounded-3xl border border-border bg-card p-2 shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20"
+      className="relative isolate flex w-full flex-col overflow-hidden rounded-4xl border border-border bg-card p-2 shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20"
       onSubmit={onSubmit}
       onDragOver={(event) => event.preventDefault()}
       onDrop={onDrop}
@@ -434,7 +436,7 @@ export function AgentMessageComposer({
             disabled={disabled}
             aria-label={t("Action menu")}
             data-composer-control="actions"
-            className={`rounded-xl bg-muted/70 text-muted-foreground transition-transform duration-150 hover:text-foreground active:scale-[0.94] motion-reduce:transform-none ${
+            className={`rounded-full bg-muted/70 text-muted-foreground transition-transform duration-150 hover:text-foreground active:scale-[0.94] motion-reduce:transform-none ${
               expanded ? "col-start-1 row-start-2" : "col-start-1 row-start-1"
             }`}
           >
@@ -445,10 +447,28 @@ export function AgentMessageComposer({
             side={placement}
             align="start"
             aria-label={t("Actions menu")}
+            className="p-2"
           >
-            <DropdownMenuItem onClick={() => fileInput.current?.click()}>
-              <PaperclipIcon />
-              {t("Add attachment")}
+            <DropdownMenuItem
+              className="gap-3 rounded-lg px-3 py-2.5"
+              onClick={() => fileInput.current?.click()}
+            >
+              <PaperclipIcon aria-hidden="true" />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span>{t("Add attachment")}</span>
+                <span className="text-xs text-muted-foreground">
+                  {t("Upload files from your device")}
+                </span>
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled className="gap-3 rounded-lg px-3 py-2.5">
+              <PlugIcon aria-hidden="true" />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span>{t("Connectors")}</span>
+                <span className="text-xs text-muted-foreground">
+                  {t("Not yet available")}
+                </span>
+              </span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -464,7 +484,7 @@ export function AgentMessageComposer({
           aria-label={t("Message")}
           placeholder={listening ? t("Listening…") : t("Ask anything")}
           rows={1}
-          className={`max-h-40 min-h-10 min-w-0 resize-none border-0 bg-transparent px-2 py-2 text-base leading-6 shadow-none transition-[height] duration-200 ease-out focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent disabled:opacity-60 motion-reduce:transition-none md:text-sm ${
+          className={`field-sizing-fixed max-h-40 min-h-10 min-w-0 resize-none border-0 bg-transparent px-2 py-2 text-base leading-6 shadow-none focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent disabled:opacity-60 md:text-sm ${
             expanded
               ? "col-span-full col-start-1 row-start-1"
               : "col-start-2 row-start-1"
@@ -528,7 +548,7 @@ export function AgentMessageComposer({
             aria-label={running ? t("Cancel response") : t("Send message")}
             data-composer-control="submit"
             onClick={running ? cancel : submitMessage}
-            className={`rounded-xl transition-transform duration-150 active:scale-[0.94] motion-reduce:transform-none ${
+            className={`rounded-full transition-transform duration-150 active:scale-[0.94] motion-reduce:transform-none ${
               expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"
             }`}
           >

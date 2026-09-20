@@ -6,10 +6,12 @@ import {
   BookOpenCheckIcon,
   FilesIcon,
   LibraryIcon,
+  SearchIcon,
   SquarePenIcon,
   SquareTerminalIcon,
+  XIcon,
 } from "lucide-react"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useLocation, useNavigate } from "react-router"
 
 import logoUrl from "@/assets/logo.svg"
@@ -17,16 +19,23 @@ import { NavMain } from "@/components/nav-main"
 import { NavProjects } from "@/components/nav-projects"
 import { NavUser } from "@/components/nav-user"
 import { TeamSwitcher } from "@/components/team-switcher"
+import { Button } from "@/components/ui/button"
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarHeader,
+  SidebarGroup,
+  SidebarInput,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
   SidebarRail,
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar"
 import { useAuth } from "@/context/AuthContext"
+import { useTranslation } from "@/i18n"
 
 type AppSidebarProps = React.ComponentProps<typeof Sidebar> & {
   onProfile: () => void
@@ -41,6 +50,8 @@ export function AppSidebar({
   ...props
 }: AppSidebarProps) {
   const { accessToken, user, logout } = useAuth()
+  const { t } = useTranslation()
+  const [searchQuery, setSearchQuery] = useState("")
   const { setOpenMobile } = useSidebar()
   const location = useLocation()
   const navigate = useNavigate()
@@ -125,8 +136,51 @@ export function AppSidebar({
         <SidebarTrigger className="shrink-0 group-data-[collapsible=icon]:mx-auto" />
       </SidebarHeader>
       <SidebarContent>
+        {accessToken && (
+          <SidebarGroup className="pt-1 pb-0">
+            <div className="flex h-8 w-full items-center gap-2 rounded-md border border-input bg-background px-2 focus-within:border-ring group-data-[collapsible=icon]:hidden">
+              <SearchIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <SidebarInput
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setSearchQuery("")
+                }}
+                placeholder={t("Search conversations")}
+                aria-label={t("Search conversation")}
+                className="h-7 min-w-0 border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
+              />
+              {searchQuery && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={t("Clear search")}
+                  onClick={() => setSearchQuery("")}
+                >
+                  <XIcon />
+                </Button>
+              )}
+            </div>
+            <SidebarMenu className="hidden group-data-[collapsible=icon]:flex">
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  tooltip={t("Search conversations")}
+                  aria-label={t("Search conversations")}
+                  onClick={() => {
+                    setOpenMobile(false)
+                    onSearch()
+                  }}
+                >
+                  <SearchIcon />
+                  <span>{t("Search conversations")}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroup>
+        )}
         <NavMain items={data.navMain} />
-        {accessToken && <NavProjects onSearch={onSearch} />}
+        {accessToken && <NavProjects onSearch={onSearch} query={searchQuery} />}
       </SidebarContent>
       <SidebarFooter>
         <NavUser

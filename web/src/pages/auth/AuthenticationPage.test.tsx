@@ -69,6 +69,29 @@ describe("authentication routes", () => {
     expect(getCurrentUser).toHaveBeenCalledOnce()
   })
 
+  it("disables the collapsed confirmation container when returning to login", async () => {
+    renderRoute("/login")
+    const createAccount = await screen.findByRole("button", { name: "Create one" })
+    const confirmation = screen.getByLabelText("Ensure your password") as HTMLInputElement
+    expect(confirmation.disabled).toBe(true)
+    expect(confirmation.required).toBe(false)
+
+    fireEvent.click(createAccount)
+    expect(confirmation.disabled).toBe(false)
+    expect(confirmation.required).toBe(true)
+    fireEvent.change(confirmation, { target: { value: "password123" } })
+
+    fireEvent.click(screen.getByRole("button", { name: "Log in" }))
+    expect(confirmation.disabled).toBe(true)
+    expect(confirmation.required).toBe(false)
+    expect(confirmation.value).toBe("")
+    expect(confirmation.closest("[inert]")?.getAttribute("aria-hidden")).toBe("true")
+
+    fireEvent.click(screen.getByRole("button", { name: "Create one" }))
+    expect(confirmation.disabled).toBe(false)
+    expect(confirmation.closest("[inert]")).toBeNull()
+  })
+
   it("validates registration passwords before calling the API", async () => {
     renderRoute("/login")
     fireEvent.click(await screen.findByRole("button", { name: "Create one" }))

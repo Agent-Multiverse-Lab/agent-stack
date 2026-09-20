@@ -89,7 +89,7 @@ export function Settings({ open, close, user }: SettingsProps) {
     sections.find((item) => item.id === section) ?? sections[0];
 
   const setting = (label: string, control: ReactNode) => (
-    <Field orientation="responsive" className="min-h-16 py-4">
+    <Field orientation="responsive" className="min-h-16 py-4 [&>[data-slot=switch]]:w-9">
       <FieldContent>
         <FieldTitle>{label}</FieldTitle>
       </FieldContent>

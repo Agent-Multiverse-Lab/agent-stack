@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { SubmitEvent } from "react";
+import { useGSAP } from "@gsap/react";
+import { gsap } from "gsap";
 import { CircleAlert, CircleCheck, Eye, EyeOff, LoaderCircle } from "lucide-react";
 import { Link } from "react-router";
 
@@ -18,6 +20,8 @@ import { Input } from "@/components/ui/input";
 import { useAuth } from "@/context/AuthContext";
 import { useTranslation } from "@/i18n";
 
+gsap.registerPlugin(useGSAP);
+
 export function LoginForm({
   onAuthenticated,
 }: {
@@ -34,6 +38,18 @@ export function LoginForm({
   const [registrationComplete, setRegistrationComplete] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const confirmPasswordContainer = useRef<HTMLDivElement>(null);
+
+  useGSAP(() => {
+    gsap.to(confirmPasswordContainer.current, {
+      height: isRegister ? "auto" : 0,
+      autoAlpha: isRegister ? 1 : 0,
+      y: isRegister ? 0 : -6,
+      duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 0.3,
+      ease: "power2.inOut",
+      overwrite: true,
+    });
+  }, { dependencies: [isRegister], scope: confirmPasswordContainer });
 
   const clearFeedback = () => {
     setRequestError("");
@@ -74,7 +90,7 @@ export function LoginForm({
       className="gap-0 overflow-hidden p-0 shadow-sm"
       aria-labelledby="authentication-title"
     >
-      <CardContent className="grid p-0 md:grid-cols-2">
+      <CardContent className="grid min-h-144 p-0 md:grid-cols-2">
         <form
           className="flex flex-col justify-center p-6 md:p-8 lg:p-10"
           onSubmit={(event) => void submit(event)}
@@ -156,8 +172,13 @@ export function LoginForm({
               </div>
             </Field>
 
-            {isRegister && (
-              <Field>
+            <div
+              ref={confirmPasswordContainer}
+              className="invisible -mt-5 h-0 overflow-hidden opacity-0"
+              aria-hidden={!isRegister}
+              inert={!isRegister}
+            >
+              <Field className="pt-5">
                 <FieldLabel htmlFor="auth-confirm-password">
                   {t("Ensure your password")}
                 </FieldLabel>
@@ -168,11 +189,11 @@ export function LoginForm({
                     name="confirmPassword"
                     autoComplete="new-password"
                     maxLength={128}
-                    required
+                    required={isRegister}
                     placeholder={t("Ensure your password")}
-                    className="h-10 pr-11"
+                    className="h-10 pr-11 hover:border-ring focus-visible:border-foreground/60 focus-visible:ring-0"
                     value={confirmPassword}
-                    disabled={submitting}
+                    disabled={submitting || !isRegister}
                     onChange={(event) => {
                       setConfirmPassword(event.target.value);
                       clearFeedback();
@@ -188,14 +209,14 @@ export function LoginForm({
                         : t("Show confirmation password")
                     }
                     className="absolute top-1 right-1 text-muted-foreground"
-                    disabled={submitting}
+                    disabled={submitting || !isRegister}
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                   >
                     {showConfirmPassword ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
                   </Button>
                 </div>
               </Field>
-            )}
+            </div>
 
             {registrationComplete && (
               <Alert>
@@ -236,7 +257,7 @@ export function LoginForm({
             </FieldDescription>
           </FieldGroup>
         </form>
-        <div className="relative hidden min-h-[440px] bg-muted md:block" aria-hidden="true">
+        <div className="relative hidden bg-muted md:block" aria-hidden="true">
           <img
             className="absolute inset-0 size-full object-cover object-center"
             src={authIllustrationUrl}

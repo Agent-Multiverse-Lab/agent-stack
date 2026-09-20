@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 
 import { listThreads, renameThread } from "@/api/agent"
 import { NavProjects } from "@/components/nav-projects"
+import { AppSidebar } from "@/components/app-sidebar"
 import {
   Sidebar,
   SidebarContent,
@@ -17,6 +18,10 @@ vi.mock("@/api/agent", () => ({
   listThreads: vi.fn(),
   renameThread: vi.fn(),
   deleteThread: vi.fn(),
+}))
+
+vi.mock("@/context/AuthContext", () => ({
+  useAuth: () => ({ accessToken: "test-token", user: null, logout: vi.fn() }),
 }))
 
 afterEach(() => {
@@ -114,7 +119,7 @@ it("opens a conversation action dialog inside the mobile sidebar", async () => {
   ).toBeTruthy()
 })
 
-it("filters conversations with the inline sidebar search", async () => {
+it("filters conversations from the persistent search above New chat", async () => {
   installBrowserStubs()
   vi.mocked(listThreads).mockResolvedValue({
     items: [thread, { ...thread, thread_id: "thread-2", title: "Release plan" }],
@@ -125,7 +130,7 @@ it("filters conversations with the inline sidebar search", async () => {
   render(
     <MemoryRouter initialEntries={["/"]}>
       <SidebarProvider>
-        <NavProjects onSearch={vi.fn()} />
+        <AppSidebar onSearch={vi.fn()} onProfile={vi.fn()} onSettings={vi.fn()} />
       </SidebarProvider>
     </MemoryRouter>,
   )
@@ -133,16 +138,16 @@ it("filters conversations with the inline sidebar search", async () => {
   expect(await screen.findByRole("link", { name: "Old title" })).toBeTruthy()
   expect(screen.getByRole("link", { name: "Release plan" })).toBeTruthy()
 
-  fireEvent.click(
-    screen.getByRole("button", { name: "Search conversations" }),
-  )
   const search = screen.getByRole("textbox", { name: "Search conversation" })
+  const newChat = screen.getByRole("link", { name: "New chat" })
+  expect(search.compareDocumentPosition(newChat) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   fireEvent.change(search, { target: { value: "release" } })
 
   expect(screen.queryByRole("link", { name: "Old title" })).toBeNull()
   expect(screen.getByRole("link", { name: "Release plan" })).toBeTruthy()
 
   fireEvent.keyDown(search, { key: "Escape" })
-  expect(screen.queryByRole("textbox", { name: "Search conversation" })).toBeNull()
+  expect(screen.getByRole("textbox", { name: "Search conversation" })).toBe(search)
+  expect((search as HTMLInputElement).value).toBe("")
   expect(screen.getByRole("link", { name: "Old title" })).toBeTruthy()
 })
