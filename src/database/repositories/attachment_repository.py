@@ -116,7 +116,7 @@ class AttachmentRepository:
         *,
         object_name: str,
     ) -> None:
-        """记录附件当前所在的 MinIO 对象名。"""
+        """记录附件当前所在的 RustFS 对象名。"""
         attachment.object_name = object_name
         attachment.updated_at = datetime.now(UTC)
         await self.session.flush()

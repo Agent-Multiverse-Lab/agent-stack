@@ -70,7 +70,7 @@ async def rename_library_attachment(
     attachment_id: str,
     file_name: str,
 ) -> dict[str, Any]:
-    """修改附件展示文件名，但不移动 MinIO 对象。"""
+    """修改附件展示文件名，但不移动 RustFS 对象。"""
     normalized_name = file_name.strip()
     if not normalized_name:
         raise ValueError("附件文件名不能为空")

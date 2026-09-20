@@ -9,8 +9,8 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
 from server.service.mcp_service import get_mcp_tools
-from src.agents.base_agent import BaseAgent
 from src.agents.backends.composite_backend import create_custom_filesystem_middleware
+from src.agents.base_agent import BaseAgent
 from src.agents.middlewares.sandbox_middleware import create_sandbox_middleware
 from src.agents.middlewares.subagent_middlware import create_subagent_middleware
 from src.agents.subagents.citationagent import CitationAgent

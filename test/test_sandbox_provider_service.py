@@ -152,6 +152,11 @@ class SandboxProviderSingletonTest(unittest.IsolatedAsyncioTestCase):
                 "http://provisioner",
             ),
             mock.patch.object(
+                _provider_service.config,
+                "sandbox_provision_timeout_seconds",
+                330.0,
+            ),
+            mock.patch.object(
                 _provider_service,
                 "SandboxProvisionClient",
             ) as client_class,
@@ -159,7 +164,10 @@ class SandboxProviderSingletonTest(unittest.IsolatedAsyncioTestCase):
             first = _provider_service.init_sandbox_provider()
             second = _provider_service.init_sandbox_provider()
 
-        client_class.assert_called_once_with("http://provisioner")
+        client_class.assert_called_once_with(
+            "http://provisioner",
+            timeout=330.0,
+        )
         self.assertIs(first, second)
         self.assertIs(first, _provider_service.get_sandbox_provider())
 

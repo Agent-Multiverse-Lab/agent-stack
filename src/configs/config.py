@@ -112,10 +112,10 @@ class Config(BaseSettings):
     jwt_algorithm: str = Field(default="HS256", description="JWT 加密算法")
     jwt_expire_minutes: int = Field(default=60, description="Token 有效期（分钟）")
 
-    # ---------- MinIO ----------
-    minio_endpoint: str = Field(default="", description="MinIO 服务地址")
-    minio_access_key: str = Field(default="", description="MinIO Access Key")
-    minio_secret_key: str = Field(default="", description="MinIO Secret Key")
+    # ---------- RustFS ----------
+    minio_endpoint: str = Field(default="", description="RustFS 服务地址")
+    minio_access_key: str = Field(default="", description="RustFS Access Key")
+    minio_secret_key: str = Field(default="", description="RustFS Secret Key")
 
     # ---------- 知识库 ----------
     milvus: MilvusConfig = Field(
@@ -209,6 +209,12 @@ class Config(BaseSettings):
         default="http://localhost:8002",
         validation_alias="SANDBOX_PROVISIONER_URL",
         description="沙箱供应服务地址",
+    )
+    sandbox_provision_timeout_seconds: float = Field(
+        default=330.0,
+        gt=0,
+        validation_alias="SANDBOX_PROVISION_TIMEOUT_SECONDS",
+        description="沙箱创建和供应请求超时时间",
     )
     sandbox_volume_path: str = Field(default="/home/sandbox/data", description="Sandbox provisioner service URL")
     sandbox_execute_timeout: int = Field(default=180, description="执行最长时间")

@@ -25,7 +25,7 @@ ATTACHMENT_BUCKET_NAME = "attachment"
 
 
 @dataclass(slots=True)
-class MinIOUploadResult:
+class RustFSUploadResult:
     object_url: str
     bucket_name: str
     object_name: str
@@ -51,7 +51,7 @@ def build_object_name(conversation_id: str | int, category: str, filename: str) 
 
 
 class MinioStorage:
-    """MinIO 文件存储管理器。"""
+    """RustFS 文件存储管理器。"""
 
     def __init__(self) -> None:
         self.minio_endpoint = config.minio_endpoint
@@ -60,7 +60,7 @@ class MinioStorage:
         self._client: Minio | None = None
 
     def get_client(self) -> Minio:
-        """获取懒加载初始化的 MinIO 客户端。"""
+        """获取懒加载初始化的 RustFS 客户端。"""
         if self._client is None:
             self._client = Minio(
                 endpoint=self.minio_endpoint,
@@ -139,7 +139,7 @@ class MinioStorage:
         object_name: str,
         content_data: bytes,
         content_type: str | None = None,
-    ) -> MinIOUploadResult:
+    ) -> RustFSUploadResult:
         """上传文件内容到存储。"""
 
         self.check_buckets_status(bucket_name)
@@ -158,7 +158,7 @@ class MinioStorage:
 
         object_url = f"http://{self.minio_endpoint}/{bucket_name}/{object_name}"
 
-        return MinIOUploadResult(
+        return RustFSUploadResult(
             object_url=object_url, bucket_name=bucket_name, object_name=object_name
         )
 
@@ -168,7 +168,7 @@ class MinioStorage:
         object_name: str,
         content_data: bytes,
         content_type: str | None = None,
-    ) -> MinIOUploadResult:
+    ) -> RustFSUploadResult:
         """upload的异步方法"""
         kwargs = {
             "bucket_name": bucket_name,

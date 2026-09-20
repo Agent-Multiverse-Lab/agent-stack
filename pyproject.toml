@@ -65,6 +65,7 @@ dependencies = [
     "vane-ai>=0.1.0",
     "duckdb>=1.5.5",
     "langchain-typesafe>=0.0.1a2",
+    "docker>=7.1.0",
 ]
 
 [dependency-groups]

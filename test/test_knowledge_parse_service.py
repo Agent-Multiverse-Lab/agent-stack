@@ -79,7 +79,7 @@ class FakeKnowledgeFileRepository:
 
 
 class FakeStorage:
-    """记录 MinIO 下载和上传。"""
+    """记录 RustFS 下载和上传。"""
 
     def __init__(self) -> None:
         self.uploads = []

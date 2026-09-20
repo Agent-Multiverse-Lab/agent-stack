@@ -269,7 +269,7 @@ class Attachment(Base):
     file_name = Column(String(255), nullable=False, comment="文件名")
     content_type = Column(String(128), nullable=False, comment="文件 MIME 类型")
     file_size = Column(Integer, nullable=False, comment="文件字节数")
-    object_name = Column(String(1024), nullable=False, comment="当前 MinIO 对象名")
+    object_name = Column(String(1024), nullable=False, comment="当前 RustFS 对象名")
     deleted_at = Column(DateTime(timezone=True), nullable=True, comment="删除时间")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), comment="更新时间")
@@ -372,7 +372,7 @@ class KnowledgeFile(Base):
         String(1024),
         nullable=False,
         unique=True,
-        comment="原文件 MinIO 对象名",
+        comment="原文件 RustFS 对象名",
     )
     markdown_object_name = Column(
         String(1024),
@@ -449,8 +449,8 @@ class Knowledge(Base):
     content_text = Column(Text, nullable=True, comment="文本内容")
     knowlege_file_name = Column(String(512), nullable=True, comment="文件名")
     knowlege_file_name_og = Column(String(512), nullable=True, comment="原始文件名")
-    knowlege_file_path = Column(String(1024), nullable=True, comment="原始文件MinIO路径")
-    knowlege_file_minio_url = Column(String(1024), nullable=True, comment="原始文件MinIO URL")
+    knowlege_file_path = Column(String(1024), nullable=True, comment="原始文件RustFS路径")
+    knowlege_file_minio_url = Column(String(1024), nullable=True, comment="原始文件RustFS URL")
     knowlege_markdown = Column(String(1024), nullable=True, comment="解析后Markdown文件路径")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), comment="更新时间")

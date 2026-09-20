@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from langchain.messages import HumanMessage
-from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage, RemoveMessage
 from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -714,6 +714,9 @@ def _make_lc_message_to_standard(
     # 构建消息ID
     stream_msg_key = _make_stream_msg_key(agent_metadata, thread_id)
 
+    # handle PatchToolCallsMiddleware 的remove case
+    if isinstance(agent_msg, RemoveMessage):
+        return []
     # 兼容v3的格式
     if isinstance(agent_msg, dict) and isinstance(agent_msg.get("event"), str):
         # message-start', 'role': 'ai', 'id': 'lc_run--019fe66c-12dd-7e33-9785-49084a241a6e' start的id会串联整个执行周期的整体文件
@@ -796,7 +799,7 @@ async def save_interrupt_message(
 
         # save msg 到 database
         if agent_run_id:
-            agent_run = agent_run_repo.lock_for_output_update(agent_run_id)
+            agent_run = await agent_run_repo.lock_for_output_update(agent_run_id)
 
             if agent_run is None:
                 raise ValueError(f"当前agent_run_id不存在：{agent_run_id}")

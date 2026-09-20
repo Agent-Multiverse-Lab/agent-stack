@@ -59,7 +59,10 @@ class SandboxProviderService:
     """基于供应客户端管理当前进程内的沙箱绑定。"""
 
     def __init__(self) -> None:
-        self._client = SandboxProvisionClient(config.sandbox_provisioner_url)
+        self._client = SandboxProvisionClient(
+            config.sandbox_provisioner_url,
+            timeout=config.sandbox_provision_timeout_seconds,
+        )
         self._sandbox_factory = _create_custom_sandbox
 
         # 状态锁只保护本地字典；持有这把全局锁时不得请求供应服务。

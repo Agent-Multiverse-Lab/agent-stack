@@ -135,7 +135,7 @@ async def parse_file(
     kb_id: str,
     file_id: str,
 ) -> KnowledgeFile:
-    """解析知识文件并将 Markdown 保存到 MinIO。"""
+    """解析知识文件并将 Markdown 保存到 RustFS。"""
     knowledge_files = KnowledgeFileRepository(db)
     knowledge_file = await knowledge_files.get_for_user(
         uid=uid,
