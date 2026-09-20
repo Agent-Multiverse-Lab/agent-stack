@@ -13,7 +13,7 @@
 ## 3. Requirements
 
 ### K-ING-001
-解析必须持久化 Markdown 到 MinIO，并更新 `status`。
+解析必须持久化 Markdown 到 RustFS，并更新 `status`。
 
 ### K-ING-002
 索引必须先读取 `parsed` Markdown，不能直接对未解析原文件重建索引。

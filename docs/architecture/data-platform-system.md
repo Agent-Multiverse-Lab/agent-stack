@@ -13,7 +13,7 @@ SatelliteAgent
   -> Python gRPC client/tool
      -> Go gateway
         -> PostgreSQL/PostGIS catalog
-        -> bounded MinIO object references
+        -> bounded RustFS object references
 
 SatelliteAgent
   -> configured MCP tools
@@ -25,7 +25,7 @@ SatelliteAgent
 - Alembic owns the satellite catalog schema.
 - `gateway/` owns catalog validation, spatial query, pagination and gRPC mapping.
 - PostgreSQL/PostGIS owns sources, collections, scenes and scene assets.
-- MinIO owns raster, band, mask and preview objects; the catalog stores bucket/key-style references.
+- RustFS owns raster, band, mask and preview objects; the catalog stores bucket/key-style references.
 - `SatelliteAgent` owns source selection and processing orchestration, not database access.
 
 ## 4. Invariants

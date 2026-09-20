@@ -11,7 +11,7 @@
 接收真实多来源元数据。目标是标准对齐的内部目录；本计划不声称现有 gRPC 接口已经是 STAC API。
 
 命名约定：产品和方案称“卫星数据资源库”；其中的 STAC 元数据组织与检索层称 `catalog`，
-影像文件由 MinIO 保存，Go `gateway` 提供有界查询。既有 `satellite_catalog` proto、迁移版本、
+影像文件由 RustFS 保存，Go `gateway` 提供有界查询。既有 `satellite_catalog` proto、迁移版本、
 生成文件和内部包名仍表示这一检索层，不作为产品名称；本次建库不修改这些公开或持久化标识。
 
 ## 2. Implementation order
@@ -31,7 +31,7 @@
 ## 3. Shared constraints
 
 - Alembic 是唯一 schema owner；Go 启动时只连接和查询，不执行 DDL。
-- PostgreSQL/PostGIS 保存目录真相，MinIO 保存影像对象；`object_ref` 不包含永久凭据。
+- PostgreSQL/PostGIS 保存目录真相，RustFS 保存影像对象；`object_ref` 不包含永久凭据。
 - Gateway 只负责数据服务，不复制 MCP 的影像算法和处理状态机。
 - bbox、时间、分页和项目范围在 Gateway 服务端再次校验。
 - 生成代码来自唯一 proto，不手工维护第二套协议模型。
@@ -41,7 +41,7 @@
 - Sentinel、Landsat 及后续来源共用四张表；`source_id` 标识来源，`collection_id` 标识产品系列，
   `scene_id` 与 `asset_id` 标识场景和对象，不以文件名或 checksum 当作全局主键。
 - 导入命令只接受有明确项目归属和来源的本地 STAC 清单；不自动扫描全盘或在导入时调用未知公网目录。
-  原始影像留在 MinIO，数据库只保存可追溯对象引用、大小、校验和、质量与空间元数据。
+  原始影像留在 RustFS，数据库只保存可追溯对象引用、大小、校验和、质量与空间元数据。
 - 光学数据的云量可以填写；无云量概念的雷达数据保留 `NULL`，使用集合中的传感器和处理级别区分。
   不为每个卫星、传感器或资产类型新增独立表。
 - [STAC Core 1.1.0](https://github.com/radiantearth/stac-spec) 作为元数据输入基线；按需接收
@@ -84,7 +84,7 @@ Collection/Item JSON 与命令行指定的可信 `project_id`、外部 `source_k
 `Item.collection` 关联 Collection，`properties.datetime` 映射 `acquired_at`，
 GeoJSON `geometry` 转为 WGS84 `footprint`，`assets` 的 key 单独存为 `asset_key`，
 并与场景 ID 组合成稳定 `asset_id`。
-`href` 只允许明确配置的 MinIO 对象地址，经归一化后存为 `object_ref`；对外提供访问时另外授权生成
+`href` 只允许明确配置的 RustFS 对象地址，经归一化后存为 `object_ref`；对外提供访问时另外授权生成
 临时链接，不把临时签名 URL 持久化。
 Collection 的描述、许可、provider、空间/时间 extent 保留标准字段；当前表无法一一对应的标准字段
 存入受限 `metadata` 并在导入时校验。光学与 SAR 项分别保留 EO 或 SAR 属性；`eo:cloud_cover`
@@ -109,7 +109,7 @@ Collection 的描述、许可、provider、空间/时间 extent 保留标准字�
   不一致，或同一批次有冲突 ID 时，先报告错误，不写入部分记录。
 - 对象引用缺失、对象不存在或 checksum 缺失时记录可追溯质量码并阻止其作为可处理资产；
   不伪造链接。对同一批清单重复导入只更新同一稳定 ID，不产生重复场景。
-- MinIO 对象检查只读取对象元数据，不整幅读取大文件；只有存储端已有可信校验和时才记录，
+- RustFS 对象检查只读取对象元数据，不整幅读取大文件；只有存储端已有可信校验和时才记录，
   否则以缺失校验和质量码标记，不把大小或 ETag 误报成内容校验和。
 - Gateway 仍强制项目、bbox、时间和数量边界；导入成功不等于 MCP 可处理该资产。
 

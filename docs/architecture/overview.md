@@ -10,7 +10,7 @@ Web/API -> Service -> Worker -> Agent Runtime -> Storage/RAG。
 - **Agent Domain**：构建并编排多代理能力。
 - **Run Domain**：从创建到终态的执行协调（队列、取消、事件）。
 - **Knowledge Domain**：文件上传、解析、切块、索引、检索、重排。
-- **Persistence Domain**：PostgreSQL / Redis / MinIO / Milvus 的状态与存储边界。
+- **Persistence Domain**：PostgreSQL / Redis / RustFS / Milvus 的状态与存储边界。
 - **Sandbox Domain**：外部能力执行隔离边界。
 - **Data Platform Domain**：卫星来源、集合、场景和波段资产的有界检索。
 
@@ -33,7 +33,7 @@ SatelliteAgent -> Python gRPC Client -> Go Gateway -> PostgreSQL/PostGIS
 
 - PostgreSQL: 用户、会话、消息、Run 及知识基础数据。
 - Redis: ARQ 队列、运行信号与 `run:events:{run_id}` 流。
-- MinIO: 知识文件和解析产物。
+- RustFS: 知识文件和解析产物。
 - Milvus: 向量索引数据。
 
 ## 5. Cross-domain Rules
@@ -52,7 +52,7 @@ SatelliteAgent -> Python gRPC Client -> Go Gateway -> PostgreSQL/PostGIS
 | `src/agents/` | Agent、SubAgent、工具和中间件装配 | HTTP、数据库、队列、对象存储流程 |
 | `src/knowledge/` | Parser、Extractor、Chunker、Embedding、检索 | Run 终态和 HTTP 编排 |
 | `src/database/` | SQLAlchemy 模型、会话和责任命名的仓储 | Redis Stream 或 Agent 推理 |
-| `src/storage/` | MinIO、Redis/ARQ 的基础设施适配 | Run 生命周期业务语义 |
+| `src/storage/` | RustFS、Redis/ARQ 的基础设施适配 | Run 生命周期业务语义 |
 | `src/configs/` | 类型化配置、环境解析、默认值和校验 | 业务编排和可变运行时状态 |
 | `src/model/` | Provider-neutral 的 Chat、Embedding、Reranker 构造 | 数据库或向量库查询 |
 | `src/third_party/` | 外部 SDK 的小型兼容边界 | 应用策略和通用业务工具 |

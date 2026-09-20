@@ -27,7 +27,7 @@
 - [knowledge-system.md](knowledge-system.md)
   - 知识处理与检索链路边界。
 - [persistence-system.md](persistence-system.md)
-  - PostgreSQL / Redis / MinIO / Milvus 的持久化边界。
+  - PostgreSQL / Redis / RustFS / Milvus 的持久化边界。
 - [sandbox-system.md](sandbox-system.md)
   - 工具执行隔离边界与服务职责。
 - [auth-system.md](auth-system.md)

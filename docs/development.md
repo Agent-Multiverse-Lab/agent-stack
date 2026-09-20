@@ -40,16 +40,30 @@ go run ./cmd/server
 使用相同的 `SATELLITE_GATEWAY_TOKEN`，并通过 `SATELLITE_GATEWAY_TARGET` 指向 gRPC 服务。
 Gateway 在 Compose 中属于 `gateway` profile，默认不启动。
 
-## 本地基础设施和 Worker
+## 本地基础设施和服务
+
+在 WSL 中进行源码开发时，先只启动依赖服务：
 
 ```bash
-docker compose up -d postgres redis minio sandbox api worker
+docker compose up -d postgres redis rustfs milvus neo4j
 ```
 
-RustFS 是独立的可选服务，不替换当前 MinIO。需要单独试用时运行 `docker compose up -d rustfs`；
-默认仅在本机 `29000`（S3 API）和 `29001`（控制台）开放，数据写入 `save/volume/rustfs/data/`。
-访问密钥和主机端口可通过 `.env` 中的 `RUSTFS_*` 变量调整。Linux bind mount 目录需允许容器用户
-UID/GID `10001:10001` 写入。
+API 和 Worker 使用上文命令从 IDE 或终端启动。沙箱供应服务可直接运行在 WSL 中：
+
+```bash
+uv run --no-sync uvicorn sandbox_server.app:app \
+  --host 127.0.0.1 --port 8002 --env-file .env
+```
+
+如需完全使用容器运行应用，再启动 `sandbox`、`api` 和 `worker`：
+
+```bash
+docker compose up -d sandbox api worker
+```
+
+RustFS 是默认对象存储，在 `9000`（S3 API）和 `9001`（控制台）开放，数据写入
+`save/volume/rustfs/data/`。应用继续通过 `MINIO_*` 环境变量配置 S3 客户端；Linux bind mount
+目录需允许容器用户 UID/GID `10001:10001` 写入。
 
 Compose 文件位于仓库根目录 `docker-compose.yml`，镜像构建文件仍在 `docker/`。
 数据卷路径相对仓库根目录，写入 `save/volume/`。已有部署若在 `volume/` 或 `docker/volume/`
@@ -79,7 +93,7 @@ git diff --check
 如果 `uv run` 因本地缓存权限受阻，请使用仓库虚拟环境，例如
 `.venv/bin/python -m compileall -q <paths>`。
 
-修改后端源码后必须重建 Compose Worker，因为 Worker 镜像没有绑定挂载当前工作区。
+使用 Compose Worker 时，修改后端源码后必须重建镜像，因为 Worker 镜像没有绑定挂载当前工作区。
 
 ## CI 等价检查
 

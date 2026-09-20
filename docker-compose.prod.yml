@@ -11,10 +11,10 @@ services:
   redis:
     ports: !override []
 
-  minio:
+  rustfs:
     environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY in .env.prod}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY in .env.prod}
+      RUSTFS_ACCESS_KEY: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY in .env.prod}
+      RUSTFS_SECRET_KEY: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY in .env.prod}
     ports: !override []
 
   sandbox:
@@ -26,7 +26,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.prod}@postgres:5432/${POSTGRES_DB:-multi_agent_s2c}
       LANGGRAPH_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.prod}@postgres:5432/${POSTGRES_DB:-multi_agent_s2c}
-      MINIO_ENDPOINT: minio:9000
+      MINIO_ENDPOINT: rustfs:9000
       MINIO_SECURE: "false"
     ports: !override
       - "127.0.0.1:${API_PORT:-5050}:5050"
@@ -37,11 +37,8 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.prod}@postgres:5432/${POSTGRES_DB:-multi_agent_s2c}
       LANGGRAPH_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.prod}@postgres:5432/${POSTGRES_DB:-multi_agent_s2c}
-      MINIO_ENDPOINT: minio:9000
+      MINIO_ENDPOINT: rustfs:9000
       MINIO_SECURE: "false"
-
-  rustfs:
-    ports: !override []
 
   milvus:
     ports: !override []

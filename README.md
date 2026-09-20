@@ -23,7 +23,7 @@ Web 端提供登录、会话和聊天界面。FastAPI 创建 Agent Run，Redis/A
 | `ImageProcessingAgent` | 装配已配置的图像处理 MCP 工具，并校验工具返回的内嵌单帧图像能否完整解码 |
 | `SatelliteAgent` | 通过 Go Gateway 查询卫星影像目录，并按需调用已配置的处理工具 |
 
-知识模块负责文件解析、切块、索引与检索；MinIO 保存文件和解析产物，Milvus 保存向量索引。`sandbox_server/` 提供独立的受控工具与代码执行服务。MCP 服务需单独部署并在 `.env` 中配置，未配置时相应工具不可用。
+知识模块负责文件解析、切块、索引与检索；RustFS 保存文件和解析产物，Milvus 保存向量索引。`sandbox_server/` 提供独立的受控工具与代码执行服务。MCP 服务需单独部署并在 `.env` 中配置，未配置时相应工具不可用。
 
 卫星目录由 Go `gateway/` 通过 gRPC 提供来源列表、场景空间/时间检索和场景详情。Gateway 查询 Alembic 管理的 PostgreSQL/PostGIS 表；目录保存影像对象引用，不保存影像二进制。
 
@@ -57,7 +57,7 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    Data[数据与工具] --> Knowledge[知识处理、MinIO 与 Milvus]
+    Data[数据与工具] --> Knowledge[知识处理、RustFS 与 Milvus]
     Data --> Gateway[Go gRPC 卫星目录与 PostGIS]
     Data --> Sandbox[Sandbox 服务]
     Data --> MCP[已配置的外部 MCP 服务]
@@ -91,7 +91,7 @@ flowchart TB
 ```powershell
 Copy-Item .env.template .env
 uv sync
-docker compose up -d postgres redis minio milvus
+docker compose up -d postgres redis rustfs milvus
 uv run --no-sync alembic upgrade head
 docker compose up -d --build gateway sandbox api worker
 ```
@@ -104,7 +104,7 @@ npm ci
 npm run dev
 ```
 
-需要固定的卫星目录测试数据时，可在迁移后执行 `uv run --no-sync python scripts/load_satellite_catalog_fixture.py`。Compose 数据卷位于 `save/volume/`。RustFS 目前是可选独立服务，应用仍使用 MinIO。更多命令见[开发指南](docs/development.md)。
+需要固定的卫星目录测试数据时，可在迁移后执行 `uv run --no-sync python scripts/load_satellite_catalog_fixture.py`。Compose 数据卷位于 `save/volume/`，对象存储由 RustFS 提供。更多命令见[开发指南](docs/development.md)。
 
 ## 界面预览
 

@@ -4,7 +4,7 @@
 
 - `PostgreSQL`: 所有业务真相（run 状态、用户、对话、知识元数据）
 - `Redis`: 临时运行状态（队列、信号、事件）
-- `MinIO`: 文件内容与中间解析产物
+- `RustFS`: 文件内容与中间解析产物
 - `Milvus`: 检索向量和 metadata
 
 ## 2. Rules

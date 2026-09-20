@@ -9,37 +9,19 @@ x-api-worker-env: &api-worker-env
   SANDBOX_PROVISIONER_URL: http://sandbox:8002
 
 services:
-  minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    container_name: agent-stack-minio
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
-    ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
-    volumes:
-      - ./save/volume/minio/data:/data
-    networks:
-      - agent-stack-network
-    restart: unless-stopped
-
   rustfs:
     image: rustfs/rustfs:1.0.0-rc.6
     container_name: agent-stack-rustfs
-    profiles:
-      - rustfs
     environment:
       RUSTFS_VOLUMES: /data
       RUSTFS_ADDRESS: 0.0.0.0:9000
       RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
       RUSTFS_CONSOLE_ENABLE: "true"
-      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-rustfsadmin}
-      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-rustfsadmin}
+      RUSTFS_ACCESS_KEY: ${MINIO_ACCESS_KEY:-rustfsadmin}
+      RUSTFS_SECRET_KEY: ${MINIO_SECRET_KEY:-rustfsadmin}
     ports:
-      - "127.0.0.1:${RUSTFS_API_PORT:-29000}:9000"
-      - "127.0.0.1:${RUSTFS_CONSOLE_PORT:-29001}:9001"
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - ./save/volume/rustfs/data:/data
     networks:
@@ -196,6 +178,7 @@ services:
     container_name: agent-stack-milvus
     command: ["milvus", "run", "standalone"]
     environment:
+      DEPLOY_MODE: STANDALONE
       ETCD_USE_EMBED: "true"
       COMMON_STORAGETYPE: local
     ports:

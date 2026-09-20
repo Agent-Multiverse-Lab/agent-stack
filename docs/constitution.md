@@ -34,4 +34,4 @@
 - `run`：运行生命周期、取消与事件流。
 - `knowledge`：知识上传、解析、检索与重排。
 - `sandbox`：代码与工具执行隔离环境。
-- `persistence`：PostgreSQL、Redis、MinIO、Milvus 的持久化职责。
+- `persistence`：PostgreSQL、Redis、RustFS、Milvus 的持久化职责。

@@ -14,7 +14,7 @@
 
 ## Done conditions
 
-- Agent 不直接连接 PostgreSQL/PostGIS 或 MinIO。
+- Agent 不直接连接 PostgreSQL/PostGIS 或 RustFS。
 - Go 不建表、不执行影像算法、不拥有 Agent Run。
 - 无界检索和跨项目访问在服务端失败。
 - 测试不依赖公网模型，也不提交大型影像二进制。

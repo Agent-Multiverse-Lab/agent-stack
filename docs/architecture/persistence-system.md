@@ -17,7 +17,7 @@
 - ARQ 队列元数据、`run:cancel:{run_id}`（cancel signal）。
 - `run:events:{run_id}`（可读事件流）。
 
-### MinIO
+### RustFS
 - 原始上传文件、解析产物、Markdown 快照。
 - 卫星栅格、波段、质量掩膜和预览对象；PostgreSQL 只保存对象引用。
 
@@ -48,5 +48,5 @@
 | `run:events:{run_id}` | Redis Stream | 事件传输和重连游标 |
 | `run:cancel:{run_id}` | Redis | 运行时取消信号 |
 
-Redis、内存、MinIO 和 Milvus 不得复制 PostgreSQL 的权威业务状态；如果新增副本，
+Redis、内存、RustFS 和 Milvus 不得复制 PostgreSQL 的权威业务状态；如果新增副本，
 必须先在对应能力文档中说明 Owner、生命周期、一致性和清理规则。

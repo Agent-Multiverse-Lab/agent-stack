@@ -21,7 +21,7 @@
   原始 Asset key、角色、波段、媒体类型、大小、校验和与质量码。同一场景以 Asset key 唯一标识资产；
   角色和波段可以相同，不能充当唯一键。
 
-PostGIS 保存可索引的空间几何；原始影像、波段、掩膜和预览图的文件字节存放在 MinIO，
+PostGIS 保存可索引的空间几何；原始影像、波段、掩膜和预览图的文件字节存放在 RustFS，
 PostgreSQL 只保存元数据和对象引用。目录 gRPC 响应及 Agent 上下文不传输这些原始文件字节。
 不能映射到固定列的受支持 STAC 字段保存在有界 JSONB 中，不保存任意提供方字段或密钥。
 
@@ -78,7 +78,7 @@ Item 的 `id`、`collection`、`properties.datetime`、WGS84 `geometry`/`bbox`�
 ### DP-SAT-008 Asset and ingestion integrity
 
 导入命令在写库前验证 Collection/Item 关系、ID 长度及唯一性、时间与空间范围、资产角色和
-允许的 MinIO 对象引用。STAC `href` 不能是待持久化的带签名临时 URL；入库引用不含凭据。
+允许的 RustFS 对象引用。STAC `href` 不能是待持久化的带签名临时 URL；入库引用不含凭据。
 对象存在性可通过对象存储元数据检查，大小及校验和记录实际可获得的值；元数据检查
 不等于对大型栅格文件逐字节复算。缺失对象、校验和或媒体类型以质量码表示，
 受阻资产不能交给处理工具当作可用输入，场景仍可作为诊断记录检索。
@@ -112,7 +112,7 @@ Item 的 `id`、`collection`、`properties.datetime`、WGS84 `geometry`/`bbox`�
 - 固定 fixture 可重复生成且覆盖约定 bad case。
 - Sentinel-2 光学、Sentinel-1 SAR 和 Landsat 光学的 Collection/Item 样例可映射到同一套表，
   重复导入、跨来源同名、缺失对象和跨项目覆盖有确定性测试。
-- 可分别核验 PostGIS 几何与时间索引、MinIO 对象引用、资产质量码以及 Gateway 有界查询；
+- 可分别核验 PostGIS 几何与时间索引、RustFS 对象引用、资产质量码以及 Gateway 有界查询；
   测试不要求将大幅影像加载到数据库或 Agent 上下文。
 - 同一场景允许两个 Asset 使用相同角色与波段但不同 STAC Asset key；`GetScene` 返回 key 与引用，
   以便调用方区分两份资产。
