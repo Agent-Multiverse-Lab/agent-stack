@@ -36,6 +36,50 @@ class FakeAgent:
 
 
 class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
+    async def test_build_agent_runtime_looks_up_uuid_thread_for_user(self):
+        thread_id = "b2308e62-68a3-433e-b051-7e0c218a9249"
+        conversation_repository = SimpleNamespace(
+            get_conversation_by_thread_id_for_user=AsyncMock(
+                return_value=SimpleNamespace(uid="user-1")
+            )
+        )
+        agent_item = SimpleNamespace(
+            slug="test-agent",
+            backend_id="TestAgent",
+        )
+        agent_repository = SimpleNamespace(
+            get_by_slug_for_run_type=AsyncMock(return_value=agent_item)
+        )
+        agent_instance = object()
+
+        with (
+            patch(
+                "server.service.thread_service.ConversationRepository",
+                return_value=conversation_repository,
+            ),
+            patch(
+                "server.service.thread_service.AgentRepository",
+                return_value=agent_repository,
+            ),
+            patch.object(
+                thread_service.agent_manager,
+                "get_agent",
+                return_value=agent_instance,
+            ),
+        ):
+            result = await thread_service._build_agent_runtime(
+                agent_slug="test-agent",
+                user=SimpleNamespace(uid="user-1"),
+                thread_id=thread_id,
+                db=object(),
+            )
+
+        self.assertEqual((agent_item, agent_instance), result)
+        conversation_repository.get_conversation_by_thread_id_for_user.assert_awaited_once_with(
+            thread_id=thread_id,
+            user_id="user-1",
+        )
+
     async def test_runtime_context_includes_selected_model(self):
         context = await thread_service._build_agent_runtime_context(
             uid="user-1",
