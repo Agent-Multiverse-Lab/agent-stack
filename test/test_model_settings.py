@@ -63,28 +63,53 @@ class ModelSettingsTest(SQLiteModelTestCase):
         self.db.commit.assert_not_called()
         self.assertIsNone(await self.repository.get_provider_by_id("vllm"))
 
-    async def test_probe_uses_unsaved_values_and_saved_private_headers(self):
+    async def test_probe_validates_unsaved_api_key_without_a_selected_model(self):
         await self.insert_provider("ollama", extra_headers={"X-Private": "private"})
         await self.db.commit()
         self.db.commit.reset_mock()
-        request = ModelSettingsRequest(base_url="http://localhost:8000/v1", api_key="new-key", models=[{"model_id": "new-model"}])
-        with patch.object(service, "_request_json", new_callable=AsyncMock, return_value={"choices": [{"message": {"role": "assistant", "content": "OK"}}]}) as remote:
+        request = ModelSettingsRequest(base_url="http://localhost:8000/v1", api_key="new-key")
+        with patch.object(service, "_request_json", new_callable=AsyncMock, return_value={"data": []}) as remote:
             result = await service.test_settings_connection(self.db, self.user_id, "ollama", request)
         self.assertTrue(result.success)
         self.assertEqual(remote.call_args.args[0], "http://localhost:8000/v1")
         self.assertNotIn("X-Private", remote.call_args.args[1])
-        self.assertEqual(remote.call_args.kwargs["body"]["model"], "new-model")
+        self.assertEqual(remote.call_args.args[1]["Authorization"], "Bearer new-key")
+        self.assertEqual(remote.call_args.args[2], "/models")
+        self.assertNotIn("body", remote.call_args.kwargs)
         self.db.commit.assert_not_called()
         self.assertEqual((await self.repository.get_provider_by_id("ollama")).api_key, "secret-key")
+
+    async def test_probe_reports_rejected_api_key(self):
+        request = ModelSettingsRequest(base_url="https://example.com/v1", api_key="bad-key")
+        with patch.object(
+            service,
+            "_request_json",
+            new_callable=AsyncMock,
+            side_effect=service.ModelConnectionError("http_error", 401),
+        ):
+            result = await service.test_settings_connection(
+                self.db, self.user_id, "deepseek", request,
+            )
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "http_error")
+        self.assertEqual(result.status_code, 401)
+        self.db.commit.assert_not_called()
 
     async def test_authenticated_api_and_redacted_validation(self):
         app = FastAPI()
         app.include_router(router, prefix="/api")
-        app.dependency_overrides[get_db] = lambda: self.db
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="https://test") as client:
+
+        async def override_db():
+            return self.db
+
+        async def override_user():
+            return SimpleNamespace(id=self.user_id)
+
+        app.dependency_overrides[get_db] = override_db
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
             response = await client.get("/api/models/providers")
             self.assertEqual(response.status_code, 401)
-            app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=self.user_id)
+            app.dependency_overrides[get_current_user] = override_user
             response = await client.post("/api/models/providers/deepseek", json={"base_url": "invalid", "api_key": "private-secret"})
             self.assertEqual(response.status_code, 422)
             self.assertNotIn("private-secret", response.text)

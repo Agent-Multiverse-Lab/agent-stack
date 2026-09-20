@@ -1,5 +1,4 @@
 import { apiClient } from "@/api/client"
-import i18n from "@/i18n"
 import type { ModelCatalogResponse } from "@/types/model"
 import type { ConnectionTestResult, ModelProvider, ModelProviderSummary, ModelProviderId, ModelSettingsRequest, SettingsModel } from "@/types/model"
 
@@ -30,6 +29,5 @@ export const testProviderConnection = (id: ModelProviderId, body: ModelSettingsR
   )
 
 function modelRequestOptions() {
-  if (window.location.protocol !== "https:") throw new Error(i18n.t("Model settings require HTTPS"))
   return { requiresAuth: true }
 }

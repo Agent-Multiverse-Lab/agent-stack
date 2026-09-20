@@ -407,11 +407,14 @@ async def test_settings_connection(
     db: AsyncSession, user_id: int, provider_id: str, request: ModelSettingsRequest,
 ) -> ConnectionTestResult:
     config, _ = await _settings_draft(db, user_id, provider_id, request)
-    if not config.enabled_models:
-        raise ValueError("请先获取并选择聊天模型")
-    model = config.enabled_models[0]
-    return await _test_connection(ModelConnection(
-        provider_id=provider_id, model_id=model.model_id, model_type=model.model_type,
-        protocol=config.protocol, base_url=config.base_url, api_key=config.api_key,
-        extra_headers=config.extra_headers, body_overrides=model.body_overrides,
-    ))
+    started = perf_counter()
+    try:
+        await _discover_config_models(config)
+    except ModelConnectionError as exc:
+        return ConnectionTestResult(
+            success=False,
+            elapsed_ms=(perf_counter() - started) * 1000,
+            error=exc.code,
+            status_code=exc.status_code,
+        )
+    return ConnectionTestResult(success=True, elapsed_ms=(perf_counter() - started) * 1000)

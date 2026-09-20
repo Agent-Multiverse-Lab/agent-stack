@@ -5,12 +5,10 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 import httpx
-from fastapi import FastAPI
 from pydantic import SecretStr
 from sqlalchemy import text
 
 from server.entities.model import ModelProviderCreate, ModelSettingsRequest
-from server.router.model_router import router
 from server.service import model_service as service
 from server.service.model_outbound import UnsafeModelTarget, resolve_public_target
 from src.configs import config
@@ -55,15 +53,6 @@ class ModelCredentialSecurityTest(SQLiteModelTestCase):
             with self.assertRaises(RuntimeError):
                 await service.create_provider(self.db, self.user_id, ModelProviderCreate(provider_id="deepseek", name="DeepSeek", base_url="https://example.com/v1", api_key="must-not-persist"))
         self.assertEqual(self.session.execute(text("SELECT count(*) FROM model_provider")).scalar_one(), 0)
-
-    async def test_http_and_spoofed_forwarded_proto_are_rejected(self):
-        app = FastAPI()
-        app.include_router(router, prefix="/api")
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
-            response = await client.post("/api/models/providers/deepseek", headers={"X-Forwarded-Proto": "https"}, json={"api_key": "never-echo"})
-        self.assertEqual(response.status_code, 426)
-        self.assertNotIn("never-echo", response.text)
-
 
 class ModelOutboundSecurityTest(unittest.IsolatedAsyncioTestCase):
     async def test_internal_literal_addresses_are_blocked_before_http(self):

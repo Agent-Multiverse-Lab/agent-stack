@@ -26,8 +26,6 @@ class ModelSettingsRoute(APIRoute):
         handler = super().get_route_handler()
 
         async def handle(request):
-            if request.url.scheme != "https":
-                raise HTTPException(426, "模型配置接口仅允许 HTTPS")
             try:
                 return await handler(request)
             except RequestValidationError:
