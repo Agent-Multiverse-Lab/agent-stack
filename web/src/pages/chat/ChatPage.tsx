@@ -57,6 +57,7 @@ export default function ChatPage() {
   const invalidate = () => {
     operation.current++;
     uploadGeneration.current++;
+    chat.resetStream();
     abortStream();
   };
 
@@ -77,6 +78,7 @@ export default function ChatPage() {
       run.getState().streamUrl &&
       run.isActive()
     ) {
+      chat.resetStream(id);
       chat.clearRunStreamMessages(monitoredRunId);
       const activeController = new AbortController();
       controller.current = activeController;
@@ -94,9 +96,11 @@ export default function ChatPage() {
           },
         );
         if (!consumed) return;
+        chat.flushStream(id);
         endEvent = consumed;
       } catch (caught) {
         if (operation.current !== expected || isAbortError(caught)) return;
+        chat.flushStream(id);
         chat.update({ error: errorText(caught) });
         try {
           await loadAndApplyThread(id, expected);

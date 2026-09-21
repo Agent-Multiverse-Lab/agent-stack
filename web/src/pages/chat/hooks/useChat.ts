@@ -1,5 +1,9 @@
 import { useCallback, useRef, useState } from "react";
 
+import {
+  useStreamSmoother,
+  type StreamTextChunk,
+} from "@/pages/chat/hooks/useStreamSmoother";
 import type { UploadedAttachmentResponse } from "@/types/attachment";
 import type {
   AgentRunStreamEvent,
@@ -149,62 +153,63 @@ export function useChat() {
     }));
   }
 
-  function appendAiText(
-    messageId: string,
-    delta: string,
-    threadId: string | null,
-    event: AgentRunStreamEvent,
-    runId: string,
-  ) {
-    const messages = getState().messages;
-    const index = messages.findIndex(
-      (message) =>
-        message.type === "ai" &&
-        message.payload.type === "text" &&
-        chatMessageId(message) === messageId,
-    );
-    if (index === -1) {
-      update({
-        messages: [
-          ...messages,
-          {
-            type: "ai",
+  const appendAiText = useCallback(
+    (chunks: StreamTextChunk[]) => {
+      if (!chunks.length) return;
+      update((previous) => {
+        const messages = [...previous.messages];
+        for (const chunk of chunks) {
+          const index = messages.findIndex(
+            (message) =>
+              message.type === "ai" &&
+              message.payload.type === "text" &&
+              chatMessageId(message) === chunk.messageId,
+          );
+          if (index === -1) {
+            messages.push({
+              type: "ai",
+              payload: {
+                type: "text",
+                event: {
+                  message_id: chunk.messageId,
+                  thread_id: chunk.threadId,
+                  run_id: chunk.runId,
+                  content: chunk.content,
+                  status: "streaming",
+                  attachments: [],
+                  created_at: chunk.createdAt,
+                },
+              },
+            });
+            continue;
+          }
+          const message = messages[index];
+          const currentEvent = chatMessageEvent(message);
+          if (!currentEvent) continue;
+          const content =
+            typeof currentEvent.content === "string" ? currentEvent.content : "";
+          messages[index] = {
+            ...message,
             payload: {
-              type: "text",
+              ...message.payload,
               event: {
-                message_id: messageId,
-                thread_id: threadId,
-                run_id: runId,
-                content: delta,
-                status: "streaming",
-                attachments: [],
-                created_at: event.created_at,
+                ...currentEvent,
+                content: content + chunk.content,
               },
             },
-          },
-        ],
+          };
+        }
+        return { messages };
       });
-      return;
-    }
-    const message = messages[index];
-    const currentEvent = chatMessageEvent(message);
-    if (!currentEvent) return;
-    const content =
-      typeof currentEvent.content === "string" ? currentEvent.content : "";
-    const next = [...messages];
-    next[index] = {
-      ...message,
-      payload: {
-        ...message.payload,
-        event: { ...currentEvent, content: content + delta },
-      },
-    };
-    update({ messages: next });
-  }
+    },
+    [update],
+  );
+  const streamSmoother = useStreamSmoother(appendAiText);
 
   function applyRunMessageEvent(event: AgentRunStreamEvent, runId: string) {
     if (event.type === "messages") {
       if (!Array.isArray(event.items)) return;
+      const chunks = new Map<string, StreamTextChunk>();
       for (const item of event.items) {
         if (!isRecord(item) || !Array.isArray(item.stream_event)) continue;
         for (const delta of item.stream_event) {
@@ -215,17 +220,25 @@ export function useChat() {
             typeof delta.content_delta !== "string"
           )
             continue;
-          appendAiText(
-            delta.message_id,
-            delta.content_delta,
+          const threadId =
             typeof delta.thread_id === "string"
               ? delta.thread_id
-              : event.thread_id,
-            event,
-            runId,
-          );
+              : event.thread_id;
+          const key = `${threadId ?? ""}\u0000${delta.message_id}`;
+          const current = chunks.get(key);
+          if (current) current.content += delta.content_delta;
+          else {
+            chunks.set(key, {
+              messageId: delta.message_id,
+              content: delta.content_delta,
+              threadId,
+              runId,
+              createdAt: event.created_at,
+            });
+          }
         }
       }
+      for (const chunk of chunks.values()) streamSmoother.pushChunk(chunk);
       return;
     }
     if (event.type !== "custom" || event.name !== "agent_state") return;
@@ -334,6 +347,7 @@ export function useChat() {
   }
 
   function resetThread() {
+    streamSmoother.reset();
     update(initialState());
   }
 
@@ -346,6 +360,8 @@ export function useChat() {
     applyCreatedThread,
     clearRunStreamMessages,
     applyRunMessageEvent,
+    flushStream: streamSmoother.flushThread,
+    resetStream: streamSmoother.reset,
     beginSubmission,
     rollbackSubmission,
     appendUploadedAttachments,
