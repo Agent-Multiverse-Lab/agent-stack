@@ -3,10 +3,7 @@
 
 from langchain.agents.middleware import HumanInTheLoopMiddleware
 
-from src.configs import config as system_cfg
-
-# 从配置获取内置的审批工具
-SENSITIVE_BACKEND_TOOLS = system_cfg.hil_approval_tools
+SENSITIVE_BACKEND_TOOLS = ("write_file", "edit_file", "execute")
 TOOL_APPROVAL_INTERRUPT_ON: dict[str, dict[str, list[str]]] = {
     tool_name: {"allowed_decisions": ["approve", "reject"]}
     for tool_name in SENSITIVE_BACKEND_TOOLS

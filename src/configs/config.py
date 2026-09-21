@@ -84,14 +84,6 @@ class Config(BaseSettings):
         description="启用 Rerank 时的初召回候选数量",
     )
 
-    # ---------- Agent ----------
-    hil_approval_tools: tuple[str, ...] = Field(
-        default=("write_file", "edit_file", "execute"),
-        min_length=1,
-        max_length=3,
-        description="需要人工审批的工具名称（1-3 个）",
-    )
-
     # ---------- 数据库 ----------
     database_url: str = Field(default="", description="PostgreSQL 数据库连接地址")
     langgraph_database_url: str = Field(

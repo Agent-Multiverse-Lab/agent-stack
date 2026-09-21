@@ -1,4 +1,5 @@
 from deepagents.middleware.patch_tool_calls import PatchToolCallsMiddleware
+from deepagents.middleware.skills import SkillsMiddleware
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
     ModelRetryMiddleware,
@@ -9,10 +10,18 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
 from server.service.mcp_service import get_mcp_tools
-from src.agents.backends.composite_backend import create_custom_filesystem_middleware
+from src.agents.backends.composite_backend import (
+    ROUTE_SKILL,
+    create_composite_backend,
+    create_custom_filesystem_middleware,
+)
 from src.agents.base_agent import BaseAgent
+from src.agents.middlewares.memory_middleware import create_memory_middleware
 from src.agents.middlewares.sandbox_middleware import create_sandbox_middleware
 from src.agents.middlewares.subagent_middlware import create_subagent_middleware
+from src.agents.middlewares.summary_middleware import (
+    create_summary_middleware_from_context,
+)
 from src.agents.subagents.citationagent import CitationAgent
 from src.agents.subagents.imageprocessingagent import ImageProcessingAgent
 from src.agents.subagents.satelliteagent import SatelliteAgent
@@ -21,7 +30,7 @@ from src.configs import config as sys_config
 from src.model import load_model
 
 from .context import LeaderAgentContext
-from .prompt import build_prompt
+from .prompt import TODO_MIDDLEWARE_SYSTEM_PROMPT, build_prompt
 from .tools import ask_user
 
 
@@ -37,9 +46,22 @@ class LeaderAgent(BaseAgent):
         pass
 
     def _create_middlewares(self, context):
+        backend = create_composite_backend(context)
         return [
             create_sandbox_middleware(),
-            create_custom_filesystem_middleware(context=context),
+            create_custom_filesystem_middleware(
+                context=context,
+                backend=backend,
+            ),
+            create_summary_middleware_from_context(
+                context,
+                backend=backend,
+            ),
+            SkillsMiddleware(
+                backend=backend,
+                sources=[(ROUTE_SKILL, "Shared")],
+            ),
+            create_memory_middleware(),
             create_subagent_middleware(
                 subagents=[
                     SearchAgent(),
@@ -52,7 +74,7 @@ class LeaderAgent(BaseAgent):
             PatchToolCallsMiddleware(),
             ModelRetryMiddleware(max_retries=3, on_failure="continue"),
             ToolRetryMiddleware(max_retries=5),
-            TodoListMiddleware(),
+            TodoListMiddleware(system_prompt=TODO_MIDDLEWARE_SYSTEM_PROMPT),
         ]
 
     async def get_agent(self, context=None) -> CompiledStateGraph:

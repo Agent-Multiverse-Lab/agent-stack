@@ -7,9 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from deepagents.backends import CompositeBackend, FilesystemBackend
+from deepagents.backends import BackendProtocol, CompositeBackend, FilesystemBackend
 from deepagents.middleware.filesystem import FilesystemMiddleware
-from langchain.tools import ToolRuntime
 
 from src.agents.backends.memories_backend import UserMemoriesBackend
 from src.agents.backends.sandbox import S2CSandbox
@@ -24,9 +23,8 @@ ROUTE_MEMORY = "/memory/"
 ROUTE_WORKSPACE = "/workspace/"
 
 
-def create_composite_backend(runtime: ToolRuntime) -> CompositeBackend:
-    """从 deepagents 绑定的运行时上下文构建 CompositeBackend。"""
-    context: BaseContext = runtime.context
+def create_composite_backend(context: BaseContext) -> CompositeBackend:
+    """为单次 Agent 运行构建隔离的 CompositeBackend。"""
     skill_root = Path(
         context.skill_root or Path(sys_config.save_dir) / "skills"
     ).resolve()
@@ -47,6 +45,7 @@ def create_composite_backend(runtime: ToolRuntime) -> CompositeBackend:
                 virtual_mode=True,
             ),
         },
+        artifacts_root=f"{ROUTE_WORKSPACE.rstrip('/')}/outputs",
     )
 
 
@@ -80,9 +79,10 @@ def create_custom_filesystem_middleware(
     tool_token_limit_before_evict: int | None = None,
     *,
     context: BaseContext,
+    backend: BackendProtocol | None = None,
 ) -> CustomFilesystemMiddleware:
     """为本次 Agent 运行构建按需连接的 Sandbox 文件系统中间件。"""
     return CustomFilesystemMiddleware(
-        backend=S2CSandbox(thread_id=context.thread_id, uid=context.uid),
+        backend=backend or S2CSandbox(thread_id=context.thread_id, uid=context.uid),
         tool_token_limit_before_evict=tool_token_limit_before_evict,
     )
