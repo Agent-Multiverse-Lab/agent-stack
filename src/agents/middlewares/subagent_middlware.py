@@ -29,32 +29,50 @@ from src.agents.base_agent import BaseAgent
 from src.agents.base_context import BaseContext
 from src.database.session import session_context
 
-TASK_SYSTEM_PROMPT = """## 子智能体任务编排
+TASK_SYSTEM_PROMPT = """## `task`（子智能体任务工具）
 
-你可以将边界清晰、能够独立完成的任务交给合适的子智能体处理，并负责安排执行顺序、跟踪运行状态和整合最终结果。
+你可以使用 `task` 工具把复杂、独立的子任务交给已配置的子智能体处理。子智能体只返回最终结果，你看不到它的中间步骤。
 
-- 简单任务直接完成，不要进行不必要的委派。
-- 后续步骤立即依赖子任务结果时，使用 `task` 启动子智能体并等待最终文本。
-- 长时间运行或彼此独立的任务，使用 `subagent_start` 在后台启动，并保存返回的 `run_id`。
-- 使用 `subagent_status` 查询后台任务的生命周期状态、最近进度和已完成结果。
-- 不再需要某个后台任务时，使用 `subagent_cancel` 请求取消。
-- 明确需要后台任务的最终结果时，使用 `subagent_await` 等待并取得最终文本。
-- 每次调用必须选择可用的 `subagent_slug`，任务描述应包含必要上下文、目标、执行边界、输出要求和完成标准。
-- 收到子智能体结果后，检查其完整性和一致性；不要直接拼接未经整理或互相冲突的结果。
-- 不要通过 HTTP、shell 或命令行绕过这些工具调用子智能体。
-"""
+使用原则：
+- 任务足够复杂、可以独立完成、或需要隔离上下文时使用。
+- 多个互不依赖的子任务可以并行调用多个 `task`。
+- 简单问题或少量直接工具调用不要委派。
+- 调用时必须选择下方可用的 `subagent_slug`，并在 `description` 中写清目标、上下文和期望输出。
+- 不要通过 shell、curl、HTTP API 或命令行间接调用子智能体；需要子智能体时必须使用这些子智能体工具。
 
-TASK_DESCRIPTION = "请详细描述当前Agent所需要执行的任务内容，上下文以及需要输出的内容"
-AGENT_DESCRIPTION = "必须从当前规定的可用的子AGENT中选取执行"
+后台子智能体：
+- 长任务或多个可并行任务优先使用 `subagent_start`，它会立即返回 `run_id` 和 `thread_id`，父智能体可以继续工作。
+- 后续用 `subagent_status` 查询状态和最近进度，`subagent_cancel` 取消，`subagent_await` 在明确需要结果时等待。
+- 短任务且父智能体必须立刻依赖结果时继续使用 `task`。
+- 收到子智能体结果后，检查其完整性和一致性，不要直接拼接未经整理或互相冲突的结果。"""
+
+TASK_TOOL_DESCRIPTION = """启动一个已配置的子智能体处理独立任务，并等待其最终结果。
+
+可用子智能体：
+{available_agents}
+
+使用 `subagent_slug` 选择一个可用子智能体，并在 `description` 中提供完整的任务说明。"""
+
+SUBAGENT_START_DESCRIPTION = """在后台启动一个已配置的子智能体任务。
+
+立即返回用于状态、取消和结果查询的 run_id，以及标识子智能体会话的 thread_id。适合长时间运行或可并行的任务。"""
+
+SUBAGENT_STATUS_DESCRIPTION = "查询子智能体运行状态、最近进度和已完成结果。"
+SUBAGENT_CANCEL_DESCRIPTION = "取消一个正在运行的子智能体任务。"
+SUBAGENT_AWAIT_DESCRIPTION = "等待一个子智能体任务结束并返回最终结果。"
+
+TASK_DESCRIPTION_ARG = "需要子智能体独立完成的任务描述，包含必要上下文和期望输出。"
+SUBAGENT_SLUG_ARG = "要调用的子智能体 slug，必须是工具描述中列出的可用项之一。"
+SUBAGENT_RUN_ID_ARG = "子智能体运行 ID，由 subagent_start 返回。"
 
 
 class TaskInput(BaseModel):
-    description: str = Field(description="子智能体可独立执行的完整任务")
-    subagent_slug: str = Field(description="要执行的子智能体 slug")
+    description: str = Field(description=TASK_DESCRIPTION_ARG)
+    subagent_slug: str = Field(description=SUBAGENT_SLUG_ARG)
 
 
 class SubAgentRunInput(BaseModel):
-    run_id: str = Field(description="由 task 或 subagent_start 返回的子运行 ID")
+    run_id: str = Field(description=SUBAGENT_RUN_ID_ARG)
 
 # 以实体类形式返回结果
 @dataclass(frozen=True)
@@ -113,13 +131,12 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
 
     def _create_task_tool(self) -> StructuredTool:
         async def task(
-            subagent_slug: Annotated[str, AGENT_DESCRIPTION],
-            task_description: Annotated[str, TASK_DESCRIPTION],
+            description: Annotated[str, TASK_DESCRIPTION_ARG],
+            subagent_slug: Annotated[str, SUBAGENT_SLUG_ARG],
             runtime: ToolRuntime,
-            thread_id: str | None
         ) -> Command:
             subagent_run_record, error = await self._start_run(
-                task_description=task_description,
+                task_description=description,
                 subagent_slug=subagent_slug,
                 runtime=runtime,
                 tool_name="task",
@@ -153,8 +170,8 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
         return StructuredTool.from_function(
             name="task",
             coroutine=task,
-            description=(
-                f"启动一个子智能体任务并等待最终文本；适合父智能体后续步骤立即依赖结果的任务。\n\n可用子智能体：\n{self._available_agents()}"
+            description=TASK_TOOL_DESCRIPTION.format(
+                available_agents=self._available_agents()
             ),
             args_schema=TaskInput,
             infer_schema=False,
@@ -177,7 +194,8 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
             name="subagent_start",
             coroutine=subagent_start,
             description=(
-                f"在后台启动一个子智能体任务并立即返回 run_id；适合长任务或可并行任务。\n\n可用子智能体：\n{self._available_agents()}"
+                f"{SUBAGENT_START_DESCRIPTION}\n\n"
+                f"可用子智能体：\n{self._available_agents()}"
             ),
             args_schema=TaskInput,
             infer_schema=False,
@@ -228,7 +246,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
         return StructuredTool.from_function(
             name="subagent_status",
             coroutine=subagent_status,
-            description="查询当前父运行创建的子智能体 Run 状态、最近进度和已完成结果。",
+            description=SUBAGENT_STATUS_DESCRIPTION,
             args_schema=SubAgentRunInput,
             infer_schema=False,
         )
@@ -289,7 +307,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
         return StructuredTool.from_function(
             name="subagent_cancel",
             coroutine=subagent_cancel,
-            description="请求取消当前父运行创建的后台子智能体 Run。",
+            description=SUBAGENT_CANCEL_DESCRIPTION,
             args_schema=SubAgentRunInput,
             infer_schema=False,
         )
@@ -336,7 +354,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
         return StructuredTool.from_function(
             name="subagent_await",
             coroutine=subagent_await,
-            description="等待当前父运行创建的后台子智能体 Run，并返回最终文本。",
+            description=SUBAGENT_AWAIT_DESCRIPTION,
             args_schema=SubAgentRunInput,
             infer_schema=False,
         )
@@ -352,7 +370,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
         """启动子 Run 后立即返回；保留为后台启动路径的单一实现。"""
 
         subagent_record, error = await self._start_run(
-            description=description,
+            task_description=description,
             subagent_slug=subagent_slug,
             runtime=runtime,
             tool_name=tool_name,
