@@ -112,10 +112,10 @@ class StreamEventSmootherTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "不支持的流事件状态"):
             map_stream_event({"status": "unknown"})
 
-    async def test_append_releases_only_bucket_over_character_limit(
+    async def test_append_releases_only_bucket_reaching_character_limit(
         self,
     ) -> None:
-        smoother = StreamEventSmoother(run_id="run-1", character_limit=3)
+        smoother = StreamEventSmoother(run_id="run-1", character_limit=4)
 
         with (
             patch(
@@ -165,6 +165,75 @@ class StreamEventSmootherTest(unittest.IsolatedAsyncioTestCase):
             [{"status": "loading", "sequence": 2}],
         )
         self.assertEqual(smoother.chunk_buckets["thread-2"].char_counts, 1)
+
+    def test_counts_v2_stream_event_text(self) -> None:
+        smoother = StreamEventSmoother(run_id="run-1", character_limit=512)
+
+        self.assertEqual(
+            smoother.calculate_character_count(
+                {
+                    "response": "ab",
+                    "stream_event": [
+                        {"type": "message_delta", "content_delta": "cd"},
+                        {"type": "tool_call_delta", "args_delta": "efg"},
+                    ],
+                }
+            ),
+            7,
+        )
+
+    async def test_complete_tool_call_releases_immediately(self) -> None:
+        smoother = StreamEventSmoother(run_id="run-1", character_limit=512)
+        chunk = {
+            "status": "loading",
+            "response": "",
+            "stream_event": [
+                {
+                    "type": "tool_call",
+                    "message_id": "message-1",
+                    "tool_call_id": "call-1",
+                    "name": "search",
+                    "args": {"query": "streaming"},
+                }
+            ],
+        }
+
+        with patch(
+            "server.worker.write_stream_event",
+            new_callable=AsyncMock,
+        ) as write_event:
+            await smoother.append(chunk, "thread-1")
+
+        write_event.assert_awaited_once_with(
+            "run-1",
+            "messages",
+            {"items": [chunk]},
+            "thread-1",
+        )
+
+    async def test_elapsed_interval_releases_pending_chunks(self) -> None:
+        smoother = StreamEventSmoother(
+            run_id="run-1",
+            character_limit=512,
+            interval_ms=100,
+        )
+        first = {"status": "loading", "response": "a"}
+        second = {"status": "loading", "response": "b"}
+
+        with patch(
+            "server.worker.write_stream_event",
+            new_callable=AsyncMock,
+        ) as write_event:
+            await smoother.append(first, "thread-1")
+            smoother.chunk_buckets["thread-1"].last_release -= 1
+            await smoother.append(second, "thread-1")
+
+        write_event.assert_awaited_once_with(
+            "run-1",
+            "messages",
+            {"items": [first, second]},
+            "thread-1",
+        )
 
 
 class WorkerStreamWriterTest(unittest.IsolatedAsyncioTestCase):

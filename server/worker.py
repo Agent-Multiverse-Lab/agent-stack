@@ -1,6 +1,7 @@
 import asyncio
 import json
 import sys
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -325,6 +326,10 @@ async def _finalize_run(
 class StreamEventBucket:
     char_counts: int = 0
     chunks: list[dict[str, Any]] = field(default_factory=list)
+    last_release: float = field(default_factory=time.monotonic)
+
+
+_ALL_STREAM_THREADS = object()
 
 
 def map_stream_event(chunk: dict[str, Any]) -> tuple[str, Any]:
@@ -360,27 +365,60 @@ class StreamEventSmoother:
         *,
         run_id: str,
         character_limit: int,
+        interval_ms: int = 100,
     ) -> None:
         """初始化单个 Agent Run 的消息缓冲。"""
 
         if character_limit < 1:
             raise ValueError("character_limit 必须大于 0")
+        if interval_ms < 1:
+            raise ValueError("interval_ms 必须大于 0")
 
         self.run_id = run_id
         self.character_limit = character_limit
+        self.interval_seconds = interval_ms / 1000
         self.chunk_buckets: dict[str | None, StreamEventBucket] = {}
 
-    def calculate_character_count(self, chunk: dict[str, Any]):
-        # tTODO 待实现char计数
+    def calculate_character_count(self, chunk: dict[str, Any]) -> int:
         response = chunk.get("response")
-
         chunk_size = len(response) if isinstance(response, str) else 0
         stream_event = chunk.get("stream_event")
-        if not isinstance(stream_event, dict):
-            return chunk_size
-
-        # 暂时不兼容v2
+        events = (
+            [stream_event]
+            if isinstance(stream_event, dict)
+            else stream_event
+            if isinstance(stream_event, list)
+            else []
+        )
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            for key in (
+                "content",
+                "content_delta",
+                "reasoning_content",
+                "additional_reasoning_content",
+                "args_delta",
+            ):
+                value = event.get(key)
+                if isinstance(value, str):
+                    chunk_size += len(value)
         return chunk_size
+
+    @staticmethod
+    def should_release_immediately(chunk: dict[str, Any]) -> bool:
+        stream_event = chunk.get("stream_event")
+        events = (
+            [stream_event]
+            if isinstance(stream_event, dict)
+            else stream_event
+            if isinstance(stream_event, list)
+            else []
+        )
+        return any(
+            isinstance(event, dict) and event.get("type") == "tool_call"
+            for event in events
+        )
 
     async def append(
         self,
@@ -393,14 +431,24 @@ class StreamEventSmoother:
         bucket.chunks.append(chunk)
         bucket.char_counts += self.calculate_character_count(chunk)
 
-        # FIXME 需要重写counts
-        if bucket.char_counts > self.character_limit:
+        if (
+            self.should_release_immediately(chunk)
+            or bucket.char_counts >= self.character_limit
+            or time.monotonic() - bucket.last_release >= self.interval_seconds
+        ):
             await self.release(thread_id)
 
-    async def release(self, thread_id: str | None = None) -> None:
+    async def release(
+        self,
+        thread_id: str | None | object = _ALL_STREAM_THREADS,
+    ) -> None:
         """写入并清空指定 thread，未指定时释放当前 Run 的全部 Bucket。"""
 
-        thread_ids = tuple(self.chunk_buckets) if thread_id is None else (thread_id,)
+        thread_ids = (
+            tuple(self.chunk_buckets)
+            if thread_id is _ALL_STREAM_THREADS
+            else (thread_id,)
+        )
         for bucket_thread_id in thread_ids:
             bucket = self.chunk_buckets.get(bucket_thread_id)
             if bucket is None or not bucket.chunks:
@@ -414,6 +462,7 @@ class StreamEventSmoother:
             )
             bucket.chunks.clear()
             bucket.char_counts = 0
+            bucket.last_release = time.monotonic()
 
 
 def _normalize_steam_agent_chunk(steam_agent_chunk_bytes: bytes) -> list[dict]:
@@ -540,7 +589,8 @@ async def process_agent_run(ctx, run_id: str):
         terminal_flag = False
         stream_event_smoother = StreamEventSmoother(
             run_id=run_id,
-            character_limit=20,
+            character_limit=512,
+            interval_ms=100,
         )
         try:
             async with postgres_manager.get_async_session_context() as db:
