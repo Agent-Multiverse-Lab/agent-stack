@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, PanelLeft, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FileContentViewer } from "@/components/common/file-content-viewer";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { listThreads } from "@/api/agent";
-import { listSandboxWorkspace } from "@/api/sandbox";
+import { listSandboxWorkspace, readSandboxFile } from "@/api/sandbox";
 import { useTranslation } from "@/i18n";
 import WorkspaceFileList from "@/pages/sandbox/components/WorkspaceFileList";
 import WorkspaceTree from "@/pages/sandbox/components/WorkspaceTree";
@@ -35,6 +36,10 @@ export default function SandboxPage() {
   const [entriesByPath, setEntriesByPath] = useState<Record<string, WorkspaceEntry[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [fileContent, setFileContent] = useState("");
+  const [fileContentTruncated, setFileContentTruncated] = useState(false);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [fileError, setFileError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -108,6 +113,38 @@ export default function SandboxPage() {
       active = false;
     };
   }, [mapEntries, threadId, t]);
+
+  useEffect(() => {
+    if (!threadId || selectedEntry?.kind !== "file") {
+      setFileContent("");
+      setFileContentTruncated(false);
+      setFileError("");
+      setFileLoading(false);
+      return;
+    }
+
+    let active = true;
+    setFileContent("");
+    setFileContentTruncated(false);
+    setFileError("");
+    setFileLoading(true);
+    void readSandboxFile(threadId, selectedEntry.path)
+      .then((response) => {
+        if (!active) return;
+        setFileContent(response.content);
+        setFileContentTruncated(response.truncated);
+      })
+      .catch((caught: unknown) => {
+        if (!active) return;
+        setFileError(caught instanceof Error ? caught.message : t("Request failed"));
+      })
+      .finally(() => {
+        if (active) setFileLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedEntry, t, threadId]);
 
   const entries = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -189,6 +226,30 @@ export default function SandboxPage() {
           />
         </div>
       </div>
+
+      <Sheet
+        open={selectedEntry?.kind === "file"}
+        onOpenChange={(open) => {
+          if (!open) setSelectedEntry(null);
+        }}
+      >
+        <SheetContent className="w-full gap-0 sm:max-w-2xl">
+          <SheetHeader className="border-b pr-12">
+            <SheetTitle className="truncate">{selectedEntry?.name ?? t("File preview")}</SheetTitle>
+            <SheetDescription className="truncate">
+              {selectedEntry?.path ?? t("Read-only sandbox file")}
+            </SheetDescription>
+          </SheetHeader>
+          <FileContentViewer
+            key={selectedEntry?.path}
+            path={selectedEntry?.path ?? ""}
+            content={fileContent}
+            loading={fileLoading}
+            error={fileError}
+            truncated={fileContentTruncated}
+          />
+        </SheetContent>
+      </Sheet>
     </main>
   );
 }

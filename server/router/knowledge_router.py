@@ -13,9 +13,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.entities.knowledge import (
     KnowledgeBaseCreateRequest,
+    KnowledgeBaseDeleteResponse,
     KnowledgeBaseResponse,
+    KnowledgeChatRequest,
+    KnowledgeChatResponse,
     KnowledgeDeleteRequest,
+    KnowledgeEntitySearchRequest,
+    KnowledgeEntitySearchResponse,
+    KnowledgeExtractResponse,
+    KnowledgeFileDeleteResponse,
+    KnowledgeFileMarkdownResponse,
     KnowledgeFileResponse,
+    KnowledgeGraphResponse,
     KnowledgeIndexResponse,
     KnowledgeSearchRequest,
 )
@@ -23,7 +32,7 @@ from server.service import knowledge_service
 from server.utils.auth import AuthenticatedUser
 from src.database import get_db
 
-router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
+router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 
 @router.post("/bases", response_model=KnowledgeBaseResponse)
@@ -47,19 +56,90 @@ async def create_knowledge_base(
     )
 
 
-@router.get("/bases/{kb_id}/files", response_model=list[str])
-async def list_knowledge_files(
+@router.get("/bases", response_model=list[KnowledgeBaseResponse])
+async def list_knowledge_bases(
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """列出当前用户的全部知识库。"""
+    knowledge_bases = await knowledge_service.list_knowledge_bases(
+        db,
+        uid=current_user.uid,
+    )
+    return [
+        KnowledgeBaseResponse(
+            kb_id=item.kb_id,
+            name=item.name,
+            description=item.description,
+            status=item.status,
+        )
+        for item in knowledge_bases
+    ]
+
+
+@router.get("/bases/{kb_id}", response_model=KnowledgeBaseResponse)
+async def get_knowledge_base(
     kb_id: str,
     current_user: AuthenticatedUser,
     db: AsyncSession = Depends(get_db),
-) -> list[str]:
-    """列出当前用户知识库中的原始文件名。"""
+):
+    """读取当前用户的指定知识库。"""
     try:
-        return await knowledge_service.list_file_names(
+        knowledge_base = await knowledge_service.get_knowledge_base(
             db,
             uid=current_user.uid,
             kb_id=kb_id,
         )
+        return KnowledgeBaseResponse(
+            kb_id=knowledge_base.kb_id,
+            name=knowledge_base.name,
+            description=knowledge_base.description,
+            status=knowledge_base.status,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+
+@router.delete("/bases/{kb_id}", response_model=KnowledgeBaseDeleteResponse)
+async def delete_knowledge_base(
+    kb_id: str,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """删除知识库及其全部文件、向量与图谱数据。"""
+    try:
+        result = await knowledge_service.delete_knowledge_base(
+            db,
+            uid=current_user.uid,
+            kb_id=kb_id,
+        )
+        return KnowledgeBaseDeleteResponse(**result)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get("/bases/{kb_id}/files", response_model=list[KnowledgeFileResponse])
+async def list_knowledge_files(
+    kb_id: str,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """列出当前用户知识库中的全部文件。"""
+    try:
+        knowledge_files = await knowledge_service.list_files(
+            db,
+            uid=current_user.uid,
+            kb_id=kb_id,
+        )
+        return [
+            _knowledge_file_response(item) for item in knowledge_files
+        ]
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -148,6 +228,182 @@ async def index_knowledge_file(
             file_id=file_id,
         )
         return KnowledgeIndexResponse(**result)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.delete(
+    "/bases/{kb_id}/files/{file_id}",
+    response_model=KnowledgeFileDeleteResponse,
+)
+async def delete_knowledge_file(
+    kb_id: str,
+    file_id: str,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """删除知识文件及其解析、索引与图谱数据。"""
+    try:
+        result = await knowledge_service.delete_file(
+            db,
+            uid=current_user.uid,
+            kb_id=kb_id,
+            file_id=file_id,
+        )
+        return KnowledgeFileDeleteResponse(**result)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(
+    "/bases/{kb_id}/files/{file_id}/markdown",
+    response_model=KnowledgeFileMarkdownResponse,
+)
+async def get_knowledge_file_markdown(
+    kb_id: str,
+    file_id: str,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """读取知识文件已解析的 Markdown 产物。"""
+    try:
+        result = await knowledge_service.get_file_markdown(
+            db,
+            uid=current_user.uid,
+            kb_id=kb_id,
+            file_id=file_id,
+        )
+        return KnowledgeFileMarkdownResponse(**result)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(
+    "/bases/{kb_id}/files/{file_id}/extract",
+    response_model=KnowledgeExtractResponse,
+)
+async def extract_knowledge_file(
+    kb_id: str,
+    file_id: str,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """抽取文件实体关系并写入 Neo4j 与 Milvus 实体集合。"""
+    try:
+        result = await knowledge_service.extract_file(
+            db,
+            uid=current_user.uid,
+            kb_id=kb_id,
+            file_id=file_id,
+        )
+        return KnowledgeExtractResponse(**result)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(
+    "/bases/{kb_id}/graph",
+    response_model=KnowledgeGraphResponse,
+)
+async def get_knowledge_graph(
+    kb_id: str,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """读取知识库全量实体与关系图谱。"""
+    try:
+        result = await knowledge_service.get_graph(
+            db,
+            uid=current_user.uid,
+            kb_id=kb_id,
+        )
+        return KnowledgeGraphResponse(**result)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(
+    "/bases/{kb_id}/entities/search",
+    response_model=KnowledgeEntitySearchResponse,
+)
+async def search_knowledge_entities(
+    kb_id: str,
+    payload: KnowledgeEntitySearchRequest,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """使用实体向量检索知识库实体。"""
+    try:
+        result = await knowledge_service.search_entities(
+            db,
+            uid=current_user.uid,
+            kb_id=kb_id,
+            query=payload.query,
+            limit=payload.limit,
+        )
+        return KnowledgeEntitySearchResponse(**result)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(
+    "/bases/{kb_id}/chat",
+    response_model=KnowledgeChatResponse,
+)
+async def chat_with_knowledge_base(
+    kb_id: str,
+    payload: KnowledgeChatRequest,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """基于知识库检索结果同步生成带引用的回答。"""
+    try:
+        result = await knowledge_service.chat(
+            db,
+            uid=current_user.uid,
+            kb_id=kb_id,
+            query=payload.query,
+            limit=payload.limit,
+        )
+        return KnowledgeChatResponse(**result)
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

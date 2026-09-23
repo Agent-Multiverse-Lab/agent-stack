@@ -49,6 +49,15 @@ class KnowledgeBaseRepository:
         )
         return result.scalar_one_or_none()
 
+    async def list_for_user(self, *, uid: str) -> list[KnowledgeBase]:
+        """按创建时间倒序列出用户知识库。"""
+        result = await self.session.execute(
+            select(KnowledgeBase)
+            .where(KnowledgeBase.uid == uid)
+            .order_by(KnowledgeBase.created_at.desc())
+        )
+        return list(result.scalars().all())
+
 
 class KnowledgeFileRepository:
     """读写知识库文件及解析状态。"""
@@ -102,15 +111,15 @@ class KnowledgeFileRepository:
         )
         return result.scalar_one_or_none()
 
-    async def list_names_for_user(
+    async def list_for_user(
         self,
         *,
         uid: str,
         kb_id: str,
-    ) -> list[str]:
-        """按上传时间倒序列出用户知识库中的原始文件名。"""
+    ) -> list[KnowledgeFile]:
+        """按上传时间倒序列出用户知识库中的文件。"""
         result = await self.session.execute(
-            select(KnowledgeFile.original_file_name)
+            select(KnowledgeFile)
             .join(
                 KnowledgeBase,
                 KnowledgeFile.kb_id == KnowledgeBase.kb_id,

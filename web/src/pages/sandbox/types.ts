@@ -27,3 +27,12 @@ export interface SandboxWorkspaceResponse {
     file_type?: "code" | "data" | "document" | "image" | null;
   }>;
 }
+
+export interface SandboxFileContentResponse {
+  thread_id: string;
+  sandbox_id: string;
+  path: string;
+  content: string;
+  encoding: string;
+  truncated: boolean;
+}

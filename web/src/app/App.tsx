@@ -15,10 +15,16 @@ export default function App() {
       "/library": "Library",
       "/knowledge": "Knowledge",
       "/agent": "Agent",
-      "/static": "Map",
+      "/static": "Satellite",
       "/sandbox": "Sandbox",
     };
-    const page = titles[location.pathname] ?? (location.pathname.startsWith("/c/") ? "Chat" : "AM");
+    const page =
+      titles[location.pathname] ??
+      (location.pathname.startsWith("/c/")
+        ? "Chat"
+        : location.pathname.startsWith("/knowledge/")
+          ? "Knowledge"
+          : "AM");
     document.title = `${t(page)} · AM`;
   }, [location.pathname, t]);
   useEffect(() => {

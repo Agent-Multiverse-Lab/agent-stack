@@ -40,9 +40,9 @@ class FakeKnowledgeBaseRepository:
 class FakeKnowledgeFileRepository:
     """在内存中维护知识文件状态。"""
 
-    def __init__(self, knowledge_file=None, *, file_names=None) -> None:
+    def __init__(self, knowledge_file=None, *, files=None) -> None:
         self.knowledge_file = knowledge_file
-        self.file_names = file_names or []
+        self.files = files or []
 
     async def create(self, **values):
         """创建上传文件记录。"""
@@ -58,9 +58,9 @@ class FakeKnowledgeFileRepository:
         """返回当前文件。"""
         return self.knowledge_file
 
-    async def list_names_for_user(self, **kwargs):
-        """返回当前知识库中的文件名。"""
-        return self.file_names
+    async def list_for_user(self, **kwargs):
+        """返回当前知识库中的文件。"""
+        return self.files
 
     async def update_status(
         self,
@@ -147,24 +147,27 @@ class KnowledgeParseServiceTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.knowledge_base_repository_patch.stop)
         self.addCleanup(self.knowledge_file_repository_patch.stop)
 
-    async def test_list_file_names_for_current_knowledge_base(self) -> None:
-        """只返回当前用户指定知识库中的原始文件名。"""
-        self.knowledge_files.file_names = ["接口说明.md", "产品需求.pdf"]
+    async def test_list_files_for_current_knowledge_base(self) -> None:
+        """只返回当前用户指定知识库中的文件。"""
+        self.knowledge_files.files = [
+            SimpleNamespace(file_id="file-1"),
+            SimpleNamespace(file_id="file-2"),
+        ]
 
-        result = await knowledge_service.list_file_names(
+        result = await knowledge_service.list_files(
             FakeSession(),
             uid="user-1",
             kb_id="kb-1",
         )
 
-        self.assertEqual(["接口说明.md", "产品需求.pdf"], result)
+        self.assertEqual(["file-1", "file-2"], [item.file_id for item in result])
 
-    async def test_list_file_names_rejects_unknown_knowledge_base(self) -> None:
+    async def test_list_files_rejects_unknown_knowledge_base(self) -> None:
         """不存在或不属于当前用户的知识库不能读取文件列表。"""
         self.knowledge_bases.exists = False
 
         with self.assertRaisesRegex(LookupError, "知识库不存在"):
-            await knowledge_service.list_file_names(
+            await knowledge_service.list_files(
                 FakeSession(),
                 uid="user-1",
                 kb_id="kb-1",

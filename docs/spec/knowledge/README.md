@@ -7,4 +7,5 @@ Knowledge Domain 关注知识文件与检索能力，不承载 Run 状态。先�
 | --- | --- | --- |
 | ingestion | [spec.md](ingestion/spec.md) | 上传、解析、切块、索引 |
 | retrieval | [spec.md](retrieval/spec.md) | 检索与重排 |
+| graph | [spec.md](graph/spec.md) | 实体抽取、图谱查询、实体检索与知识库问答 |
 | evaluation | [spec.md](evaluation/spec.md) | 知识链路质量评估 |

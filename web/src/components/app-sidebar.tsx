@@ -71,7 +71,8 @@ export function AppSidebar({
         logo: <BookOpenCheckIcon />,
         url: "/knowledge",
         isActive:
-          location.pathname === "/knowledge" || location.pathname === "/library",
+          location.pathname.startsWith("/knowledge") ||
+          location.pathname === "/library",
       },
       {
         name: "Sandbox",
@@ -98,7 +99,7 @@ export function AppSidebar({
         title: "Knowledge",
         url: "/knowledge",
         icon: <BookOpenCheckIcon />,
-        isActive: location.pathname === "/knowledge",
+        isActive: location.pathname.startsWith("/knowledge"),
       },
       {
         title: "Agent",
@@ -107,7 +108,7 @@ export function AppSidebar({
         isActive: location.pathname === "/agent",
       },
       {
-        title: "Static",
+        title: "Satellite",
         url: "/static",
         icon: <FilesIcon />,
         isActive: location.pathname === "/static",

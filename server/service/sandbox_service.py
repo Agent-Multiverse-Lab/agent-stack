@@ -8,12 +8,18 @@ from pathlib import PurePosixPath
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.entities.sandbox import SandboxWorkspaceEntry, SandboxWorkspaceResponse
+from server.entities.sandbox import (
+    SandboxFileContentResponse,
+    SandboxWorkspaceEntry,
+    SandboxWorkspaceResponse,
+)
 from src.agents.backends.sandbox import get_sandbox_provider
 from src.database.repositories import ConversationRepository
 
 WORKSPACE_PATH = "/workspace"
 SANDBOX_WORKSPACE_PATH = "/home/gem/user-data/workspace"
+MAX_FILE_PREVIEW_LINES = 2000
+MAX_FILE_PREVIEW_CHARS = 200_000
 
 _CODE_EXTENSIONS = {
     ".c", ".cpp", ".css", ".go", ".html", ".java", ".js", ".jsx",
@@ -61,13 +67,12 @@ def _file_type(path: str) -> str | None:
     return "document" if suffix else None
 
 
-async def list_workspace(
+async def _get_owned_sandbox(
     db: AsyncSession,
     *,
     uid: str,
     thread_id: str,
-    path: str,
-) -> SandboxWorkspaceResponse:
+):
     normalized_thread_id = str(thread_id).strip()
     conversation = await ConversationRepository(
         db
@@ -75,7 +80,6 @@ async def list_workspace(
     if conversation is None:
         raise LookupError("Conversation not found")
 
-    workspace_path = normalize_workspace_path(path)
     provider = get_sandbox_provider()
     sandbox_id = await provider.acquire_async(
         uid,
@@ -86,6 +90,22 @@ async def list_workspace(
     sandbox = provider.get(sandbox_id)
     if sandbox is None:
         raise RuntimeError("Sandbox execution backend is unavailable")
+    return normalized_thread_id, sandbox_id, sandbox
+
+
+async def list_workspace(
+    db: AsyncSession,
+    *,
+    uid: str,
+    thread_id: str,
+    path: str,
+) -> SandboxWorkspaceResponse:
+    workspace_path = normalize_workspace_path(path)
+    normalized_thread_id, sandbox_id, sandbox = await _get_owned_sandbox(
+        db,
+        uid=uid,
+        thread_id=thread_id,
+    )
 
     result = await asyncio.to_thread(sandbox.ls, to_sandbox_path(workspace_path))
     error = getattr(result, "error", None)
@@ -113,4 +133,54 @@ async def list_workspace(
         sandbox_id=sandbox_id,
         path=workspace_path,
         entries=entries,
+    )
+
+
+async def read_workspace_file(
+    db: AsyncSession,
+    *,
+    uid: str,
+    thread_id: str,
+    path: str,
+) -> SandboxFileContentResponse:
+    workspace_path = normalize_workspace_path(path)
+    if workspace_path == WORKSPACE_PATH:
+        raise ValueError("path must point to a file inside /workspace")
+
+    normalized_thread_id, sandbox_id, sandbox = await _get_owned_sandbox(
+        db,
+        uid=uid,
+        thread_id=thread_id,
+    )
+    result = await asyncio.to_thread(
+        sandbox.read,
+        to_sandbox_path(workspace_path),
+        0,
+        MAX_FILE_PREVIEW_LINES + 1,
+    )
+    error = getattr(result, "error", None)
+    if error:
+        raise RuntimeError(str(error))
+
+    file_data = getattr(result, "file_data", None) or {}
+    content = str(file_data.get("content") or "")
+    encoding = str(file_data.get("encoding") or "utf-8")
+    if encoding.lower().replace("_", "-") not in {"utf-8", "utf8"}:
+        raise ValueError("file is not UTF-8 text")
+
+    lines = content.splitlines(keepends=True)
+    truncated = len(lines) > MAX_FILE_PREVIEW_LINES
+    if truncated:
+        content = "".join(lines[:MAX_FILE_PREVIEW_LINES])
+    if len(content) > MAX_FILE_PREVIEW_CHARS:
+        content = content[:MAX_FILE_PREVIEW_CHARS]
+        truncated = True
+
+    return SandboxFileContentResponse(
+        thread_id=normalized_thread_id,
+        sandbox_id=sandbox_id,
+        path=workspace_path,
+        content=content,
+        encoding=encoding,
+        truncated=truncated,
     )

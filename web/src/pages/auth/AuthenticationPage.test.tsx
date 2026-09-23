@@ -201,7 +201,7 @@ describe("authentication routes", () => {
   it("shows the shared sidebar on the knowledge route", async () => {
     localStorage.setItem("au.access_token", "test-token")
     renderRoute("/knowledge")
-    expect(await screen.findByRole("heading", { name: "Knowledge Chat" })).toBeTruthy()
+    expect(await screen.findByRole("heading", { name: "Knowledge Bases" })).toBeTruthy()
     expect(screen.getAllByRole("navigation", { name: "Primary navigation" })).toHaveLength(1)
   })
 })

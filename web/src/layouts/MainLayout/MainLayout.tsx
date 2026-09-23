@@ -55,14 +55,16 @@ export default function MainLayout() {
 
   const page = location.pathname.startsWith("/c/")
     ? "Chat"
-    : ({
-        "/": "Chat",
-        "/library": "Library",
-        "/knowledge": "Knowledge",
-        "/agent": "Agent",
-        "/static": "Map",
-        "/sandbox": "Sandbox",
-      } as Record<string, string>)[location.pathname] ?? "Chat";
+    : location.pathname.startsWith("/knowledge/")
+      ? "Knowledge"
+      : ({
+          "/": "Chat",
+          "/library": "Library",
+          "/knowledge": "Knowledge",
+          "/agent": "Agent",
+          "/static": "Satellite",
+          "/sandbox": "Sandbox",
+        } as Record<string, string>)[location.pathname] ?? "Chat";
 
   return (
     <>

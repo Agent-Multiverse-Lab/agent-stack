@@ -5,6 +5,7 @@ from hashlib import sha256
 from typing import Any
 from uuid import uuid4
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.configs import config as sys_config
@@ -22,10 +23,13 @@ from src.knowledge.base import KnowledgeRecord
 from src.knowledge.embedding_service import EmbeddingService
 from src.knowledge.factory import KnowledgeFactory
 from src.knowledge.flow import Pipeline
+from src.knowledge.graph import GraphExtractor
 from src.knowledge.store.milvus.milvus import MilvusKnowledge
+from src.knowledge.store.neo4j.neo4j_store import get_graph_store
 from src.model import (
     RerankDocument,
     load_embedding_model,
+    load_model,
     load_reranker,
     resolve_embedding_model,
 )
@@ -33,6 +37,18 @@ from src.storage.minio import get_storage, sanitize_filename
 from src.utils import logger
 
 _KNOWLEDGE_BUCKET = "knowledgebases"
+_ENTITY_COLLECTION_PREFIX = "kge_"
+_ENTITY_DEDUPE_THRESHOLD = 0.92
+_EXTRACT_MAX_CHARS = 60_000
+_CITATION_EXCERPT_CHARS = 300
+
+_CHAT_SYSTEM_PROMPT = (
+    "你是知识库问答助手。只能根据提供的检索片段回答用户问题，"
+    "禁止编造片段中没有的信息。回答使用中文，条理清晰。"
+    "引用片段内容时，在相关句末标注片段编号，例如[1]、[2]。"
+    "如果片段信息不足以回答，请明确说明。"
+)
+_CHAT_NO_ANSWER = "知识库中未找到与问题相关的内容。"
 
 
 async def create_knowledge_base(
@@ -106,26 +122,6 @@ async def upload_file(
         )
         raise
     return knowledge_file
-
-
-async def list_file_names(
-    db: AsyncSession,
-    *,
-    uid: str,
-    kb_id: str,
-) -> list[str]:
-    """列出当前用户指定知识库中的原始文件名。"""
-    knowledge_base = await KnowledgeBaseRepository(db).get_for_user(
-        uid=uid,
-        kb_id=kb_id,
-    )
-    if knowledge_base is None:
-        raise LookupError(f"知识库不存在：{kb_id}")
-
-    return await KnowledgeFileRepository(db).list_names_for_user(
-        uid=uid,
-        kb_id=kb_id,
-    )
 
 
 async def parse_file(
@@ -458,6 +454,477 @@ async def status(
     return _binding_result(binding, status=result)
 
 
+async def list_knowledge_bases(
+    db: AsyncSession,
+    *,
+    uid: str,
+) -> list[KnowledgeBase]:
+    """列出当前用户的全部知识库。"""
+    return await KnowledgeBaseRepository(db).list_for_user(uid=uid)
+
+
+async def get_knowledge_base(
+    db: AsyncSession,
+    *,
+    uid: str,
+    kb_id: str,
+) -> KnowledgeBase:
+    """读取属于当前用户的指定知识库。"""
+    knowledge_base = await KnowledgeBaseRepository(db).get_for_user(
+        uid=uid,
+        kb_id=kb_id,
+    )
+    if knowledge_base is None:
+        raise LookupError(f"知识库不存在：{kb_id}")
+    return knowledge_base
+
+
+async def delete_knowledge_base(
+    db: AsyncSession,
+    *,
+    uid: str,
+    kb_id: str,
+) -> dict[str, Any]:
+    """删除知识库及其文件、向量与图谱数据。"""
+    knowledge_base = await KnowledgeBaseRepository(db).get_for_user(
+        uid=uid,
+        kb_id=kb_id,
+    )
+    if knowledge_base is None:
+        raise LookupError(f"知识库不存在：{kb_id}")
+
+    files = await KnowledgeFileRepository(db).list_for_user(
+        uid=uid,
+        kb_id=kb_id,
+    )
+    binding = await KnowledgeEmbeddingBindingRepository(db).get(
+        uid=uid,
+        kb_id=kb_id,
+    )
+    # 外部数据清理尽力而为，PostgreSQL 删除为准。
+    knowledge = _get_knowledge("milvus")
+    if binding is not None:
+        for collection_name in (
+            binding.collection_name,
+            _entity_collection_name(uid, kb_id),
+        ):
+            try:
+                await knowledge.drop_collection(
+                    collection_name=collection_name
+                )
+            except Exception:
+                logger.exception(
+                    "知识库 Milvus 集合删除失败：%s", collection_name
+                )
+    try:
+        await get_graph_store().delete_by_kb(kb_id=kb_id)
+    except Exception:
+        logger.exception("知识库 Neo4j 图谱删除失败：%s", kb_id)
+    try:
+        await get_storage().adelete_objects_by_prefix(
+            _KNOWLEDGE_BUCKET,
+            f"knowledge-files/{uid}/{kb_id}/",
+        )
+    except Exception:
+        logger.exception("知识库 RustFS 对象删除失败：%s", kb_id)
+
+    await db.delete(knowledge_base)
+    await db.commit()
+    return {"kb_id": kb_id, "deleted_file_count": len(files)}
+
+
+async def list_files(
+    db: AsyncSession,
+    *,
+    uid: str,
+    kb_id: str,
+) -> list[KnowledgeFile]:
+    """列出当前用户指定知识库中的全部文件。"""
+    knowledge_base = await KnowledgeBaseRepository(db).get_for_user(
+        uid=uid,
+        kb_id=kb_id,
+    )
+    if knowledge_base is None:
+        raise LookupError(f"知识库不存在：{kb_id}")
+
+    return await KnowledgeFileRepository(db).list_for_user(
+        uid=uid,
+        kb_id=kb_id,
+    )
+
+
+async def delete_file(
+    db: AsyncSession,
+    *,
+    uid: str,
+    kb_id: str,
+    file_id: str,
+) -> dict[str, Any]:
+    """删除知识文件及其解析、索引与图谱数据。"""
+    knowledge_files = KnowledgeFileRepository(db)
+    file_record = await knowledge_files.get_for_user(
+        uid=uid,
+        kb_id=kb_id,
+        file_id=file_id,
+    )
+    if file_record is None:
+        raise LookupError(f"知识文件不存在：{file_id}")
+    if file_record.status in {"parsing", "indexing", "extracting"}:
+        raise ValueError(f"知识文件正在处理中，无法删除：{file_record.status}")
+
+    knowledge = _get_knowledge("milvus")
+    binding = await KnowledgeEmbeddingBindingRepository(db).get(
+        uid=uid,
+        kb_id=kb_id,
+    )
+    if binding is not None:
+        for collection_name in (
+            binding.collection_name,
+            _entity_collection_name(uid, kb_id),
+        ):
+            await knowledge.delete(
+                collection_name=collection_name,
+                filter=f'file_id == "{file_id}"',
+            )
+    await get_graph_store().delete_by_file(kb_id=kb_id, file_id=file_id)
+    await get_storage().adelete_objects_by_prefix(
+        _KNOWLEDGE_BUCKET,
+        f"knowledge-files/{uid}/{kb_id}/{file_id}/",
+    )
+
+    await db.delete(file_record)
+    await db.commit()
+    return {"file_id": file_id}
+
+
+async def get_file_markdown(
+    db: AsyncSession,
+    *,
+    uid: str,
+    kb_id: str,
+    file_id: str,
+) -> dict[str, Any]:
+    """读取知识文件已解析的 Markdown 产物。"""
+    file_record = await KnowledgeFileRepository(db).get_for_user(
+        uid=uid,
+        kb_id=kb_id,
+        file_id=file_id,
+    )
+    if file_record is None:
+        raise LookupError(f"知识文件不存在：{file_id}")
+    if not file_record.markdown_object_name:
+        raise LookupError("解析结果不存在")
+
+    markdown = await get_storage().adownload_file(
+        _KNOWLEDGE_BUCKET,
+        file_record.markdown_object_name,
+    )
+    return {
+        "file_id": file_id,
+        "markdown": markdown.decode(errors="ignore"),
+    }
+
+
+async def extract_file(
+    db: AsyncSession,
+    *,
+    uid: str,
+    kb_id: str,
+    file_id: str,
+) -> dict[str, Any]:
+    """抽取知识文件实体关系并写入 Neo4j 与 Milvus 实体集合。"""
+    knowledge_files = KnowledgeFileRepository(db)
+    file_record = await knowledge_files.get_for_user(
+        uid=uid,
+        kb_id=kb_id,
+        file_id=file_id,
+    )
+    if file_record is None:
+        raise LookupError(f"知识文件不存在：{file_id}")
+    if file_record.status not in {"indexed", "extracted"}:
+        raise ValueError(
+            f"知识文件当前状态不允许抽取：{file_record.status}"
+        )
+    if not file_record.markdown_object_name:
+        raise ValueError("知识文件缺少已解析的 Markdown")
+    re_extract = file_record.status == "extracted"
+
+    await knowledge_files.update_status(
+        file_record,
+        status="extracting",
+        error_message=None,
+    )
+    await db.commit()
+
+    storage = get_storage()
+    entity_store = _get_knowledge("milvus")
+    graph_store = get_graph_store()
+    entity_collection = _entity_collection_name(uid, kb_id)
+    try:
+        markdown = await storage.adownload_file(
+            _KNOWLEDGE_BUCKET,
+            file_record.markdown_object_name,
+        )
+        markdown_text = markdown.decode(errors="ignore")
+        if len(markdown_text) > _EXTRACT_MAX_CHARS:
+            logger.warning(
+                "知识图谱抽取截断文档：%s 原始 %s 字符",
+                file_id,
+                len(markdown_text),
+            )
+            markdown_text = markdown_text[:_EXTRACT_MAX_CHARS]
+        result = await GraphExtractor().extract(markdown_text)
+
+        entities = []
+        seen_names: set[str] = set()
+        for entity in result.entities:
+            key = entity.name.strip().casefold()
+            if not key or key in seen_names:
+                continue
+            seen_names.add(key)
+            entities.append(entity)
+
+        if re_extract:
+            await entity_store.delete(
+                collection_name=entity_collection,
+                filter=f'file_id == "{file_id}"',
+            )
+            await graph_store.delete_by_file(kb_id=kb_id, file_id=file_id)
+
+        name_to_id: dict[str, str] = {}
+        new_entities: list[dict[str, Any]] = []
+        entity_rows: list[dict[str, Any]] = []
+        binding = (
+            await _require_binding(db, uid, kb_id) if entities else None
+        )
+        if binding is not None:
+            embedding, _, _ = _create_embedding_service(
+                binding.embedding_model_spec,
+                expected_dimension=binding.embedding_dimension,
+                batch_size=binding.embedding_batch_size,
+            )
+            vectors = await embedding.embed_texts(
+                [entity.name for entity in entities]
+            )
+            for entity, vector in zip(entities, vectors, strict=True):
+                name_key = entity.name.strip().casefold()
+                hits = await entity_store.search_entities(
+                    collection_name=entity_collection,
+                    vector=vector,
+                    limit=1,
+                )
+                if (
+                    hits
+                    and hits[0]["distance"] >= _ENTITY_DEDUPE_THRESHOLD
+                ):
+                    name_to_id[name_key] = hits[0]["id"]
+                    continue
+                entity_id = uuid4().hex
+                name_to_id[name_key] = entity_id
+                new_entities.append(
+                    {
+                        "entity_id": entity_id,
+                        "name": entity.name,
+                        "type": entity.type,
+                        "description": entity.description,
+                    }
+                )
+                entity_rows.append(
+                    {
+                        "id": entity_id,
+                        "name": entity.name,
+                        "entity_type": entity.type,
+                        "description": entity.description,
+                        "file_id": file_id,
+                        "entity_embeding": vector,
+                    }
+                )
+        if new_entities:
+            await graph_store.upsert_entities(
+                kb_id=kb_id,
+                file_id=file_id,
+                entities=new_entities,
+            )
+            await entity_store.upsert_entities(
+                collection_name=entity_collection,
+                dimension=binding.embedding_dimension,
+                rows=entity_rows,
+            )
+
+        relations: list[dict[str, Any]] = []
+        seen_relations: set[tuple[str, str, str]] = set()
+        for relation in result.relations:
+            source_id = name_to_id.get(relation.source.strip().casefold())
+            target_id = name_to_id.get(relation.target.strip().casefold())
+            if not source_id or not target_id or source_id == target_id:
+                continue
+            signature = (source_id, target_id, relation.type)
+            if signature in seen_relations:
+                continue
+            seen_relations.add(signature)
+            relations.append(
+                {
+                    "relation_id": uuid4().hex,
+                    "source_entity_id": source_id,
+                    "target_entity_id": target_id,
+                    "type": relation.type,
+                }
+            )
+        if relations:
+            await graph_store.create_relations(
+                kb_id=kb_id,
+                file_id=file_id,
+                relations=relations,
+            )
+
+        await knowledge_files.update_status(
+            file_record,
+            status="extracted",
+            error_message=None,
+        )
+        await db.commit()
+        return {
+            "kb_id": kb_id,
+            "file_id": file_id,
+            "status": "extracted",
+            "entity_count": len(entities),
+            "relation_count": len(relations),
+        }
+    except Exception as exc:
+        await db.rollback()
+        file_record = await knowledge_files.get_for_user(
+            uid=uid,
+            kb_id=kb_id,
+            file_id=file_id,
+        )
+        if file_record is not None:
+            await knowledge_files.update_status(
+                file_record,
+                status="indexed",
+                error_message=str(exc)[:2000],
+            )
+            await db.commit()
+        raise
+
+
+async def get_graph(
+    db: AsyncSession,
+    *,
+    uid: str,
+    kb_id: str,
+) -> dict[str, Any]:
+    """读取知识库全量实体与关系图谱。"""
+    knowledge_base = await KnowledgeBaseRepository(db).get_for_user(
+        uid=uid,
+        kb_id=kb_id,
+    )
+    if knowledge_base is None:
+        raise LookupError(f"知识库不存在：{kb_id}")
+
+    graph = await get_graph_store().get_graph(kb_id=kb_id)
+    return {
+        "kb_id": kb_id,
+        "nodes": graph["nodes"],
+        "edges": graph["edges"],
+        "entity_count": len(graph["nodes"]),
+        "relation_count": len(graph["edges"]),
+    }
+
+
+async def search_entities(
+    db: AsyncSession,
+    *,
+    uid: str,
+    kb_id: str,
+    query: str,
+    limit: int,
+) -> dict[str, Any]:
+    """使用实体向量检索知识库实体。"""
+    binding = await _require_binding(db, uid, kb_id)
+    embedding, _, _ = _create_embedding_service(
+        binding.embedding_model_spec,
+        expected_dimension=binding.embedding_dimension,
+        batch_size=binding.embedding_batch_size,
+    )
+    vector = await embedding.embed_query(query)
+    hits = await _get_knowledge("milvus").search_entities(
+        collection_name=_entity_collection_name(uid, kb_id),
+        vector=vector,
+        limit=limit,
+    )
+    return {
+        "kb_id": kb_id,
+        "hits": [
+            {
+                "entity_id": hit["id"],
+                "name": hit["entity"]["name"],
+                "type": hit["entity"]["entity_type"],
+                "description": hit["entity"]["description"],
+                "file_id": hit["entity"]["file_id"],
+                "similarity": hit["distance"],
+            }
+            for hit in hits
+        ],
+    }
+
+
+async def chat(
+    db: AsyncSession,
+    *,
+    uid: str,
+    kb_id: str,
+    query: str,
+    limit: int,
+) -> dict[str, Any]:
+    """基于知识库检索结果同步生成带引用的回答。"""
+    result = await search(
+        db,
+        uid=uid,
+        kb_id=kb_id,
+        query=query,
+        limit=limit,
+    )
+    hits = result["hits"]
+    citations: list[dict[str, Any]] = []
+    for hit in hits:
+        entity = hit["entity"]
+        metadata = dict(entity.get("metadata") or {})
+        citations.append(
+            {
+                "file_id": entity["file_id"],
+                "file_name": metadata.get("file_name") or entity["file_id"],
+                "chunk_id": entity["chunk_id"],
+                "excerpt": entity["chunk"][:_CITATION_EXCERPT_CHARS],
+            }
+        )
+    if not citations:
+        return {
+            "kb_id": kb_id,
+            "answer": _CHAT_NO_ANSWER,
+            "citations": [],
+        }
+
+    segments = "\n\n".join(
+        f"[{index}]（来源文件：{citation['file_name']}）\n"
+        f"{hits[position]['entity']['chunk']}"
+        for position, (citation, index) in enumerate(
+            zip(citations, range(1, len(citations) + 1), strict=True)
+        )
+    )
+    model = load_model(sys_config.default_model)
+    response = await model.ainvoke(
+        [
+            SystemMessage(content=_CHAT_SYSTEM_PROMPT),
+            HumanMessage(content=f"{segments}\n\n用户问题：{query}"),
+        ]
+    )
+    return {
+        "kb_id": kb_id,
+        "answer": response.content,
+        "citations": citations,
+    }
+
+
 def _get_knowledge(knowledge_type: str) -> MilvusKnowledge:
     """读取指定类型的向量存储。"""
     knowledge = KnowledgeFactory.create(knowledge_type)
@@ -574,6 +1041,12 @@ def _collection_name(uid: str, kb_id: str) -> str:
     """生成用户隔离且满足 Milvus 命名约束的集合名。"""
     digest = sha256(f"{uid}:{kb_id}".encode()).hexdigest()[:32]
     return f"kb_{digest}"
+
+
+def _entity_collection_name(uid: str, kb_id: str) -> str:
+    """生成实体向量集合名，与分块集合共用同一摘要。"""
+    digest = sha256(f"{uid}:{kb_id}".encode()).hexdigest()[:32]
+    return f"{_ENTITY_COLLECTION_PREFIX}{digest}"
 
 
 def _binding_result(

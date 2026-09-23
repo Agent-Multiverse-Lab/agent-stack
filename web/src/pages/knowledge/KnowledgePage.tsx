@@ -1,9 +1,21 @@
-import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { useRef, useState } from "react";
-import type { CSSProperties } from "react";
-import { toast } from "sonner";
+import { useEffect, useState } from "react"
+import { useNavigate } from "react-router"
+import { BookOpen, MoreHorizontal, Plus, Trash2 } from "lucide-react"
+import { toast } from "sonner"
+
+import {
+  createKnowledgeBase,
+  deleteKnowledgeBase,
+  listKnowledgeBases,
+} from "@/api/knowledge"
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardAction,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -11,432 +23,260 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@/components/ui/dropdown-menu"
 import {
-  FileText,
-  Files,
-  Globe,
-  Map,
-  MessagesSquare,
-  MoreHorizontal,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
-  PanelsTopLeft,
-  Plus,
-  Presentation,
-  Search,
-} from "lucide-react";
-import type { KnowledgeFileItem } from "@/types/knowledge";
-import { useTranslation } from "@/i18n";
+  Empty,
+  EmptyDescription,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
+import { Textarea } from "@/components/ui/textarea"
+import { useTranslation } from "@/i18n"
+import type { KnowledgeBase } from "@/types/knowledge"
 
-const supported = new Set([
-  "pdf",
-  "doc",
-  "docx",
-  "txt",
-  "md",
-  "markdown",
-  "csv",
-  "xls",
-  "xlsx",
-  "ppt",
-  "pptx",
-  "png",
-  "jpg",
-  "jpeg",
-  "webp",
-]);
 export default function KnowledgePage() {
-  const { t } = useTranslation();
-  const [files, setFiles] = useState<KnowledgeFileItem[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [confirmRemove, setConfirmRemove] = useState<KnowledgeFileItem | null>(
-    null,
-  );
-  const [filesCollapsed, setFilesCollapsed] = useState(false);
-  const [toolsCollapsed, setToolsCollapsed] = useState(false);
-  const [query, setQuery] = useState("");
-  const [appliedQuery, setAppliedQuery] = useState("");
-  const [draft, setDraft] = useState("");
-  const fileInput = useRef<HTMLInputElement>(null);
-  const visible = files.filter((file) =>
-    file.name.toLowerCase().includes(appliedQuery.toLowerCase()),
-  );
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const [bases, setBases] = useState<KnowledgeBase[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+  const [createOpen, setCreateOpen] = useState(false)
+  const [name, setName] = useState("")
+  const [description, setDescription] = useState("")
+  const [creating, setCreating] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<KnowledgeBase | null>(null)
 
-  function addFiles(selected: File[]) {
-    const keys = new Set(
-      files.map((file) => `${file.name}:${file.size}:${file.lastModified}`),
-    );
-    const additions = selected
-      .filter((file) => {
-        const key = `${file.name}:${file.size}:${file.lastModified}`;
-        if (keys.has(key)) return false;
-        keys.add(key);
-        return true;
-      })
-      .filter((file) => {
-        const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-        if (!supported.has(extension)) {
-          toast.warning(t("{{file}} is not a supported source type.", { file: file.name }));
-          return false;
-        }
-        return true;
-      })
-      .map((file) => ({
-        id: crypto.randomUUID(),
-        source: file,
-        name: file.name,
-        size: file.size,
-        mimeType: file.type,
-        extension: file.name.split(".").pop()?.toUpperCase() || "FILE",
-        lastModified: file.lastModified,
-        status: "selected" as const,
-      }));
-    if (!additions.length) return;
-    setFiles((previous) => [...previous, ...additions]);
-    setSelectedId((previous) => previous ?? additions[0].id);
-  }
-  function removeFile(id: string) {
-    const index = files.findIndex((file) => file.id === id);
-    const remaining = files.filter((file) => file.id !== id);
-    setFiles(remaining);
-    if (selectedId === id)
-      setSelectedId(remaining[index]?.id ?? remaining[index - 1]?.id ?? null);
-  }
-  function openFile(file: KnowledgeFileItem, download: boolean) {
-    const url = URL.createObjectURL(file.source);
-    if (download) {
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = file.name;
-      link.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 0);
-    } else {
-      window.open(url, "_blank", "noopener,noreferrer");
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  useEffect(() => {
+    let active = true
+    loadBases()
+    async function loadBases() {
+      setLoading(true)
+      setError("")
+      try {
+        const items = await listKnowledgeBases()
+        if (active) setBases(items)
+      } catch (caught) {
+        if (active)
+          setError(
+            caught instanceof Error ? caught.message : t("Request failed")
+          )
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    return () => {
+      active = false
+    }
+  }, [t])
+
+  async function refresh() {
+    setError("")
+    try {
+      setBases(await listKnowledgeBases())
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : t("Request failed")
+      )
     }
   }
-  const columns = filesCollapsed
-    ? toolsCollapsed
-      ? "56px minmax(0,1fr) 56px"
-      : "56px minmax(0,1.92fr) minmax(0,1fr)"
-    : toolsCollapsed
-      ? "minmax(0,1fr) minmax(0,1.92fr) 56px"
-      : "minmax(0,1fr) minmax(0,1.92fr) minmax(0,1fr)";
+
+  async function handleCreate() {
+    setCreating(true)
+    try {
+      const base = await createKnowledgeBase({ name, description })
+      setCreateOpen(false)
+      setName("")
+      setDescription("")
+      await refresh()
+      navigate(`/knowledge/${base.kb_id}`)
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : t("Request failed"))
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  async function handleDelete() {
+    if (!confirmDelete) return
+    try {
+      await deleteKnowledgeBase(confirmDelete.kb_id)
+      toast.success(t("{{name}} will be permanently deleted.", { name: confirmDelete.name }))
+      setConfirmDelete(null)
+      await refresh()
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : t("Request failed"))
+    }
+  }
+
   return (
-    <div className="@container relative flex h-full w-full overflow-hidden bg-background font-sans text-foreground">
-      <main
-        className="knowledge-workspace grid min-h-0 min-w-0 w-full flex-1 overflow-hidden bg-background text-sm [grid-template-columns:var(--knowledge-columns)] [grid-template-rows:minmax(0,1fr)] @max-[720px]:grid-cols-1 @max-[720px]:grid-rows-none @max-[720px]:overflow-y-auto"
-        style={{
-          "--knowledge-columns": columns,
-          transition: "grid-template-columns 240ms ease",
-        } as CSSProperties}
-      >
-        <section className="knowledge-files grid min-h-0 min-w-0 overflow-hidden border-r border-border bg-background [grid-template-rows:48px_minmax(0,1fr)] @max-[720px]:border-r-0 @max-[720px]:border-b @max-[720px]:min-h-[calc(100dvh-92px)]">
-            <header className="flex h-12 items-center justify-between border-b border-border px-3">
-              <h2
-                className={
-                  filesCollapsed
-                    ? "overflow-hidden opacity-0 @max-[720px]:opacity-100"
-                    : "font-semibold"
-                }
-              >
-                {t("Files")}
-              </h2>
-              <Button variant="ghost"
-                type="button"
-                aria-label={filesCollapsed ? t("Expand files") : t("Collapse files")}
-                aria-expanded={!filesCollapsed}
-                aria-controls="knowledge-files-body"
-                onClick={() => setFilesCollapsed(!filesCollapsed)}
-                className="grid size-10 shrink-0 place-items-center text-muted-foreground @max-[720px]:hidden"
-              >
-                {filesCollapsed ? (
-                  <PanelLeftOpen size={18} />
-                ) : (
-                  <PanelLeftClose size={18} />
-                )}
-              </Button>
-            </header>
-            <div
-              id="knowledge-files-body"
-              className={`grid min-h-0 gap-3 overflow-hidden p-4 [grid-template-rows:auto_auto_minmax(0,1fr)] ${filesCollapsed ? "invisible opacity-0 @max-[720px]:visible @max-[720px]:opacity-100" : ""}`}
-            >
-              <Input
-                ref={fileInput}
-                type="file"
-                multiple
-                accept=".pdf,.doc,.docx,.txt,.md,.markdown,.csv,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.webp"
-                className="hidden"
-                onChange={(event) => {
-                  addFiles(Array.from(event.target.files ?? []));
-                  event.target.value = "";
-                }}
-              />
-              <Button variant="ghost"
-                type="button"
-                className="h-auto justify-start gap-3 text-left font-semibold"
-                onClick={() => fileInput.current?.click()}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  addFiles(Array.from(event.dataTransfer.files));
-                }}
-              >
-                <span className="grid size-9 place-items-center rounded-[16px] border border-border">
-                  <Plus size={18} />
-                </span>
-                {t("Add Sources")}
-              </Button>
-              <form
-                role="search"
-                className="grid gap-1 rounded-[16px] border border-border p-[0.45rem]"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  setAppliedQuery(query.trim());
-                }}
-              >
-                <Input
-                  value={query}
-                  onChange={(event) => {
-                    setQuery(event.target.value);
-                    if (!event.target.value.trim()) setAppliedQuery("");
-                  }}
-                  aria-label={t("Search files")}
-                  placeholder={t("Search files")}
-                  className="min-w-0 bg-transparent px-2 py-1 outline-none"
-                />
-                <div className="flex justify-between">
-                  <Globe size={18} className="text-muted-foreground" />
-                  <Button variant="default"
-                    type="submit"
-                    aria-label={t("Search")}
-                    className="grid size-8 place-items-center rounded-full bg-primary text-primary-foreground"
-                  >
-                    <Search size={18} />
-                  </Button>
-                </div>
-              </form>
-              <div className="min-h-0 overflow-y-auto">
-                {visible.length ? (
-                  <ul className="grid gap-1">
-                    {visible.map((file) => (
-                      <li
-                        key={file.id}
-                        className={`flex min-h-14 min-w-0 items-center gap-1 rounded-[16px] border px-2 hover:bg-accent ${selectedId === file.id ? "border-border bg-muted" : "border-transparent"}`}
-                      >
-                        <Button variant="ghost"
-                          type="button"
-                          className="h-auto min-w-0 flex-1 justify-start gap-2 text-left"
-                          aria-current={
-                            selectedId === file.id ? "true" : undefined
-                          }
-                          onClick={() => setSelectedId(file.id)}
-                        >
-                          <FileText size={17} />
-                          <span className="truncate" title={file.name}>
-                            {file.name}
-                          </span>
-                        </Button>
+    <div className="flex h-full w-full flex-col overflow-hidden bg-background font-sans text-foreground">
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border px-6">
+        <h1 className="text-base font-semibold">{t("Knowledge Bases")}</h1>
+        <Button
+          type="button"
+          variant="default"
+          className="gap-2"
+          onClick={() => setCreateOpen(true)}
+        >
+          <Plus size={16} />
+          {t("Create knowledge base")}
+        </Button>
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-6">
+        {loading ? (
+          <div className="grid min-h-48 place-items-center text-muted-foreground">
+            <Spinner className="size-6" />
+          </div>
+        ) : error ? (
+          <div className="grid min-h-48 place-items-center text-sm text-muted-foreground">
+            {error}
+          </div>
+        ) : bases.length ? (
+          <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]">
+            {bases.map((base) => (
+              <li key={base.kb_id}>
+                <Card
+                  className="cursor-pointer hover:border-border"
+                  onClick={() => navigate(`/knowledge/${base.kb_id}`)}
+                >
+                  <CardHeader className="pr-2">
+                    <div className="flex min-w-0 items-start justify-between gap-2">
+                      <div className="grid min-w-0 gap-1">
+                        <CardTitle className="truncate">{base.name}</CardTitle>
+                        <CardDescription className="line-clamp-2 min-h-8">
+                          {base.description || t("Description (optional)")}
+                        </CardDescription>
+                      </div>
+                      <CardAction>
                         <DropdownMenu>
                           <DropdownMenuTrigger
                             aria-label={t("Open file actions")}
-                            title={t("File actions")}
-                            className="grid size-11 place-items-center text-muted-foreground"
+                            title={t("Open file actions")}
+                            className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent"
                           >
-                            <MoreHorizontal size={17} />
+                            <MoreHorizontal size={16} />
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem
-                              onClick={() => openFile(file, false)}
-                            >
-                              {t("Open file")}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => openFile(file, true)}
-                            >
-                              {t("Download a copy")}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem disabled>{t("Rename")}</DropdownMenuItem>
-                            <DropdownMenuItem disabled>{t("Parse file")}</DropdownMenuItem>
-                            <DropdownMenuItem disabled>{t("Build index")}</DropdownMenuItem>
-                            <DropdownMenuItem
                               variant="destructive"
-                              onClick={() => setConfirmRemove(file)}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                setConfirmDelete(base)
+                              }}
                             >
-                              {t("Remove from list")}
+                              <Trash2 />
+                              {t("Delete knowledge base")}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="grid min-h-48 place-content-center justify-items-center gap-2 text-muted-foreground">
-                    <Files size={25} />
-                    {t("No files")}
-                  </div>
-                )}
-              </div>
-            </div>
-          </section>
-          <section
-            className="grid min-h-0 min-w-0 overflow-hidden bg-background [grid-template-rows:48px_minmax(0,1fr)_auto] @max-[720px]:min-h-[calc(100dvh-92px)]"
-            aria-labelledby="knowledge-chat-title"
-          >
-            <header className="flex h-12 items-center border-b border-border px-4">
-              <h1 id="knowledge-chat-title" className="text-base font-semibold">
-                {t("Knowledge Chat")}
-              </h1>
-            </header>
-            <div className="grid min-h-0 place-content-center justify-items-center gap-3 overflow-y-auto bg-muted text-muted-foreground">
-              <MessagesSquare size={28} />
-              <strong className="text-foreground">
-                {files.length ? t("No indexed files") : t("Add a file to start")}
-              </strong>
-            </div>
-            <form
-              className="border-t border-border p-[0.8rem]"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (
-                  draft.trim() &&
-                  files.some((file) => file.status === "indexed")
-                )
-                  setDraft("");
-              }}
-            >
-              <div className="flex items-center gap-2 rounded-[16px] border border-border bg-muted px-3 py-2">
-                <Textarea
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (
-                      event.key === "Enter" &&
-                      !event.shiftKey &&
-                      !event.nativeEvent.isComposing
-                    ) {
-                      event.preventDefault();
-                      event.currentTarget.form?.requestSubmit();
-                    }
-                  }}
-                  disabled={!files.some((file) => file.status === "indexed")}
-                  placeholder={t("Ask a question")}
-                  aria-label={t("Ask this knowledge base")}
-                  rows={1}
-                  className="min-h-0 min-w-0 flex-1 resize-none border-0 bg-transparent px-0 py-0 focus-visible:ring-0"
-                />
-                <Button variant="default"
-                  type="submit"
-                  aria-label={t("Send question")}
-                  disabled={
-                    !draft.trim() ||
-                    !files.some((file) => file.status === "indexed")
-                  }
-                  className="grid size-11 place-items-center rounded-full bg-primary text-primary-foreground disabled:bg-muted disabled:text-muted-foreground"
-                >
-                  ↑
-                </Button>
-              </div>
-            </form>
-          </section>
-          <section className="knowledge-actions grid min-h-0 min-w-0 overflow-hidden border-l border-border bg-background [grid-template-rows:48px_minmax(0,1fr)] @max-[720px]:border-l-0 @max-[720px]:border-t @max-[720px]:min-h-[calc(100dvh-92px)]">
-            <header className="flex h-12 items-center justify-between border-b border-border px-3">
-              <h2
-                className={
-                  toolsCollapsed
-                    ? "overflow-hidden opacity-0 @max-[720px]:opacity-100"
-                    : "font-semibold"
-                }
-              >
-                {t("Tools")}
-              </h2>
-              <Button variant="ghost"
-                type="button"
-                aria-label={toolsCollapsed ? t("Expand tools") : t("Collapse tools")}
-                aria-expanded={!toolsCollapsed}
-                aria-controls="knowledge-actions-body"
-                onClick={() => setToolsCollapsed(!toolsCollapsed)}
-                className="grid size-10 shrink-0 place-items-center text-muted-foreground @max-[720px]:hidden"
-              >
-                {toolsCollapsed ? (
-                  <PanelRightOpen size={18} />
-                ) : (
-                  <PanelRightClose size={18} />
-                )}
-              </Button>
-            </header>
-            <div
-              id="knowledge-actions-body"
-              className={`grid min-h-0 [grid-template-rows:repeat(2,minmax(0,1fr))] ${toolsCollapsed ? "invisible opacity-0 @max-[720px]:visible @max-[720px]:opacity-100" : ""}`}
-            >
-              <div className="grid min-h-0 content-start gap-2 overflow-y-auto p-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,104px),1fr))] [grid-auto-rows:74px]">
-                {[
-                  { label: "Road Map", icon: Map, color: "bg-muted hover:bg-accent" },
-                  { label: "PPT", icon: Presentation, color: "bg-muted hover:bg-accent" },
-                  {
-                    label: "Slides",
-                    icon: PanelsTopLeft,
-                    color: "bg-muted hover:bg-accent",
-                  },
-                ].map(({ label, icon: Icon, color }) => (
-                  <Button variant="ghost"
-                    key={label}
-                    type="button"
-                    className={`flex h-[74px] flex-col justify-center gap-1 rounded-[16px] px-3 text-left font-medium ${color}`}
-                    onClick={() => toast.info(t("{{tool}} is not connected yet.", { tool: t(label) }))}
-                  >
-                    <Icon size={18} />
-                    {t(label)}
-                  </Button>
-                ))}
-              </div>
-              <div className="border-t border-border" />
-            </div>
-          </section>
-        </main>
+                      </CardAction>
+                    </div>
+                  </CardHeader>
+                </Card>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="grid min-h-48 place-items-center">
+            <Empty>
+              <EmptyMedia>
+                <BookOpen />
+              </EmptyMedia>
+              <EmptyTitle>{t("No knowledge bases yet")}</EmptyTitle>
+              <EmptyDescription>{t("Create knowledge base")}</EmptyDescription>
+            </Empty>
+          </div>
+        )}
+      </div>
+
       <Dialog
-        open={confirmRemove !== null}
+        open={createOpen}
         onOpenChange={(open) => {
-          if (!open) setConfirmRemove(null);
+          if (!open) setCreateOpen(false)
         }}
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t("Remove this file?")}</DialogTitle>
+            <DialogTitle>{t("Create knowledge base")}</DialogTitle>
             <DialogDescription>
-              {t("{{file}} will be removed from this list.", { file: confirmRemove?.name })}
+              {t("Description (optional)")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 py-2">
+            <Input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder={t("Knowledge base name")}
+              aria-label={t("Knowledge base name")}
+            />
+            <Textarea
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder={t("Description (optional)")}
+              rows={3}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              type="button"
+              onClick={() => setCreateOpen(false)}
+            >
+              {t("Cancel")}
+            </Button>
+            <Button
+              type="button"
+              disabled={!name.trim() || creating}
+              onClick={handleCreate}
+            >
+              {t("Create knowledge base")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={confirmDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDelete(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("Delete this knowledge base?")}</DialogTitle>
+            <DialogDescription>
+              {t("This will permanently delete {{name}} and all of its files.", {
+                name: confirmDelete?.name,
+              })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost"
+            <Button
+              variant="ghost"
               type="button"
-              className="rounded-md px-3 py-2 text-sm"
-              onClick={() => setConfirmRemove(null)}
+              onClick={() => setConfirmDelete(null)}
             >
-              {t("Keep file")}
+              {t("Cancel")}
             </Button>
-            <Button variant="destructive"
+            <Button
+              variant="destructive"
               type="button"
-              className="rounded-md px-3 py-2 text-sm"
-              onClick={() => {
-                if (confirmRemove) removeFile(confirmRemove.id);
-                setConfirmRemove(null);
-              }}
+              onClick={handleDelete}
             >
-              {t("Remove")}
+              {t("Delete knowledge base")}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
-  );
+  )
 }

@@ -45,5 +45,6 @@ web/
 1. 从用户目标定位页面或功能，读取真实定义、调用点和类型；按需追踪 `app/App.tsx → app/routes.tsx → pages/layouts → 页面组件与 Hooks → api`，跨接口任务同时核对后端协议。
 2. 页面专用组件和 Hooks 放在对应的 `pages/<页面>/` 下；布局专用组件放在对应的 `layouts/` 下；只有跨页面复用的组件才放 `src/components/`。跨页面状态放 `context/`，网络请求放 `api/`。保留工作区内其他人的改动。
 3. 优先使用已有依赖和实现；新增组件、状态或依赖要有当前任务的实际需要。架构边界或公开契约需要变更时，遵循根目录的工作规则。
-4. 修改前端代码后，在 `web/` 执行 `npm run typecheck`、`npm run lint`、`npm test`、`npm run build`；路由或交互变化再验证对应页面。仅修改本文档时，检查 `git diff --check -- web/AGENTS.md`。
-5. 只报告实际执行过的检查，并区分静态检查、浏览器验证和服务运行结果。
+4. UX 设计规范：不要增加微文案（如标题、卡片或表单下方的描述性小字/过度解释），组件的描述与语义应集中于容器内部，不允许添加额外的解释性文本。
+5. 修改前端代码后，在 `web/` 执行 `npm run typecheck`、`npm run lint`、`npm test`、`npm run build`；路由或交互变化再验证对应页面。仅修改本文档时，检查 `git diff --check -- web/AGENTS.md`。
+6. 只报告实际执行过的检查，并区分静态检查、浏览器验证和服务运行结果。

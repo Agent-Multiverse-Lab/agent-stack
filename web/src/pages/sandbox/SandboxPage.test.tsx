@@ -2,12 +2,15 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { listThreads } from "@/api/agent";
-import { listSandboxWorkspace } from "@/api/sandbox";
+import { listSandboxWorkspace, readSandboxFile } from "@/api/sandbox";
 import SandboxPage from "@/pages/sandbox/SandboxPage";
 import { installBrowserStubs } from "@/test/browserStubs";
 
 vi.mock("@/api/agent", () => ({ listThreads: vi.fn() }));
-vi.mock("@/api/sandbox", () => ({ listSandboxWorkspace: vi.fn() }));
+vi.mock("@/api/sandbox", () => ({
+  listSandboxWorkspace: vi.fn(),
+  readSandboxFile: vi.fn(),
+}));
 
 afterEach(cleanup);
 
@@ -41,6 +44,14 @@ beforeEach(() => {
           { name: "README.md", path: "/workspace/README.md", kind: "file", size: 10, modified_at: "2026-09-21T00:00:00Z", file_type: "document" },
           { name: "scripts", path: "/workspace/scripts", kind: "directory", size: null, modified_at: "2026-09-21T00:00:00Z" },
         ],
+  }));
+  vi.mocked(readSandboxFile).mockImplementation(async (_threadId, path) => ({
+    thread_id: "thread-1",
+    sandbox_id: "s2c-real",
+    path,
+    content: path.endsWith("README.md") ? "# Sandbox readme\n\nHello **world**." : "{}",
+    encoding: "utf-8",
+    truncated: false,
   }));
 });
 
@@ -86,4 +97,22 @@ it("sorts and selects rows in the workspace data table", async () => {
 
   fireEvent.click(table.getByRole("checkbox", { name: "Select README.md" }));
   expect(screen.getByText("1 of 3 row(s) selected")).toBeTruthy();
+});
+
+it("previews sandbox file source and rendered markdown", async () => {
+  installBrowserStubs();
+  render(<SandboxPage />);
+
+  const readmeButtons = await screen.findAllByRole("button", { name: "README.md" });
+  fireEvent.click(readmeButtons.at(-1)!);
+
+  expect(await screen.findByRole("heading", { name: "Sandbox readme" })).toBeTruthy();
+  expect(readSandboxFile).toHaveBeenCalledWith("thread-1", "/workspace/README.md");
+
+  fireEvent.click(screen.getByRole("tab", { name: "Source" }));
+  await waitFor(() => {
+    expect(document.querySelector("pre code")?.textContent).toBe(
+      "# Sandbox readme\n\nHello **world**.",
+    );
+  });
 });

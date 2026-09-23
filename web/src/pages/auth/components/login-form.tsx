@@ -111,11 +111,6 @@ export function LoginForm({
               >
                 {isRegister ? t("Create your account") : t("Welcome back")}
               </h1>
-              <p className="text-balance text-sm text-muted-foreground">
-                {isRegister
-                  ? t("Create an AM account with your email.")
-                  : t("Sign in to your AM account.")}
-              </p>
             </header>
 
             <Field>

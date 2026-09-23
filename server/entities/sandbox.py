@@ -18,3 +18,12 @@ class SandboxWorkspaceResponse(BaseModel):
     status: str = "running"
     path: str
     entries: list[SandboxWorkspaceEntry] = Field(default_factory=list)
+
+
+class SandboxFileContentResponse(BaseModel):
+    thread_id: str
+    sandbox_id: str
+    path: str
+    content: str
+    encoding: str = "utf-8"
+    truncated: bool = False

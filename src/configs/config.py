@@ -33,6 +33,32 @@ class MilvusConfig(BaseSettings):
     )
 
 
+class Neo4jConfig(BaseSettings):
+    """Neo4j 知识图谱配置。"""
+
+    model_config = SettingsConfigDict(
+        env_file=str(_PROJECT_ROOT / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    uri: str = Field(
+        default="bolt://127.0.0.1:7687",
+        validation_alias="NEO4J_URI",
+        description="Neo4j 连接地址",
+    )
+    user: str = Field(
+        default="neo4j",
+        validation_alias="NEO4J_USER",
+        description="Neo4j 用户名",
+    )
+    password: str = Field(
+        default="password",
+        validation_alias="NEO4J_PASSWORD",
+        description="Neo4j 密码",
+    )
+
+
 class Config(BaseSettings):
     """配置管理: 环境变量 > .env > 代码默认值"""
 
@@ -113,6 +139,10 @@ class Config(BaseSettings):
     milvus: MilvusConfig = Field(
         default_factory=MilvusConfig,
         description="Milvus 知识库配置",
+    )
+    neo4j: Neo4jConfig = Field(
+        default_factory=Neo4jConfig,
+        description="Neo4j 知识图谱配置",
     )
 
     # ---------- Search ----------

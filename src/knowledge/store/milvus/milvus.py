@@ -112,6 +112,65 @@ class MilvusKnowledge(BaseKnowledge):
             filter=filter,
         )
 
+    async def drop_collection(self, *, collection_name: str) -> dict[str, Any]:
+        """删除指定 Collection（不存在时静默跳过）。"""
+        exists = await self.milvus_client.has_collection(
+            collection_name=collection_name
+        )
+        if not exists:
+            return {"dropped": False, "exists": False}
+
+        await self.milvus_client.drop_collection(
+            collection_name=collection_name
+        )
+        self.milvus_collection.pop(collection_name, None)
+        return {"dropped": True, "exists": True}
+
+    async def upsert_entities(
+        self,
+        *,
+        collection_name: str,
+        dimension: int,
+        rows: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """将实体向量批量写入 Milvus。"""
+        if dimension <= 0:
+            raise ValueError("Embedding 维度必须为正整数")
+        if not rows:
+            return {"upsert_count": 0}
+
+        await self._get_entity_collection(collection_name, dimension)
+        return await self.milvus_client.upsert(
+            collection_name=collection_name,
+            data=rows,
+        )
+
+    async def search_entities(
+        self,
+        *,
+        collection_name: str,
+        vector: list[float],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """使用稠密向量检索知识库实体。"""
+        if not await self.milvus_client.has_collection(
+            collection_name=collection_name
+        ):
+            return []
+
+        result = await self.milvus_client.search(
+            collection_name=collection_name,
+            data=[vector],
+            anns_field="entity_embeding",
+            limit=limit,
+            output_fields=["name", "entity_type", "description", "file_id"],
+            search_params={
+                "metric_type": "COSINE",
+                "params": {},
+            },
+        )
+        return result[0] if result else []
+
     async def status(self, *, collection_name: str) -> dict[str, Any]:
         """返回知识库 Collection 的存在状态和统计信息。"""
         exists = await self.milvus_client.has_collection(
@@ -160,6 +219,85 @@ class MilvusKnowledge(BaseKnowledge):
 
         self.milvus_collection[collection_name] = collection_name
         return collection_name
+
+    async def _get_entity_collection(
+        self,
+        collection_name: str,
+        dimension: int,
+    ) -> str:
+        """获取实体 Collection，不存在时按实际向量维度创建。"""
+        if collection_name in self.milvus_collection:
+            return self.milvus_collection[collection_name]
+
+        exists = await self.milvus_client.has_collection(
+            collection_name=collection_name
+        )
+        if not exists:
+            await self._create_entity_collection(collection_name, dimension)
+
+        self.milvus_collection[collection_name] = collection_name
+        return collection_name
+
+    async def _create_entity_collection(
+        self,
+        collection_name: str,
+        dimension: int,
+    ) -> None:
+        """创建仅含稠密向量的实体 Collection。"""
+        fields = [
+            FieldSchema(
+                name="id",
+                dtype=DataType.VARCHAR,
+                max_length=100,
+                is_primary=True,
+            ),
+            FieldSchema(
+                name="name",
+                dtype=DataType.VARCHAR,
+                max_length=512,
+                description="实体名称",
+            ),
+            FieldSchema(
+                name="entity_type",
+                dtype=DataType.VARCHAR,
+                max_length=64,
+                description="实体类型",
+            ),
+            FieldSchema(
+                name="description",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                description="实体描述",
+            ),
+            FieldSchema(
+                name="file_id",
+                dtype=DataType.VARCHAR,
+                max_length=100,
+                description="实体来源文件",
+            ),
+            FieldSchema(
+                name="entity_embeding",
+                dtype=DataType.FLOAT_VECTOR,
+                dimension=dimension,
+                description="实体稠密向量",
+            ),
+        ]
+        schema = CollectionSchema(
+            fields=fields,
+            description="知识库实体",
+        )
+        index_params = MilvusClient.prepare_index_params()
+        index_params.add_index(
+            field_name="entity_embeding",
+            index_name="entity_embedding_index",
+            index_type="AUTOINDEX",
+            metric_type="COSINE",
+        )
+        await self.milvus_client.create_collection(
+            collection_name=collection_name,
+            schema=schema,
+            index_params=index_params,
+        )
 
     async def _create_collection(
         self,

@@ -219,6 +219,36 @@ class MinioStorage:
         )
         return result
 
+    def delete_objects_by_prefix(self, bucket_name: str, prefix: str) -> int:
+        """按前缀批量删除对象并返回删除数量。"""
+        client = self.get_client()
+        names = [
+            item.object_name
+            for item in client.list_objects(
+                bucket_name, prefix=prefix, recursive=True
+            )
+        ]
+        if not names:
+            return 0
+        errors = list(client.remove_objects(bucket_name, names))
+        if errors:
+            logger.warning(
+                f"bucket:{bucket_name} 前缀:{prefix} 下 {len(errors)} 个对象删除失败"
+            )
+        return len(names) - len(errors)
+
+    async def adelete_objects_by_prefix(
+        self,
+        bucket_name: str,
+        prefix: str,
+    ) -> int:
+        """异步按前缀批量删除对象。"""
+        return await asyncio.to_thread(
+            self.delete_objects_by_prefix,
+            bucket_name=bucket_name,
+            prefix=prefix,
+        )
+
     async def create_file_access_url(self, bucket_name: str, object_name: str) -> str:
         """创建临时文件访问 URL。"""
         client = self.get_client()
