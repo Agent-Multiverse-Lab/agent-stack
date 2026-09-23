@@ -12,3 +12,18 @@ export interface WorkspaceTreeNode {
   path: string;
   children?: WorkspaceTreeNode[];
 }
+
+export interface SandboxWorkspaceResponse {
+  thread_id: string;
+  sandbox_id: string;
+  status: string;
+  path: string;
+  entries: Array<{
+    name: string;
+    path: string;
+    kind: "directory" | "file";
+    size: number | null;
+    modified_at: string;
+    file_type?: "code" | "data" | "document" | "image" | null;
+  }>;
+}
