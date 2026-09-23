@@ -119,18 +119,19 @@ it("opens a conversation action dialog inside the mobile sidebar", async () => {
   ).toBeTruthy()
 })
 
-it("filters conversations from the persistent search above New chat", async () => {
+it("opens conversation search dialog from the sidebar header search button", async () => {
   installBrowserStubs()
   vi.mocked(listThreads).mockResolvedValue({
     items: [thread, { ...thread, thread_id: "thread-2", title: "Release plan" }],
     has_more: false,
     next_cursor: null,
   })
+  const onSearch = vi.fn()
 
   render(
     <MemoryRouter initialEntries={["/"]}>
       <SidebarProvider>
-        <AppSidebar onSearch={vi.fn()} onProfile={vi.fn()} onSettings={vi.fn()} />
+        <AppSidebar onSearch={onSearch} onProfile={vi.fn()} onSettings={vi.fn()} />
       </SidebarProvider>
     </MemoryRouter>,
   )
@@ -138,16 +139,12 @@ it("filters conversations from the persistent search above New chat", async () =
   expect(await screen.findByRole("link", { name: "Old title" })).toBeTruthy()
   expect(screen.getByRole("link", { name: "Release plan" })).toBeTruthy()
 
-  const search = screen.getByRole("textbox", { name: "Search conversation" })
-  const newChat = screen.getByRole("link", { name: "New chat" })
-  expect(search.compareDocumentPosition(newChat) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  fireEvent.change(search, { target: { value: "release" } })
+  const searchButton = screen.getByRole("button", { name: "Search conversations" })
+  const sidebarTrigger = screen.getAllByRole("button", { name: "Toggle Sidebar" })[0]
+  expect(
+    searchButton.compareDocumentPosition(sidebarTrigger) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy()
 
-  expect(screen.queryByRole("link", { name: "Old title" })).toBeNull()
-  expect(screen.getByRole("link", { name: "Release plan" })).toBeTruthy()
-
-  fireEvent.keyDown(search, { key: "Escape" })
-  expect(screen.getByRole("textbox", { name: "Search conversation" })).toBe(search)
-  expect((search as HTMLInputElement).value).toBe("")
-  expect(screen.getByRole("link", { name: "Old title" })).toBeTruthy()
+  fireEvent.click(searchButton)
+  expect(onSearch).toHaveBeenCalledTimes(1)
 })

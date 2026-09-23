@@ -20,9 +20,9 @@ export function NavMain({ items }: { items: NavItem[] }) {
   const { setOpenMobile } = useSidebar()
 
   return (
-    <SidebarGroup className="pt-1 pb-1">
+    <SidebarGroup className="py-1">
       <nav aria-label={t("Primary navigation")}>
-        <SidebarMenu className="gap-0.5">
+        <SidebarMenu className="gap-1">
           {items.map((item) => (
             <SidebarMenuItem key={item.title}>
               <SidebarMenuButton

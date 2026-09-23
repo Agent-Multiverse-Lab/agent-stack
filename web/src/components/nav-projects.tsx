@@ -155,14 +155,14 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
   return (
     <>
       <SidebarGroup
-        className="min-h-0 flex-1 pt-0 group-data-[collapsible=icon]:hidden"
+        className="min-h-0 flex-1 pt-1 group-data-[collapsible=icon]:hidden"
         aria-label={t("Conversation history")}
       >
-        <SidebarGroupLabel className="gap-1.5">
+        <SidebarGroupLabel className="mb-1 gap-1.5 font-medium">
           <ChevronDownIcon />
           <span>{t("Conversations")}</span>
         </SidebarGroupLabel>
-        <SidebarMenu className="min-h-0 flex-1 overflow-y-auto">
+        <SidebarMenu className="min-h-0 flex-1 overflow-y-auto gap-1">
           {visibleThreads.map((item) => (
             <SidebarMenuItem key={item.thread_id}>
               <SidebarMenuButton

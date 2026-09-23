@@ -132,21 +132,15 @@ export default function KnowledgePage() {
       ? "minmax(0,1fr) minmax(0,1.92fr) 56px"
       : "minmax(0,1fr) minmax(0,1.92fr) minmax(0,1fr)";
   return (
-    <div className="@container relative flex h-full w-full gap-2.5 overflow-hidden bg-muted p-2.5 font-sans text-foreground">
-      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-[20px] border border-border bg-background shadow-sm">
-        <header className="flex min-h-[46px] shrink-0 items-center border-b border-border px-4 py-1.5">
-          <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            {t("Knowledge Base")}
-          </span>
-        </header>
-        <main
-          className="knowledge-workspace grid min-h-0 min-w-0 w-full flex-1 gap-3 overflow-hidden bg-muted p-3 text-sm [grid-template-columns:var(--knowledge-columns)] [grid-template-rows:minmax(0,1fr)] @max-[720px]:grid-cols-1 @max-[720px]:grid-rows-none @max-[720px]:overflow-y-auto"
-          style={{
-            "--knowledge-columns": columns,
-            transition: "grid-template-columns 240ms ease",
-          } as CSSProperties}
-        >
-          <section className="knowledge-files grid min-h-0 min-w-0 overflow-hidden rounded-[16px] border border-border bg-background [grid-template-rows:48px_minmax(0,1fr)] @max-[720px]:min-h-[calc(100dvh-92px)]">
+    <div className="@container relative flex h-full w-full overflow-hidden bg-background font-sans text-foreground">
+      <main
+        className="knowledge-workspace grid min-h-0 min-w-0 w-full flex-1 overflow-hidden bg-background text-sm [grid-template-columns:var(--knowledge-columns)] [grid-template-rows:minmax(0,1fr)] @max-[720px]:grid-cols-1 @max-[720px]:grid-rows-none @max-[720px]:overflow-y-auto"
+        style={{
+          "--knowledge-columns": columns,
+          transition: "grid-template-columns 240ms ease",
+        } as CSSProperties}
+      >
+        <section className="knowledge-files grid min-h-0 min-w-0 overflow-hidden border-r border-border bg-background [grid-template-rows:48px_minmax(0,1fr)] @max-[720px]:border-r-0 @max-[720px]:border-b @max-[720px]:min-h-[calc(100dvh-92px)]">
             <header className="flex h-12 items-center justify-between border-b border-border px-3">
               <h2
                 className={
@@ -295,7 +289,7 @@ export default function KnowledgePage() {
             </div>
           </section>
           <section
-            className="grid min-h-0 min-w-0 overflow-hidden rounded-[16px] border border-border bg-background [grid-template-rows:48px_minmax(0,1fr)_auto] @max-[720px]:min-h-[calc(100dvh-92px)]"
+            className="grid min-h-0 min-w-0 overflow-hidden bg-background [grid-template-rows:48px_minmax(0,1fr)_auto] @max-[720px]:min-h-[calc(100dvh-92px)]"
             aria-labelledby="knowledge-chat-title"
           >
             <header className="flex h-12 items-center border-b border-border px-4">
@@ -354,7 +348,7 @@ export default function KnowledgePage() {
               </div>
             </form>
           </section>
-          <section className="knowledge-actions grid min-h-0 min-w-0 overflow-hidden rounded-[16px] border border-border bg-background [grid-template-rows:48px_minmax(0,1fr)] @max-[720px]:min-h-[calc(100dvh-92px)]">
+          <section className="knowledge-actions grid min-h-0 min-w-0 overflow-hidden border-l border-border bg-background [grid-template-rows:48px_minmax(0,1fr)] @max-[720px]:border-l-0 @max-[720px]:border-t @max-[720px]:min-h-[calc(100dvh-92px)]">
             <header className="flex h-12 items-center justify-between border-b border-border px-3">
               <h2
                 className={
@@ -409,7 +403,6 @@ export default function KnowledgePage() {
             </div>
           </section>
         </main>
-      </div>
       <Dialog
         open={confirmRemove !== null}
         onOpenChange={(open) => {

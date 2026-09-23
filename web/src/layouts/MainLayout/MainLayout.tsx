@@ -18,6 +18,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { useTranslation } from "@/i18n";
+import { cn } from "@/lib/utils";
 import {
   ProfileDialog,
   SearchChat,
@@ -59,7 +60,7 @@ export default function MainLayout() {
         "/library": "Library",
         "/knowledge": "Knowledge",
         "/agent": "Agent",
-        "/static": "Static",
+        "/static": "Map",
         "/sandbox": "Sandbox",
       } as Record<string, string>)[location.pathname] ?? "Chat";
 
@@ -67,7 +68,7 @@ export default function MainLayout() {
     <>
       <SidebarProvider
         className="h-dvh min-h-0 overflow-hidden"
-        style={{ "--sidebar-width": "14rem" } as CSSProperties}
+        style={{ "--sidebar-width": "15.5rem" } as CSSProperties}
       >
         <AppSidebar
           variant="inset"
@@ -77,7 +78,12 @@ export default function MainLayout() {
           onSearch={() => setSearchOpen(true)}
         />
         <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
-          <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+          <header
+            className={cn(
+              "flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12",
+              location.pathname.startsWith("/sandbox") && "border-b border-border",
+            )}
+          >
             <div className="flex items-center gap-2 px-4">
               <SidebarTrigger className="-ml-1 md:hidden" />
               <Separator

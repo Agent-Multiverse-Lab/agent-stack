@@ -15,7 +15,7 @@ export default function App() {
       "/library": "Library",
       "/knowledge": "Knowledge",
       "/agent": "Agent",
-      "/static": "Static",
+      "/static": "Map",
       "/sandbox": "Sandbox",
     };
     const page = titles[location.pathname] ?? (location.pathname.startsWith("/c/") ? "Chat" : "AM");
