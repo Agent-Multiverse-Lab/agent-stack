@@ -23,6 +23,11 @@ class HumanQuestion(BaseModel):
         description="针对该问题生成的 1～3 个明确且有区分度的可选答案，优先提供 3 个，合理选项不足时不凑数",
     )
 
+@tool
+def calculator(a: Annotated[int, "计算元素a"], b: Annotated[int, "计算元素b"]):
+    """计算专用的计算器，当用户有计算需求请调用该工具"""
+    return a + b
+
 
 @tool
 def ask_user(

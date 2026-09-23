@@ -191,7 +191,7 @@ class BaseAgent:
                     yield stream_methods, (stream_msg, stream_agent_run_metadata)
                     
                     
-                if stream_methods == "tool":
+                if stream_methods == "tools":
                     # 对 tool 消息进行清洗
                     stream_execute_data = {
                         "stream_methods": stream_methods,

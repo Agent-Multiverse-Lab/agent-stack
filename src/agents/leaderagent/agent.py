@@ -31,7 +31,7 @@ from src.model import load_model
 
 from .context import LeaderAgentContext
 from .prompt import TODO_MIDDLEWARE_SYSTEM_PROMPT, build_prompt
-from .tools import ask_user
+from .tools import ask_user, calculator
 
 
 class LeaderAgent(BaseAgent):
@@ -83,7 +83,7 @@ class LeaderAgent(BaseAgent):
         # FIXEME: ask_user 仅注册到顶层 LeaderAgent，不扩散到 SubAgent。
         return self._build_agent(
             runtime_context,
-            tools=[*mcp_tools, ask_user],
+            tools=[*mcp_tools, ask_user, calculator],
         )
 
     def _build_agent(
