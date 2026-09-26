@@ -87,6 +87,15 @@ Item 的 `id`、`collection`、`properties.datetime`、WGS84 `geometry`/`bbox`�
 重复导入相同稳定 ID 应得到相同资源，不产生重复行；若 ID 已属于其他项目或来源，
 必须拒绝覆盖。导入命令不会在服务启动时自动运行，也不会自动扫描或下载未知数据源。
 
+### DP-SAT-009 Business-scene libraries
+
+农业产量监测、作物灾害监测、建筑变化筛查和光伏识别是同一影像目录上的四个业务专题，
+不是四套重复的来源、场景或 RustFS 文件。`satellite_business_scenes` 以业务代码、场景 ID
+和该场景在业务中的角色建立多对多关联；业务查询仍须通过场景所属来源限制可信项目范围。
+没有地面产量样本时，农业影像只能支持长势监测或产量估算输入；没有灾害标签时，前后影像
+只能作为灾情判读候选；没有规划许可数据时，新增建筑只能标记为疑似变化，不能判定违建。
+单时相高分辨率训练影像不能单独充当建筑变化证据。
+
 ## 3. Failure handling
 
 - 无范围、非法 bbox/时间、非法分页参数返回 `InvalidArgument`。
@@ -116,3 +125,4 @@ Item 的 `id`、`collection`、`properties.datetime`、WGS84 `geometry`/`bbox`�
   测试不要求将大幅影像加载到数据库或 Agent 上下文。
 - 同一场景允许两个 Asset 使用相同角色与波段但不同 STAC Asset key；`GetScene` 返回 key 与引用，
   以便调用方区分两份资产。
+- 四个业务专题可引用同一场景而不复制原始资产；专题关联只指向已入库场景，并记录其业务角色。

@@ -15,6 +15,13 @@ from sqlalchemy.orm import relationship
 
 from .base import Base
 from .credential_types import EncryptedCredential, EncryptedHeaders
+from .satellite_models import (
+    SatelliteBusinessScene,  # noqa: F401
+    SatelliteCollection,  # noqa: F401
+    SatelliteScene,  # noqa: F401
+    SatelliteSceneAsset,  # noqa: F401
+    SatelliteSource,  # noqa: F401
+)
 
 
 class ModelProvider(Base):
