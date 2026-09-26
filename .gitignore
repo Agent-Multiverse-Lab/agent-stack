@@ -40,4 +40,5 @@ docker/volume/
 # gemini directories
 .gemini/skills/*
 
-save/
+save/*
+scripts/*
