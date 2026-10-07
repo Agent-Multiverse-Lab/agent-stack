@@ -14,10 +14,10 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 from pydantic import ValidationError
 
+from server import worker
 from server.entities.agent import AgentRunResumeRequest
 from server.entities.thread import InteractionRequired
 from server.service import agent_run_service, thread_service
-from server import worker
 from test.test_ask_user_tool import ask_user
 
 QUESTIONS = [
@@ -142,6 +142,7 @@ class FixtureContext(SimpleNamespace):
 
 
 class FixtureAgent:
+    definition = SimpleNamespace(context={})
     agent_context = FixtureContext
 
     def __init__(self, graph):
@@ -192,10 +193,10 @@ class ResumeStreamTest(unittest.IsolatedAsyncioTestCase):
                       runtime_metadata={"run_id": "resume-run", "request_id": "request-1"},
                       current_user=SimpleNamespace(uid="user-1"), db=SimpleNamespace())
         values.update(overrides)
-        with patch.object(thread_service.agent_manager, "get_agent", return_value=agent) as get_agent:
+        with patch.object(thread_service, "_build_agent_runtime", AsyncMock(return_value=(SimpleNamespace(slug="LeaderAgent"), agent))) as get_agent:
             chunks = [json.loads(chunk) async for chunk in thread_service.resume_agent_response(**values)]
         if agent is not None:
-            get_agent.assert_called_once_with("LeaderAgent")
+            self.assertEqual(get_agent.await_args.kwargs["run_type"], "resume")
         return chunks
 
     async def test_real_checkpoint_resumes_all_answers(self):
@@ -266,7 +267,7 @@ class NormalStreamFinalizationTest(unittest.IsolatedAsyncioTestCase):
             order.append("save")
             if save_error:
                 raise save_error
-        agent = SimpleNamespace(agent_context=FixtureContext, stream_messages_with_event=events)
+        agent = SimpleNamespace(agent_context=FixtureContext, definition=SimpleNamespace(context={}), stream_messages_with_event=events)
         with patch.object(thread_service, "_build_agent_runtime", AsyncMock(return_value=(SimpleNamespace(slug="LeaderAgent"), agent))), patch.object(
             thread_service, "_check_conv_status", AsyncMock()
         ), patch.object(thread_service, "check_agent_interrupt_handler", handler), patch.object(
@@ -311,7 +312,7 @@ class ResumeWorkerTest(unittest.IsolatedAsyncioTestCase):
     async def run_stream(self, chunks, cancelled=False):
         run = SimpleNamespace(agent_status="pending", uid="user-1", agent_id="LeaderAgent",
                               request_id="request-1", thread_id="thread-1", run_type="resume",
-                              trigger_message_id=None,
+                              trigger_message_id=None, parent_run_id="parent-run",
                               run_metadata={"resume": {"answers": ANSWERS}})
         @asynccontextmanager
         async def session():

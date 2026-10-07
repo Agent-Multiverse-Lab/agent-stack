@@ -26,7 +26,7 @@
 
 ## 4. End-to-end example
 
-`src/agents/subagents/satellite_agent.py`（或当前 SatelliteAgent 构造入口）收到“把某范围内最新低云量影像发布为图层”后：
+`src/agents/agent_library/subagents/satellite.py` 声明的角色（通过共同的 SubAgentGraph 构图）收到“把某范围内最新低云量影像发布为图层”后：
 
 1. 调用 `search_scenes` 获取有界候选集并向用户解释选择依据。
 2. 调用 `create_layer` 和 `attach_scene_to_layer` 前触发 HIL；Gateway 验证候选 asset 与项目归属。

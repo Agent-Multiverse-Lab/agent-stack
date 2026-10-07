@@ -12,6 +12,10 @@ from PIL import Image
 class ImageValidationMiddleware(AgentMiddleware):
     """检查实际返回的图片字节；远程引用和内容语义不在本地验证。"""
 
+    def __init__(self, *, tool_names: set[str] | None = None):
+        super().__init__()
+        self.tool_names = tool_names
+
     @staticmethod
     def validate_mcp_tools(tools, server_names, configured_servers, server_errors):
         for name in server_names:
@@ -23,6 +27,8 @@ class ImageValidationMiddleware(AgentMiddleware):
             raise ValueError("图像处理 Agent 没有可用的 MCP 工具，请检查服务配置和连接状态")
 
     async def awrap_tool_call(self, request, handler):
+        if self.tool_names is not None and request.tool_call["name"] not in self.tool_names:
+            return await handler(request)
         try:
             result = await handler(request)
         except Exception as exc:
@@ -45,9 +51,7 @@ class ImageValidationMiddleware(AgentMiddleware):
             )
         if not checks:
             checks = ["未获得可校验的图片字节；文本、URL、路径或资产 ID 不代表文件完整性已通过。"]
-        content = list(result.content) if isinstance(result.content, list) else [
-            {"type": "text", "text": result.content}
-        ]
+        content = list(result.content) if isinstance(result.content, list) else [{"type": "text", "text": result.content}]
         content.append({"type": "text", "text": "图片校验：" + "；".join(checks)})
         return result.model_copy(update={"content": content})
 
@@ -78,7 +82,5 @@ class ImageValidationMiddleware(AgentMiddleware):
                 image.verify()
             with Image.open(BytesIO(data)) as image:
                 image.load()
-            checks.append(
-                f"{image_format} {size[0]}×{size[1]} 文件可完整解码；内容是否符合任务仍需核验"
-            )
+            checks.append(f"{image_format} {size[0]}×{size[1]} 文件可完整解码；内容是否符合任务仍需核验")
         return checks

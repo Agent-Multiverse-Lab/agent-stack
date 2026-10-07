@@ -27,8 +27,8 @@ from server.service.attachment_service import (
     upload_attachments,
 )
 from server.utils.auth import AuthenticatedUser
-from src.agents import agent_manager
 from src.database import get_db
+from src.database.repositories import AgentRepository
 
 router = APIRouter(prefix="/chat", tags=["chat会话"])
 
@@ -236,12 +236,11 @@ async def delete_thread(
 @router.get("/agents", response_model=list[AgentSummary])
 async def list_agent_summaries(
     current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
 ) -> list[AgentSummary]:
     """列出当前公开顶层 Agent。"""
-    return [
-        AgentSummary(**agent)
-        for agent in agent_manager.list_top_level_agents()
-    ]
+    agents = await AgentRepository(db).list_agents(role="orchestrator", internal_only=False)
+    return [AgentSummary(id=agent.slug, name=agent.name, description=agent.description) for agent in agents]
 
 
 @router.post(

@@ -17,9 +17,10 @@ from server.service.arq_queue_servcie import (
     write_agent_run_stream_event,
 )
 from server.service.input_message_service import build_agent_input_msg
-from server.service.thread_service import resume_agent_response, stream_agent_response
+from server.service.thread_service import AGENT_CLASSES, resume_agent_response, stream_agent_response
 from server.utils.woker_utils import reslove_thread_id
-from src.agents import agent_manager
+from src.agents.agent_library.leader import LEADER_AGENT
+from src.agents.agent_library.subagents import SUBAGENTS
 from src.agents.backends.sandbox import init_sandbox_provider, shutdown_sandbox_provider
 from src.configs import config
 from src.database import postgres_manager
@@ -113,32 +114,31 @@ class AgentRunController:
 
 
 async def ensure_agents_exist() -> None:
-    agents = agent_manager.list_top_level_agents()
-    subagents = agent_manager.list_subagents()
+    agents = (LEADER_AGENT,)
+    subagents = SUBAGENTS
+    definitions = (*agents, *subagents)
+    if len({item.slug for item in definitions}) != len(definitions):
+        raise ValueError("预定义 Agent slug 重复")
+    for definition in definitions:
+        definition.validate_context(AGENT_CLASSES[definition.backend_id].agent_context)
     async with postgres_manager.get_async_session_context() as session:
         repository = AgentRepository(session)
         for agent in agents:
-            await repository.ensure_agent_registered(
-                slug=agent["id"],
-                backend_id=agent["id"],
-                name=agent["name"],
-                description=agent["description"],
+            await repository.sync_agent(
+                definition=agent,
                 role="orchestrator",
                 internal_only=False,
             )
         for agent in subagents:
-            await repository.ensure_agent_registered(
-                slug=agent["name"],
-                backend_id=agent["id"],
-                name=agent["name"],
-                description=agent["description"],
+            await repository.sync_agent(
+                definition=agent,
                 role="subagent",
                 internal_only=True,
             )
     logger.info(
         "Worker 已确保数据库表及 Agent 注册：top=%s, subagents=%s",
-        ", ".join(item["id"] for item in agents),
-        ", ".join(item["name"] for item in subagents),
+        ", ".join(item.slug for item in agents),
+        ", ".join(item.slug for item in subagents),
     )
 
 
@@ -561,6 +561,7 @@ async def process_agent_run(ctx, run_id: str):
         "thread_id": thread_id,
         "uid": user.uid,  # ty:ignore[unresolved-attribute]
         "run_type": run_type,
+        "parent_run_id": agent_run_event.parent_run_id,
     }
 
     running_run = await set_run_running(run_id)

@@ -25,7 +25,7 @@ from server.service.agent_run_service import (
     wait_agent_run_result,
 )
 from server.service.input_message_service import build_agent_input_msg
-from src.agents.base_agent import BaseAgent
+from src.agents.agent_library import AgentLibrary
 from src.agents.base_context import BaseContext
 from src.database.session import session_context
 
@@ -100,7 +100,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
     def __init__(
         self,
         *,
-        subagents: Sequence[BaseAgent],
+        subagents: Sequence[AgentLibrary],
         parent_context: BaseContext,
         system_prompt: str | None = TASK_SYSTEM_PROMPT,
     ) -> None:
@@ -108,9 +108,9 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
         if not subagents:
             raise ValueError("必须至少指定一个子智能体")
 
-        self._subagents: dict[str, BaseAgent] = {}
+        self._subagents: dict[str, AgentLibrary] = {}
         for subagent in subagents:
-            subagent_slug = subagent.name
+            subagent_slug = subagent.slug
             if subagent_slug in self._subagents:
                 raise ValueError(f"子智能体 slug 重复：{subagent_slug}")
             self._subagents[subagent_slug] = subagent
@@ -146,7 +146,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
 
             run_id = str(subagent_run_record["run_id"])  # ty:ignore[not-subscriptable]
             try:
-                result = await wait_agent_run_result(run_id)
+                result = await wait_agent_run_result(run_id, uid=self.parent_context.uid)
             except Exception as exc:
                 return self._result(
                     runtime=runtime,
@@ -326,7 +326,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
                         parent_run_id=self.parent_context.run_id,
                         run_id=run_id,
                     )
-                result = await wait_agent_run_result(run_id)
+                result = await wait_agent_run_result(run_id, uid=self.parent_context.uid)
             except Exception as exc:
                 return self._result(
                     runtime=runtime,
@@ -508,7 +508,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
 
     def _available_agents(self) -> str:
         return "\n".join(
-            f"- {subagent_slug}: {subagent.description}"
+            f"- {subagent_slug} ({subagent.name}): {subagent.description}"
             for subagent_slug, subagent in self._subagents.items()
         )
 
@@ -518,7 +518,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
 
 def create_subagent_middleware(
     *,
-    subagents: Sequence[BaseAgent],
+    subagents: Sequence[AgentLibrary],
     parent_context: BaseContext,
     system_prompt: str | None = TASK_SYSTEM_PROMPT,
 ) -> SubAgentMiddleware:

@@ -11,9 +11,9 @@ class BaseContext:
 
     system_prompt: str = field(default="", metadata={"description": "系统提示词"})
 
-    uid: str = field(default=lambda: str(uuid.uuid4()), metadata={"description": "用户id"})  # ty:ignore[invalid-assignment]
+    uid: str = field(default_factory=lambda: str(uuid.uuid4()), metadata={"description": "用户id"})
 
-    thread_id: str = field(default=lambda: str(uuid.uuid4()), metadata={"description": "对话id"})  # ty:ignore[invalid-assignment]
+    thread_id: str = field(default_factory=lambda: str(uuid.uuid4()), metadata={"description": "对话id"})
 
     run_id: str = field(default="", metadata={"description": "当前 Agent Run ID"})
 

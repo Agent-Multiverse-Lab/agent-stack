@@ -286,8 +286,8 @@ Command(resume=resume_input)
 随后 `resume_agent_response` 把该 Command 交给
 `BaseAgent.stream_message_by_resume`，不再调用 `stream_agent_response`。
 恢复入口显式接收 resume_input、thread_id、runtime_metadata、current_user 和 db，不接收 agent_slug。
-当前中断只发生在主 Agent；恢复入口通过 `agent_manager.get_agent("LeaderAgent")` 获取主 Agent，
-不按 slug 选择执行实例。父 Run 的 agent_id 仍用于持久化关联。
+当前中断只发生在主 Agent；恢复入口用父 Run 的 agent_id 查询 SQL 中的启用 orchestrator，
+按 backend_id 直接实例化 Agent class，并合并该记录的 Context 预设。父 Run 的 agent_id 仍用于持久化关联。
 resume_input 是已校验的回答字典；runtime_metadata 承载运行身份与配置，入口不再从中提取回答。
 模型配置沿用父 Run 的 model（若未指定则保持既有默认解析规则），前端回答不能更换 Agent 或模型。
 恢复入口仍负责运行上下文、会话校验、流事件转换、累计输出、消息保存、再次中断检测和异常处理。

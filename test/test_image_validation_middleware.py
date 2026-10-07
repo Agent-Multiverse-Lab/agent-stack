@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 from langchain_core.messages import ToolMessage
 from PIL import Image
 
-from src.agents.subagents.imageprocessingagent.middlewares import ImageValidationMiddleware
+from src.agents.middlewares.image_validation_middleware import ImageValidationMiddleware
 
 
 class ImageValidationMiddlewareTest(unittest.IsolatedAsyncioTestCase):

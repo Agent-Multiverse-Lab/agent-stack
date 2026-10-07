@@ -52,6 +52,7 @@ class _Agent(BaseAgent):
 
 
 class _ThreadAgent:
+    definition = SimpleNamespace(context={})
     agent_context = _Context
 
     def __init__(self) -> None:
@@ -208,7 +209,7 @@ class LangfuseExecutionConfigTest(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(thread_service, "_require_thread", AsyncMock()),
-            patch.object(thread_service.agent_manager, "get_agent", return_value=agent),
+            patch.object(thread_service, "_build_agent_runtime", AsyncMock(return_value=(SimpleNamespace(slug="LeaderAgent"), agent))),
             patch.object(thread_service, "_reslove_agent_interrupt", return_value=object()),
             patch.object(
                 thread_service,

@@ -8,13 +8,15 @@
 
 - [Context Management Spec](../spec/agent/context-management/spec.md)
 - [Subagent Delegation Spec](../spec/agent/subagent-delegation/spec.md)
+- [Agent Construction Spec](../spec/agent/agent-construction/spec.md)
 
 ## 2. Core Components
 
 - `src/agents/base_agent.py`：agent 执行基类。
 - `src/agents/base_context.py`：运行上下文模型。
 - `src/agents/leaderagent/`：主编排 Agent。
-- `src/agents/subagents/*`：内部子代理能力。
+- `src/agents/agent_library/`：角色配置实体与按角色文件声明的预设。
+- `src/agents/subagents/subagentgraph.py`、`subagent_context.py`：所有子角色共用的执行图和 Context。
 - `src/agents/middlewares/subagent_middlware.py`：子代理调度与结果等待。
 - `src/agents/backends/*`：外部运行后端（沙箱、模型适配器）。
 
@@ -51,29 +53,34 @@ agent 运行上下文只来自：
 | 上下文管理 | `src/agents/base_context.py`、具体 context | 合并并校验本次 Run 配置，不读取隐式全局运行状态 |
 | 顶层编排 | `src/agents/leaderagent/` | 编排工具和内部 Agent，保持基础 Prompt 领域中立 |
 | 子代理委派 | `src/agents/middlewares/subagent_middlware.py`、`server/service/` | 通过 Run-backed 工具创建和等待子 Run，不嵌入父图执行 |
-| 内部 Agent | `src/agents/subagents/` | 提供受注册和上下文约束的专门能力，不成为新的 HTTP/Run 编排入口 |
-| 模型、工具和后端装配 | 具体 Agent 包、`src/model/`、Agent backend | 在 Agent 边界组装；数据库、队列和对象存储仍由外层拥有 |
+| 子角色定义 | `src/agents/agent_library/subagents/` | 声明 slug、名称、描述、backend 和 Context 预设 |
+| 子角色执行 | `src/agents/subagents/` | 共用 SubAgentGraph 与 SubAgentContext，不成为新的 HTTP/Run 编排入口 |
+| 模型、工具和后端装配 | LeaderAgent、SubAgentGraph、`src/model/`、Agent backend | 在 Agent 边界组装；数据库、队列和对象存储仍由外层拥有 |
 
-`AgentManager` 负责发现公共和内部 Agent，内部 Agent 不进入公共对话 Agent 列表。
-`SearchAgent`、`CitationAgent` 的专门行为属于各自 Agent 能力，不在
-本架构文档重复展开。
-`SatelliteAgent` 通过 gRPC 目录工具检索场景和资产，再按需调用 MCP 影像处理工具；它不直接连接
-PostgreSQL/PostGIS 或 RustFS。
-`ImageProcessingAgent` 处理调用方提供的图像，通过 `context.mcps` 和现有 MCP service 装配工具，
-返回处理结果和产物引用；MCP 服务仍由外部部署和统一配置管理。
-包内 `ImageValidationMiddleware` 检查 MCP 工具可用性并反馈调用错误；对 MCP 返回的内嵌单帧图片
-执行有界解码、格式和完整性检查。URL/路径/资产 ID 的文件内容及图像语义正确性不视为已验证。
+`AgentLibrary` 只持有可序列化的角色配置，不持有执行实例。Worker 启动按 slug 同步 SQL，
+保留记录身份和 enabled 运维设置；公开列表由 SQL 查询启用且公开的 orchestrator。
+普通执行、子 Run 和 Resume 在 `thread_service._build_agent_runtime()` 中按 SQL backend_id
+直接实例化 `LeaderAgent` 或 `SubAgentGraph`；每次 Run 使用新的实例、Context 和 Middleware。
+Leader 接收可用子角色定义，Middleware 通过 slug 创建并入队子 Run。
+
+所有子角色共用知识/网络检索、Gateway 目录和 MCP 工具，以及沙箱、文件系统、图片校验和模型重试
+Middleware。专业 Prompt、报告 Schema 和预设参数放在角色文件；工具是否用于当前任务由角色规则约束。
+Gateway 工具仍通过 Python gRPC 客户端访问目录，不直接连接 PostgreSQL/PostGIS 或 RustFS。
+`src/knowledge/tools.py` 承接知识和网络检索工具。
+`src/agents/middlewares/image_validation_middleware.py` 检查 MCP 工具可用性并反馈调用错误；
+对 MCP 返回的内嵌单帧图片执行有界解码、格式和完整性检查。URL/路径/资产 ID 的文件内容及图像语义
+正确性不视为已验证。图片角色通过 Context 预设要求 MCP 可用。
 
 ## 7. Implementation Invariants
 
-- 标准内部 Agent 包由 `__init__.py`、`agent.py`、`prompt.py`、`context.py` 和
-  `state.py` 组成；只有存在真实包内行为时才增加 `tools.py` 或 `middleware.py`。
+- 每个子角色在 `agent_library/subagents/` 的对应文件声明 AgentLibrary 实体；
+  共享构造放在 SubAgentGraph，不为角色创建专业 Agent class 或独立 builder。
 - 内部 Agent 的现有位置只有在明确批准的结构重构中才能移动，
   不为未来想法创建空模块。
 - `BaseAgent.stream_messages(...)` 使用 LangGraph `astream(...)`；事件流入口使用
   `astream_events(version="v3")` 并转发 `messages` channel 的 `params.data`。
 - `LeaderAgent` 的基础 Prompt 保持领域中立；专业行为放在工具、内部 Agent 或运行上下文。
-- `SearchAgent` 只做有界查询规划、检索、来源比较和证据综合，并保持为
-  `LeaderAgent` 的可选能力；`CitationAgent` 只校验调用方提供的声明和来源。
+- `search_agent` 只做有界查询规划、检索、来源比较和证据综合，并保持为
+  `LeaderAgent` 的可选能力；`citation_agent` 只校验调用方提供的声明和来源。
 - Agent 运行配置只有具体 context、当前 Run 提供的值和后端加载的值三类来源；
   不增加模块全局配置、中间件私有默认值或平行关键字参数。

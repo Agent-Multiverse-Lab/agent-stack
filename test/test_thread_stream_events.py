@@ -1,11 +1,25 @@
 import json
 import unittest
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from langchain.messages import HumanMessage
+from langchain_core.messages import ToolMessage
+from langgraph.types import Command
 
 from server.service import thread_service
+from src.agents.subagents import SubAgentContext
+
+
+async def no_interrupt(**kwargs):
+    return
+    yield
+
+
+@asynccontextmanager
+async def fake_session():
+    yield object()
 
 
 class FakeContext:
@@ -15,6 +29,7 @@ class FakeContext:
 
 
 class FakeAgent:
+    definition = SimpleNamespace(context={})
     agent_context = FakeContext
 
     def __init__(self, events=(), error: Exception | None = None) -> None:
@@ -34,22 +49,23 @@ class FakeAgent:
         for event in self.events:
             yield event
 
+    async def get_agent(self, context):
+        return SimpleNamespace(aget_state=AsyncMock(return_value=SimpleNamespace(tasks=(SimpleNamespace(interrupts=(object(),)),))))
+
 
 class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
     async def test_build_agent_runtime_looks_up_uuid_thread_for_user(self):
         thread_id = "b2308e62-68a3-433e-b051-7e0c218a9249"
-        conversation_repository = SimpleNamespace(
-            get_conversation_by_thread_id_for_user=AsyncMock(
-                return_value=SimpleNamespace(uid="user-1")
-            )
-        )
+        conversation_repository = SimpleNamespace(get_conversation_by_thread_id_for_user=AsyncMock(return_value=SimpleNamespace(uid="user-1")))
         agent_item = SimpleNamespace(
             slug="test-agent",
-            backend_id="TestAgent",
+            backend_id="SubAgentGraph",
+            name="测试角色",
+            description="test",
+            agent_config={},
+            role="subagent",
         )
-        agent_repository = SimpleNamespace(
-            get_by_slug_for_run_type=AsyncMock(return_value=agent_item)
-        )
+        agent_repository = SimpleNamespace(get_by_slug_for_run_type=AsyncMock(return_value=agent_item))
         agent_instance = object()
 
         with (
@@ -61,10 +77,11 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                 "server.service.thread_service.AgentRepository",
                 return_value=agent_repository,
             ),
-            patch.object(
-                thread_service.agent_manager,
-                "get_agent",
-                return_value=agent_instance,
+            patch.dict(
+                thread_service.AGENT_CLASSES,
+                {
+                    "SubAgentGraph": Mock(agent_context=SubAgentContext, return_value=agent_instance),
+                },
             ),
         ):
             result = await thread_service._build_agent_runtime(
@@ -130,9 +147,10 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             # FIXEME: 流事件单测不重复验证 checkpoint interrupt fixture。
             patch(
                 "server.service.thread_service.check_agent_interrupt_handler",
-                new_callable=AsyncMock,
-                return_value=None,
+                new=no_interrupt,
             ),
+            patch.object(thread_service.postgres_manager, "get_async_session_context", fake_session),
+            patch.object(thread_service, "save_interrupt_message", AsyncMock()),
         ):
             return [
                 json.loads(chunk)
@@ -199,11 +217,28 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("error", events[-1]["status"])
         self.assertEqual("AttributeError", events[-1]["error_type"])
 
+    async def test_subagent_command_result_can_be_sent_as_json(self):
+        command = Command(update={"messages": [ToolMessage(content="child result", tool_call_id="task-1")]})
+        events = await self.collect_events(
+            FakeAgent(
+                events=(
+                    (
+                        "agent_execute_event",
+                        {
+                            "stream_namesapce": [],
+                            "stream_data": {"event": "tool-completed", "output": command},
+                        },
+                    ),
+                )
+            )
+        )
+        output = events[0]["event"]["stream_data"]["output"]
+        self.assertEqual(output["update"]["messages"][0]["content"], "child result")
+        self.assertEqual(events[-1]["status"], "finished")
+
     async def test_agent_stream_error_yields_error_chunk(self) -> None:
         # FIXEME: 模型异常不再越过 Thread Service 直接抛给 Worker。
-        events = await self.collect_events(
-            FakeAgent(error=RuntimeError("model failed"))
-        )
+        events = await self.collect_events(FakeAgent(error=RuntimeError("model failed")))
 
         self.assertEqual("error", events[-1]["status"])
         self.assertEqual("model failed", events[-1]["error"])
@@ -230,14 +265,14 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             ),
             patch(
                 "server.service.thread_service.check_agent_interrupt_handler",
-                new_callable=AsyncMock,
-                return_value=None,
+                new=no_interrupt,
             ),
+            patch.object(thread_service, "_require_thread", AsyncMock()),
         ):
             events = [
                 json.loads(chunk)
                 async for chunk in thread_service.resume_agent_response(
-                    agent_slug="test-agent",
+                    resume_input={"answer": "PostgreSQL"},
                     thread_id="thread-1",
                     runtime_metadata={
                         "run_id": "resume-run",
@@ -250,7 +285,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                 )
             ]
 
-        self.assertEqual("PostgreSQL", agent.resume_input.resume)
+        self.assertEqual({"answer": "PostgreSQL"}, agent.resume_input.resume)
         self.assertEqual("finished", events[-1]["status"])
 
     async def test_resume_stream_error_yields_error_chunk(self) -> None:
@@ -269,11 +304,14 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                 "server.service.thread_service._check_conv_status",
                 new_callable=AsyncMock,
             ),
+            patch.object(thread_service, "_require_thread", AsyncMock()),
+            patch.object(thread_service.postgres_manager, "get_async_session_context", fake_session),
+            patch.object(thread_service, "save_interrupt_message", AsyncMock()),
         ):
             events = [
                 json.loads(chunk)
                 async for chunk in thread_service.resume_agent_response(
-                    agent_slug="test-agent",
+                    resume_input={"answer": "PostgreSQL"},
                     thread_id="thread-1",
                     runtime_metadata={
                         "run_id": "resume-run",

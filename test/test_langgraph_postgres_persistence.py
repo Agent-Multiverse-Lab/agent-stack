@@ -7,9 +7,7 @@ from unittest import mock
 
 import src.database.manger as manager_module
 from src.agents.leaderagent.agent import LeaderAgent
-from src.agents.subagents.citationagent.agent import CitationAgent
-from src.agents.subagents.outlineagent.agent import OutlineAgent
-from src.agents.subagents.searchagent.agent import SearchAgent
+from src.agents.subagents.subagentgraph import SubAgentGraph
 from src.configs.config import Config
 from src.database.manger import PostgreManger
 
@@ -192,13 +190,11 @@ class LangGraphPostgresPersistenceTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(manager.initialized)
 
     def test_all_concrete_agents_bind_store_and_checkpointer(self) -> None:
-        '''四个真实 create_agent 调用点同时注入两个组件。'''
+        '''两个真实 create_agent 调用点同时注入两个组件。'''
 
         methods = (
             LeaderAgent._build_agent,
-            CitationAgent.get_agent,
-            SearchAgent.get_agent,
-            OutlineAgent.get_agent,
+            SubAgentGraph.get_agent,
         )
         for method in methods:
             with self.subTest(method=method.__qualname__):

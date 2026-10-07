@@ -10,6 +10,7 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
 from server.service.mcp_service import get_mcp_tools
+from src.agents.agent_library import AgentLibrary
 from src.agents.backends.composite_backend import (
     ROUTE_SKILL,
     create_composite_backend,
@@ -22,10 +23,6 @@ from src.agents.middlewares.subagent_middlware import create_subagent_middleware
 from src.agents.middlewares.summary_middleware import (
     create_summary_middleware_from_context,
 )
-from src.agents.subagents.citationagent import CitationAgent
-from src.agents.subagents.imageprocessingagent import ImageProcessingAgent
-from src.agents.subagents.satelliteagent import SatelliteAgent
-from src.agents.subagents.searchagent import SearchAgent
 from src.configs import config as sys_config
 from src.model import load_model
 
@@ -42,11 +39,19 @@ class LeaderAgent(BaseAgent):
     context = LeaderAgentContext
     agent_context = LeaderAgentContext
 
-    def __init__(self):
-        pass
+    def __init__(self, *, definition: AgentLibrary, subagents: tuple[AgentLibrary, ...]):
+        super().__init__()
+        self.definition = definition
+        self.name = definition.name
+        self.description = definition.description
+        self.subagents = tuple(subagents)
 
     def _create_middlewares(self, context):
         backend = create_composite_backend(context)
+        delegation = (
+            [create_subagent_middleware(subagents=self.subagents, parent_context=context)]
+            if self.subagents else []
+        )
         return [
             create_sandbox_middleware(),
             create_custom_filesystem_middleware(
@@ -62,15 +67,7 @@ class LeaderAgent(BaseAgent):
                 sources=[(ROUTE_SKILL, "Shared")],
             ),
             create_memory_middleware(),
-            create_subagent_middleware(
-                subagents=[
-                    SearchAgent(),
-                    CitationAgent(),
-                    ImageProcessingAgent(),
-                    SatelliteAgent(),
-                ],
-                parent_context=context,
-            ),
+            *delegation,
             PatchToolCallsMiddleware(),
             ModelRetryMiddleware(max_retries=3, on_failure="continue"),
             ToolRetryMiddleware(max_retries=5),

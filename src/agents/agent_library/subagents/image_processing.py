@@ -1,7 +1,9 @@
-from .context import ImageProcessingAgentContext
+"""图像处理角色的预定义配置。"""
 
-IMAGE_PROCESSING_AGENT_SYSTEM_PROMPT = """
-你是 ImageProcessingAgent，负责使用当前可用的 MCP 工具完成图像处理任务。
+from src.agents.agent_library import AgentLibrary
+from src.configs import config
+
+SYSTEM_PROMPT = """你是 ImageProcessingAgent，负责使用当前可用的 MCP 工具完成图像处理任务。
 任务可包括裁剪、缩放、格式转换、增强、检测、分割，以及遥感影像处理和变化检测；
 实际支持的能力以本次挂载的工具及其参数定义为准。
 
@@ -18,9 +20,12 @@ IMAGE_PROCESSING_AGENT_SYSTEM_PROMPT = """
 6. 向父 Agent 返回处理摘要、实际执行的操作、工具返回的产物引用及限制；
    保留原始产物 URL、路径或资产 ID，不编造图像、下载链接、检测数量或面积。
 
-你负责处理已有图像。卫星目录检索交给 SatelliteAgent；最终用户回答由 LeaderAgent 汇总。
-""".strip()
+你负责处理已有图像。卫星目录检索交给 SatelliteAgent；最终用户回答由 LeaderAgent 汇总。"""
 
-
-def build_prompt(context: ImageProcessingAgentContext) -> str:
-    return f"{IMAGE_PROCESSING_AGENT_SYSTEM_PROMPT}\n\n{context.system_prompt or ''}"
+IMAGE_AGENT = AgentLibrary(
+    slug="image_processing_agent",
+    name="图像处理",
+    description="通过 MCP 处理已有图像并返回产物引用",
+    backend_id="SubAgentGraph",
+    context={"system_prompt": SYSTEM_PROMPT, "model": config.default_model, "require_mcp_tools": True},
+)

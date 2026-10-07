@@ -5,6 +5,7 @@ Agent Domain 管理代理能力的构造与执行边界，不直接负责持久�
 
 | Capability | 入口 | 职责 |
 | --- | --- | --- |
+| agent-construction | [spec.md](agent-construction/spec.md) | Agent library 角色定义、SQL 同步与每次 Run 的实例创建 |
 | context-management | [README.md](context-management/README.md) | 运行上下文来源、合并与消费边界 |
 | subagent-delegation | [README.md](subagent-delegation/README.md) | 父代理到子代理的委派机制 |
 

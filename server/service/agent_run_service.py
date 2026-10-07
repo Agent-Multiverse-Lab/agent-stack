@@ -289,23 +289,42 @@ async def enqueue_agent_run(run_id: str) -> None:
 
 
 async def load_agent_run_result(run_id: str, uid: str):
-    return get_agent_run_result(current_uid=uid, run_id=run_id)
+    return await get_agent_run_result(current_uid=uid, run_id=run_id)
 
 
 async def wait_agent_run_result(run_id: str, uid: str, time_out: float = 600) -> str:
-    """子agent不显示进程，只执行完毕，从数据库读取子Aent的结果返回"""
-
-    agent_run_events = await read_agent_run_events(
-        run_id=run_id, after_id="0-0", block_ms=15_000
-    )
-    async for _ in agent_run_events:
-        pass
-
-    # 事件流尽后，从库直接拿结果
-    subagent_run_result = await load_agent_run_result(run_id=run_id, uid=uid)
-    if str(subagent_run_result.get("status") or "") not in _TERMINAL_RUN_STATUSES:
-        raise AgentRunTimeOut(subagent_run_result)
-    return subagent_run_result
+    """事件唤醒等待方，SQL 终态决定结果；超时与取消结束等待。"""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + time_out
+    after_id = "0-0"
+    while True:
+        async with session_context() as db:
+            run = await AgentRunRepository(db).get_by_id_for_user(run_id=run_id, uid=uid)
+            if run is None:
+                raise ValueError(f"Agent Run 不存在或不属于当前用户：{run_id}")
+            status = str(run.agent_status)
+            error = run.error
+        if status == "completed":
+            result = await load_agent_run_result(run_id=run_id, uid=uid)
+            if result is None:
+                raise RuntimeError(f"Agent Run 未保存最终消息：{run_id}")
+            return result
+        if status in _TERMINAL_RUN_STATUSES:
+            raise RuntimeError(f"子 Agent Run {status}：{error or run_id}")
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            raise AgentRunTimeOut(run_id)
+        try:
+            events = await asyncio.wait_for(
+                read_agent_run_events(
+                    run_id, after_id=after_id, block_ms=max(1, min(1000, int(remaining * 1000)))
+                ),
+                timeout=remaining,
+            )
+        except TimeoutError as exc:
+            raise AgentRunTimeOut(run_id) from exc
+        if events:
+            after_id = events[-1][0]
     
 
 async def read_agent_run_events(

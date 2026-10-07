@@ -6,7 +6,6 @@ __all__ = [
     "BaseAgent",
     "BaseContext",
     "LeaderAgent",
-    "agent_manager",
     "CustomAgentState"
 ]
 
@@ -25,10 +24,6 @@ def __getattr__(name: str) -> Any:
         from .leaderagent import LeaderAgent
 
         return LeaderAgent
-    if name == "agent_manager":
-        from .manager import agent_manager
-
-        return agent_manager
     if name == "CustomAgentState":
             from .base_state import CustomAgentState
     
