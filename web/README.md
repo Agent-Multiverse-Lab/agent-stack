@@ -21,3 +21,16 @@ npm test
 npm run build
 npm run preview
 ```
+
+## Map page
+
+The `/map` page uses TianDiTu imagery as its basemap. Add a browser-side TianDiTu
+key to `web/.env.local` before starting Vite:
+
+```dotenv
+VITE_TIANDITU_TK=your-browser-key
+```
+
+The key is exposed to the browser; configure the allowed website origin in the
+TianDiTu console. Satellite catalog search and Map conversation are not connected
+on this initial page.

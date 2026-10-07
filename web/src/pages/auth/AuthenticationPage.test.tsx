@@ -57,15 +57,15 @@ describe("authentication routes", () => {
   })
 
   it("redirects a guest from a protected page to login", async () => {
-    renderRoute("/library")
+    renderRoute("/agent")
     expect(await screen.findByRole("heading", { name: "Welcome back" })).toBeTruthy()
     expect(getCurrentUser).not.toHaveBeenCalled()
   })
 
   it("restores a session before rendering a protected page", async () => {
     localStorage.setItem("au.access_token", "test-token")
-    renderRoute("/library")
-    expect(await screen.findByRole("heading", { name: "Library" })).toBeTruthy()
+    renderRoute("/agent")
+    expect(await screen.findByRole("main", { name: "Agent" })).toBeTruthy()
     expect(getCurrentUser).toHaveBeenCalledOnce()
   })
 
@@ -157,10 +157,14 @@ describe("authentication routes", () => {
 
   it("uses the shadcn sidebar for navigation and account actions", async () => {
     localStorage.setItem("au.access_token", "test-token")
-    const { container } = renderRoute("/library")
-    expect(await screen.findByRole("heading", { name: "Library" })).toBeTruthy()
-    expect(screen.getByRole("navigation", { name: "Primary navigation" })).toBeTruthy()
-    expect(screen.getByRole("link", { name: "Agent" }).getAttribute("href")).toBe("/agent")
+    const { container } = renderRoute("/agent")
+    expect(await screen.findByRole("main", { name: "Agent" })).toBeTruthy()
+    const navigation = screen.getByRole("navigation", {
+      name: "Primary navigation",
+    })
+    expect(navigation).toBeTruthy()
+    expect(within(navigation).getByRole("link", { name: "Agent" }).getAttribute("href")).toBe("/agent")
+    expect(within(navigation).queryByRole("link", { name: "Library" })).toBeNull()
 
     const sidebar = container.querySelector('[data-slot="sidebar"][data-state]')
     expect(sidebar?.getAttribute("data-state")).toBe("expanded")
@@ -189,12 +193,12 @@ describe("authentication routes", () => {
   it("opens the mobile sidebar and closes it after navigation", async () => {
     vi.stubGlobal("innerWidth", 375)
     localStorage.setItem("au.access_token", "test-token")
-    renderRoute("/library")
-    expect(await screen.findByRole("heading", { name: "Library" })).toBeTruthy()
+    renderRoute("/agent")
+    expect(await screen.findByRole("main", { name: "Agent" })).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: "Toggle Sidebar" }))
     const sidebar = await screen.findByRole("dialog")
-    fireEvent.click(within(sidebar).getByRole("link", { name: "Agent" }))
+    fireEvent.click(within(sidebar).getByRole("link", { name: "Sandbox" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 

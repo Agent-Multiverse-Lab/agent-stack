@@ -12,7 +12,6 @@ export default function App() {
   useEffect(() => {
     const titles: Record<string, string> = {
       "/": "Chat",
-      "/library": "Library",
       "/knowledge": "Knowledge",
       "/agent": "Agent",
       "/static": "Satellite",

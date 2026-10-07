@@ -59,10 +59,10 @@ export default function MainLayout() {
       ? "Knowledge"
       : ({
           "/": "Chat",
-          "/library": "Library",
           "/knowledge": "Knowledge",
           "/agent": "Agent",
           "/static": "Satellite",
+          "/map": "Map",
           "/sandbox": "Sandbox",
         } as Record<string, string>)[location.pathname] ?? "Chat";
 

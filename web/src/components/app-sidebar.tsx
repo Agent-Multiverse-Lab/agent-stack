@@ -5,7 +5,7 @@ import {
   BotIcon,
   BookOpenCheckIcon,
   FilesIcon,
-  LibraryIcon,
+  MapIcon,
   SearchIcon,
   SquarePenIcon,
   SquareTerminalIcon,
@@ -70,9 +70,7 @@ export function AppSidebar({
         name: "Knowledge",
         logo: <BookOpenCheckIcon />,
         url: "/knowledge",
-        isActive:
-          location.pathname.startsWith("/knowledge") ||
-          location.pathname === "/library",
+        isActive: location.pathname.startsWith("/knowledge"),
       },
       {
         name: "Sandbox",
@@ -88,12 +86,6 @@ export function AppSidebar({
         url: "/",
         icon: <SquarePenIcon />,
         isActive: location.pathname === "/",
-      },
-      {
-        title: "Library",
-        url: "/library",
-        icon: <LibraryIcon />,
-        isActive: location.pathname === "/library",
       },
       {
         title: "Knowledge",
@@ -112,6 +104,12 @@ export function AppSidebar({
         url: "/static",
         icon: <FilesIcon />,
         isActive: location.pathname === "/static",
+      },
+      {
+        title: "Map",
+        url: "/map",
+        icon: <MapIcon />,
+        isActive: location.pathname === "/map",
       },
       {
         title: "Sandbox",

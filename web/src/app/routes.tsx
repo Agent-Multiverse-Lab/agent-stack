@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { Navigate, Outlet, Route, Routes, useLocation } from "react-router";
 
 import { useAuth } from "@/context/AuthContext";
 import { useTranslation } from "@/i18n";
@@ -8,22 +8,16 @@ import MainLayout from "@/layouts/MainLayout/MainLayout";
 import ChatPage from "@/pages/chat/ChatPage";
 import KnowledgePage from "@/pages/knowledge/KnowledgePage";
 import KnowledgeBaseDetailPage from "@/pages/knowledge/KnowledgeBaseDetailPage";
-import LibraryPage from "@/pages/library/LibraryPage";
 import AgentPage from "@/pages/agent/AgentPage";
 import Satellite from "@/pages/statellite/Satellite";
 import SandboxPage from "@/pages/sandbox/SandboxPage";
 
-function AuthGate({
-  children,
-  login = false,
-}: {
-  children: React.ReactNode;
-  login?: boolean;
-}) {
-  const { t } = useTranslation();
+const MapPage = lazy(() => import("@/pages/map/MapPage"));
+
+function useRestoredSession() {
   const { accessToken, restore } = useAuth();
   const [ready, setReady] = useState(false);
-  const location = useLocation();
+
   useEffect(() => {
     let current = true;
     void restore().finally(() => {
@@ -33,44 +27,63 @@ function AuthGate({
       current = false;
     };
   }, [restore]);
-  if (!ready)
-    return (
-      <div className="grid h-dvh place-items-center text-muted-foreground">{t("Loading...")}</div>
-    );
-  if (login) return accessToken ? <Navigate to="/" replace /> : children;
-  return accessToken ? (
-    children
-  ) : (
+
+  return { accessToken, ready };
+}
+
+function RouteLoading() {
+  const { t } = useTranslation();
+  return (
+    <div className="grid h-dvh place-items-center text-muted-foreground">
+      {t("Loading...")}
+    </div>
+  );
+}
+
+function GuestRoute() {
+  const { accessToken, ready } = useRestoredSession();
+
+  if (!ready) return <RouteLoading />;
+  return accessToken ? <Navigate to="/" replace /> : <Outlet />;
+}
+
+function ProtectedRoute() {
+  const { accessToken, ready } = useRestoredSession();
+  const location = useLocation();
+
+  if (!ready) return <RouteLoading />;
+  return accessToken ? <Outlet /> : (
     <Navigate to="/login" state={{ from: location }} replace />
   );
 }
 
 export default function AppRoutes() {
+  const { t } = useTranslation();
   return (
     <Routes>
-      <Route
-        path="/login"
-        element={
-          <AuthGate login>
-            <AuthenticationPage />
-          </AuthGate>
-        }
-      />
-      <Route
-        element={
-          <AuthGate>
-            <MainLayout />
-          </AuthGate>
-        }
-      >
-        <Route path="/" element={<ChatPage />} />
-        <Route path="/c/:threadId" element={<ChatPage />} />
-        <Route path="/library" element={<LibraryPage />} />
-        <Route path="/knowledge" element={<KnowledgePage />} />
-        <Route path="/knowledge/:kbId" element={<KnowledgeBaseDetailPage />} />
-        <Route path="/agent" element={<AgentPage />} />
-        <Route path="/static" element={<Satellite />} />
-        <Route path="/sandbox" element={<SandboxPage />} />
+      <Route element={<GuestRoute />}>
+        <Route path="login" element={<AuthenticationPage />} />
+      </Route>
+      <Route element={<ProtectedRoute />}>
+        <Route element={<MainLayout />}>
+          <Route index element={<ChatPage />} />
+          <Route path="c/:threadId" element={<ChatPage />} />
+          <Route path="knowledge" element={<KnowledgePage />} />
+          <Route path="knowledge/:kbId" element={<KnowledgeBaseDetailPage />} />
+          <Route path="agent" element={<AgentPage />} />
+          <Route path="static" element={<Satellite />} />
+          <Route
+            path="map"
+            element={
+              <Suspense
+                fallback={<div className="grid h-full place-items-center text-muted-foreground">{t("Loading map")}</div>}
+              >
+                <MapPage />
+              </Suspense>
+            }
+          />
+          <Route path="sandbox" element={<SandboxPage />} />
+        </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

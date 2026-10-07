@@ -27,8 +27,7 @@ web/
 │   │   ├── auth/            登录页及其表单
 │   │   ├── chat/            聊天页、专用组件与 Hooks
 │   │   ├── knowledge/       知识页及其专用组件
-│   │   ├── library/         资料库页、专用组件与演示数据
-│   │   └── agent|static|sandbox/  其他路由页
+│   │   └── agent|map|static|sandbox/  其他路由页
 │   ├── styles/index.css     全局样式与主题
 │   ├── types/               共享类型
 │   └── main.tsx             应用入口
