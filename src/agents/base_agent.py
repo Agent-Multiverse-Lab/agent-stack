@@ -165,7 +165,8 @@ class BaseAgent:
                 stream_params = stream_event.get("params")
                 stream_data = stream_params.get("data") #此处根据方法不同，内容也不同, 具体得自己debug看下，随便写个就知道了
                 stream_namesapce = stream_params.get("namespace", []) # 当有旁路子图或者agent执行时，namespace会有东西
-                
+                stream_sequence = stream_event.get("seq") # 直接从流式中
+
                 if stream_methods == "values":
                     # 返回直接参数，由于values的特殊性，其返回的时候，只有完全参数提取的时候才出现 value,即是一个完整消息，
                     # 输出的时候，直接返回就可跳过了，只有values是完整的，其他的都是流式的
@@ -181,6 +182,9 @@ class BaseAgent:
                     
                     # purely 上面二参数
                     stream_agent_run_metadata = dict(stream_agent_run_metadata or {})
+
+                    # 组合参数
+
                     
                     # 添加额外数据,因为会添加子图（子agent）的关系，此处需要保留
                     stream_agent_run_metadata["namespace"] = stream_namesapce
@@ -193,14 +197,14 @@ class BaseAgent:
                     
                 if stream_methods == "tools":
                     # 对 tool 消息进行清洗
-                    stream_execute_data = {
+                    agent_execute_data = {
                         "stream_methods": stream_methods,
                         "stream_namesapce": stream_namesapce,
                         "stream_data":stream_data
                     }
              
                     # 构建任务触发时，所要输出内容
-                    yield "agent_execute_event", stream_execute_data
+                    yield "agent_execute_event", agent_execute_data
 
     # FIXEME: Resume 必须把 Command 原样交给 LangGraph，不能包装成 messages。
     async def stream_message_by_resume(

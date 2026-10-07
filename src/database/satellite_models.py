@@ -1,4 +1,4 @@
-"""ORM mappings for the Alembic-owned satellite imagery catalog."""
+"""卫星影像目录的 ORM 映射；表结构由 Alembic 迁移维护。"""
 
 from sqlalchemy import (
     BigInteger,
@@ -23,7 +23,7 @@ from .base import Base
 
 
 class PostGISPolygon(UserDefinedType):
-    """"""
+    """将字段声明为 WGS84 坐标系下的 PostGIS 多边形几何。"""
 
     cache_ok = True
 
@@ -32,6 +32,8 @@ class PostGISPolygon(UserDefinedType):
 
 
 class SatelliteSource(Base):
+    """影像数据来源及其所属项目。"""
+
     __tablename__ = "satellite_sources"
     __table_args__ = (
         UniqueConstraint("project_id", "name", name="uq_satellite_sources_project_name"),
@@ -49,6 +51,8 @@ class SatelliteSource(Base):
 
 
 class SatelliteCollection(Base):
+    """同一来源下的影像产品集合。"""
+
     __tablename__ = "satellite_collections"
     __table_args__ = (
         UniqueConstraint("source_id", "name", name="uq_satellite_collections_source_name"),
@@ -70,6 +74,8 @@ class SatelliteCollection(Base):
 
 
 class SatelliteScene(Base):
+    """单景影像的时间、空间范围及质量等目录元数据。"""
+
     __tablename__ = "satellite_scenes"
     __table_args__ = (
         CheckConstraint("bbox_west >= -180 AND bbox_east <= 180 AND bbox_west < bbox_east", name="ck_satellite_scenes_bbox_lon"),
@@ -94,6 +100,7 @@ class SatelliteScene(Base):
     provider_scene_id = Column(String(255), nullable=False)
     acquired_at = Column(DateTime(timezone=True), nullable=False)
     ingested_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    # 实际覆盖范围用多边形表示；下方 bbox 字段是便于筛选的外接矩形。
     footprint = Column(PostGISPolygon(), nullable=False)
     bbox_west = Column(Float, nullable=False)
     bbox_south = Column(Float, nullable=False)
@@ -113,6 +120,8 @@ class SatelliteScene(Base):
 
 
 class SatelliteSceneAsset(Base):
+    """影像、波段、掩膜和预览等资产的对象存储引用。"""
+
     __tablename__ = "satellite_scene_assets"
     __table_args__ = (
         UniqueConstraint("scene_id", "asset_key", name="uq_satellite_scene_assets_scene_asset_key"),
@@ -135,6 +144,8 @@ class SatelliteSceneAsset(Base):
 
 
 class SatelliteBusinessScene(Base):
+    """"""
+
     __tablename__ = "satellite_business_scenes"
     __table_args__ = (
         CheckConstraint(

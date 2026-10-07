@@ -2,11 +2,11 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import ModelRetryMiddleware
 from langgraph.graph.state import CompiledStateGraph
 
-from src.agents.base_agent import BaseAgent
-from src.model import load_model
-from src.configs import config as sys_config
 from src.agents.backends.composite_backend import create_custom_filesystem_middleware
+from src.agents.base_agent import BaseAgent
 from src.agents.middlewares.sandbox_middleware import create_sandbox_middleware
+from src.configs import config as sys_config
+from src.model import load_model
 
 from .context import SearchAgentContext
 from .tools import knowledge_search, web_search_one, web_search_parallel
