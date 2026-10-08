@@ -5,11 +5,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from langchain.messages import HumanMessage
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from langgraph.types import Command
 
 from server.service import thread_service
-from src.agents.subagents import SubAgentContext
+from src.agents.buildin.subagents import SubAgentContext
 
 
 async def no_interrupt(**kwargs):
@@ -29,7 +29,6 @@ class FakeContext:
 
 
 class FakeAgent:
-    definition = SimpleNamespace(context={})
     agent_context = FakeContext
 
     def __init__(self, events=(), error: Exception | None = None) -> None:
@@ -64,6 +63,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             description="test",
             agent_config={},
             role="subagent",
+            is_subagent=True,
         )
         agent_repository = SimpleNamespace(get_by_slug_for_run_type=AsyncMock(return_value=agent_item))
         agent_instance = object()
@@ -77,12 +77,11 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                 "server.service.thread_service.AgentRepository",
                 return_value=agent_repository,
             ),
-            patch.dict(
-                thread_service.AGENT_CLASSES,
-                {
-                    "SubAgentGraph": Mock(agent_context=SubAgentContext, return_value=agent_instance),
-                },
-            ),
+            patch.object(
+                thread_service.agent,
+                "get_agent_class",
+                return_value=Mock(agent_context=SubAgentContext, return_value=agent_instance),
+            ) as resolve_class,
         ):
             result = await thread_service._build_agent_runtime(
                 agent_slug="test-agent",
@@ -92,6 +91,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual((agent_item, agent_instance), result)
+        resolve_class.assert_called_once_with(agent_item.backend_id)
         conversation_repository.get_conversation_by_thread_id_for_user.assert_awaited_once_with(
             thread_id=thread_id,
             user_id="user-1",
@@ -109,7 +109,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("dashscope/qwen3.8-max", context["model"])
 
     async def collect_events(self, agent: FakeAgent) -> list[dict]:
-        agent_item = SimpleNamespace(slug="test-agent")
+        agent_item = SimpleNamespace(slug="test-agent", agent_config={})
         input_message = SimpleNamespace(
             content="hello",
             image_content=None,
@@ -210,6 +210,14 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
         self.save_messages.assert_awaited_once()
         self.assertEqual("run-1", self.save_messages.await_args.kwargs["run_id"])
 
+    async def test_v2_messages_and_empty_chunks_do_not_abort_stream(self):
+        for message in (AIMessage(content="OK"), AIMessageChunk(content="OK"), AIMessageChunk(content="")):
+            with self.subTest(message=message):
+                events = await self.collect_events(FakeAgent(events=(("messages", (message, {})),)))
+                self.assertEqual(events[-1]["status"], "finished")
+                loading = [event for event in events if event["status"] == "loading"]
+                self.assertEqual([event["response"] for event in loading], ["OK"] if message.content else [])
+
     async def test_invalid_values_payload_yields_error_chunk(self) -> None:
         # FIXEME: Thread Service 将内部解析异常转换为统一 error chunk。
         events = await self.collect_events(FakeAgent(events=(("values", None),)))
@@ -246,7 +254,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_resume_stream_passes_command_without_human_message(self) -> None:
         agent = FakeAgent()
-        agent_item = SimpleNamespace(slug="test-agent")
+        agent_item = SimpleNamespace(slug="test-agent", agent_config={})
         current_user = SimpleNamespace(uid="user-1")
 
         with (
@@ -291,7 +299,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
     async def test_resume_stream_error_yields_error_chunk(self) -> None:
         # FIXEME: Resume 入口使用自己的 builder 输出 error chunk。
         agent = FakeAgent(error=RuntimeError("resume failed"))
-        agent_item = SimpleNamespace(slug="test-agent")
+        agent_item = SimpleNamespace(slug="test-agent", agent_config={})
         current_user = SimpleNamespace(uid="user-1")
 
         with (

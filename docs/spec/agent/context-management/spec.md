@@ -2,37 +2,44 @@
 
 ## 1. Invariant
 
-Agent 的 `context` 由以下来源合并，且每次执行只读一次：
+每次 Run 在 Service 入口合并一次配置快照，并将它显式传给 Agent：
 
-1. 运行时配置（`AgentRun` 触发数据）
-2. 数据库持久化参数（如 agent 配置）
-3. 用户输入消息与 metadata
+1. Context 声明的配置默认值。
+2. SQL `agent.agent_config` 中的角色配置。
+3. 当前 Run 明确选择的模型及受信任的运行身份。
+
+用户消息进入 Graph State，不将整份消息 metadata 或 Run metadata 混入 Context。
+本能力不替代 Run 生命周期、数据库连接或模型凭据管理。
 
 ## 2. Requirements
 
-### AG-CONT-001
-禁止从全局环境直接注入运行参数；所有上下文都应明确从入口参数传入。
+### AG-CONT-001：显式来源与覆盖顺序
 
-### AG-CONT-002
-同一 run 运行期间上下文不可热更新；若需更新，需发起新 run。
+Worker 从持久化 AgentRun、用户和输入消息构造执行参数；Run 的身份字段覆盖 metadata 同名值。
+Service 深拷贝 SQL 配置，模型优先级为：非空 Run 选择 > 非空 SQL 预设 > 应用默认模型。
+`uid`、`run_id`、`thread_id`、`request_id` 和子 Run 的 `parent_run_id` 来自本次执行参数。
+SQL 预设中的运行身份和未知 Context 字段由 Agent 构造入口拒绝。
+应用默认模型在入口或 Context 默认值中确定，构图和摘要中间件只消费 `context.model`。
+平台连接、凭据和存储根目录属于基础设施配置，不作为当前用户或 Run 身份的隐式来源。
 
-### AG-CONT-003
-`LeaderAgent` 与 `SubAgent` 的上下文构造入口必须可追踪到具体调用点。
+### AG-CONT-002：单次运行快照
 
-## 3. Example
+同一 Run 不重新查询角色配置或热更新 Context；数据库变更在后续 Run 生效。
+SQL 中的嵌套配置在合并时深拷贝，修改一个 Run 的快照不污染 SQL 默认值或另一个 Run。
+Resume 是新的 Run，通过相同的合并入口组装自己的 Context，再读取原会话的 checkpoint。
 
-```python
-# worker / service 组装上下文示例（概念化）
-runtime_context = {
-    "uid": agent_run.uid,
-    "thread_id": agent_run.thread_id,
-    "agent_id": agent_run_event.agent_id,
-    "metadata": agent_run_metadata,
-    "message": build_agent_input_msg(...),
-}
-```
+### AG-CONT-003：可追踪的组装与消费
 
-## 4. Acceptance
+`server/worker.py:process_agent_run()` 组装 runtime_metadata 和消息。
+`server/service/thread_service.py:_build_agent_runtime_context()` 是 chat、subagent、resume 共用的合并入口，
+由 `stream_agent_response()` 和 `resume_agent_response()` 调用。
+`BaseAgent` 用显式传入的快照构造具体 Context；LeaderAgent、SubAgentGraph 和 Middleware 消费它。
+子代理中间件只使用显式的父 Context 传递父 Run 身份，子 Run 通过自身角色 slug 获取独立配置。
+Context 不负责修改数据库中的 Run 状态。
 
-- 运行上下文的输入点可以审计
-- context 与 DB 主状态无耦合（不会直接修改 run 状态）
+## 3. Acceptance
+
+- Run 身份不会被 SQL 预设或未筛选的 metadata 覆盖。
+- 非空模型选择按上述顺序生效，空字符串不会清除 SQL 预设。
+- 全局默认模型在快照构造后改变，不影响已有快照；构图与摘要使用同一个模型值。
+- 嵌套配置在不同 Run 之间隔离；普通执行、子 Run 和 Resume 的 Context 入口均可追踪。

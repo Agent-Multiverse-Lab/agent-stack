@@ -2,16 +2,16 @@ import unittest
 from unittest.mock import AsyncMock, patch, sentinel
 
 from src.agents.agent_library.subagents.image_processing import IMAGE_AGENT
-from src.agents.subagents import SubAgentContext, SubAgentGraph
+from src.agents.buildin.subagents import SubAgentContext, SubAgentGraph
 
 
 class ImageProcessingAgentTest(unittest.IsolatedAsyncioTestCase):
     async def test_selected_mcp_tools_are_attached_to_common_graph(self):
-        module = "src.agents.subagents.subagentgraph"
+        module = "src.agents.buildin.subagents.subagent_graph"
         context = SubAgentContext(uid="user-1", thread_id="thread-1")
         context.update_context(IMAGE_AGENT.context)
         context.update_context({"mcps": ["image_server"], "model": "test/model"})
-        agent = SubAgentGraph(definition=IMAGE_AGENT)
+        agent = SubAgentGraph()
         with (
             patch(f"{module}.get_mcp_tools", AsyncMock(return_value=(sentinel.image_tool,))) as get_tools,
             patch(f"{module}.list_mcp_servers", return_value=("image_server",)),
@@ -32,6 +32,6 @@ class ImageProcessingAgentTest(unittest.IsolatedAsyncioTestCase):
     async def test_image_role_still_requires_available_mcp_tools(self):
         context = SubAgentContext(uid="user-1", thread_id="thread-1")
         context.update_context(IMAGE_AGENT.context)
-        with patch("src.agents.subagents.subagentgraph.get_mcp_tools", AsyncMock(return_value=[])):
+        with patch("src.agents.buildin.subagents.subagent_graph.get_mcp_tools", AsyncMock(return_value=[])):
             with self.assertRaisesRegex(ValueError, "没有可用的 MCP 工具"):
-                await SubAgentGraph(definition=IMAGE_AGENT).get_agent(context)
+                await SubAgentGraph().get_agent(context)

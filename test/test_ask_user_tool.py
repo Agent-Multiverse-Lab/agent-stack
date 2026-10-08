@@ -15,7 +15,7 @@ from langgraph.types import Command
 from pydantic import ValidationError
 
 # 单独加载工具定义，避免导入 LeaderAgent 时加载模型、数据库和其他服务。
-ask_user = runpy.run_path(str(Path(__file__).resolve().parents[1] / "src/agents/leaderagent/tools.py"))["ask_user"]
+ask_user = runpy.run_path(str(Path(__file__).resolve().parents[1] / "src/agents/buildin/leader/tools.py"))["ask_user"]
 
 
 class AskUserToolTest(unittest.IsolatedAsyncioTestCase):

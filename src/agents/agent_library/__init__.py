@@ -1,4 +1,4 @@
-"""预定义 Agent 的角色配置实体。"""
+"""Agent 属性模型及启动时用于补齐数据库记录的角色预设。"""
 
 import json
 from copy import deepcopy
@@ -32,13 +32,3 @@ class AgentLibrary:
         unknown_fields = self.context.keys() - {item.name for item in fields(context_class)}
         if unknown_fields:
             raise ValueError(f"未知 Agent Context 参数：{', '.join(sorted(unknown_fields))}")
-
-    @classmethod
-    def from_record(cls, record: Any) -> "AgentLibrary":
-        return cls(
-            slug=record.slug,
-            name=record.name,
-            description=record.description,
-            backend_id=record.backend_id,
-            context=record.agent_config or {},
-        )

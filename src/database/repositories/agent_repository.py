@@ -14,26 +14,26 @@ class AgentRepository:
         result = await self.session.execute(select(Agent).where(Agent.slug == slug))
         return result.scalar_one_or_none()
 
-    async def sync_agent(
+    async def ensure_agent(
         self,
         *,
         definition: AgentLibrary,
         role: str = "orchestrator",
         internal_only: bool = False,
-    ) -> Agent:
-        """同步声明字段，保留已有身份及 enabled 运维设置。"""
+    ) -> None:
+        """按预设补齐缺失的 Agent，已有 slug 的记录保持原样。"""
         values = {
             "backend_id": definition.backend_id,
             "name": definition.name,
             "description": definition.description,
             "agent_config": definition.context,
             "role": role,
+            "is_subagent": role == "subagent",
             "internal_only": internal_only,
         }
         statement = insert(Agent).values(slug=definition.slug, enabled=True, **values)
-        statement = statement.on_conflict_do_update(index_elements=[Agent.slug], set_=values).returning(Agent)
-        result = await self.session.execute(statement, execution_options={"populate_existing": True})
-        return result.scalar_one()
+        statement = statement.on_conflict_do_nothing(index_elements=[Agent.slug])
+        await self.session.execute(statement)
 
     async def list_agents(self, *, role: str, internal_only: bool) -> list[Agent]:
         result = await self.session.execute(

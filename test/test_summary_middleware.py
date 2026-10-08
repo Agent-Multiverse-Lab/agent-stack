@@ -12,7 +12,6 @@ from src.agents.middlewares.summary_middleware import (
     create_summary_middleware,
     create_summary_middleware_from_context,
 )
-from src.configs import config as sys_config
 
 
 class _DummyModel:
@@ -64,6 +63,7 @@ class SummaryMiddlewareTest(unittest.TestCase):
 
     def test_context_factory_maps_summary_configuration(self):
         context = BaseContext(
+            model="run-specific/model",
             summary_threshold=64,
             summary_keep_messages=8,
             summary_tool_result_token_limit=256,
@@ -79,7 +79,7 @@ class SummaryMiddlewareTest(unittest.TestCase):
                 backend=_backend(),
             )
 
-        load_model.assert_called_once_with(sys_config.default_model)
+        load_model.assert_called_once_with("run-specific/model")
         self.assertEqual(middleware._lc_helper.trigger, ("tokens", 64 * 1024))
         self.assertEqual(middleware._lc_helper.keep, ("messages", 8))
         self.assertEqual(middleware.tool_result_offload_token_limit, 256)

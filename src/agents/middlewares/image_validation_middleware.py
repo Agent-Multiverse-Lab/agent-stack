@@ -84,3 +84,8 @@ class ImageValidationMiddleware(AgentMiddleware):
                 image.load()
             checks.append(f"{image_format} {size[0]}×{size[1]} 文件可完整解码；内容是否符合任务仍需核验")
         return checks
+
+
+def create_image_validation_middleware(*, tool_names: set[str] | None = None) -> ImageValidationMiddleware:
+    """创建图片校验中间件。"""
+    return ImageValidationMiddleware(tool_names=tool_names)

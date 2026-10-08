@@ -16,7 +16,7 @@
 
 ### 工具参数与原生中断载荷
 
-`src/agents/leaderagent/tools.py` 拥有 `QuestionOption`、`HumanQuestion` 和 `ask_user`：
+`src/agents/buildin/leader/tools.py` 拥有 `QuestionOption`、`HumanQuestion` 和 `ask_user`：
 
 - `QuestionOption` 包含 `label: str`（展示文字）与 `value: str`（回答值）。
 - `HumanQuestion` 包含 `question_id: str`、`question: str` 与

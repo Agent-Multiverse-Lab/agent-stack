@@ -1,6 +1,5 @@
 import unittest
 
-from src.agents.agent_library import AgentLibrary
 from src.agents.base_context import BaseContext
 from src.agents.middlewares.subagent_middlware import SubAgentMiddleware
 
@@ -9,13 +8,7 @@ class SubAgentMiddlewarePromptTest(unittest.TestCase):
     def setUp(self):
         self.middleware = SubAgentMiddleware(
             subagents=[
-                AgentLibrary(
-                    slug="search_agent",
-                    name="资料检索",
-                    description="搜索和整理外部资料",
-                    backend_id="SubAgentGraph",
-                    context={},
-                )
+                {"slug": "search_agent", "name": "资料检索", "description": "搜索和整理外部资料"}
             ],
             parent_context=BaseContext(),
         )

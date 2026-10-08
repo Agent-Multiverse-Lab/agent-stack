@@ -25,7 +25,6 @@ from server.service.agent_run_service import (
     wait_agent_run_result,
 )
 from server.service.input_message_service import build_agent_input_msg
-from src.agents.agent_library import AgentLibrary
 from src.agents.base_context import BaseContext
 from src.database.session import session_context
 
@@ -95,12 +94,12 @@ def _subagent_run_service(db: AsyncSession):
 
 
 class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
-    """把模型工具调用适配为持久化、入队的子智能体 Run。"""
+    """使用显式父 Context 委派子 Run；子角色配置由子 Run 的执行入口读取。"""
 
     def __init__(
         self,
         *,
-        subagents: Sequence[AgentLibrary],
+        subagents: Sequence[Mapping[str, str]],
         parent_context: BaseContext,
         system_prompt: str | None = TASK_SYSTEM_PROMPT,
     ) -> None:
@@ -108,12 +107,12 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
         if not subagents:
             raise ValueError("必须至少指定一个子智能体")
 
-        self._subagents: dict[str, AgentLibrary] = {}
+        self._subagents: dict[str, dict[str, str]] = {}
         for subagent in subagents:
-            subagent_slug = subagent.slug
+            subagent_slug = subagent["slug"]
             if subagent_slug in self._subagents:
                 raise ValueError(f"子智能体 slug 重复：{subagent_slug}")
-            self._subagents[subagent_slug] = subagent
+            self._subagents[subagent_slug] = dict(subagent)
 
         self.parent_context = parent_context
         self.subagent_slugs = frozenset(self._subagents)
@@ -508,7 +507,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
 
     def _available_agents(self) -> str:
         return "\n".join(
-            f"- {subagent_slug} ({subagent.name}): {subagent.description}"
+            f"- {subagent_slug} ({subagent['name']}): {subagent['description']}"
             for subagent_slug, subagent in self._subagents.items()
         )
 
@@ -518,7 +517,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
 
 def create_subagent_middleware(
     *,
-    subagents: Sequence[AgentLibrary],
+    subagents: Sequence[Mapping[str, str]],
     parent_context: BaseContext,
     system_prompt: str | None = TASK_SYSTEM_PROMPT,
 ) -> SubAgentMiddleware:

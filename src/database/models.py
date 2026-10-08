@@ -9,13 +9,14 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy.orm import relationship
 
-from .base import Base
-from .credential_types import EncryptedCredential, EncryptedHeaders
-from .satellite_models import (
+from src.database.base import Base
+from src.database.credential_types import EncryptedCredential, EncryptedHeaders
+from src.database.satellite_models import (
     SatelliteBusinessScene,  # noqa: F401
     SatelliteCollection,  # noqa: F401
     SatelliteScene,  # noqa: F401
@@ -234,6 +235,7 @@ class Agent(Base):
     backend_id = Column(String(128), nullable=False, comment="虚拟文件系统")
     name = Column(String(128), nullable=False, comment="智能体名称")
     role = Column(String(32), nullable=False, default="orchestrator", comment="智能体角色")
+    is_subagent = Column(Boolean, nullable=False, default=False, server_default=false(), comment="是否为子智能体")
     description = Column(Text, nullable=False, default="", comment="智能体描述")
     agent_config = Column(JSON, nullable=False, default=dict, comment="智能体配置")
     internal_only = Column(Boolean, nullable=False, default=True, comment="是否仅内部可见")

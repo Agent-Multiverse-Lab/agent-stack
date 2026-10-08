@@ -6,8 +6,8 @@ from contextlib import asynccontextmanager
 from unittest import mock
 
 import src.database.manger as manager_module
-from src.agents.leaderagent.agent import LeaderAgent
-from src.agents.subagents.subagentgraph import SubAgentGraph
+from src.agents.buildin.leader.agent import LeaderAgent
+from src.agents.buildin.subagents.subagent_graph import SubAgentGraph
 from src.configs.config import Config
 from src.database.manger import PostgreManger
 

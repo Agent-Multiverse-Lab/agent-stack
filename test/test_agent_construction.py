@@ -1,23 +1,32 @@
 import asyncio
+import importlib.util
 import unittest
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+import src.agents.buildin as agent
+from server import worker
 from server.exception import AgentRunTimeOut
 from server.service import agent_run_service, thread_service
 from src.agents.agent_library import AgentLibrary
 from src.agents.agent_library.leader import LEADER_AGENT
-from src.agents.agent_library.subagents import CITATION_AGENT, SEARCH_AGENT
+from src.agents.agent_library.subagents import CITATION_AGENT, SEARCH_AGENT, SUBAGENTS
+from src.agents.base_agent import BaseAgent
+from src.agents.buildin.leader.agent import LeaderAgent
+from src.agents.buildin.subagents import SubAgentContext, SubAgentGraph
 from src.agents.middlewares.subagent_middlware import SubAgentMiddleware
-from src.agents.subagents import SubAgentContext, SubAgentGraph
 from src.database.models import Agent
 from src.database.repositories.agent_repository import AgentRepository
 
@@ -32,6 +41,17 @@ class SessionAdapter:
         return self.session.execute(statement, **kwargs)
 
 
+class AgentClassTest(unittest.TestCase):
+    def test_resolve_exact_backend_class_names(self):
+        for expected in (LeaderAgent, SubAgentGraph):
+            resolved = agent.get_agent_class(expected.__name__)
+            self.assertIs(resolved, expected)
+            self.assertTrue(issubclass(resolved, BaseAgent))
+        for backend_id in ("", "leaderagent", "search_agent", "os.system", "UnknownAgent"):
+            with self.subTest(backend_id=backend_id), self.assertRaisesRegex(ValueError, "未知 Agent backend"):
+                agent.get_agent_class(backend_id)
+
+
 class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         engine = create_engine("sqlite://")
@@ -42,8 +62,8 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
         self.db = SessionAdapter(session)
         self.repository = AgentRepository(self.db)
         for definition in (SEARCH_AGENT, CITATION_AGENT):
-            await self.repository.sync_agent(definition=definition, role="subagent", internal_only=True)
-        await self.repository.sync_agent(definition=LEADER_AGENT)
+            await self.repository.ensure_agent(definition=definition, role="subagent", internal_only=True)
+        await self.repository.ensure_agent(definition=LEADER_AGENT)
 
     async def runtime(self, slug, run_type="subagent"):
         conversations = SimpleNamespace(get_conversation_by_thread_id_for_user=AsyncMock(return_value=object()))
@@ -56,32 +76,71 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
                 run_type=run_type,
             )
 
-    async def test_sync_updates_old_backend_and_preserves_identity_and_disabled_state(self):
-        row = await self.repository._get_by_slug(SEARCH_AGENT.slug)
-        original_id = row.id
-        row.backend_id = "SearchAgent"
-        row.enabled = False
-        row.agent_config = {}
+    async def test_worker_creates_missing_agents_and_preserves_all_existing_fields(self):
+        existing = {}
+        for definition in (SEARCH_AGENT, LEADER_AGENT):
+            row = await self.repository._get_by_slug(definition.slug)
+            row.name = f"custom {definition.slug}"
+            row.description = "database description"
+            row.agent_config = {"system_prompt": "database prompt", "model": "custom/model"}
+            row.backend_id = "LeaderAgent" if definition is SEARCH_AGENT else "SubAgentGraph"
+            row.role = "orchestrator" if definition is SEARCH_AGENT else "subagent"
+            row.is_subagent = row.role == "subagent"
+            row.internal_only = row.is_subagent
+            row.enabled = definition is LEADER_AGENT
         self.db.session.flush()
-        for _ in range(2):
-            updated = await self.repository.sync_agent(definition=SEARCH_AGENT, role="subagent", internal_only=True)
-            self.assertEqual(updated.id, original_id)
-            self.assertFalse(updated.enabled)
-            self.assertEqual(updated.backend_id, "SubAgentGraph")
-            self.assertEqual(updated.agent_config, SEARCH_AGENT.context)
-        self.assertIsNone(await self.repository.get_by_slug_for_run_type(SEARCH_AGENT.slug, "subagent"))
+        for definition in (SEARCH_AGENT, LEADER_AGENT):
+            row = await self.repository._get_by_slug(definition.slug)
+            existing[row.slug] = {column.name: getattr(row, column.name) for column in Agent.__table__.columns}
+
+        @asynccontextmanager
+        async def session_context():
+            yield self.db
+
+        expected_slugs = {LEADER_AGENT.slug, *(definition.slug for definition in SUBAGENTS)}
+        with patch.object(worker.postgres_manager, "get_async_session_context", session_context):
+            for _ in range(2):
+                await worker.ensure_agents_exist()
+                self.db.session.expire_all()
+                rows = self.db.session.execute(select(Agent)).scalars().all()
+                self.assertEqual({row.slug for row in rows}, expected_slugs)
+                self.assertEqual(len(rows), len(expected_slugs))
+                for row in rows:
+                    if row.slug in existing:
+                        self.assertEqual(
+                            {column.name: getattr(row, column.name) for column in Agent.__table__.columns},
+                            existing[row.slug],
+                        )
+                for definition in SUBAGENTS:
+                    if definition.slug in existing:
+                        continue
+                    row = await self.repository._get_by_slug(definition.slug)
+                    self.assertEqual(row.backend_id, definition.backend_id)
+                    self.assertEqual(row.name, definition.name)
+                    self.assertEqual(row.description, definition.description)
+                    self.assertEqual(row.agent_config, definition.context)
+                    self.assertEqual(row.role, "subagent")
+                    self.assertTrue(row.is_subagent)
+                    self.assertTrue(row.internal_only)
+                    self.assertTrue(row.enabled)
 
     async def test_roles_share_class_and_create_new_instances_from_sql_configuration(self):
-        _, first = await self.runtime(SEARCH_AGENT.slug)
-        _, second = await self.runtime(CITATION_AGENT.slug)
+        first_record, first = await self.runtime(SEARCH_AGENT.slug)
+        second_record, second = await self.runtime(CITATION_AGENT.slug)
         _, third = await self.runtime(SEARCH_AGENT.slug)
         self.assertIsInstance(first, SubAgentGraph)
         self.assertIs(type(first), type(second))
         self.assertIsNot(first, third)
-        self.assertNotEqual(first.definition.context["system_prompt"], second.definition.context["system_prompt"])
-        first.definition.context["system_prompt"] = "local mutation"
-        _, fresh = await self.runtime(SEARCH_AGENT.slug)
-        self.assertEqual(fresh.definition.context, SEARCH_AGENT.context)
+        self.assertTrue(first_record.is_subagent)
+        self.assertTrue(second_record.is_subagent)
+        self.assertNotEqual(first_record.agent_config["system_prompt"], second_record.agent_config["system_prompt"])
+        context = await thread_service._build_agent_runtime_context(
+            uid="user-1", run_id="run-1", thread_id="thread-1", request_id="request-1",
+            defaults=first_record.agent_config,
+        )
+        context["system_prompt"] = "local mutation"
+        fresh_record, _ = await self.runtime(SEARCH_AGENT.slug)
+        self.assertEqual(fresh_record.agent_config, SEARCH_AGENT.context)
 
     async def test_public_list_and_leader_only_include_enabled_roles(self):
         row = await self.repository._get_by_slug(CITATION_AGENT.slug)
@@ -89,9 +148,43 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
         self.db.session.flush()
         public = await self.repository.list_agents(role="orchestrator", internal_only=False)
         self.assertEqual([item.slug for item in public], [LEADER_AGENT.slug])
+        self.assertFalse(public[0].is_subagent)
         for run_type in ("chat", "resume"):
             _, leader = await self.runtime(LEADER_AGENT.slug, run_type)
-            self.assertEqual([item.slug for item in leader.subagents], [SEARCH_AGENT.slug])
+            self.assertEqual([item["slug"] for item in leader.subagents], [SEARCH_AGENT.slug])
+
+    async def test_runtime_uses_database_attributes_without_agent_library(self):
+        custom = Agent(
+            slug="database_only_agent", backend_id="SubAgentGraph", name="数据库子角色",
+            description="数据库中的子角色描述", role="subagent", is_subagent=True,
+            internal_only=True, enabled=True, agent_config={"system_prompt": "数据库中的 Prompt"},
+        )
+        self.db.session.add(custom)
+        leader_record = await self.repository._get_by_slug(LEADER_AGENT.slug)
+        leader_record.name = "数据库中的主角色"
+        leader_record.description = "数据库中的主角色描述"
+        self.db.session.flush()
+
+        with patch.object(AgentLibrary, "__post_init__", side_effect=AssertionError("runtime used AgentLibrary")):
+            _, leader = await self.runtime(LEADER_AGENT.slug, "chat")
+            record, child = await self.runtime(custom.slug)
+            self.assertEqual(leader.name, leader_record.name)
+            self.assertEqual(leader.description, leader_record.description)
+            self.assertIn(
+                {"slug": custom.slug, "name": custom.name, "description": custom.description},
+                leader.subagents,
+            )
+            middleware = SubAgentMiddleware(subagents=leader.subagents, parent_context=SubAgentContext())
+            self.assertIn("- database_only_agent (数据库子角色): 数据库中的子角色描述", middleware._system_prompt())
+            self.assertIsInstance(child, SubAgentGraph)
+            context = await thread_service._build_agent_runtime_context(
+                uid="user-1", run_id="child-1", thread_id="child-thread", request_id="request-1",
+                defaults=record.agent_config,
+            )
+            self.assertEqual(context["system_prompt"], "数据库中的 Prompt")
+            leader.subagents[0]["description"] = "local mutation"
+            _, fresh = await self.runtime(LEADER_AGENT.slug, "resume")
+            self.assertNotEqual(fresh.subagents[0]["description"], "local mutation")
 
     async def test_context_defaults_survive_missing_model_and_do_not_share_nested_values(self):
         defaults = {"model": "preset/model", "mcps": ["configured-server"], "style_profolio": {"a": [1]}}
@@ -105,18 +198,47 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second["mcps"], ["configured-server"])
         self.assertEqual(defaults["style_profolio"], {"a": [1]})
 
+    async def test_runtime_context_freezes_default_model_and_overrides_run_identity(self):
+        values = dict(uid="user-1", run_id="run-1", thread_id="thread-1", request_id="request-1")
+        with patch.object(thread_service.config, "default_model", "configured/model"):
+            context = await thread_service._build_agent_runtime_context(
+                **values, defaults={"uid": "ignored", "model": ""}, parent_run_id="parent-1",
+            )
+        with patch.object(thread_service.config, "default_model", "changed/model"):
+            self.assertEqual(context["model"], "configured/model")
+            agent_context = SubAgentContext()
+            agent_context.update_context(context)
+            self.assertEqual(agent_context.model, "configured/model")
+        self.assertEqual(context["uid"], "user-1")
+        self.assertEqual(context["parent_run_id"], "parent-1")
+
     async def test_unknown_backend_and_context_are_rejected_before_execution(self):
         row = await self.repository._get_by_slug(SEARCH_AGENT.slug)
-        row.agent_config = {"unrecognized_field": True}
-        self.db.session.flush()
-        with self.assertRaisesRegex(ValueError, "未知 Agent Context"):
-            await self.runtime(row.slug)
+        for config, error in (
+            ({"unrecognized_field": True}, "未知 Agent Context"),
+            ({"uid": "forged"}, "Run 身份"),
+            ({"parent_run_id": "forged"}, "Run 身份"),
+            ([], "配置必须是字典"),
+            ({"summary_threshold": float("nan")}, "JSON compliant"),
+        ):
+            with self.subTest(config=config):
+                row.agent_config = config
+                self.db.session.flush()
+                with self.assertRaisesRegex(ValueError, error):
+                    await self.runtime(row.slug)
         row.backend_id = "os.system"
         self.db.session.flush()
         with self.assertRaisesRegex(ValueError, "未知 Agent backend"):
             await self.runtime(row.slug)
         with self.assertRaisesRegex(ValueError, "Run 身份"):
             AgentLibrary(slug="bad", name="bad", description="", backend_id="SubAgentGraph", context={"uid": "forged"})
+
+    async def test_role_flags_must_match_backend(self):
+        row = await self.repository._get_by_slug(SEARCH_AGENT.slug)
+        row.is_subagent = False
+        self.db.session.flush()
+        with self.assertRaisesRegex(ValueError, "配置不一致"):
+            await self.runtime(row.slug)
 
     async def test_common_graph_executes_each_role_with_its_own_prompt_and_checkpoint(self):
         calls = []
@@ -132,12 +254,12 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
         checkpointer, store = InMemorySaver(), InMemoryStore()
         model = Model(responses=[AIMessage(content="role result")])
         for definition in (SEARCH_AGENT, CITATION_AGENT):
-            _, agent = await self.runtime(definition.slug)
+            record, agent = await self.runtime(definition.slug)
             context = SubAgentContext(uid="user-1", thread_id=definition.slug, run_id=definition.slug)
-            context.update_context(agent.definition.context)
+            context.update_context(record.agent_config)
             with (
-                patch("src.agents.subagents.subagentgraph.get_mcp_tools", AsyncMock(return_value=[])),
-                patch("src.agents.subagents.subagentgraph.load_model", return_value=model),
+                patch("src.agents.buildin.subagents.subagent_graph.get_mcp_tools", AsyncMock(return_value=[])),
+                patch("src.agents.buildin.subagents.subagent_graph.load_model", return_value=model),
                 patch.object(agent, "get_checkpointer", return_value=checkpointer),
                 patch.object(agent, "get_store", return_value=store),
             ):
@@ -151,7 +273,7 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_task_and_start_delegate_by_slug_using_parent_run_identity(self):
         middleware = SubAgentMiddleware(
-            subagents=[SEARCH_AGENT],
+            subagents=[{"slug": SEARCH_AGENT.slug, "name": SEARCH_AGENT.name, "description": SEARCH_AGENT.description}],
             parent_context=SubAgentContext(uid="user-1", run_id="parent-1", request_id="request-1"),
         )
         service = SimpleNamespace(
@@ -185,6 +307,55 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
 @asynccontextmanager
 async def fake_session():
     yield object()
+
+
+class AgentSubagentMigrationTest(unittest.TestCase):
+    def test_upgrade_backfills_roles_and_downgrade_preserves_existing_data(self):
+        path = Path(__file__).resolve().parents[1] / "migrate/versions/0014_agent_is_subagent.py"
+        spec = importlib.util.spec_from_file_location("agent_is_subagent_migration", path)
+        migration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(migration)
+        engine = create_engine("sqlite://")
+        self.addCleanup(engine.dispose)
+        with engine.begin() as connection:
+            connection.execute(text(
+                "CREATE TABLE agent (id INTEGER PRIMARY KEY, slug TEXT NOT NULL, "
+                "role TEXT NOT NULL, enabled BOOLEAN NOT NULL)"
+            ))
+            connection.execute(text(
+                "INSERT INTO agent (id, slug, role, enabled) VALUES "
+                "(1, 'LeaderAgent', 'orchestrator', 1), "
+                "(2, 'search_agent', 'subagent', 1), "
+                "(3, 'disabled_subagent', 'subagent', 0), "
+                "(4, 'disabled_leader', 'orchestrator', 0)"
+            ))
+            original = connection.execute(text("SELECT id, slug, role, enabled FROM agent ORDER BY id")).all()
+            with patch.object(migration, "op", Operations(MigrationContext.configure(connection))):
+                migration.upgrade()
+                column = next(item for item in inspect(connection).get_columns("agent") if item["name"] == "is_subagent")
+                self.assertFalse(column["nullable"])
+                self.assertEqual(
+                    connection.execute(text("SELECT id, is_subagent FROM agent ORDER BY id")).all(),
+                    [(1, False), (2, True), (3, True), (4, False)],
+                )
+                connection.execute(text(
+                    "INSERT INTO agent (id, slug, role, enabled) VALUES (5, 'new_leader', 'orchestrator', 1)"
+                ))
+                self.assertEqual(connection.execute(text("SELECT is_subagent FROM agent WHERE id = 5")).scalar_one(), False)
+                with self.assertRaises(IntegrityError):
+                    connection.execute(text(
+                        "INSERT INTO agent (id, slug, role, enabled, is_subagent) "
+                        "VALUES (6, 'invalid', 'orchestrator', 1, NULL)"
+                    ))
+                migration.downgrade()
+                self.assertEqual(
+                    {item["name"] for item in inspect(connection).get_columns("agent")},
+                    {"id", "slug", "role", "enabled"},
+                )
+                self.assertEqual(
+                    connection.execute(text("SELECT id, slug, role, enabled FROM agent WHERE id <= 4 ORDER BY id")).all(),
+                    original,
+                )
 
 
 class AgentResultWaitTest(unittest.IsolatedAsyncioTestCase):

@@ -10,25 +10,22 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
 from server.service.mcp_service import get_mcp_tools
-from src.agents.agent_library import AgentLibrary
 from src.agents.backends.composite_backend import (
     ROUTE_SKILL,
     create_composite_backend,
     create_custom_filesystem_middleware,
 )
 from src.agents.base_agent import BaseAgent
+from src.agents.buildin.leader.context import LeaderAgentContext
+from src.agents.buildin.leader.prompt import TODO_MIDDLEWARE_SYSTEM_PROMPT, build_prompt
+from src.agents.buildin.leader.tools import ask_user, calculator
 from src.agents.middlewares.memory_middleware import create_memory_middleware
 from src.agents.middlewares.sandbox_middleware import create_sandbox_middleware
 from src.agents.middlewares.subagent_middlware import create_subagent_middleware
 from src.agents.middlewares.summary_middleware import (
     create_summary_middleware_from_context,
 )
-from src.configs import config as sys_config
 from src.model import load_model
-
-from .context import LeaderAgentContext
-from .prompt import TODO_MIDDLEWARE_SYSTEM_PROMPT, build_prompt
-from .tools import ask_user, calculator
 
 
 class LeaderAgent(BaseAgent):
@@ -39,12 +36,11 @@ class LeaderAgent(BaseAgent):
     context = LeaderAgentContext
     agent_context = LeaderAgentContext
 
-    def __init__(self, *, definition: AgentLibrary, subagents: tuple[AgentLibrary, ...]):
+    def __init__(self, *, name: str, description: str, subagents: tuple[dict[str, str], ...]):
         super().__init__()
-        self.definition = definition
-        self.name = definition.name
-        self.description = definition.description
-        self.subagents = tuple(subagents)
+        self.name = name
+        self.description = description
+        self.subagents = tuple(dict(item) for item in subagents)
 
     def _create_middlewares(self, context):
         backend = create_composite_backend(context)
@@ -75,6 +71,7 @@ class LeaderAgent(BaseAgent):
         ]
 
     async def get_agent(self, context=None) -> CompiledStateGraph:
+        """消费已组装的 Context；不在构图过程中重新解析运行配置。"""
         runtime_context = context or self.context()
         mcp_tools = await get_mcp_tools(runtime_context.mcps)
         # FIXEME: ask_user 仅注册到顶层 LeaderAgent，不扩散到 SubAgent。
@@ -90,7 +87,7 @@ class LeaderAgent(BaseAgent):
         tools: list[BaseTool],
     ) -> CompiledStateGraph:
         return create_agent(
-            model=load_model(runtime_context.model or sys_config.default_model),
+            model=load_model(runtime_context.model),
             tools=tools,
             system_prompt=build_prompt(runtime_context),
             context_schema=type(runtime_context),

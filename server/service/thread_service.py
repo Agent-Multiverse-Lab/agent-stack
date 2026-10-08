@@ -4,7 +4,7 @@ import json
 import uuid
 from collections.abc import AsyncIterator, Callable
 from copy import deepcopy
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from datetime import datetime
 from typing import Any
 
@@ -13,16 +13,15 @@ from langchain_core.messages import AIMessage, AIMessageChunk, RemoveMessage, To
 from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import src.agents.buildin as agent
 from server.service.input_message_service import AgentInputMsg
 from server.service.langfuse_service import with_langfuse_config
 from server.utils.auth import AuthenticatedUser
 from server.utils.interrupt_utils import AskHumanPayload, parse_interrupt_questions
 from src.agents import BaseAgent
 from src.agents import CustomAgentState as AgentState
-from src.agents.agent_library import AgentLibrary
 from src.agents.base_agent import unpack_data
-from src.agents.leaderagent import LeaderAgent
-from src.agents.subagents import SubAgentGraph
+from src.configs import config
 from src.database import (
     Agent,
     AgentRun,
@@ -46,10 +45,6 @@ from src.utils import logger
 
 _THREAD_CURSOR_VERSION = 1
 _SYSTEM_THREAD_METADATA_KEYS = frozenset({"backend_id"})
-AGENT_CLASSES: dict[str, type[BaseAgent]] = {
-    "LeaderAgent": LeaderAgent,
-    "SubAgentGraph": SubAgentGraph,
-}
 
 
 class ThreadConflictError(RuntimeError):
@@ -461,18 +456,8 @@ async def _build_agent_runtime(
     thread_id: str | None,
     db: AsyncSession,
     run_type: str = "chat",
-) -> tuple[Any, BaseAgent]:
-    """根据传递的参数，构建 agent 基础以及实例
-
-    Args:
-        agent_id (str): agent name
-        user (User): 当前用户可访问的agent
-        thread_id (str | None): _description_
-        run_type: Agent Run 类型，当前为 chat 或 subagent
-
-    Returns:
-        tuple[Any, Any, Any]: _description_
-    """
+) -> tuple[Agent, BaseAgent]:
+    """按角色 slug 读取数据库属性，并为本次 Run 创建执行实例。"""
     agent_repo = AgentRepository(db)
     conv_repo = ConversationRepository(db)
 
@@ -490,25 +475,45 @@ async def _build_agent_runtime(
     if not agent_slug:
         raise ValueError("未配置agent")
 
-    agent = await agent_repo.get_by_slug_for_run_type(
+    agent_record = await agent_repo.get_by_slug_for_run_type(
         slug=agent_slug, run_type=run_type
     )
 
-    if not agent:
+    if not agent_record:
         raise ValueError("当前智能体不存在")
 
-    definition = AgentLibrary.from_record(agent)
-    agent_class = AGENT_CLASSES.get(definition.backend_id)
-    if agent_class is None:
-        raise ValueError(f"未知 Agent backend：{definition.backend_id}")
-    definition.validate_context(agent_class.agent_context)
-    constructor_args = {"definition": definition}
-    if agent.role == "orchestrator":
+    if not agent_record.slug.strip() or not agent_record.name.strip():
+        raise ValueError("Agent slug 和名称不能为空")
+    agent_class = agent.get_agent_class(agent_record.backend_id)
+    expected_role = "subagent" if agent_record.is_subagent else "orchestrator"
+    expected_backend = "SubAgentGraph" if agent_record.is_subagent else "LeaderAgent"
+    if agent_record.role != expected_role or agent_record.backend_id != expected_backend:
+        raise ValueError(f"Agent 角色或 backend 配置不一致：{agent_record.slug}")
+
+    context_config = agent_record.agent_config if agent_record.agent_config is not None else {}
+    if not isinstance(context_config, dict):
+        raise ValueError("Agent Context 配置必须是字典")
+    if {"uid", "run_id", "thread_id", "request_id", "parent_run_id", "parent_thread_id"} & context_config.keys():
+        raise ValueError("Agent 预设配置不能包含 Run 身份")
+    json.dumps(context_config, allow_nan=False)
+    unknown_fields = context_config.keys() - {item.name for item in fields(agent_class.agent_context)}
+    if unknown_fields:
+        raise ValueError(f"未知 Agent Context 参数：{', '.join(sorted(unknown_fields))}")
+
+    constructor_args = {}
+    if not agent_record.is_subagent:
         subagents = await agent_repo.list_agents(role="subagent", internal_only=True)
-        constructor_args["subagents"] = tuple(AgentLibrary.from_record(item) for item in subagents)
+        constructor_args = {
+            "name": agent_record.name,
+            "description": agent_record.description,
+            "subagents": tuple(
+                {"slug": item.slug, "name": item.name, "description": item.description}
+                for item in subagents
+            ),
+        }
     agent_instance = agent_class(**constructor_args)
 
-    return agent, agent_instance
+    return agent_record, agent_instance
 
 
 async def _build_agent_runtime_context(
@@ -520,19 +525,7 @@ async def _build_agent_runtime_context(
     defaults: dict[str, Any] | None = None,
     parent_run_id: str | None = None,
 ):
-    """结合前端传递构建 agent 运行的固有参数的上下文
-
-    Args:
-        agent_instance (BaseAgent): 当前要触发的 agent上下文实例
-        uid (str): 当前用户id
-        run_id (str): 当前运行agent事件的id
-        thread_id (str): 当前会话的id
-        request_id (str): 当前会话内的单词请求id
-        model (str | None): 当前 Run 选择的模型 ID
-
-    Returns:
-        dict[str, str]: 上下文结构
-    """
+    """复制 SQL 默认配置，注入本次 Run 身份和模型选择，生成运行快照。"""
     agent_runtime_context = deepcopy(defaults or {})
 
     # 根据当前用户的传递内容填填充上下文
@@ -544,8 +537,7 @@ async def _build_agent_runtime_context(
             "request_id": request_id,
         }
     )
-    if model:
-        agent_runtime_context["model"] = model
+    agent_runtime_context["model"] = model or agent_runtime_context.get("model") or config.default_model
     if parent_run_id:
         agent_runtime_context["parent_run_id"] = parent_run_id
     return agent_runtime_context
@@ -639,6 +631,10 @@ def _lc_message_v2_dispather(
         and additional_kwargs_reasoning_content
         else None
     )
+    if any(message_event[key] for key in (
+        "content_delta", "reasoning_content_delta", "additional_kwargs_reasoning_content",
+    )):
+        events.append(message_event)
 
     if tool_call_chunks := agent_msg.get("tool_call_chunks"):
         if isinstance(tool_call_chunks, list):
@@ -670,6 +666,7 @@ def _lc_message_v2_dispather(
                         "index": int(tool_call_chunk.get("index", 0)),
                     }
                 )
+    return events
 
 
 def _lc_message_v3_dispather(
@@ -753,7 +750,7 @@ def _make_lc_message_to_standard(
         )  # ty: ignore[invalid-return-type]
 
     # 初始的v2的格式
-    if isinstance(agent_msg, AIMessageChunk):
+    if isinstance(agent_msg, (AIMessage, AIMessageChunk)):
         agent_msg_dict = agent_msg.model_dump()
     elif isinstance(agent_msg, dict):
         agent_msg_dict = dict(agent_msg)
@@ -1216,7 +1213,11 @@ async def stream_agent_response(
     current_user: AuthenticatedUser,
     db: AsyncSession,
 ) -> AsyncIterator[Any]:
-    """使用普通 HumanMessage 启动 Agent Run。"""
+    """合并 SQL 配置与 Worker 的运行身份，使用一次性 Context 快照启动 Agent。
+
+    消息进入 Graph State；runtime_metadata 仅显式选取身份、模型和父 Run 参数。
+    执行期间不重新读取或热更新 Agent 配置。
+    """
 
     if not thread_id:
         thread_id = str(uuid.uuid4())
@@ -1276,7 +1277,7 @@ async def stream_agent_response(
         thread_id=thread_id,
         request_id=runtime_metadata["request_id"],
         model=runtime_metadata.get("model"),
-        defaults=agent_instance.definition.context,
+        defaults=agent_item.agent_config,
         parent_run_id=runtime_metadata.get("parent_run_id"),
     )
     agent_context = agent_instance.agent_context()
@@ -1455,7 +1456,7 @@ async def resume_agent_response(
             thread_id=thread_id,
             request_id=runtime_metadata["request_id"],
             model=runtime_metadata.get("model"),
-            defaults=agent_instance.definition.context,
+            defaults=agent_item.agent_config,
         )
         agent_context = agent_instance.agent_context()
         agent_context.update_context(agent_runtime_context)

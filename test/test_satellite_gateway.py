@@ -10,8 +10,8 @@ import grpc
 
 from scripts.generate_satellite_catalog_fixture import build_fixture, build_manifest
 from src.agents.agent_library.subagents.satellite import SATELLITE_AGENT
-from src.agents.subagents import SubAgentGraph
-from src.agents.subagents.subagent_context import SubAgentContext
+from src.agents.buildin.subagents import SubAgentGraph
+from src.agents.buildin.subagents.subagent_context import SubAgentContext
 from src.third_party.satellite_gateway import satellite_catalog_pb2 as pb
 from src.third_party.satellite_gateway import satellite_catalog_pb2_grpc as pb_grpc
 from src.third_party.satellite_gateway.client import SatelliteGatewayClient
@@ -118,21 +118,23 @@ class SatelliteGatewayTest(unittest.IsolatedAsyncioTestCase):
         graph = object()
         with (
             patch(
-                "src.agents.subagents.subagentgraph.get_mcp_tools",
+                "src.agents.buildin.subagents.subagent_graph.get_mcp_tools",
                 new=AsyncMock(return_value=(mcp_tool,)),
             ),
             patch(
-                "src.agents.subagents.subagentgraph.load_model",
+                "src.agents.buildin.subagents.subagent_graph.load_model",
                 return_value=object(),
             ),
             patch(
-                "src.agents.subagents.subagentgraph.create_agent",
+                "src.agents.buildin.subagents.subagent_graph.create_agent",
                 return_value=graph,
             ) as create_agent,
             patch.object(SubAgentGraph, "get_checkpointer", return_value=None),
             patch.object(SubAgentGraph, "get_store", return_value=None),
         ):
-            result = await SubAgentGraph(definition=SATELLITE_AGENT).get_agent(SubAgentContext(uid="user-1", thread_id="thread-1"))
+            context = SubAgentContext(uid="user-1", thread_id="thread-1")
+            context.update_context(SATELLITE_AGENT.context)
+            result = await SubAgentGraph().get_agent(context)
 
         self.assertIs(result, graph)
         names = [tool.name for tool in create_agent.call_args.kwargs["tools"]]

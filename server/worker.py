@@ -9,6 +9,7 @@ from typing import Any
 from arq.connections import RedisSettings
 from sqlalchemy import select
 
+import src.agents.buildin as agent
 from server.service.arq_queue_servcie import (
     RUN_REDIS_TTL_SECONDS,
     clear_agent_run_cancel_signal,
@@ -17,7 +18,7 @@ from server.service.arq_queue_servcie import (
     write_agent_run_stream_event,
 )
 from server.service.input_message_service import build_agent_input_msg
-from server.service.thread_service import AGENT_CLASSES, resume_agent_response, stream_agent_response
+from server.service.thread_service import resume_agent_response, stream_agent_response
 from server.utils.woker_utils import reslove_thread_id
 from src.agents.agent_library.leader import LEADER_AGENT
 from src.agents.agent_library.subagents import SUBAGENTS
@@ -114,24 +115,26 @@ class AgentRunController:
 
 
 async def ensure_agents_exist() -> None:
+    """使用 AgentLibrary 预设补齐缺失记录，保留数据库中的已有配置。"""
     agents = (LEADER_AGENT,)
     subagents = SUBAGENTS
     definitions = (*agents, *subagents)
     if len({item.slug for item in definitions}) != len(definitions):
         raise ValueError("预定义 Agent slug 重复")
     for definition in definitions:
-        definition.validate_context(AGENT_CLASSES[definition.backend_id].agent_context)
+        agent_class = agent.get_agent_class(definition.backend_id)
+        definition.validate_context(agent_class.agent_context)
     async with postgres_manager.get_async_session_context() as session:
         repository = AgentRepository(session)
-        for agent in agents:
-            await repository.sync_agent(
-                definition=agent,
+        for definition in agents:
+            await repository.ensure_agent(
+                definition=definition,
                 role="orchestrator",
                 internal_only=False,
             )
-        for agent in subagents:
-            await repository.sync_agent(
-                definition=agent,
+        for definition in subagents:
+            await repository.ensure_agent(
+                definition=definition,
                 role="subagent",
                 internal_only=True,
             )
@@ -486,6 +489,7 @@ async def _pending_run_cancel(run_id: str) -> bool:
     return False
 
 async def process_agent_run(ctx, run_id: str):
+    """从持久化 Run 和消息组装入口参数；SQL 身份覆盖 metadata 中同名值。"""
     agent_run_event: AgentRun | None = await _get_agent_run(run_id)
     if agent_run_event is None:
         logger.error(f"当前agent运行id：{run_id} 不存在")
