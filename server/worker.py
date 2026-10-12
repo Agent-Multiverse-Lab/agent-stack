@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from arq.connections import RedisSettings
+from arq.worker import RetryJob
 from sqlalchemy import select
 
 import src.agents.buildin as agent
@@ -20,9 +21,9 @@ from server.service.arq_queue_servcie import (
 from server.service.input_message_service import build_agent_input_msg
 from server.service.thread_service import resume_agent_response, stream_agent_response
 from server.utils.woker_utils import reslove_thread_id
+from src.agents.backends.sandbox import init_sandbox_provider, shutdown_sandbox_provider
 from src.agents.library.leader import LEADER_AGENT
 from src.agents.library.subagents import SUBAGENTS
-from src.agents.backends.sandbox import init_sandbox_provider, shutdown_sandbox_provider
 from src.configs import config
 from src.database import postgres_manager
 from src.database.models import AgentRun, Message, User
@@ -34,6 +35,11 @@ from src.database.repositories.agent_run_repository import (
     AGENT_RUN_TERMINAL_STATUSES,
 )
 from src.utils import logger
+
+
+class RetryableWorkerError(RetryJob):
+    """显式标记需要交给 ARQ 重试的 Worker 错误。"""
+
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -488,7 +494,42 @@ async def _pending_run_cancel(run_id: str) -> bool:
         return current_agent_run.agent_status == "cancel_requested"
     return False
 
+
 async def process_agent_run(ctx, run_id: str):
+    """仅重试 Agent 启动前的 RetryJob，其他异常保存失败终态。"""
+    ctx["_agent_stream_started"] = False
+    try:
+        return await _process_agent_run(ctx, run_id)
+    except RetryJob as exc:
+        if ctx["_agent_stream_started"]:
+            raise RuntimeError(str(exc)) from exc
+        job_try = ctx.get("job_try", 1)
+        if job_try < WorkerSettings.max_tries:
+            logger.warning(
+                "Agent Run 执行准备失败，交由 ARQ 重试：run_id=%s attempt=%s/%s error_type=%s",
+                run_id, job_try, WorkerSettings.max_tries, type(exc).__name__,
+            )
+            raise
+        await set_run_terminal(
+            run_id,
+            status="failed",
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        # 已写入失败终态，使用普通异常让 ARQ 结束 Job。
+        raise RuntimeError(str(exc)) from exc
+    except Exception as exc:
+        if not ctx["_agent_stream_started"]:
+            await set_run_terminal(
+                run_id,
+                status="failed",
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+        raise
+
+
+async def _process_agent_run(ctx, run_id: str):
     """从持久化 Run 和消息组装入口参数；SQL 身份覆盖 metadata 中同名值。"""
     agent_run_event: AgentRun | None = await _get_agent_run(run_id)
     if agent_run_event is None:
@@ -620,6 +661,7 @@ async def process_agent_run(ctx, run_id: str):
                         db=db,
                     )
 
+                ctx["_agent_stream_started"] = True
                 async for steam_agent_chunk in _cancellable_stream(
                     stream_thread_events,
                     run_controller=run_controller,
@@ -774,6 +816,8 @@ async def process_agent_run(ctx, run_id: str):
                 thread_id=str(thread_id),
             )
         except Exception as exc:
+            if not ctx["_agent_stream_started"]:
+                raise
             await _finalize_run(
                 run_id,
                 status="failed",
@@ -794,5 +838,7 @@ class WorkerSettings:
     queue_name = config.arq_queue_name
     redis_settings = RedisSettings.from_dsn(config.redis_url)
     max_jobs = config.arq_max_jobs
+    retry_jobs = True
+    max_tries = 3  # 包含首次执行，最多再重试两次。
     on_startup = startup
     on_shutdown = shutdown

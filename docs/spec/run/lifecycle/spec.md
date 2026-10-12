@@ -51,6 +51,18 @@ run = await set_run_terminal(
 收敛。Redis/SSE 终止遵循
 [`RUN-ES-004`](../event-streaming/spec.md) 的 PostgreSQL 权威状态规则。
 
+### RUN-LC-006 执行前显式重试
+
+`WorkerSettings` 启用 ARQ 重试，每个 Job 最多执行 3 次（首次执行加两次重试）。
+`RetryableWorkerError` 直接继承 `arq.worker.RetryJob`。Agent Stream 启动前仅
+`RetryJob` 及其子类触发重新调度，由 ARQ 决定下一次执行时机；等待重试时
+保留非终态，不写入 `failed` 或发布终态事件。重试耗尽后通过 `set_run_terminal`
+保存失败原因，并向 ARQ 传播普通异常以结束 Job。
+每次重试重新读取 SQL Run，已有终态与执行前取消检查继续生效。
+普通 `Exception`（包括连接和超时异常）保存失败终态，不自动转换成重试信号。
+Agent Stream 已启动后的错误、业务错误 chunk、缺失输入和用户，以及业务取消
+继续使用现有终态流程，避免整个 Agent 重放导致重复工具副作用。
+
 ## 4. Failure Contract
 
 - `running` 异常 -> `failed` + `error/error_type`
