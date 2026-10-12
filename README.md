@@ -23,7 +23,7 @@ Web 端提供登录、会话和聊天界面。FastAPI 创建 Agent Run，Redis/A
 | `ImageProcessingAgent` | 装配已配置的图像处理 MCP 工具，并校验工具返回的内嵌单帧图像能否完整解码 |
 | `SatelliteAgent` | 通过 Go Gateway 查询卫星影像目录，并按需调用已配置的处理工具 |
 
-知识模块负责文件解析、切块、索引与检索；RustFS 保存文件和解析产物，Milvus 保存向量索引。`sandbox_server/` 提供独立的受控工具与代码执行服务。MCP 服务需单独部署并在 `.env` 中配置，未配置时相应工具不可用。
+知识模块负责文件解析、切块、索引与检索；RustFS 保存文件和解析产物，Milvus 保存向量索引。CubeSandbox 提供独立的工具与代码执行隔离，部署见 [CubeSandbox 指南](docker/cube/README.md)。MCP 服务需单独部署并在 `.env` 中配置，未配置时相应工具不可用。
 
 卫星目录由 Go `gateway/` 通过 gRPC 提供来源列表、场景空间/时间检索和场景详情。Gateway 查询 Alembic 管理的 PostgreSQL/PostGIS 表；目录保存影像对象引用，不保存影像二进制。
 
@@ -74,7 +74,7 @@ flowchart TB
 | `src/knowledge/` | 文件处理和知识检索 |
 | `src/database/`、`src/storage/` | 数据库仓储与基础设施适配 |
 | `gateway/` | Go gRPC 卫星目录与 PostGIS 查询 |
-| `sandbox_server/` | 独立的执行隔离服务 |
+| `docker/cube/` | CubeSandbox 部署、预检和运行验收 |
 | `web/` | React 前端 |
 | `migrate/` | Alembic 数据库迁移 |
 | `docker-compose.yml`、`docker/` | 服务编排与镜像配置 |

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import sys
 import types
@@ -13,13 +14,7 @@ from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
 _MODULE_NAME = "_sandbox_middleware_test_module"
-_MODULE_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "src"
-    / "agents"
-    / "middlewares"
-    / "sandbox_middleware.py"
-)
+_MODULE_PATH = Path(__file__).resolve().parents[1] / "src" / "agents" / "middlewares" / "sandbox_middleware.py"
 _sandbox_package = types.ModuleType("src.agents.backends.sandbox")
 _sandbox_package.get_sandbox_provider = lambda: None
 
@@ -135,7 +130,8 @@ class SandboxMiddlewareTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIsInstance(result, ToolMessage)
-        self.assertEqual(self.provider.acquire_calls, [("user-1", "thread-1")])
+        self.assertEqual(self.provider.acquire_calls, [("user-1", "thread-1")] * 2)
+        self.assertEqual(self.provider.release_calls, [sandbox_id])
 
     def test_non_sandbox_tool_does_not_acquire(self) -> None:
         request = make_request("web_search")
@@ -148,6 +144,34 @@ class SandboxMiddlewareTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result, ToolMessage)
         self.assertEqual(self.provider.acquire_calls, [])
         self.assertEqual(request.runtime.state, {})
+
+    def test_failed_handler_releases_connection(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "failure"):
+            self.middleware.wrap_tool_call(make_request("execute"), mock.Mock(side_effect=RuntimeError("failure")))
+        self.assertEqual(self.provider.release_calls, ["user-1:thread-1"])
+
+    def test_shutdown_during_handler_still_releases_original_provider(self) -> None:
+        def handler(_request):
+            _sandbox_middleware.get_sandbox_provider.side_effect = RuntimeError("shut down")
+            return make_tool_message()
+
+        self.middleware.wrap_tool_call(make_request("execute"), handler)
+        self.assertEqual(self.provider.release_calls, ["user-1:thread-1"])
+
+    async def test_canceled_handler_releases_connection(self) -> None:
+        async def handler(_request):
+            raise asyncio.CancelledError()
+
+        with self.assertRaises(asyncio.CancelledError):
+            await self.middleware.awrap_tool_call(make_request("execute"), handler)
+        self.assertEqual(self.provider.release_calls, ["user-1:thread-1"])
+
+    def test_only_execute_output_is_truncated(self) -> None:
+        message = ToolMessage(content="中文" * 100000, tool_call_id="call")
+        execute = self.middleware.wrap_tool_call(make_request("execute"), lambda _request: message)
+        read = self.middleware.wrap_tool_call(make_request("read_file"), lambda _request: message)
+        self.assertTrue(execute.update["messages"][0].content.endswith("[output truncated]"))
+        self.assertEqual(read.update["messages"][0].content, message.content)
 
     async def test_async_tool_call_acquires_and_after_agent_releases(self) -> None:
         request = make_request("write_file")

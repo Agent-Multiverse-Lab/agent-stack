@@ -17,9 +17,6 @@ services:
       RUSTFS_SECRET_KEY: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY in .env.prod}
     ports: !override []
 
-  sandbox:
-    ports: !override []
-
   api:
     env_file: !override
       - ./.env.prod

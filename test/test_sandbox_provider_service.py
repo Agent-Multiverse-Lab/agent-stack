@@ -1,257 +1,275 @@
 from __future__ import annotations
 
-import importlib
-import sys
+import asyncio
+import json
 import threading
-import time
-import types
-import unittest
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
-from unittest import mock
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import httpx
+import pytest
+from cubesandbox import Config
 
-_SANDBOX_PACKAGE = "_sandbox_provider_test_package"
-_SANDBOX_ROOT = (
-    Path(__file__).resolve().parents[1] / "src" / "agents" / "backends" / "sandbox"
-)
-_package = types.ModuleType(_SANDBOX_PACKAGE)
-_package.__path__ = [str(_SANDBOX_ROOT)]
-sys.modules.setdefault(_SANDBOX_PACKAGE, _package)
-
-_provision_client = importlib.import_module(f"{_SANDBOX_PACKAGE}.provision_client")
-_provider_service = importlib.import_module(f"{_SANDBOX_PACKAGE}.provider_service")
-SandboxProvision = _provision_client.SandboxProvision
-SandboxProvisionClient = _provision_client.SandboxProvisionClient
-SandboxProviderService = _provider_service.SandboxProviderService
+from src.agents.backends.sandbox import provider_service as service
+from src.agents.backends.sandbox.cube_client import CubeClient
 
 
-class FakeProvisionClient:
-    def __init__(self, *, create_delay: float = 0) -> None:
-        self._lock = threading.Lock()
-        self._provisions: dict[str, SandboxProvision] = {}
-        self.create_delay = create_delay
-        self.create_calls = 0
-        self.delete_calls: list[str] = []
-        self.close_calls = 0
+class FakeRedis:
+    def __init__(self):
+        self.locks = {}
+        self.guard = threading.Lock()
 
-    def get(self, sandbox_id: str) -> SandboxProvision | None:
-        with self._lock:
-            return self._provisions.get(sandbox_id)
+    def lock(self, key, **kwargs):
+        with self.guard:
+            lock = self.locks.setdefault(key, threading.Lock())
 
-    def create(
-        self,
-        *,
-        sandbox_id: str,
-        thread_id: str,
-        user_id: str,
-        **_kwargs: object,
-    ) -> SandboxProvision:
-        _ = (thread_id, user_id)
-        if self.create_delay:
-            time.sleep(self.create_delay)
-        provision = SandboxProvision(
-            sandbox_id=sandbox_id,
-            sandbox_url=f"http://sandbox/{sandbox_id}",
-            status="running",
-        )
-        with self._lock:
-            self.create_calls += 1
-            self._provisions[sandbox_id] = provision
-        return provision
+        class Lease:
+            def __enter__(self):
+                assert lock.acquire(timeout=3)
+                return self
 
-    def delete(self, sandbox_id: str) -> bool:
-        with self._lock:
-            self.delete_calls.append(sandbox_id)
-            self._provisions.pop(sandbox_id, None)
-        return True
+            def __exit__(self, *args):
+                lock.release()
 
-    def close(self) -> None:
-        self.close_calls += 1
+            def owned(self):
+                return True
+
+        return Lease()
+
+    def close(self):
+        pass
 
 
-class FakeSandbox:
-    def __init__(self, **kwargs: object) -> None:
-        self.id = kwargs["sandbox_id"]
-        self.sandbox_url = kwargs["sandbox_url"]
+class CubeServer:
+    """HTTP state survives application client shutdown/restart."""
 
+    def __init__(self):
+        self.rows = {}
+        self.mounts = {}
+        self.creates = 0
+        self.error = None
+        self.inventory = None
+        self.connect_missing = False
+        self.created = threading.Event()
+        self.resume = None
 
-def fake_sandbox_factory(**kwargs: object) -> FakeSandbox:
-    return FakeSandbox(**kwargs)
-
-
-class SandboxProvisionClientTest(unittest.TestCase):
-    def test_lifecycle_requests_match_provisioner_api(self) -> None:
-        requests: list[httpx.Request] = []
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            requests.append(request)
-            if request.method == "POST" and request.url.path == "/api/sandboxes":
-                return httpx.Response(
-                    200,
-                    json={
-                        "sandbox_id": "sandbox-1",
-                        "sandbox_url": "http://sandbox-1",
-                        "status": "running",
-                    },
-                )
-            if request.method == "POST" and request.url.path.endswith("/touch"):
-                return httpx.Response(200, json={"ok": True})
-            if request.method == "DELETE":
-                return httpx.Response(200, json={"ok": True})
-            return httpx.Response(404, json={"detail": "not found"})
-
-        http_client = httpx.Client(
-            base_url="http://provisioner",
-            transport=httpx.MockTransport(handler),
-        )
-        self.addCleanup(http_client.close)
-        client = SandboxProvisionClient(
-            base_url="http://provisioner",
-            http_client=http_client,
-        )
-
-        provision = client.create(
-            sandbox_id="sandbox-1",
-            thread_id="thread-1",
-            user_id="user-1",
-        )
-
-        self.assertEqual(provision.sandbox_id, "sandbox-1")
-        self.assertTrue(client.touch("sandbox-1"))
-        self.assertTrue(client.delete("sandbox-1"))
-        self.assertEqual(
-            [(request.method, request.url.path) for request in requests],
-            [
-                ("POST", "/api/sandboxes"),
-                ("POST", "/api/sandboxes/sandbox-1/touch"),
-                ("DELETE", "/api/sandboxes/sandbox-1"),
-            ],
-        )
-
-    def test_sandbox_id_is_fully_path_encoded(self) -> None:
-        self.assertEqual(
-            SandboxProvisionClient._sandbox_path("user/thread"),
-            "/api/sandboxes/user%2Fthread",
-        )
-
-
-class SandboxProviderSingletonTest(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        await _provider_service.shutdown_sandbox_provider()
-
-    async def asyncTearDown(self) -> None:
-        await _provider_service.shutdown_sandbox_provider()
-
-    async def test_init_uses_config_and_get_returns_same_instance(self) -> None:
-        with (
-            mock.patch.object(
-                _provider_service.config,
-                "sandbox_provisioner_url",
-                "http://provisioner",
-            ),
-            mock.patch.object(
-                _provider_service.config,
-                "sandbox_provision_timeout_seconds",
-                330.0,
-            ),
-            mock.patch.object(
-                _provider_service,
-                "SandboxProvisionClient",
-            ) as client_class,
-        ):
-            first = _provider_service.init_sandbox_provider()
-            second = _provider_service.init_sandbox_provider()
-
-        client_class.assert_called_once_with(
-            "http://provisioner",
-            timeout=330.0,
-        )
-        self.assertIs(first, second)
-        self.assertIs(first, _provider_service.get_sandbox_provider())
-
-        await _provider_service.shutdown_sandbox_provider()
-
-        client_class.return_value.close.assert_called_once_with()
-        with self.assertRaisesRegex(RuntimeError, "尚未初始化"):
-            _provider_service.get_sandbox_provider()
-
-
-class SandboxProviderServiceTest(unittest.TestCase):
-    @staticmethod
-    def _create_provider(client: FakeProvisionClient) -> SandboxProviderService:
-        with (
-            mock.patch.object(
-                _provider_service,
-                "SandboxProvisionClient",
-                return_value=client,
-            ),
-            mock.patch.object(
-                _provider_service,
-                "_create_custom_sandbox",
-                side_effect=fake_sandbox_factory,
-            ),
-        ):
-            return SandboxProviderService()
-
-    def test_acquire_reuses_remote_and_local_sandbox(self) -> None:
-        client = FakeProvisionClient()
-        provider = self._create_provider(client)
-
-        first_id = provider.acquire("user-1", "thread-1")
-        first_sandbox = provider.get(first_id)
-        second_id = provider.acquire("user-1", "thread-1")
-
-        self.assertEqual(first_id, second_id)
-        self.assertIs(first_sandbox, provider.get(second_id))
-        self.assertEqual(client.create_calls, 1)
-
-        self.assertTrue(provider.release(first_id))
-        self.assertIsNone(provider.get(first_id))
-        self.assertEqual(client.delete_calls, [])
-
-        reacquired_id = provider.acquire("user-1", "thread-1")
-        self.assertEqual(reacquired_id, first_id)
-        self.assertEqual(client.create_calls, 1)
-        self.assertIsNotNone(provider.get(reacquired_id))
-
-    def test_concurrent_acquire_for_same_thread_creates_once(self) -> None:
-        client = FakeProvisionClient(create_delay=0.05)
-        provider = self._create_provider(client)
-
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            sandbox_ids = list(
-                executor.map(
-                    lambda _index: provider.acquire("user-1", "thread-1"),
-                    range(8),
-                )
+    def handle(self, request):
+        if self.error:
+            return httpx.Response(self.error)
+        if request.url.path == "/cube/sandbox/inventory":
+            assert request.url.params["host_id"] == "agent-stack-node"
+            body = (
+                self.inventory
+                if self.inventory is not None
+                else {
+                    "ret": {"ret_code": 0},
+                    "size": 1,
+                    "data": [{"sandbox_id": row["sandboxID"], "labels": row["metadata"]} for row in self.rows.values()],
+                }
             )
+            return httpx.Response(200, json=body)
+        if request.method == "POST" and request.url.path == "/sandboxes":
+            data = json.loads(request.content)
+            assert data["lifecycle"] == {"onTimeout": "kill"}
+            self.creates += 1
+            sid = f"cube-{self.creates}"
+            # Real CubeAPI stores this in annotations, not in list/get metadata.
+            self.mounts[sid] = data["metadata"].pop("host-mount")
+            row = {"sandboxID": sid, "metadata": data["metadata"]}
+            self.rows[sid] = row
+            self.created.set()
+            if self.resume:
+                assert self.resume.wait(5)
+            return httpx.Response(201, json=row)
+        sid = request.url.path.split("/")[2]
+        if request.url.path.endswith("/connect") and self.connect_missing:
+            self.rows.pop(sid, None)
+            self.connect_missing = False
+        if sid not in self.rows:
+            return httpx.Response(404)
+        if request.method == "DELETE":
+            del self.rows[sid]
+            return httpx.Response(204)
+        return httpx.Response(200, json=self.rows[sid])
 
-        self.assertEqual(len(set(sandbox_ids)), 1)
-        self.assertEqual(client.create_calls, 1)
 
-    def test_destroy_deletes_remote_and_local_state(self) -> None:
-        client = FakeProvisionClient()
-        provider = self._create_provider(client)
-        sandbox_id = provider.acquire("user-1", "thread-1")
+@pytest.fixture
+def deployment(tmp_path, monkeypatch):
+    monkeypatch.setattr(service.config, "save_dir", str(tmp_path))
+    monkeypatch.setattr(service.config, "cube_host_save_dir", "/data/shared/agent-stack")
+    server, redis = CubeServer(), FakeRedis()
+    providers = []
 
-        self.assertTrue(provider.destroy(sandbox_id))
-        self.assertEqual(client.delete_calls, [sandbox_id])
-        self.assertIsNone(provider.get(sandbox_id))
+    def new_provider():
+        client = CubeClient(
+            Config(template_id="template-test"),
+            master_url="http://master",
+            node_id="agent-stack-node",
+            http_client=httpx.Client(base_url="http://cube", transport=httpx.MockTransport(server.handle)),
+        )
+        client.sandbox = lambda data: SimpleNamespace(sandbox_id=data["sandboxID"], close=Mock())
+        provider = service.SandboxProviderService(client=client, redis_client=redis)
+        providers.append(provider)
+        return provider
 
-    def test_shutdown_is_idempotent_and_rejects_new_acquire(self) -> None:
-        client = FakeProvisionClient()
-        provider = self._create_provider(client)
-        provider.acquire("user-1", "thread-1")
-
+    yield server, new_provider
+    for provider in providers:
+        for sid, state in list(provider._states.items()):
+            for _ in range(state.references):
+                provider.release(sid)
         provider.shutdown()
-        provider.shutdown()
-
-        self.assertEqual(client.close_calls, 1)
-        with self.assertRaisesRegex(RuntimeError, "shut down"):
-            provider.acquire("user-1", "thread-2")
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_discovery_after_restart_and_user_isolation(deployment):
+    server, new = deployment
+    first = new()
+    sid = first.acquire("alice", "thread")
+    sdk = first.get(sid)._client
+    first.release(sid)
+    sdk.close.assert_called_once()
+    first.shutdown()
+    second = new()
+    assert second.acquire("alice", "thread") == sid
+    assert second.acquire("bob", "thread") != sid
+    assert server.creates == 2
+    mounts = json.loads(server.mounts[sid])
+    assert mounts[0]["hostPath"].endswith("/workspaces/alice/thread")
+    assert mounts[1]["mountPath"] == "/skill" and mounts[1]["readOnly"]
+
+
+def test_two_application_providers_create_once(deployment):
+    server, new = deployment
+    providers = [new(), new()]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        ids = list(pool.map(lambda i: providers[i % 2].acquire("alice", "thread"), range(8)))
+    assert len(set(ids)) == 1
+    assert server.creates == 1
+
+
+@pytest.mark.parametrize("status", [401, 403, 500, 503])
+def test_management_errors_never_create_another_instance(deployment, status):
+    server, new = deployment
+    provider = new()
+    provider.acquire("alice", "thread")
+    server.error = status
+    with pytest.raises(httpx.HTTPStatusError):
+        provider.acquire("alice", "thread")
+    assert server.creates == 1
+
+
+def test_only_explicit_missing_instance_is_recreated(deployment):
+    server, new = deployment
+    provider = new()
+    first = provider.acquire("alice", "thread")
+    provider.release(first)
+    server.connect_missing = True
+    assert provider.acquire("alice", "thread") != first
+    assert server.creates == 2
+
+
+def test_borrow_keeps_client_alive_after_owner_release(deployment):
+    server, new = deployment
+    provider = new()
+    sid = provider.acquire("alice", "thread")
+    with provider.borrow("alice", "thread") as sdk:
+        provider.release(sid)
+        sdk.close.assert_not_called()
+    sdk.close.assert_called_once()
+    assert provider.get(sid) is None
+    assert sid in server.rows
+
+
+def test_mount_change_and_duplicate_fail_closed(deployment, monkeypatch):
+    server, new = deployment
+    provider = new()
+    sid = provider.acquire("alice", "thread")
+    provider.release(sid)
+    row = server.rows[sid]
+    server.rows["duplicate"] = {**row, "sandboxID": "duplicate"}
+    with pytest.raises(RuntimeError, match="Multiple"):
+        provider.acquire("alice", "thread")
+    del server.rows["duplicate"]
+    monkeypatch.setattr(service.config, "cube_host_save_dir", "/data/shared/changed")
+    with pytest.raises(RuntimeError, match="mounts differ"):
+        provider.acquire("alice", "thread")
+    assert server.creates == 1
+
+
+@pytest.mark.parametrize(
+    "inventory",
+    [
+        {"ret": {"ret_code": 130404}, "data": []},
+        {"ret": {"ret_code": 130500, "ret_msg": "cubelet unreachable"}, "size": 1, "data": []},
+        {"ret": {"ret_code": 0}, "size": 1},
+        {"ret": {"ret_code": 0}, "size": 0, "data": []},
+        {"ret": {"ret_code": 0}, "size": 1, "data": ["invalid"]},
+        {},
+    ],
+    ids=["unknown-node", "unreachable-node", "missing-data", "no-node", "invalid-row", "invalid-body"],
+)
+def test_failed_or_incomplete_inventory_never_creates(deployment, inventory):
+    server, new = deployment
+    provider = new()
+    provider.acquire("alice", "thread")
+    server.inventory = inventory
+    with pytest.raises(RuntimeError, match="inventory"):
+        provider.acquire("alice", "thread")
+    assert server.creates == 1
+
+
+def test_unrelated_null_metadata_does_not_block_discovery(deployment):
+    server, new = deployment
+    server.rows["other"] = {"sandboxID": "other", "metadata": None}
+    assert new().acquire("alice", "thread") == "cube-1"
+
+
+@pytest.mark.parametrize("uid,thread", [("..", "thread"), ("alice", "../other"), ("a/b", "thread")])
+def test_invalid_workspace_identity_rejected(deployment, uid, thread):
+    server, new = deployment
+    with pytest.raises(ValueError):
+        new().acquire(uid, thread)
+    assert server.creates == 0
+
+
+def test_canceled_acquire_eventually_releases_client(deployment):
+    server, new = deployment
+    server.resume = threading.Event()
+    provider = new()
+
+    async def run():
+        task = asyncio.create_task(provider.acquire_async("alice", "thread"))
+        assert await asyncio.to_thread(server.created.wait, 3)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        server.resume.set()
+        await asyncio.sleep(0.2)
+        assert provider.get("cube-1") is None
+
+    asyncio.run(run())
+    assert server.creates == 1
+
+
+def test_shutdown_preserves_remote_and_rejects_new_use(deployment):
+    server, new = deployment
+    provider = new()
+    sid = provider.acquire("alice", "thread")
+    provider.shutdown()
+    provider.shutdown()
+    with pytest.raises(RuntimeError, match="shut down"):
+        provider.acquire("alice", "thread")
+    provider.release(sid)
+    assert sid in server.rows
+
+
+def test_explicit_destroy_preserves_host_files(deployment, tmp_path):
+    server, new = deployment
+    provider = new()
+    sid = provider.acquire("alice", "thread")
+    provider.release(sid)
+    artifact = tmp_path / "workspaces/alice/thread/outputs/result.txt"
+    artifact.write_text("retained")
+    assert provider.destroy(sid)
+    assert not server.rows
+    assert artifact.read_text() == "retained"

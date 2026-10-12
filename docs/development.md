@@ -48,17 +48,15 @@ Gateway 在 Compose 中属于 `gateway` profile，默认不启动。
 docker compose up -d postgres redis rustfs milvus neo4j
 ```
 
-API 和 Worker 使用上文命令从 IDE 或终端启动。沙箱供应服务可直接运行在 WSL 中：
+API 和 Worker 可以从同机 Ubuntu 的 IDE/终端启动；执行隔离使用 CubeSandbox。
+完整主机预检、节点启动、模板构建与 smoke 命令见
+[CubeSandbox 部署指南](../docker/cube/README.md)。先填写 Cube 主机地址与三个独立凭据，
+模板 READY 后填写 `CUBE_TEMPLATE_ID`。Windows 环境可做代码和单测验证，运行 VM 需要 Linux。
 
 ```bash
-uv run --no-sync uvicorn sandbox_server.app:app \
-  --host 127.0.0.1 --port 8002 --env-file .env
-```
-
-如需完全使用容器运行应用，再启动 `sandbox`、`api` 和 `worker`：
-
-```bash
-docker compose up -d sandbox api worker
+docker compose up -d --build cube-api cube-templatecenter cube-proxy cube-egress-net
+# 完成部署指南中的模板构建和 smoke 后启动应用
+docker compose up -d --build api worker
 ```
 
 RustFS 是默认对象存储，在 `9000`（S3 API）和 `9001`（控制台）开放，数据写入
@@ -66,7 +64,8 @@ RustFS 是默认对象存储，在 `9000`（S3 API）和 `9001`（控制台）�
 目录需允许容器用户 UID/GID `10001:10001` 写入。
 
 Compose 文件位于仓库根目录 `docker-compose.yml`，镜像构建文件仍在 `docker/`。
-数据卷路径相对仓库根目录，写入 `save/volume/`。已有部署若在 `volume/` 或 `docker/volume/`
+应用基础设施数据卷写入 `save/volume/`；Cube 使用 `/data/cube-stack`、`/data/cubelet` 等宿主机
+目录，工作文件位于 `CUBE_HOST_SAVE_DIR`。已有部署若在 `volume/` 或 `docker/volume/`
 保存数据，应在启动新 Compose 配置前把对应数据迁至 `save/volume/`，避免数据库和对象存储以空目录启动。
 
 生产环境使用 `docker-compose.prod.yml` 覆盖配置。先从 `.env.template` 准备未提交的 `.env.prod`，
@@ -79,7 +78,8 @@ docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod
 ```
 
 此覆盖文件让 API/Worker 读取 `.env.prod`，仅将 API 的 `5050` 端口绑定到本机，
-其他服务只在 Compose 网络内通信。同一主机上的开发和生产配置使用相同容器名与数据目录，
+Cube 控制/调试端口保留 loopback 绑定，计算节点使用 host network，其余基础设施端口关闭。
+同一主机上的开发和生产配置使用相同容器名与数据目录，
 因此应选择其中一套运行。
 
 ## 后端定向验证

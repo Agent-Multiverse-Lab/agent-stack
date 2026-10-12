@@ -3,17 +3,16 @@
 
 CompositeBackend 按虚拟路径前缀路由，各后端路径直接来自运行时上下文。
 """
-from __future__ import annotations
 
-from pathlib import Path
+from __future__ import annotations
 
 from deepagents.backends import BackendProtocol, CompositeBackend, FilesystemBackend
 from deepagents.middleware.filesystem import FilesystemMiddleware
 
 from src.agents.backends.memories_backend import UserMemoriesBackend
-from src.agents.backends.sandbox import S2CSandbox
+from src.agents.backends.sandbox import CubeSandboxBackend
+from src.agents.backends.sandbox.provider_service import workspace_paths
 from src.agents.base_context import BaseContext
-from src.configs.config import config as sys_config
 
 EVICT_TOOL_EXEMPT = {"read_file"}  # 直接返回 read_file 的长结果，避免写入部分后端
 
@@ -25,15 +24,10 @@ ROUTE_WORKSPACE = "/workspace/"
 
 def create_composite_backend(context: BaseContext) -> CompositeBackend:
     """为单次 Agent 运行构建隔离的 CompositeBackend。"""
-    skill_root = Path(
-        context.skill_root or Path(sys_config.save_dir) / "skills"
-    ).resolve()
-    workspace_root = (
-        Path(sys_config.save_dir) / "workspaces" / context.uid / context.thread_id
-    ).resolve()
+    workspace_root, skill_root = workspace_paths(context.uid, context.thread_id, context.skill_root)
 
     return CompositeBackend(
-        default=S2CSandbox(thread_id=context.thread_id, uid=context.uid),
+        default=CubeSandboxBackend(thread_id=context.thread_id, uid=context.uid, skill_root=context.skill_root),
         routes={
             ROUTE_SKILL: FilesystemBackend(
                 root_dir=str(skill_root),
@@ -51,7 +45,6 @@ def create_composite_backend(context: BaseContext) -> CompositeBackend:
 
 # 原生 FilesystemMiddleware 会将工具直接绑定到后端。
 class CustomFilesystemMiddleware(FilesystemMiddleware):
-
     async def awrap_tool_call(self, request, handler):
         tool_results = await handler(request)
 
@@ -83,6 +76,6 @@ def create_custom_filesystem_middleware(
 ) -> CustomFilesystemMiddleware:
     """为本次 Agent 运行构建按需连接的 Sandbox 文件系统中间件。"""
     return CustomFilesystemMiddleware(
-        backend=backend or S2CSandbox(thread_id=context.thread_id, uid=context.uid),
+        backend=backend or CubeSandboxBackend(thread_id=context.thread_id, uid=context.uid, skill_root=context.skill_root),
         tool_token_limit_before_evict=tool_token_limit_before_evict,
     )

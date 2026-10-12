@@ -25,6 +25,9 @@ SANDBOX_TOOL_NAMES = frozenset(
 )
 
 
+MAX_EXECUTE_OUTPUT_BYTES = 100_000
+
+
 class SandboxRuntimeState(TypedDict):
     sandbox_id: str
 
@@ -82,30 +85,47 @@ class SandboxMiddleware(AgentMiddleware[SandboxMiddlewareState]):
         return isinstance(tool_name, str) and tool_name in SANDBOX_TOOL_NAMES
 
     @classmethod
-    def _ensure_sandbox(cls, runtime: object) -> tuple[str, bool]:
+    def _ensure_sandbox(cls, runtime: object, provider) -> tuple[str, bool]:
         state = getattr(runtime, "state", None)
-        provider = get_sandbox_provider()
         current_id = cls._read_sandbox_id(state)
-        if current_id is not None and provider.get(current_id) is not None:
-            return current_id, False
-
         uid, thread_id = cls._context_ids(runtime)
-        sandbox_id = provider.acquire(uid, thread_id)
-        cls._write_sandbox_id(state, sandbox_id)
-        return sandbox_id, True
+        context = getattr(runtime, "context", None)
+        skill_root = context.get("skill_root") if isinstance(context, Mapping) else getattr(context, "skill_root", None)
+        sandbox_id = provider.acquire(uid, thread_id, **({"skill_root": skill_root} if skill_root else {}))
+        try:
+            cls._write_sandbox_id(state, sandbox_id)
+        except Exception:
+            provider.release(sandbox_id)
+            raise
+        return sandbox_id, current_id != sandbox_id
 
     @classmethod
-    async def _ensure_sandbox_async(cls, runtime: object) -> tuple[str, bool]:
+    async def _ensure_sandbox_async(cls, runtime: object, provider) -> tuple[str, bool]:
         state = getattr(runtime, "state", None)
-        provider = get_sandbox_provider()
         current_id = cls._read_sandbox_id(state)
-        if current_id is not None and provider.get(current_id) is not None:
-            return current_id, False
-
         uid, thread_id = cls._context_ids(runtime)
-        sandbox_id = await provider.acquire_async(uid, thread_id)
-        cls._write_sandbox_id(state, sandbox_id)
-        return sandbox_id, True
+        context = getattr(runtime, "context", None)
+        skill_root = context.get("skill_root") if isinstance(context, Mapping) else getattr(context, "skill_root", None)
+        sandbox_id = await provider.acquire_async(uid, thread_id, **({"skill_root": skill_root} if skill_root else {}))
+        try:
+            cls._write_sandbox_id(state, sandbox_id)
+        except Exception:
+            provider.release(sandbox_id)
+            raise
+        return sandbox_id, current_id != sandbox_id
+
+    @staticmethod
+    def _limit_execute_output(result):
+        """Limit tool messages while preserving complete backend file responses."""
+        if isinstance(result, ToolMessage) and isinstance(result.content, str):
+            content = result.content.encode("utf-8")
+            if len(content) > MAX_EXECUTE_OUTPUT_BYTES:
+                return result.model_copy(update={"content": content[:MAX_EXECUTE_OUTPUT_BYTES].decode("utf-8", errors="ignore") + "\n[output truncated]"})
+        if isinstance(result, Command) and isinstance(result.update, dict):
+            messages = result.update.get("messages")
+            if isinstance(messages, list):
+                return replace(result, update={**result.update, "messages": [SandboxMiddleware._limit_execute_output(m) for m in messages]})
+        return result
 
     @staticmethod
     def _attach_sandbox_update(
@@ -142,8 +162,14 @@ class SandboxMiddleware(AgentMiddleware[SandboxMiddlewareState]):
         if not self._uses_sandbox(request):
             return handler(request)
 
-        sandbox_id, acquired = self._ensure_sandbox(request.runtime)
-        result = handler(request)
+        provider = get_sandbox_provider()
+        sandbox_id, acquired = self._ensure_sandbox(request.runtime, provider)
+        try:
+            result = handler(request)
+        finally:
+            provider.release(sandbox_id)
+        if request.tool_call["name"] == "execute":
+            result = self._limit_execute_output(result)
         if not acquired:
             return result
         return self._attach_sandbox_update(result, sandbox_id)
@@ -160,8 +186,14 @@ class SandboxMiddleware(AgentMiddleware[SandboxMiddlewareState]):
         if not self._uses_sandbox(request):
             return await handler(request)
 
-        sandbox_id, acquired = await self._ensure_sandbox_async(request.runtime)
-        result = await handler(request)
+        provider = get_sandbox_provider()
+        sandbox_id, acquired = await self._ensure_sandbox_async(request.runtime, provider)
+        try:
+            result = await handler(request)
+        finally:
+            provider.release(sandbox_id)
+        if request.tool_call["name"] == "execute":
+            result = self._limit_execute_output(result)
         if not acquired:
             return result
         return self._attach_sandbox_update(result, sandbox_id)
@@ -175,7 +207,6 @@ class SandboxMiddleware(AgentMiddleware[SandboxMiddlewareState]):
         sandbox_id = self._read_sandbox_id(state)
         if sandbox_id is None:
             return None
-        get_sandbox_provider().release(sandbox_id)
         return {"sandbox": None}
 
     @override
@@ -187,7 +218,6 @@ class SandboxMiddleware(AgentMiddleware[SandboxMiddlewareState]):
         sandbox_id = self._read_sandbox_id(state)
         if sandbox_id is None:
             return None
-        get_sandbox_provider().release(sandbox_id)
         return {"sandbox": None}
 
 

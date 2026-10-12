@@ -13,7 +13,7 @@
 | Run 生命周期、取消、事件流 | [run-system.md](run-system.md) | [docs/spec/run](../spec/run/README.md) |
 | 知识上传、解析、索引、检索 | [knowledge-system.md](knowledge-system.md) | [docs/spec/knowledge](../spec/knowledge/README.md) |
 | 状态和存储所有权 | [persistence-system.md](persistence-system.md) | [docs/spec/persistence](../spec/persistence/README.md) |
-| 沙箱与工具执行隔离 | [sandbox-system.md](sandbox-system.md) | 暂无独立能力规格 |
+| 沙箱与工具执行隔离 | [sandbox-system.md](sandbox-system.md) | [docs/spec/sandbox](../spec/sandbox/README.md) |
 | 卫星影像多源目录 | [data-platform-system.md](data-platform-system.md) | [docs/spec/data-platform](../spec/data-platform/README.md) |
 | 认证和用户身份 | [auth-system.md](auth-system.md) | 暂无独立能力规格 |
 | 跨系统拓扑和目录职责 | [overview.md](overview.md) | — |

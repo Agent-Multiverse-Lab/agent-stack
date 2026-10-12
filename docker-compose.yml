@@ -6,7 +6,63 @@ x-api-worker-env: &api-worker-env
   REDIS_URL: redis://redis:6379/0
   ENABLE_RUN_QUEUE: "true"
   ARQ_MAX_JOBS: "${ARQ_MAX_JOBS:-64}"
-  SANDBOX_PROVISIONER_URL: http://sandbox:8002
+  CUBE_API_URL: http://cube-api:3000
+  CUBE_MASTER_URL: http://cube-master:8089
+  CUBE_NODE_ID: ${CUBE_NODE_ID:-agent-stack-node}
+  CUBE_PROXY_NODE_IP: cube-proxy
+  CUBE_PROXY_PORT_HTTP: "80"
+  SAVE_DIR: /app/save
+
+x-cube-control: &cube-control
+  restart: unless-stopped
+  networks: [agent-stack-network]
+
+x-cube-artifact-env: &cube-artifact-env
+  CUBE_ARTIFACT_STORE_BACKEND: fs
+  CUBE_ARTIFACT_STORE_FS_ROOT: /data/CubeMaster/storage
+  CUBEMASTER_ROOTFS_ARTIFACT_STORE_DIR: /data/CubeMaster/storage
+  CUBE_TEMPLATE_CALLBACK_TOKEN: ${CUBE_TEMPLATE_CALLBACK_TOKEN:?Set CUBE_TEMPLATE_CALLBACK_TOKEN}
+
+x-cube-node: &cube-node
+  restart: unless-stopped
+  privileged: true
+  network_mode: host
+  pid: host
+  cgroup: host
+  # Published control ports stay on loopback; node containers use host networking.
+  extra_hosts: ["cube-master:127.0.0.1", "cube-ops:127.0.0.1"]
+  security_opt: [apparmor:unconfined, seccomp:unconfined]
+  volumes:
+    - /usr/local/services/cubetoolbox:/usr/local/services/cubetoolbox
+    - /data/cubelet:/data/cubelet:rshared
+    - /data/log:/data/log
+    - /data/cube-shim:/data/cube-shim:rshared
+    - /data/snapshot_pack:/data/snapshot_pack
+    - /data/cube-shared:/data/cube-shared:rshared
+    - ${CUBE_HOST_SAVE_DIR:-/data/shared/agent-stack}:${CUBE_HOST_SAVE_DIR:-/data/shared/agent-stack}:rshared
+    - /tmp/cube:/tmp/cube:rshared
+    - /data/cubelet/run/containerd:/run/containerd
+    - /data/cubelet/run/vc:/run/vc
+    - /data/cubelet/run/cube-node:/run/cube-node
+    - /var/lib/cube-node-bootstrap:/var/lib/cube-node-bootstrap
+    - /dev:/dev
+    - /sys:/sys
+    - /lib/modules:/lib/modules:ro
+
+x-cube-install: &cube-install
+  restart: unless-stopped
+  network_mode: none
+  depends_on:
+    cube-node-init: {condition: service_completed_successfully}
+  volumes:
+    - /usr/local/services/cubetoolbox:/usr/local/services/cubetoolbox
+    - /data/cubelet:/data/cubelet
+    - /var/lib/cube-node-bootstrap:/var/lib/cube-node-bootstrap
+  healthcheck:
+    test: [CMD-SHELL, 'test -f /usr/local/services/cubetoolbox/.staged-$$CUBE_COMPONENT && test ! -f /usr/local/services/cubetoolbox/.staging-$$CUBE_COMPONENT']
+    interval: 5s
+    timeout: 3s
+    retries: 60
 
 services:
   rustfs:
@@ -63,7 +119,7 @@ services:
       GATEWAY_SHARED_TOKEN: ${SATELLITE_GATEWAY_TOKEN:-development-only-change-me}
     ports:
       - "${SATELLITE_GATEWAY_PORT:-50051}:50051"
-      - "${SATELLITE_GATEWAY_HEALTH_PORT:-8080}:8080"
+      - "${SATELLITE_GATEWAY_HEALTH_PORT:-18080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -92,33 +148,6 @@ services:
       - agent-stack-network
     restart: unless-stopped
 
-  sandbox:
-    build:
-      context: ./sandbox_server
-      dockerfile: Dockerfile
-    image: agent-stack-sandbox:${VERSION:-0.1.0}
-    container_name: agent-stack-sandbox
-    environment:
-      PROVISIONER_BACKEND: docker
-      DOCKER_SANDBOX_HOST: host.docker.internal
-      DOCKER_SANDBOX_PREFIX: agent-stack-sandbox
-    ports:
-      - "${SANDBOX_PROVISIONER_PORT:-8002}:8002"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./save/volume/sandbox:/app/saves
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    healthcheck:
-      test: ["CMD", "python", "-c", "from urllib.request import urlopen; response = urlopen('http://localhost:8002/health', timeout=3); raise SystemExit(0 if response.status == 200 else 1)"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-    networks:
-      - agent-stack-network
-    restart: unless-stopped
-
   api:
     build:
       context: .
@@ -131,12 +160,19 @@ services:
       - ./.env
     environment:
       <<: *api-worker-env
+    volumes:
+      - ${CUBE_HOST_SAVE_DIR:-/data/shared/agent-stack}/workspaces:/app/save/workspaces
+      - ${CUBE_HOST_SAVE_DIR:-/data/shared/agent-stack}/skills:/app/save/skills:ro
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-      sandbox:
+      cube-api:
+        condition: service_healthy
+      cube-proxy:
+        condition: service_healthy
+      cube-egress-net:
         condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -160,12 +196,19 @@ services:
       - ./.env
     environment:
       <<: *api-worker-env
+    volumes:
+      - ${CUBE_HOST_SAVE_DIR:-/data/shared/agent-stack}/workspaces:/app/save/workspaces
+      - ${CUBE_HOST_SAVE_DIR:-/data/shared/agent-stack}/skills:/app/save/skills:ro
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-      sandbox:
+      cube-api:
+        condition: service_healthy
+      cube-proxy:
+        condition: service_healthy
+      cube-egress-net:
         condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -206,6 +249,273 @@ services:
     networks:
       - agent-stack-network
     restart: unless-stopped
+
+  cube-prepare:
+    build:
+      context: ./docker/cube
+      dockerfile: prepare.Dockerfile
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      CUBE_DB_PASSWORD: ${CUBE_DB_PASSWORD:?Set CUBE_DB_PASSWORD}
+      CUBE_ADMIN_TOKEN: ${CUBE_ADMIN_TOKEN:?Set CUBE_ADMIN_TOKEN}
+      CUBE_NODE_IP: ${CUBE_NODE_IP:?Set the Linux host IPv4 address}
+      CUBE_HOST_SAVE_DIR: ${CUBE_HOST_SAVE_DIR:-/data/shared/agent-stack}
+    depends_on:
+      postgres: {condition: service_healthy}
+    volumes:
+      - /data/cube-stack/config:/config
+      - /data/cube-stack/certs:/certs
+    networks: [agent-stack-network]
+    restart: "no"
+
+  cube-master:
+    <<: *cube-control
+    image: ${CUBE_REGISTRY:-cube-sandbox-int.tencentcloudcr.com/cube-sandbox}/cube-master:v0.7.2
+    environment:
+      <<: *cube-artifact-env
+      CUBE_MASTER_CONFIG_PATH: /config/master.yaml
+      CUBE_MASTER_ADDR: http://cube-master:8089
+      CUBE_TEMPLATE_CENTER_ADDR: cube-templatecenter:8090
+      CUBE_NODE_IPS: ${CUBE_NODE_IP}
+    ports: ["127.0.0.1:8089:8089"]
+    volumes:
+      - /data/cube-stack/config:/config:ro
+      - /data/cube-stack/artifacts:/data/CubeMaster/storage
+      - /data/cube-stack/certs:/etc/cube/ca:ro
+    depends_on:
+      cube-prepare: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+
+  cube-templatecenter:
+    <<: *cube-control
+    image: ${CUBE_REGISTRY:-cube-sandbox-int.tencentcloudcr.com/cube-sandbox}/cube-templatecenter:v0.7.2
+    privileged: true
+    environment:
+      <<: *cube-artifact-env
+      CUBE_TEMPLATE_CENTER_CONFIG_PATH: /config/templatecenter.yaml
+      CUBE_MASTER_ADDR: http://cube-master:8089
+    volumes:
+      - /data/cube-stack/config:/config:ro
+      - /data/cube-stack/artifacts:/data/CubeMaster/storage
+      - /data/cube-stack/certs:/etc/cube/ca:ro
+      - /dev:/dev
+    depends_on:
+      cube-master: {condition: service_healthy}
+
+  cube-ops:
+    <<: *cube-control
+    image: ${CUBE_REGISTRY:-cube-sandbox-int.tencentcloudcr.com/cube-sandbox}/cube-ops:v0.7.2
+    environment:
+      DATABASE_URL: postgresql://cube:${CUBE_DB_PASSWORD}@postgres:5432/cube?sslmode=disable
+      CUBE_OPS_BIND: 0.0.0.0:3010
+      CUBE_MASTER_ADDR: http://cube-master:8089
+      CUBE_API_SANDBOX_DOMAIN: ${CUBE_SANDBOX_DOMAIN:-cube.app}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_DB: "1"
+      CUBE_OPS_STORE_BACKEND: fs
+      CUBE_OPS_STORE_FS_ROOT: /var/lib/cubeops/blobs
+      CUBE_OPS_STORE_FS_PUBLIC_URL: http://cube-ops:3010
+      CUBE_OPS_STORE_FS_SIGNING_KEY: ${CUBE_ADMIN_TOKEN}
+      CUBE_OPS_STORE_FS_SHARED: "true"
+      CUBE_OPS_WAREHOUSE_WORK_DIR: /var/lib/cubeops/work
+      TMPDIR: /var/lib/cubeops/work
+    ports: ["127.0.0.1:3010:3010"]
+    volumes:
+      - /data/cube-stack/ops:/var/lib/cubeops
+    depends_on:
+      cube-master: {condition: service_healthy}
+
+  cube-api:
+    <<: *cube-control
+    image: ${CUBE_REGISTRY:-cube-sandbox-int.tencentcloudcr.com/cube-sandbox}/cube-api:v0.7.2
+    environment:
+      DATABASE_URL: postgresql://cube:${CUBE_DB_PASSWORD}@postgres:5432/cube?sslmode=disable
+      CUBE_API_BIND: 0.0.0.0:3000
+      CUBE_MASTER_ENDPOINT: cube-master:8089
+      CUBE_MASTER_ADDR: http://cube-master:8089
+      CUBE_API_SANDBOX_DOMAIN: ${CUBE_SANDBOX_DOMAIN:-cube.app}
+    ports: ["127.0.0.1:3000:3000"]
+    volumes:
+      - /data/cube-stack/certs:/etc/cube/ca:ro
+    depends_on:
+      cube-master: {condition: service_healthy}
+
+  cube-lifecycle-manager:
+    <<: *cube-control
+    image: ${CUBE_REGISTRY:-cube-sandbox-int.tencentcloudcr.com/cube-sandbox}/cube-lifecycle-manager:v0.7.2
+    environment:
+      CUBE_LCM_REDIS_ADDR: redis:6379
+      CUBE_LCM_REDIS_DB: "1"
+      CUBE_LCM_CUBEMASTER_URL: http://cube-master:8089
+      CUBE_LCM_LISTEN_ADDR: ":8083"
+      CUBE_LCM_DEFAULT_IDLE_TIMEOUT: 10m
+      CUBE_LCM_HEARTBEAT_TTL: 15s
+      CUBE_LCM_DISCOVERY_REFRESH: 5s
+      CUBE_LCM_ADMIN_TOKEN: ${CUBE_ADMIN_TOKEN}
+    depends_on:
+      cube-master: {condition: service_healthy}
+
+  cube-proxy:
+    <<: *cube-control
+    image: ${CUBE_REGISTRY:-cube-sandbox-int.tencentcloudcr.com/cube-sandbox}/cube-proxy:v0.7.2
+    entrypoint: [sh, /cube/proxy-entrypoint.sh]
+    environment:
+      NODE_IP: cube-proxy
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_DB: "1"
+      TIMEOUT_MIN: "600"
+      TIMEOUT_MAX: "3600"
+      CUBE_SIDECAR_LISTEN_ADDR: cube-lifecycle-manager:8083
+      CUBE_PROXY_HTTP_LISTEN_PORT: "80"
+      CUBE_PROXY_HTTPS_LISTEN_PORT: "443"
+      CUBE_PROXY_GRPC_LISTEN_PORT: "9090"
+      CUBE_PROXY_ADMIN_LISTEN: 0.0.0.0
+      CUBE_PROXY_ADMIN_TOKEN: ${CUBE_ADMIN_TOKEN}
+      CUBE_PROXY_RESOLVER_ADDRS: 127.0.0.11
+      CUBE_PROXY_RESOLVER_VALID: 10s
+      CUBE_PROXY_RESOLVER_TIMEOUT: 5s
+      CUBE_PROXY_RESOLVER_IPV6: "off"
+      CUBE_PROXY_REGISTRY_ENABLE: "1"
+      CUBE_PROXY_ID: agent-stack-proxy
+      CUBE_PROXY_ADMIN_URL: http://cube-proxy:8082
+      CUBE_PROXY_RESUME_URL: http://cube-proxy:8082
+      CUBE_PROXY_NODE_IP: cube-proxy
+      CUBE_PROXY_VERSION: v0.7.2
+      CUBE_PROXY_HEARTBEAT_INTERVAL_MS: "5000"
+      CUBE_PROXY_REGISTRY_REDIS_HOST: redis
+      CUBE_PROXY_REGISTRY_REDIS_PORT: "6379"
+      CUBE_PROXY_REGISTRY_REDIS_DB: "1"
+    ports: ["127.0.0.1:8081:80"]
+    volumes:
+      - ./docker/cube/proxy-entrypoint.sh:/cube/proxy-entrypoint.sh:ro
+      - /data/cube-stack/certs:/usr/local/openresty/nginx/certs:ro
+    healthcheck:
+      test: [CMD-SHELL, 'curl -fsS -H "X-Cube-Admin-Token: $$CUBE_PROXY_ADMIN_TOKEN" http://127.0.0.1:8082/admin/healthz >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    depends_on:
+      cube-prepare: {condition: service_completed_successfully}
+      cube-lifecycle-manager: {condition: service_started}
+
+  cube-node-init:
+    <<: *cube-node
+    image: ${CUBE_REGISTRY:-cube-sandbox-int.tencentcloudcr.com/cube-sandbox}/cube-node-init:v0.7.2
+    entrypoint: [sh, /cube/node-init.sh]
+    restart: "no"
+    environment:
+      CUBE_MASTER_ENDPOINT: 127.0.0.1:8089
+      CUBE_NODE_HOST_NETWORK: "true"
+      CUBE_SANDBOX_NETWORK_CIDR: 172.16.0.0/16
+      LOOPBACK_ENABLED: "false"
+      CUBE_PVM_ENABLE: "0"
+      PVM_ENABLED: "0"
+      NODE_INIT_ENABLED: "1"
+      CHMOD_KVM: "false"
+      LOAD_KVM_MODULE: "false"
+      WRITE_UDEV_RULE: "false"
+      CREATE_HOST_DIRS: "false"
+      HOST_ROOT: /host
+      STATE_DIR: /var/lib/cube-node-bootstrap
+    volumes:
+      - /:/host:ro
+      - /dev:/dev
+      - /sys:/sys
+      - /lib/modules:/lib/modules:ro
+      - /data/cubelet:/data/cubelet:rshared
+      - /var/lib/cube-node-bootstrap:/var/lib/cube-node-bootstrap
+      - ./docker/cube/node-init.sh:/cube/node-init.sh:ro
+    depends_on:
+      cube-master: {condition: service_healthy}
+
+  cube-shim-install:
+    <<: *cube-install
+    image: ${CUBE_REGISTRY:-cube-sandbox-int.tencentcloudcr.com/cube-sandbox}/cube-shim:v0.7.2
+    environment: {CUBE_COMPONENT: cube-shim, CUBE_ROLE: install}
+  cube-kernel-install:
+    <<: *cube-install
+    image: ${CUBE_REGISTRY:-cube-sandbox-int.tencentcloudcr.com/cube-sandbox}/cube-kernel:v0.7.2
+    environment: {CUBE_COMPONENT: cube-kernel, CUBE_ROLE: install, CUBE_PVM_ENABLE: "0"}
+  cube-guest-install:
+    <<: *cube-install
+    image: ${CUBE_REGISTRY:-cube-sandbox-int.tencentcloudcr.com/cube-sandbox}/cube-guest:v0.7.2
+    environment: {CUBE_COMPONENT: cube-guest, CUBE_ROLE: install}
+  cube-agent-install:
+    <<: *cube-install
+    image: ${CUBE_REGISTRY:-cube-sandbox-int.tencentcloudcr.com/cube-sandbox}/cube-agent:v0.7.2
+    environment: {CUBE_COMPONENT: cube-agent, CUBE_ROLE: install}
+
+  cubelet:
+    <<: *cube-node
+    image: ${CUBE_REGISTRY:-cube-sandbox-int.tencentcloudcr.com/cube-sandbox}/cubelet:v0.7.2
+    environment:
+      CUBE_COMPONENT: cubelet
+      CUBE_ROLE: run
+      CUBE_OPS_ENDPOINT: 127.0.0.1:3010
+      CUBE_MASTER_HTTP_ADDR: 127.0.0.1:8089
+      CUBE_SANDBOX_NODE_ID: ${CUBE_NODE_ID:-agent-stack-node}
+      CUBE_SANDBOX_ENDPOINT_IP: ${CUBE_NODE_IP}
+      CUBE_PVM_ENABLE: "0"
+      CUBE_SANDBOX_AUTO_DETECT_ETH: "true"
+      CUBE_SANDBOX_NETWORK_CIDR: 172.16.0.0/16
+      CUBE_SANDBOX_DNS_SERVERS: ${CUBE_DNS_SERVERS:-1.1.1.1,8.8.8.8}
+      CUBE_EGRESS_ADMIN_PORT: "19091"
+      CUBE_TAP_INIT_NUM: "4"
+      CUBE_CGROUP_POOL_SIZE: "8"
+      CUBE_WORKFLOW_CONCURRENT: "4"
+    healthcheck:
+      test: [CMD-SHELL, 'ss -lntp | grep -q ":9999" && test -s /run/cube-node/cubelet.pid']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    depends_on:
+      cube-ops: {condition: service_healthy}
+      cube-shim-install: {condition: service_healthy}
+      cube-kernel-install: {condition: service_healthy}
+      cube-guest-install: {condition: service_healthy}
+      cube-agent-install: {condition: service_healthy}
+
+  cube-egress:
+    <<: *cube-node
+    image: ${CUBE_REGISTRY:-cube-sandbox-int.tencentcloudcr.com/cube-sandbox}/cube-egress:v0.7.2
+    environment:
+      CUBE_EGRESS_BOOTSTRAP_URL: http://127.0.0.1:9998/v1/policies/dump
+      CUBE_EGRESS_ADMIN_PORT: "19091"
+      CUBE_SANDBOX_NETWORK_CIDR: 172.16.0.0/16
+    volumes:
+      - /data/cube-stack/certs:/etc/cube/ca:ro
+      - /data/log:/data/log
+      - /usr/local/services/cubetoolbox:/usr/local/services/cubetoolbox
+    healthcheck:
+      test: [CMD, curl, -fsS, http://127.0.0.1:19091/admin/v1/health]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    depends_on:
+      cubelet: {condition: service_healthy}
+
+  cube-egress-net:
+    <<: *cube-node
+    image: ${CUBE_REGISTRY:-cube-sandbox-int.tencentcloudcr.com/cube-sandbox}/cube-egress-net:v0.7.2
+    environment:
+      CUBE_INGRESS_IFACE: cube-dev
+      CUBE_TPROXY_ON_IP: 172.16.0.1
+      CUBE_EGRESS_NET_INITIAL_WAIT_SECONDS: "300"
+      CUBE_EGRESS_NET_REAPPLY_INTERVAL_SECONDS: "30"
+    volumes:
+      - /lib/modules:/lib/modules:ro
+      - /usr/local/services/cubetoolbox:/usr/local/services/cubetoolbox
+    healthcheck:
+      test: [CMD-SHELL, 'ip link show cube-dev >/dev/null && ip rule show | grep -q "fwmark 0xce010000/0xffff0000 lookup 100" && iptables -t mangle -S TRANSPROXY | grep -q 0xce020000']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    depends_on:
+      cube-egress: {condition: service_healthy}
 
 networks:
   agent-stack-network:

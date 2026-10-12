@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import posixpath
+from datetime import UTC, datetime
 from pathlib import PurePosixPath
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,19 +18,45 @@ from src.agents.backends.sandbox import get_sandbox_provider
 from src.database.repositories import ConversationRepository
 
 WORKSPACE_PATH = "/workspace"
-SANDBOX_WORKSPACE_PATH = "/home/gem/user-data/workspace"
 MAX_FILE_PREVIEW_LINES = 2000
 MAX_FILE_PREVIEW_CHARS = 200_000
 
 _CODE_EXTENSIONS = {
-    ".c", ".cpp", ".css", ".go", ".html", ".java", ".js", ".jsx",
-    ".py", ".rs", ".sh", ".sql", ".ts", ".tsx", ".vue",
+    ".c",
+    ".cpp",
+    ".css",
+    ".go",
+    ".html",
+    ".java",
+    ".js",
+    ".jsx",
+    ".py",
+    ".rs",
+    ".sh",
+    ".sql",
+    ".ts",
+    ".tsx",
+    ".vue",
 }
 _DATA_EXTENSIONS = {
-    ".csv", ".json", ".jsonl", ".parquet", ".toml", ".xml", ".yaml", ".yml",
+    ".csv",
+    ".json",
+    ".jsonl",
+    ".parquet",
+    ".toml",
+    ".xml",
+    ".yaml",
+    ".yml",
 }
 _IMAGE_EXTENSIONS = {
-    ".avif", ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp",
+    ".avif",
+    ".bmp",
+    ".gif",
+    ".jpeg",
+    ".jpg",
+    ".png",
+    ".svg",
+    ".webp",
 }
 
 
@@ -41,18 +68,14 @@ def normalize_workspace_path(path: str) -> str:
 
 
 def to_sandbox_path(path: str) -> str:
-    normalized = normalize_workspace_path(path)
-    suffix = normalized.removeprefix(WORKSPACE_PATH).lstrip("/")
-    return posixpath.join(SANDBOX_WORKSPACE_PATH, suffix)
+    return normalize_workspace_path(path)
 
 
 def to_workspace_path(path: str) -> str:
     normalized = posixpath.normpath(path)
-    if normalized != SANDBOX_WORKSPACE_PATH and not normalized.startswith(
-        f"{SANDBOX_WORKSPACE_PATH}/"
-    ):
+    if normalized != WORKSPACE_PATH and not normalized.startswith(f"{WORKSPACE_PATH}/"):
         raise ValueError("sandbox returned a path outside the workspace")
-    suffix = normalized.removeprefix(SANDBOX_WORKSPACE_PATH).lstrip("/")
+    suffix = normalized.removeprefix(WORKSPACE_PATH).lstrip("/")
     return posixpath.join(WORKSPACE_PATH, suffix)
 
 
@@ -74,9 +97,7 @@ async def _get_owned_sandbox(
     thread_id: str,
 ):
     normalized_thread_id = str(thread_id).strip()
-    conversation = await ConversationRepository(
-        db
-    ).get_conversation_by_thread_id_for_user(normalized_thread_id, uid)
+    conversation = await ConversationRepository(db).get_conversation_by_thread_id_for_user(normalized_thread_id, uid)
     if conversation is None:
         raise LookupError("Conversation not found")
 
@@ -84,13 +105,12 @@ async def _get_owned_sandbox(
     sandbox_id = await provider.acquire_async(
         uid,
         normalized_thread_id,
-        file_thread_id=normalized_thread_id,
-        skills_thread_id=normalized_thread_id,
     )
     sandbox = provider.get(sandbox_id)
     if sandbox is None:
+        provider.release(sandbox_id)
         raise RuntimeError("Sandbox execution backend is unavailable")
-    return normalized_thread_id, sandbox_id, sandbox
+    return normalized_thread_id, sandbox_id, sandbox, provider
 
 
 async def list_workspace(
@@ -101,13 +121,16 @@ async def list_workspace(
     path: str,
 ) -> SandboxWorkspaceResponse:
     workspace_path = normalize_workspace_path(path)
-    normalized_thread_id, sandbox_id, sandbox = await _get_owned_sandbox(
+    normalized_thread_id, sandbox_id, sandbox, provider = await _get_owned_sandbox(
         db,
         uid=uid,
         thread_id=thread_id,
     )
 
-    result = await asyncio.to_thread(sandbox.ls, to_sandbox_path(workspace_path))
+    try:
+        result = await asyncio.to_thread(sandbox.ls, to_sandbox_path(workspace_path))
+    finally:
+        provider.release(sandbox_id)
     error = getattr(result, "error", None)
     if error:
         raise RuntimeError(str(error))
@@ -122,7 +145,7 @@ async def list_workspace(
                 path=item_path,
                 kind="directory" if is_directory else "file",
                 size=item.get("size") if isinstance(item.get("size"), int) else None,
-                modified_at=str(item.get("modified_at") or ""),
+                modified_at=datetime.fromtimestamp(item["mtime"], UTC).isoformat() if isinstance(item.get("mtime"), (int, float)) else "",
                 file_type=None if is_directory else _file_type(item_path),
             )
         )
@@ -147,17 +170,20 @@ async def read_workspace_file(
     if workspace_path == WORKSPACE_PATH:
         raise ValueError("path must point to a file inside /workspace")
 
-    normalized_thread_id, sandbox_id, sandbox = await _get_owned_sandbox(
+    normalized_thread_id, sandbox_id, sandbox, provider = await _get_owned_sandbox(
         db,
         uid=uid,
         thread_id=thread_id,
     )
-    result = await asyncio.to_thread(
-        sandbox.read,
-        to_sandbox_path(workspace_path),
-        0,
-        MAX_FILE_PREVIEW_LINES + 1,
-    )
+    try:
+        result = await asyncio.to_thread(
+            sandbox.read,
+            to_sandbox_path(workspace_path),
+            0,
+            MAX_FILE_PREVIEW_LINES + 1,
+        )
+    finally:
+        provider.release(sandbox_id)
     error = getattr(result, "error", None)
     if error:
         raise RuntimeError(str(error))

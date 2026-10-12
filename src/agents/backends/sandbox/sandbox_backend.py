@@ -1,442 +1,143 @@
 from __future__ import annotations
 
 import base64
-import posixpath
+import json
 import shlex
+from contextlib import nullcontext
+from pathlib import PurePosixPath
+from threading import RLock
 
-from agent_sandbox import Sandbox as AgentSandboxClient
-from agent_sandbox.core.api_error import ApiError
-from deepagents.backends.protocol import (
-    FILE_NOT_FOUND,
-    INVALID_PATH,
-    IS_DIRECTORY,
-    PERMISSION_DENIED,
-    EditResult,
-    ExecuteResponse,
-    FileDownloadResponse,
-    FileInfo,
-    FileUploadResponse,
-    GlobResult,
-    GrepMatch,
-    GrepResult,
-    LsResult,
-    ReadResult,
-    WriteResult,
-)
+from deepagents.backends.protocol import ExecuteResponse, FileDownloadResponse, FileUploadResponse
 from deepagents.backends.sandbox import BaseSandbox
 
-DEFAULT_EXECUTE_TIMEOUT = 120
-MAX_EXECUTE_OUTPUT_BYTES = 100_000
+from src.configs import config
+
+_CHUNK_SIZE = 64 * 1024
+_DOWNLOAD_SCRIPT = """
+import base64, json, os, sys
+path, offset, expected = json.loads(base64.b64decode(sys.argv[1]))
+try:
+    with open(path, 'rb') as f:
+        st = os.fstat(f.fileno())
+        signature = [st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns]
+        if expected is not None and signature != expected:
+            raise RuntimeError('file changed during download')
+        f.seek(offset)
+        chunk = f.read(65536)
+        after = os.fstat(f.fileno())
+        if signature != [after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns]:
+            raise RuntimeError('file changed during download')
+        print(json.dumps({'signature': signature, 'data': base64.b64encode(chunk).decode()}))
+except FileNotFoundError:
+    print(json.dumps({'error': 'file_not_found'}))
+except IsADirectoryError:
+    print(json.dumps({'error': 'is_directory'}))
+except PermissionError:
+    print(json.dumps({'error': 'permission_denied'}))
+except Exception as e:
+    print(json.dumps({'error': str(e)}))
+"""
 
 
-class CustomSandbox(BaseSandbox):
-    """基于 Agent Sandbox 实现 DeepAgents 的按需连接后端。"""
+class CubeSandboxBackend(BaseSandbox):
+    """保留 DeepAgents 文件协议，仅适配 Cube 命令和字节传输。"""
 
-    def __init__(
-        self,
-        thread_id: str,
-        uid: str,
-        sandbox_url: str | None = None,
-        **keywords: object,
-    ) -> None:
-        from .provider_service import sandbox_id_for_thread
-
-        sandbox_id = str(keywords.pop("sandbox_id", sandbox_id_for_thread(uid, thread_id))).strip()
-        headers = keywords.pop("headers", None)
-        execute_timeout = keywords.pop("execute_timeout", DEFAULT_EXECUTE_TIMEOUT)
-        self._validate_init_params(
-            thread_id=thread_id,
-            uid=uid,
-            sandbox_id=sandbox_id,
-        )
-        if sandbox_url is not None:
-            self._validate_init_params(sandbox_url=sandbox_url)
-        if headers is not None and not isinstance(headers, dict):
-            raise TypeError("headers 必须是 dict[str, str]")
-
-        self._id = sandbox_id
-        self._thread_id = thread_id
+    def __init__(self, *, uid: str, thread_id: str, skill_root=None, client=None, provider=None):
         self._uid = uid
-        self._sandbox_url = sandbox_url.rstrip("/") if sandbox_url else None
-        self._execute_timeout = int(execute_timeout)
-        self._headers = (
-            {str(key): str(value) for key, value in headers.items()}
-            if isinstance(headers, dict)
-            else None
-        )
-        self._client = (
-            self._build_client(self._sandbox_url, headers=self._headers)
-            if self._sandbox_url is not None
-            else None
+        self._thread_id = thread_id
+        self._skill_root = skill_root
+        self._client = client
+        self._provider = provider
+        self._operation_lock = RLock()
+
+    def _connection(self):
+        from .provider_service import get_sandbox_provider
+
+        if self._client is not None and self._provider is None:
+            return nullcontext(self._client)
+        provider = self._provider or get_sandbox_provider()
+        return provider.borrow(
+            self._uid,
+            self._thread_id,
+            skill_root=self._skill_root,
+            sandbox_id=self._client.sandbox_id if self._client is not None else None,
         )
 
     @property
     def id(self) -> str:
-        return self._id
-
-    @property
-    def client(self) -> AgentSandboxClient:
-        """首次文件或命令操作时取得本会话的 Sandbox 连接。"""
-        if self._client is None:
-            from .provider_service import get_sandbox_provider
-
-            provider = get_sandbox_provider()
-            sandbox = provider.get(self._id)
-            if sandbox is None:
-                sandbox_id = provider.acquire(self._uid, self._thread_id)
-                sandbox = provider.get(sandbox_id)
-            if sandbox is None or sandbox is self:
-                raise RuntimeError("Sandbox provisioned but execution backend is unavailable.")
-            self._id = sandbox.id
-            self._sandbox_url = sandbox._sandbox_url
-            self._client = sandbox.client
-        return self._client
-
-    def _build_client(
-        self,
-        sandbox_url: str,
-        *,
-        headers: dict[str, str] | None = None,
-    ) -> AgentSandboxClient:
-        """创建连接远程沙箱的客户端。"""
-        return AgentSandboxClient(
-            base_url=sandbox_url,
-            headers=headers,
-            timeout=self._execute_timeout,
-        )
+        if self._client is not None:
+            return self._client.sandbox_id
+        with self._connection() as client:
+            return client.sandbox_id
 
     @staticmethod
-    def _validate_init_params(**params) -> None:
-        empty_params = [
-            name
-            for name, value in params.items()
-            if value is None or (isinstance(value, str) and not value.strip())
-        ]
-        if empty_params:
-            names = ", ".join(empty_params)
-            raise ValueError(f"CustomSandbox 初始化参数不能为空: {names}")
+    def _run(client, command: str, timeout: int | None = None):
+        seconds = config.sandbox_execute_timeout_seconds if timeout is None else min(timeout, config.sandbox_execute_timeout_seconds)
+        if seconds <= 0:
+            raise ValueError("Command timeout must be positive")
+        # SDK 读超时不负责终止子进程，使用 VM 内的进程组超时作为硬上限。
+        wrapped = f"timeout --signal=TERM --kill-after=5s {int(seconds)}s bash -lc {shlex.quote(command)}"
+        return client.commands.run(wrapped, cwd="/workspace", timeout=seconds + 10)
 
-    def execute(
-        self,
-        command: str,
-        *,
-        timeout: int | None = None,
-    ) -> ExecuteResponse:
-        if not command:
-            return ExecuteResponse(
-                output="Error: Command must be a non-empty string.",
-                exit_code=1,
-            )
-
-        effective_timeout = timeout or self._execute_timeout
+    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        if not isinstance(command, str) or not command.strip():
+            return ExecuteResponse(output="Error: command must not be empty", exit_code=1)
         try:
-            response = self.client.shell.exec_command(
-                command=command,
-                timeout=effective_timeout,
-                hard_timeout=effective_timeout,
-                truncate=False,
-            )
-        except Exception as exc:  # noqa: BLE001
-            return ExecuteResponse(
-                output=f"Error executing command ({type(exc).__name__}): {exc}",
-                exit_code=1,
-            )
+            with self._connection() as client, self._operation_lock:
+                result = self._run(client, command, timeout)
+            output = result.stdout
+            if result.stderr:
+                output += ("\n" if output and not output.endswith("\n") else "") + result.stderr
+            # BaseSandbox 使用完整 JSON 解析文件结果，不能在这里截断。
+            return ExecuteResponse(output=output, exit_code=result.exit_code, truncated=False)
+        except Exception as exc:
+            return ExecuteResponse(output=f"Error executing command ({type(exc).__name__}): {exc}", exit_code=1)
 
-        data = getattr(response, "data", None)
-        if data is None:
-            message = getattr(response, "message", None) or "Sandbox returned no command data."
-            return ExecuteResponse(output=f"Error: {message}", exit_code=1)
-
-        output = str(getattr(data, "output", "") or "")
-        exit_code = getattr(data, "exit_code", None)
-        exit_code = int(exit_code) if exit_code is not None else None
-
-        truncated_output, truncated = self._truncate_output(output or "<no output>")
-        return ExecuteResponse(
-            output=truncated_output,
-            exit_code=exit_code,
-            truncated=truncated,
-        )
-
-    def ls(self, path: str) -> LsResult:
-        """通过沙箱文件接口列出目录。"""
-        try:
-            response = self.client.file.list_path(
-                path=path,
-                recursive=False,
-                include_size=True,
-            )
-            entries: list[FileInfo] = []
-            for entry in response.data.files or []:
-                info: FileInfo = {
-                    "path": entry.path,
-                    "is_dir": bool(entry.is_directory),
-                }
-                if isinstance(entry.size, int):
-                    info["size"] = entry.size
-                if entry.modified_time:
-                    info["modified_at"] = str(entry.modified_time)
-                entries.append(info)
-            return LsResult(entries=entries)
-        except Exception as exc:  # noqa: BLE001
-            return LsResult(error=str(exc) or f"Failed to list '{path}'")
-
-    def read(
-        self,
-        file_path: str,
-        offset: int = 0,
-        limit: int = 2000,
-    ) -> ReadResult:
-        """通过沙箱文件接口分页读取文件。"""
-        try:
-            response = self.client.file.read_file(
-                file=file_path,
-                start_line=max(0, offset),
-                end_line=max(0, offset) + limit,
-            )
-            content = response.data.content or ""
-            encoding = str(getattr(response.data, "encoding", "") or "utf-8")
-            if isinstance(content, bytes):
-                content = base64.b64encode(content).decode("ascii")
-                encoding = "base64"
-            return ReadResult(
-                file_data={"content": str(content), "encoding": encoding}
-            )
-        except Exception as exc:  # noqa: BLE001
-            return ReadResult(error=str(exc) or f"Failed to read '{file_path}'")
-
-    def write(self, file_path: str, content: str) -> WriteResult:
-        """通过沙箱文件接口写入 UTF-8 文本。"""
-        try:
-            response = self.client.file.write_file(
-                file=file_path,
-                content=content,
-                encoding="utf-8",
-            )
-            if getattr(response, "success", None) is False:
-                return WriteResult(
-                    error=str(getattr(response, "message", "") or INVALID_PATH)
-                )
-            return WriteResult(path=file_path)
-        except Exception as exc:  # noqa: BLE001
-            return WriteResult(error=str(exc) or f"Failed to write '{file_path}'")
-
-    def edit(
-        self,
-        file_path: str,
-        old_string: str,
-        new_string: str,
-        replace_all: bool = False,
-    ) -> EditResult:
-        """通过沙箱文件接口替换文本。"""
-        if not old_string:
-            return EditResult(error="old_string must not be empty")
-        try:
-            current = self.client.file.read_file(file=file_path).data
-            current_content = current.content or ""
-            if str(getattr(current, "encoding", "")).lower() == "base64":
-                current_content = base64.b64decode(current_content).decode("utf-8")
-            count = str(current_content).count(old_string)
-            if count == 0:
-                return EditResult(error=f"String not found in file: '{old_string}'")
-            if count > 1 and not replace_all:
-                return EditResult(
-                    error="old_string appears multiple times; use replace_all=True"
-                )
-
-            response = self.client.file.str_replace_editor(
-                command="str_replace",
-                path=file_path,
-                old_str=old_string,
-                new_str=new_string,
-                replace_mode="ALL" if replace_all else "FIRST",
-            )
-            if getattr(response, "success", None) is False:
-                return EditResult(
-                    error=str(getattr(response, "message", "") or INVALID_PATH)
-                )
-            return EditResult(
-                path=file_path,
-                occurrences=count if replace_all else 1,
-            )
-        except Exception as exc:  # noqa: BLE001
-            return EditResult(error=str(exc) or f"Failed to edit '{file_path}'")
-
-    def grep(
-        self,
-        pattern: str,
-        path: str | None = None,
-        glob: str | None = None,
-    ) -> GrepResult:
-        """通过远端命令执行接口搜索文件内容。"""
-        search_path = path or "."
-        include = f" --include={shlex.quote(glob)}" if glob else ""
-        command = (
-            f"grep -RFnH{include} -- {shlex.quote(pattern)} "
-            f"{shlex.quote(search_path)}"
-        )
-        result = self.execute(command)
-        if result.exit_code == 1:
-            return GrepResult(matches=[])
-        if result.exit_code not in (0, None):
-            return GrepResult(error=result.output or "grep failed")
-
-        matches: list[GrepMatch] = []
-        for line in result.output.splitlines():
-            parts = line.split(":", 2)
-            if len(parts) != 3 or not parts[1].isdigit():
-                continue
-            matches.append(
-                {"path": parts[0], "line": int(parts[1]), "text": parts[2]}
-            )
-        return GrepResult(matches=matches)
-
-    def glob(self, pattern: str, path: str | None = None) -> GlobResult:
-        """通过沙箱文件接口匹配路径。"""
-        search_path = path or "/"
-        try:
-            response = self.client.file.find_files(
-                path=search_path,
-                glob=pattern,
-            )
-            matches: list[FileInfo] = [
-                {"path": file_path} for file_path in response.data.files or []
-            ]
-            return GlobResult(matches=matches)
-        except Exception as exc:  # noqa: BLE001
-            return GlobResult(error=str(exc) or f"Failed to glob '{search_path}'")
-
-    def read_file_base64(self, content_base64: str) -> ExecuteResponse:
-        """在沙箱内解码 base64 内容并输出 UTF-8 文本。"""
-        if not isinstance(content_base64, str) or not content_base64.strip():
-            return ExecuteResponse(
-                output="Error: Base64 content must be a non-empty string.",
-                exit_code=1,
-            )
-
-        script = (
-            "import base64, sys; "
-            "pass_bytes = base64.b64decode(sys.argv[1], validate=True); "
-            "print(pass_bytes.decode('utf-8'))"
-        )
-        command = (
-            f"python3 -c {shlex.quote(script)} "
-            f"{shlex.quote(content_base64.strip())}"
-        )
-        return self.execute(command)
+    @staticmethod
+    def _valid_path(path: str) -> bool:
+        return isinstance(path, str) and "\x00" not in path and PurePosixPath(path).is_absolute() and ".." not in PurePosixPath(path).parts
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        responses: list[FileUploadResponse] = []
-        for path, content in files:
-            if not self._is_absolute_file_path(path):
-                responses.append(FileUploadResponse(path=path, error=INVALID_PATH))
-                continue
-
-            try:
-                parent = posixpath.dirname(path.rstrip("/")) or "/"
-                mkdir = self.execute(f"mkdir -p {shlex.quote(parent)}")
-                if mkdir.exit_code not in (0, None):
-                    responses.append(FileUploadResponse(path=path, error=INVALID_PATH))
+        responses = []
+        with self._connection() as client, self._operation_lock:
+            for path, content in files:
+                if not self._valid_path(path):
+                    responses.append(FileUploadResponse(path=path, error="invalid_path"))
                     continue
-
-                encoded = base64.b64encode(content).decode("ascii")
-                response = self.client.file.write_file(
-                    file=path,
-                    content=encoded,
-                    encoding="base64",
-                )
-                if getattr(response, "success", None) is False:
-                    responses.append(
-                        FileUploadResponse(
-                            path=path,
-                            error=str(getattr(response, "message", "") or INVALID_PATH),
-                        )
-                    )
-                    continue
-                responses.append(FileUploadResponse(path=path))
-            except ApiError as exc:
-                responses.append(
-                    FileUploadResponse(path=path, error=self._upload_error(exc))
-                )
-            except Exception:
-                responses.append(FileUploadResponse(path=path, error=INVALID_PATH))
+                try:
+                    client.files.write(path, content)
+                    responses.append(FileUploadResponse(path=path))
+                except Exception as exc:
+                    responses.append(FileUploadResponse(path=path, error=str(exc)))
         return responses
 
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        responses: list[FileDownloadResponse] = []
-        for path in paths:
-            if not self._is_absolute_file_path(path):
-                responses.append(FileDownloadResponse(path=path, error=INVALID_PATH))
-                continue
-
-            try:
-                check = self.execute(
-                    "if [ -d {path} ]; then exit 3; fi; "  # noqa: UP032
-                    "if [ ! -e {path} ]; then exit 2; fi; "
-                    "if [ ! -f {path} ]; then exit 4; fi".format(
-                        path=shlex.quote(path)
-                    )
-                )
-                if check.exit_code == 2:
-                    responses.append(
-                        FileDownloadResponse(path=path, error=FILE_NOT_FOUND)
-                    )
+        responses = []
+        with self._connection() as client, self._operation_lock:
+            for path in paths:
+                if not self._valid_path(path):
+                    responses.append(FileDownloadResponse(path=path, error="invalid_path"))
                     continue
-                if check.exit_code == 3:
-                    responses.append(FileDownloadResponse(path=path, error=IS_DIRECTORY))
-                    continue
-                if check.exit_code not in (0, None):
-                    responses.append(FileDownloadResponse(path=path, error=INVALID_PATH))
-                    continue
-
-                content = b"".join(self.client.file.download_file(path=path))
-                responses.append(FileDownloadResponse(path=path, content=content))
-            except ApiError as exc:
-                responses.append(
-                    FileDownloadResponse(path=path, error=self._download_error(exc))
-                )
-            except Exception:
-                responses.append(FileDownloadResponse(path=path, error=INVALID_PATH))
+                try:
+                    content = bytearray()
+                    signature = None
+                    while True:
+                        args = base64.b64encode(json.dumps([path, len(content), signature]).encode()).decode()
+                        result = self._run(client, f"python3 -c {shlex.quote(_DOWNLOAD_SCRIPT)} {shlex.quote(args)}")
+                        if result.exit_code:
+                            raise RuntimeError(result.stderr or "File download command failed")
+                        payload = json.loads(result.stdout)
+                        if payload.get("error"):
+                            raise RuntimeError(payload["error"])
+                        signature = payload["signature"]
+                        chunk = base64.b64decode(payload["data"], validate=True)
+                        expected_size = min(_CHUNK_SIZE, signature[2] - len(content))
+                        if len(chunk) != expected_size:
+                            raise RuntimeError("Incomplete file download")
+                        content.extend(chunk)
+                        if len(content) == signature[2]:
+                            break
+                    responses.append(FileDownloadResponse(path=path, content=bytes(content)))
+                except Exception as exc:
+                    responses.append(FileDownloadResponse(path=path, error=str(exc)))
         return responses
-
-    @staticmethod
-    def _is_absolute_file_path(path: str) -> bool:
-        return isinstance(path, str) and path.startswith("/") and path != "/"
-
-    @staticmethod
-    def _join_output(stdout: str, stderr: str) -> str:
-        parts = []
-        if stdout:
-            parts.append(stdout)
-        if stderr:
-            parts.append("\n".join(f"[stderr] {line}" for line in stderr.splitlines()))
-        return "\n".join(parts)
-
-    @staticmethod
-    def _append_line(output: str, line: str) -> str:
-        return f"{output.rstrip()}\n{line}" if output else line
-
-    @staticmethod
-    def _truncate_output(output: str) -> tuple[str, bool]:
-        raw = output.encode("utf-8")
-        if len(raw) <= MAX_EXECUTE_OUTPUT_BYTES:
-            return output, False
-        truncated = raw[:MAX_EXECUTE_OUTPUT_BYTES].decode("utf-8", errors="ignore")
-        return (
-            f"{truncated}\n\n... Output truncated at {MAX_EXECUTE_OUTPUT_BYTES} bytes.",
-            True,
-        )
-
-    @staticmethod
-    def _upload_error(exc: ApiError) -> str:
-        if exc.status_code == 403:
-            return PERMISSION_DENIED
-        return INVALID_PATH
-
-    @staticmethod
-    def _download_error(exc: ApiError) -> str:
-        if exc.status_code == 404:
-            return FILE_NOT_FOUND
-        if exc.status_code == 403:
-            return PERMISSION_DENIED
-        return INVALID_PATH

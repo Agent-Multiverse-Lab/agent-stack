@@ -57,7 +57,7 @@ SatelliteAgent -> Python gRPC Client -> Go Gateway -> PostgreSQL/PostGIS
 | `src/model/` | Provider-neutral 的 Chat、Embedding、Reranker 构造 | 数据库或向量库查询 |
 | `src/third_party/` | 外部 SDK 的小型兼容边界 | 应用策略和通用业务工具 |
 | `src/utils/` | 跨子系统复用的无状态通用帮助函数 | 单一子系统的领域逻辑 |
-| `sandbox_server/` | 独立沙箱管理和执行隔离 | 应用持久化和 Agent Run 编排 |
+| `docker/cube/` | CubeSandbox 部署、预检和运行验收 | 应用持久化和 Agent Run 编排 |
 | `gateway/` | 卫星目录 gRPC、空间查询和分页 | 建表、Agent Run、影像算法执行 |
 | `web/` | API 消费、页面状态和展示 | 后端领域规则 |
 | `docker/` | Dockerfile 和 Compose 拓扑 | 应用业务逻辑 |

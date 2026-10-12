@@ -74,18 +74,11 @@ class Config(BaseSettings):
 
     # ---------- 模型 ----------
     model_credential_key: SecretStr = Field(default=SecretStr(""), repr=False, description="模型凭据加密密钥，独立于 JWT")
-    default_model: str = Field(
-        default="dashscope/qwen3.8-max", description="默认使用的模型名称"
-    )
-    fallback_model: str = Field(
-        default="deepseek/deepseek-v4-pro", description="备用模型名称"
-    )
-    flash_model: str = Field(
-        default="deepseek/deepseek-v4-flash", description="快速推断模型名称"
-    )
+    default_model: str = Field(default="dashscope/qwen3.8-max", description="默认使用的模型名称")
+    fallback_model: str = Field(default="deepseek/deepseek-v4-pro", description="备用模型名称")
+    flash_model: str = Field(default="deepseek/deepseek-v4-flash", description="快速推断模型名称")
     image_model: str = Field(default="qwen/qwen-image-2.0-pro-2026-04-22", description="图片生成模型名称")
 
-    
     embed_model: str = Field(
         default="",
         description="向量生成模型名称，格式为 provider/model",
@@ -112,17 +105,13 @@ class Config(BaseSettings):
 
     # ---------- 数据库 ----------
     database_url: str = Field(default="", description="PostgreSQL 数据库连接地址")
-    langgraph_database_url: str = Field(
-        default="", description="LangGraph PostgreSQL 连接地址"
-    )
+    langgraph_database_url: str = Field(default="", description="LangGraph PostgreSQL 连接地址")
     redis_url: str = Field(default="redis://8.136.2.212:6379/0", description="Redis 连接地址")
     arq_queue_name: str = Field(default="agent-runs", description="ARQ 队列名称")
     arq_max_jobs: int = Field(default=64, description="ARQ worker 最大并发任务数")
     enable_run_queue: bool = Field(default=False, description="是否使用 ARQ/Redis 执行 agent run")
     redis_pool_max_connections: int = Field(default=20, description="Redis 连接池最大连接数")
-    run_stream_poll_timeout_ms: int = Field(
-        default=15000, description="Redis Stream 阻塞读取超时时间"
-    )
+    run_stream_poll_timeout_ms: int = Field(default=15000, description="Redis Stream 阻塞读取超时时间")
     run_stream_max_len: int = Field(default=10000, description="单个 run 事件流保留长度")
 
     # ---------- JWT ----------
@@ -221,33 +210,26 @@ class Config(BaseSettings):
         gt=0,
         description="Unlimited-OCR 任务轮询超时时间",
     )
-    document_parser_api_timeout_seconds: float = Field(
-        default=120.0, description="Document parser API request timeout"
-    )
+    document_parser_api_timeout_seconds: float = Field(default=120.0, description="Document parser API request timeout")
 
     # ---------- Sandbox ----------
-    sandbox_provider: str = Field(default="provisioner", description="沙箱提供者")
-    sandbox_provisioner_url: str = Field(
-        default="http://localhost:8002",
-        validation_alias="SANDBOX_PROVISIONER_URL",
-        description="沙箱供应服务地址",
-    )
-    sandbox_provision_timeout_seconds: float = Field(
-        default=330.0,
-        gt=0,
-        validation_alias="SANDBOX_PROVISION_TIMEOUT_SECONDS",
-        description="沙箱创建和供应请求超时时间",
-    )
-    sandbox_volume_path: str = Field(default="/home/sandbox/data", description="Sandbox provisioner service URL")
-    sandbox_execute_timeout: int = Field(default=180, description="执行最长时间")
-    andbox_keepalive_interval_seconds: int = Field(default=30, description="沙箱生命周期")
+    cube_api_url: str = Field(default="http://localhost:3000", description="CubeAPI 管理地址")
+    cube_master_url: str = Field(default="http://localhost:8089", description="CubeMaster 严格节点查询地址")
+    cube_node_id: str = Field(default="agent-stack-node", min_length=1, description="同机 Cubelet 的稳定节点 ID")
+    cube_api_key: str = Field(default="", repr=False, description="已启用 Cube 鉴权时使用的 API key")
+    cube_template_id: str = Field(default="", description="已构建完成的 Cube 模板 ID")
+    cube_proxy_node_ip: str = Field(default="localhost", description="CubeProxy 连接主机")
+    cube_proxy_port_http: int = Field(default=8081, ge=1, le=65535)
+    cube_sandbox_domain: str = Field(default="cube.app")
+    cube_host_save_dir: str = Field(default="/data/shared/agent-stack")
+    cube_request_timeout_seconds: float = Field(default=330.0, gt=0)
+    sandbox_idle_timeout_seconds: int = Field(default=600, gt=0)
+    sandbox_execute_timeout_seconds: int = Field(default=180, gt=0)
 
     # ---------- Langfuse ----------
     langfuse_public_key: str = Field(default="", description="Langfuse Public Key")
     langfuse_secret_key: str = Field(default="", description="Langfuse Secret Key")
-    langfuse_base_url: str = Field(
-        default="https://cloud.langfuse.com", description="Langfuse 服务地址"
-    )
+    langfuse_base_url: str = Field(default="https://cloud.langfuse.com", description="Langfuse 服务地址")
     langfuse_tracing_enabled: bool = Field(default=False, description="是否启用 Langfuse tracing")
     langfuse_tracing_environment: str = Field(default="development", description="Langfuse 环境")
 

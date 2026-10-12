@@ -12,7 +12,7 @@
 - 后端是 FastAPI，使用 LangChain/LangGraph 组织 Agent 执行。
 - PostgreSQL 保存业务持久化状态；Redis/ARQ 负责队列、运行信号和事件流。
 - RustFS 保存文件和解析产物，Milvus 承载知识检索向量。
-- `sandbox_server/` 提供独立的工具和代码执行隔离。
+- CubeSandbox 提供独立的工具和代码执行隔离，部署配置位于 `docker/cube/`。
 - `gateway/` 提供 Go gRPC 卫星影像目录和 PostGIS 空间检索。
 - `web/` 是 React/TypeScript 前端，负责 API 消费、页面状态和展示。
 

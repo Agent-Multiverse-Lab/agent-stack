@@ -6,28 +6,34 @@ from server.service import sandbox_service
 
 
 class SandboxWorkspaceServiceTest(IsolatedAsyncioTestCase):
+    async def test_unauthorized_thread_never_acquires_sandbox(self) -> None:
+        repository = MagicMock()
+        repository.get_conversation_by_thread_id_for_user = AsyncMock(return_value=None)
+        with patch.object(sandbox_service, "ConversationRepository", return_value=repository), patch.object(sandbox_service, "get_sandbox_provider") as provider:
+            with self.assertRaises(LookupError):
+                await sandbox_service.list_workspace(MagicMock(), uid="other", thread_id="thread", path="/workspace")
+            provider.assert_not_called()
+
     def test_rejects_paths_outside_workspace(self) -> None:
         with self.assertRaisesRegex(ValueError, "inside /workspace"):
             sandbox_service.normalize_workspace_path("/uploads")
 
     async def test_lists_real_sandbox_entries_for_owned_thread(self) -> None:
         repository = MagicMock()
-        repository.get_conversation_by_thread_id_for_user = AsyncMock(
-            return_value=SimpleNamespace(thread_id="thread-1")
-        )
+        repository.get_conversation_by_thread_id_for_user = AsyncMock(return_value=SimpleNamespace(thread_id="thread-1"))
         sandbox = MagicMock()
         sandbox.ls.return_value = SimpleNamespace(
             error=None,
             entries=[
                 {
-                    "path": "/home/gem/user-data/workspace/output",
+                    "path": "/workspace/output",
                     "is_dir": True,
                 },
                 {
-                    "path": "/home/gem/user-data/workspace/result.json",
+                    "path": "/workspace/result.json",
                     "is_dir": False,
                     "size": 12,
-                    "modified_at": "2026-09-21T00:00:00Z",
+                    "mtime": 0,
                 },
             ],
         )
@@ -51,33 +57,26 @@ class SandboxWorkspaceServiceTest(IsolatedAsyncioTestCase):
                 path="/workspace",
             )
 
-        repository.get_conversation_by_thread_id_for_user.assert_awaited_once_with(
-            "thread-1", "user-1"
-        )
+        repository.get_conversation_by_thread_id_for_user.assert_awaited_once_with("thread-1", "user-1")
         provider.acquire_async.assert_awaited_once_with(
             "user-1",
             "thread-1",
-            file_thread_id="thread-1",
-            skills_thread_id="thread-1",
         )
-        sandbox.ls.assert_called_once_with("/home/gem/user-data/workspace/")
+        sandbox.ls.assert_called_once_with("/workspace")
+        provider.release.assert_called_once_with("s2c-real")
         self.assertEqual(response.sandbox_id, "s2c-real")
         self.assertEqual([entry.name for entry in response.entries], ["output", "result.json"])
         self.assertEqual(response.entries[1].file_type, "data")
+        self.assertEqual(response.entries[1].modified_at, "1970-01-01T00:00:00+00:00")
 
     async def test_reads_and_truncates_utf8_workspace_file(self) -> None:
         repository = MagicMock()
-        repository.get_conversation_by_thread_id_for_user = AsyncMock(
-            return_value=SimpleNamespace(thread_id="thread-1")
-        )
+        repository.get_conversation_by_thread_id_for_user = AsyncMock(return_value=SimpleNamespace(thread_id="thread-1"))
         sandbox = MagicMock()
         sandbox.read.return_value = SimpleNamespace(
             error=None,
             file_data={
-                "content": "".join(
-                    f"line-{index}\n"
-                    for index in range(sandbox_service.MAX_FILE_PREVIEW_LINES + 1)
-                ),
+                "content": "".join(f"line-{index}\n" for index in range(sandbox_service.MAX_FILE_PREVIEW_LINES + 1)),
                 "encoding": "utf-8",
             },
         )
@@ -102,7 +101,7 @@ class SandboxWorkspaceServiceTest(IsolatedAsyncioTestCase):
             )
 
         sandbox.read.assert_called_once_with(
-            "/home/gem/user-data/workspace/report.md",
+            "/workspace/report.md",
             0,
             sandbox_service.MAX_FILE_PREVIEW_LINES + 1,
         )
@@ -110,7 +109,8 @@ class SandboxWorkspaceServiceTest(IsolatedAsyncioTestCase):
         self.assertIn("line-1999", response.content)
         self.assertNotIn("line-2000", response.content)
 
-    async def test_rejects_non_utf8_workspace_file(self) -> None:
+    @patch.object(sandbox_service, "get_sandbox_provider", return_value=MagicMock())
+    async def test_rejects_non_utf8_workspace_file(self, _provider) -> None:
         with patch.object(
             sandbox_service,
             "_get_owned_sandbox",
@@ -126,6 +126,7 @@ class SandboxWorkspaceServiceTest(IsolatedAsyncioTestCase):
                             )
                         )
                     ),
+                    MagicMock(),
                 )
             ),
         ):
