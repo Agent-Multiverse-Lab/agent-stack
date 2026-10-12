@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, patch, sentinel
 
-from src.agents.agent_library.subagents.image_processing import IMAGE_AGENT
+from src.agents.library.subagents.image_processing import IMAGE_AGENT
 from src.agents.buildin.subagents import SubAgentContext, SubAgentGraph
 
 

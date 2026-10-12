@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 import grpc
 
 from scripts.generate_satellite_catalog_fixture import build_fixture, build_manifest
-from src.agents.agent_library.subagents.satellite import SATELLITE_AGENT
+from src.agents.library.subagents.satellite import SATELLITE_AGENT
 from src.agents.buildin.subagents import SubAgentGraph
 from src.agents.buildin.subagents.subagent_context import SubAgentContext
 from src.third_party.satellite_gateway import satellite_catalog_pb2 as pb

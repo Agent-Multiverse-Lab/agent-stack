@@ -2,7 +2,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from src.agents.agent_library.subagents.citation import CITATION_AGENT, CitationValidationItem, CitationValidationReport
+from src.agents.library.subagents.citation import CITATION_AGENT, CitationValidationItem, CitationValidationReport
 
 
 class CitationAgentContractTest(unittest.TestCase):

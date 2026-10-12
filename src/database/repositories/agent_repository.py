@@ -2,7 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.agents.agent_library import AgentLibrary
+from src.agents.library import AgentLibrary
 from src.database.models import Agent
 
 

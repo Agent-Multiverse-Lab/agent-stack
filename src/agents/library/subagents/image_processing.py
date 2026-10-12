@@ -1,6 +1,6 @@
 """图像处理角色的预定义配置。"""
 
-from src.agents.agent_library import AgentLibrary
+from src.agents.library import AgentLibrary
 from src.configs import config
 
 SYSTEM_PROMPT = """你是 ImageProcessingAgent，负责使用当前可用的 MCP 工具完成图像处理任务。

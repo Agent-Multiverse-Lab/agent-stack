@@ -3,6 +3,8 @@
 import json
 from copy import deepcopy
 from dataclasses import dataclass, fields
+from importlib import import_module
+from pkgutil import walk_packages
 from typing import Any
 
 from src.agents.base_context import BaseContext
@@ -32,3 +34,20 @@ class AgentLibrary:
         unknown_fields = self.context.keys() - {item.name for item in fields(context_class)}
         if unknown_fields:
             raise ValueError(f"未知 Agent Context 参数：{', '.join(sorted(unknown_fields))}")
+
+
+def discover_agents() -> dict[str, AgentLibrary]:
+    """递归收集 library 中的 AgentLibrary 实例，重复导出合并，同 slug 的不同实例报错。"""
+    agents: dict[str, AgentLibrary] = {}
+    sources: dict[str, str] = {}
+    for module_info in walk_packages(__path__, prefix=f"{__name__}."):
+        module = import_module(module_info.name)
+        for value in vars(module).values():
+            if not isinstance(value, AgentLibrary):
+                continue
+            existing = agents.get(value.slug)
+            if existing is not None and existing is not value:
+                raise ValueError(f"Agent slug 重复：{value.slug}（{sources[value.slug]}、{module.__name__}）")
+            agents[value.slug] = value
+            sources.setdefault(value.slug, module.__name__)
+    return agents

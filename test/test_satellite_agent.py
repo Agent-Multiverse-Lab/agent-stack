@@ -1,6 +1,6 @@
 import unittest
 
-from src.agents.agent_library.subagents.satellite import SATELLITE_AGENT, SatelliteEvidence, SatelliteReport
+from src.agents.library.subagents.satellite import SATELLITE_AGENT, SatelliteEvidence, SatelliteReport
 
 
 class SatelliteAgentContractTest(unittest.TestCase):

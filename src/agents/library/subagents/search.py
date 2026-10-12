@@ -1,6 +1,6 @@
 """资料检索角色的预定义配置。"""
 
-from src.agents.agent_library import AgentLibrary
+from src.agents.library import AgentLibrary
 from src.configs import config
 
 SYSTEM_PROMPT = """You are the search specialist working for LeaderAgent.

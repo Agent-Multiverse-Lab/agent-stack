@@ -20,8 +20,8 @@ from server.service.arq_queue_servcie import (
 from server.service.input_message_service import build_agent_input_msg
 from server.service.thread_service import resume_agent_response, stream_agent_response
 from server.utils.woker_utils import reslove_thread_id
-from src.agents.agent_library.leader import LEADER_AGENT
-from src.agents.agent_library.subagents import SUBAGENTS
+from src.agents.library.leader import LEADER_AGENT
+from src.agents.library.subagents import SUBAGENTS
 from src.agents.backends.sandbox import init_sandbox_provider, shutdown_sandbox_provider
 from src.configs import config
 from src.database import postgres_manager
@@ -139,7 +139,7 @@ async def ensure_agents_exist() -> None:
                 internal_only=True,
             )
     logger.info(
-        "Worker 已确保数据库表及 Agent 注册：top=%s, subagents=%s",
+        "Agent 注册：top=%s, subagents=%s",
         ", ".join(item.slug for item in agents),
         ", ".join(item.slug for item in subagents),
     )

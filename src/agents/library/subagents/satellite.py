@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from src.agents.agent_library import AgentLibrary
+from src.agents.library import AgentLibrary
 from src.configs import config
 
 

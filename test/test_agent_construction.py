@@ -20,9 +20,9 @@ import src.agents.buildin as agent
 from server import worker
 from server.exception import AgentRunTimeOut
 from server.service import agent_run_service, thread_service
-from src.agents.agent_library import AgentLibrary
-from src.agents.agent_library.leader import LEADER_AGENT
-from src.agents.agent_library.subagents import CITATION_AGENT, SEARCH_AGENT, SUBAGENTS
+from src.agents.library import AgentLibrary
+from src.agents.library.leader import LEADER_AGENT
+from src.agents.library.subagents import CITATION_AGENT, SEARCH_AGENT, SUBAGENTS
 from src.agents.base_agent import BaseAgent
 from src.agents.buildin.leader.agent import LeaderAgent
 from src.agents.buildin.subagents import SubAgentContext, SubAgentGraph

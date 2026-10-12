@@ -1,6 +1,6 @@
 """顶层编排角色。"""
 
-from src.agents.agent_library import AgentLibrary
+from src.agents.library import AgentLibrary
 from src.configs import config
 
 LEADER_AGENT = AgentLibrary(
