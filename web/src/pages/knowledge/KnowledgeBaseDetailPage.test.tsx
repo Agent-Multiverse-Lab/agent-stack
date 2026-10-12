@@ -128,12 +128,12 @@ it("parse action posts and refreshes the file list", async () => {
 })
 
 it("graph tab renders one circle per node", async () => {
-  const { container } = renderPage()
-  (await screen.findAllByText("manual.pdf"))[0]
+  const { container } = renderPage();
+  await screen.findAllByText("manual.pdf");
 
-  fireEvent.click(screen.getByRole("tab", { name: "Knowledge Graph" }))
+  fireEvent.click(screen.getByRole("tab", { name: "Knowledge Graph" }));
 
   await waitFor(() =>
-    expect(container.querySelectorAll("circle").length).toBe(2)
-  )
-})
+    expect(container.querySelectorAll("svg g circle").length).toBe(2)
+  );
+});

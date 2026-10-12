@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, PanelLeft, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { FileContentViewer } from "@/components/common/file-content-viewer";
+import { FileContentViewer, isMarkdownPath } from "@/components/common/file-content-viewer";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { listThreads } from "@/api/agent";
 import { listSandboxWorkspace, readSandboxFile } from "@/api/sandbox";
 import { useTranslation } from "@/i18n";
@@ -40,6 +42,11 @@ export default function SandboxPage() {
   const [fileContentTruncated, setFileContentTruncated] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const [fileError, setFileError] = useState("");
+  const [viewMode, setViewMode] = useState<"preview" | "source">("preview");
+
+  useEffect(() => {
+    setViewMode("preview");
+  }, [selectedEntry?.path]);
 
   useEffect(() => {
     let active = true;
@@ -227,19 +234,45 @@ export default function SandboxPage() {
         </div>
       </div>
 
-      <Sheet
+      <Dialog
         open={selectedEntry?.kind === "file"}
         onOpenChange={(open) => {
           if (!open) setSelectedEntry(null);
         }}
       >
-        <SheetContent className="w-full gap-0 sm:max-w-2xl">
-          <SheetHeader className="border-b pr-12">
-            <SheetTitle className="truncate">{selectedEntry?.name ?? t("File preview")}</SheetTitle>
-            <SheetDescription className="truncate">
-              {selectedEntry?.path ?? t("Read-only sandbox file")}
-            </SheetDescription>
-          </SheetHeader>
+        <DialogContent className="flex h-[80dvh] max-h-[48rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl">
+          <DialogHeader className="shrink-0 border-b px-4 py-3 pr-12">
+            <div className="flex items-center justify-between gap-3">
+              <DialogTitle className="min-w-0 truncate text-base font-medium">
+                {selectedEntry?.name ?? t("File preview")}
+              </DialogTitle>
+              {selectedEntry && isMarkdownPath(selectedEntry.path) ? (
+                <Tabs
+                  value={viewMode}
+                  onValueChange={(value) => setViewMode(value as "preview" | "source")}
+                  className="shrink-0"
+                >
+                  <TabsList className="h-7 rounded-md bg-muted p-0.5 text-muted-foreground">
+                    <TabsTrigger
+                      value="preview"
+                      className="rounded-sm px-2.5 py-0.5 text-xs font-medium transition-all data-active:bg-background data-active:text-foreground data-active:shadow-xs"
+                    >
+                      {t("Rendered")}
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="source"
+                      className="rounded-sm px-2.5 py-0.5 text-xs font-medium transition-all data-active:bg-background data-active:text-foreground data-active:shadow-xs"
+                    >
+                      {t("Source")}
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              ) : null}
+            </div>
+            <DialogDescription className="sr-only">
+              {selectedEntry?.name ?? t("Read-only sandbox file")}
+            </DialogDescription>
+          </DialogHeader>
           <FileContentViewer
             key={selectedEntry?.path}
             path={selectedEntry?.path ?? ""}
@@ -247,9 +280,10 @@ export default function SandboxPage() {
             loading={fileLoading}
             error={fileError}
             truncated={fileContentTruncated}
+            viewMode={viewMode}
           />
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }

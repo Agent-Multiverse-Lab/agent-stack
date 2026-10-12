@@ -6,15 +6,16 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTranslation } from "@/i18n";
 
-interface FileContentViewerProps {
+export interface FileContentViewerProps {
   path: string;
   content: string;
   loading?: boolean;
   error?: string;
   truncated?: boolean;
+  viewMode?: "preview" | "source";
 }
 
-function isMarkdownPath(path: string) {
+export function isMarkdownPath(path: string) {
   return /\.(md|markdown)$/i.test(path);
 }
 
@@ -24,6 +25,7 @@ export function FileContentViewer({
   loading = false,
   error = "",
   truncated = false,
+  viewMode,
 }: FileContentViewerProps) {
   const { t } = useTranslation();
   const canPreviewMarkdown = isMarkdownPath(path);
@@ -66,28 +68,46 @@ export function FileContentViewer({
       ) : null}
 
       {canPreviewMarkdown ? (
-        <Tabs defaultValue="preview" className="min-h-0 flex-1">
-          <TabsList className="h-10 w-full justify-start gap-5 border-b px-4">
-            <TabsTrigger value="preview" className="h-10 border-b-2 border-transparent px-0 data-active:border-foreground">
-              {t("Rendered")}
-            </TabsTrigger>
-            <TabsTrigger value="source" className="h-10 border-b-2 border-transparent px-0 data-active:border-foreground">
-              {t("Source")}
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="preview" className="min-h-0 overflow-auto p-5">
-            {content ? (
-              <article className="chat-markdown max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-              </article>
-            ) : (
-              <EmptyFile />
-            )}
-          </TabsContent>
-          <TabsContent value="source" className="min-h-0 overflow-auto">
-            {content ? source : <EmptyFile />}
-          </TabsContent>
-        </Tabs>
+        viewMode !== undefined ? (
+          viewMode === "preview" ? (
+            <div className="min-h-0 flex-1 overflow-auto p-5">
+              {content ? (
+                <article className="chat-markdown max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                </article>
+              ) : (
+                <EmptyFile />
+              )}
+            </div>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-auto">
+              {content ? source : <EmptyFile />}
+            </div>
+          )
+        ) : (
+          <Tabs defaultValue="preview" className="min-h-0 flex-1">
+            <TabsList className="h-10 w-full justify-start gap-5 border-b px-4">
+              <TabsTrigger value="preview" className="h-10 border-b-2 border-transparent px-0 data-active:border-foreground">
+                {t("Rendered")}
+              </TabsTrigger>
+              <TabsTrigger value="source" className="h-10 border-b-2 border-transparent px-0 data-active:border-foreground">
+                {t("Source")}
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="preview" className="min-h-0 overflow-auto p-5">
+              {content ? (
+                <article className="chat-markdown max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                </article>
+              ) : (
+                <EmptyFile />
+              )}
+            </TabsContent>
+            <TabsContent value="source" className="min-h-0 overflow-auto">
+              {content ? source : <EmptyFile />}
+            </TabsContent>
+          </Tabs>
+        )
       ) : content ? (
         source
       ) : (
