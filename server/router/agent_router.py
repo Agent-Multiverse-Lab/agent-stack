@@ -4,7 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.entities.agent import AgentRunCreateRequest, AgentRunResumeRequest
+from server.entities.agent import (
+    AgentCatalogEntry,
+    AgentCatalogResponse,
+    AgentRunCreateRequest,
+    AgentRunResumeRequest,
+    AgentUpdateRequest,
+)
 from server.service.agent_run_service import (
     AgentRunConflictError,
     cancel_run_service,
@@ -15,7 +21,7 @@ from server.service.agent_run_service import (
 from server.utils.auth import AuthenticatedUser
 from src.configs import config
 from src.database import get_db
-from src.database.repositories import AgentRunRepository
+from src.database.repositories import AgentRepository, AgentRunRepository
 
 agent_router = APIRouter(prefix="/agent", tags=["agent_router"])
 
@@ -23,6 +29,64 @@ agent_router = APIRouter(prefix="/agent", tags=["agent_router"])
 @agent_router.post("")
 def create_agent():
     """预留用户自定义 Agent 入口。"""
+
+
+@agent_router.get("/catalog", response_model=AgentCatalogResponse)
+async def list_agent_catalog(
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+) -> AgentCatalogResponse:
+    """读取已认证用户可查看的数据库 Agent 目录。"""
+    repository = AgentRepository(db)
+    agents = await repository.list_main_agents()
+    subagents = await repository.list_subagents()
+    return AgentCatalogResponse(
+        agents=[
+            AgentCatalogEntry(
+                id=agent.slug,
+                name=agent.name,
+                description=agent.description,
+                is_subagent=agent.is_subagent,
+                enabled=agent.enabled,
+            )
+            for agent in agents
+        ],
+        subagents=[
+            AgentCatalogEntry(
+                id=agent.slug,
+                name=agent.name,
+                description=agent.description,
+                is_subagent=agent.is_subagent,
+                enabled=agent.enabled,
+            )
+            for agent in subagents
+        ],
+    )
+
+
+@agent_router.patch("/{agent_id}", response_model=AgentCatalogEntry)
+async def update_agent(
+    agent_id: str,
+    payload: AgentUpdateRequest,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+) -> AgentCatalogEntry:
+    """保存已认证用户对 Agent 基础字段的修改。"""
+    agent = await AgentRepository(db).update_agent(
+        agent_id,
+        **payload.model_dump(exclude_unset=True),
+    )
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent 不存在")
+    await db.commit()
+    await db.refresh(agent)
+    return AgentCatalogEntry(
+        id=agent.slug,
+        name=agent.name,
+        description=agent.description,
+        is_subagent=agent.is_subagent,
+        enabled=agent.enabled,
+    )
 
 
 @agent_router.post("/runs")

@@ -2,6 +2,9 @@ import { apiClient } from "@/api/client"
 import i18n from "@/i18n"
 import type { UploadedAttachmentResponse } from "@/types/attachment"
 import type {
+  AgentCatalogResponse,
+  AgentCatalogEntry,
+  AgentUpdateRequest,
   AgentRunCancelResponse,
   AgentRunCreateResponse,
   AgentRunEndEvent,
@@ -19,6 +22,25 @@ export const listChatAgents = () =>
   apiClient.apiGet<AgentSummary[]>("/api/chat/agents", {
     requiresAuth: true
   })
+
+export const getAgentCatalog = (signal?: AbortSignal) =>
+  apiClient.apiGet<AgentCatalogResponse>("/api/agent/catalog", {
+    requiresAuth: true,
+    signal
+  })
+
+export const updateAgent = async (
+  agentId: string,
+  request: AgentUpdateRequest
+): Promise<AgentCatalogEntry> => {
+  const response = await apiClient.apiFetch(`/api/agent/${encodeURIComponent(agentId)}`, {
+    method: "PATCH",
+    requiresAuth: true,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request)
+  })
+  return response.json()
+}
 
 export const listThreads = (
   options?: { query?: string; cursor?: string; limit?: number }

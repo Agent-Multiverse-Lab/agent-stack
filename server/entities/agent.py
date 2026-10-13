@@ -1,8 +1,16 @@
 """Agent 接口的请求与响应 Schema。"""
 
-from typing import Any
+from typing import Annotated, Any, Self
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 
 class AgentCreateRequest(BaseModel):
@@ -62,3 +70,35 @@ class AgentSummary(BaseModel):
     id: str
     name: str
     description: str
+
+
+class AgentCatalogEntry(AgentSummary):
+    """已认证目录中的 Agent 摘要，不包含运行配置。"""
+
+    is_subagent: bool
+    enabled: bool
+
+
+class AgentCatalogResponse(BaseModel):
+    """数据库 Agent 目录，按顶层和子 Agent 分组。"""
+
+    agents: list[AgentCatalogEntry]
+    subagents: list[AgentCatalogEntry]
+
+
+class AgentUpdateRequest(BaseModel):
+    """只更新数据库 Agent 的基础展示字段和启用状态。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)] | None = None
+    description: str | None = None
+    enabled: StrictBool | None = None
+
+    @model_validator(mode="after")
+    def validate_partial_update(self) -> Self:
+        if not self.model_fields_set:
+            raise ValueError("至少提供一个需要更新的字段")
+        if any(getattr(self, field) is None for field in self.model_fields_set):
+            raise ValueError("更新字段不能为 null")
+        return self

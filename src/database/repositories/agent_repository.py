@@ -47,6 +47,40 @@ class AgentRepository:
         )
         return list(result.scalars().all())
 
+    async def list_main_agents(self) -> list[Agent]:
+        """查询目录中的顶层 Agent，包括禁用的记录。"""
+        result = await self.session.execute(
+            select(Agent).where(Agent.is_subagent.is_(False)).order_by(Agent.slug)
+        )
+        return list(result.scalars().all())
+
+    async def list_subagents(self) -> list[Agent]:
+        """查询目录中的子 Agent，包括内部和禁用的记录。"""
+        result = await self.session.execute(
+            select(Agent).where(Agent.is_subagent.is_(True)).order_by(Agent.slug)
+        )
+        return list(result.scalars().all())
+
+    async def update_agent(
+        self,
+        slug: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        enabled: bool | None = None,
+    ) -> Agent | None:
+        """更新基础字段，调用方负责提交事务。"""
+        agent = await self._get_by_slug(slug)
+        if agent is None:
+            return None
+        if name is not None:
+            agent.name = name
+        if description is not None:
+            agent.description = description
+        if enabled is not None:
+            agent.enabled = enabled
+        return agent
+
     async def get_by_slug_for_run_type(
         self,
         slug: str,

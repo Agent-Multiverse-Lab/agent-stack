@@ -9,6 +9,22 @@ export interface AgentSummary {
   description: string
 }
 
+export interface AgentCatalogEntry extends AgentSummary {
+  is_subagent: boolean
+  enabled: boolean
+}
+
+export interface AgentCatalogResponse {
+  agents: AgentCatalogEntry[]
+  subagents: AgentCatalogEntry[]
+}
+
+export interface AgentUpdateRequest {
+  name?: string
+  description?: string
+  enabled?: boolean
+}
+
 export interface ThreadResponse {
   uid: string
   title: string
