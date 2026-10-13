@@ -27,3 +27,20 @@ class SandboxFileContentResponse(BaseModel):
     content: str
     encoding: str = "utf-8"
     truncated: bool = False
+
+
+class SandboxFileRenameRequest(BaseModel):
+    thread_id: str = Field(min_length=1)
+    path: str = Field(min_length=1, max_length=4096)
+    name: str = Field(min_length=1, max_length=255)
+
+
+class SandboxFileUpdateRequest(BaseModel):
+    thread_id: str = Field(min_length=1)
+    path: str = Field(min_length=1, max_length=4096)
+    content: str = Field(max_length=200_000)
+    previous_content: str = Field(max_length=200_000)
+
+
+class SandboxFileOperationResponse(BaseModel):
+    path: str

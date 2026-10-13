@@ -7,6 +7,8 @@ export interface WorkspaceEntry {
   fileType?: "code" | "data" | "document" | "image";
 }
 
+export type WorkspaceFileAction = "rename" | "edit" | "delete";
+
 export interface WorkspaceTreeNode {
   name: string;
   path: string;
