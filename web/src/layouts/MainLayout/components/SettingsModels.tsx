@@ -24,7 +24,6 @@ import {
   InputGroupAddon,
   InputGroupButton,
   InputGroupInput,
-  InputGroupText,
 } from "@/components/ui/input-group";
 import {
   Item,
@@ -42,12 +41,6 @@ import { Switch } from "@/components/ui/switch";
 import { Bot, Eye, EyeOff, Plug, RefreshCw, Search } from "lucide-react";
 import deepseekLogo from "@/assets/models/deepseek-color.svg";
 import qwenLogo from "@/assets/models/qwen-color.svg";
-import glmLogo from "@/assets/models/zhipu-color.svg";
-import minimaxLogo from "@/assets/models/minimax-color.svg";
-import geminiLogo from "@/assets/models/gemini-color.svg";
-import chatgptLogo from "@/assets/models/chatgpt-color.svg";
-import ollamaLogo from "@/assets/models/ollama-color.svg";
-import vllmLogo from "@/assets/models/vllm-color.svg";
 import {
   discoverProviderModels,
   getModelProvider,
@@ -57,6 +50,7 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { useTranslation } from "@/i18n";
 import type {
+  ModelProvider,
   ModelProviderId,
   ModelSettingsRequest,
   SettingsModel,
@@ -65,12 +59,6 @@ import type {
 const providers: { id: ModelProviderId; name: string; logo: string }[] = [
   { id: "deepseek", name: "DeepSeek", logo: deepseekLogo },
   { id: "qwen", name: "Qwen", logo: qwenLogo },
-  { id: "glm", name: "GLM", logo: glmLogo },
-  { id: "minomax", name: "minomax", logo: minimaxLogo },
-  { id: "gemini", name: "Gemini", logo: geminiLogo },
-  { id: "chatgpt", name: "ChatGPT", logo: chatgptLogo },
-  { id: "ollama", name: "Ollama", logo: ollamaLogo },
-  { id: "vllm", name: "vLLM", logo: vllmLogo },
 ];
 interface Draft extends ModelSettingsRequest {
   key: string;
@@ -86,6 +74,18 @@ const emptyDraft = (): Draft => ({
   keyEdited: false,
   hasKey: false,
   initialized: false,
+});
+const providerDraft = (value: ModelProvider): Draft => ({
+  base_url: value.base_url,
+  is_enabled: value.is_enabled,
+  models: value.enabled_models.map((model) => ({
+    model_id: model.model_id,
+    capabilities: model.capabilities ?? [],
+  })),
+  key: "",
+  keyEdited: false,
+  hasKey: value.has_api_key,
+  initialized: true,
 });
 
 export default function SettingsModels() {
@@ -104,6 +104,7 @@ export default function SettingsModels() {
   const [search, setSearch] = useState("");
   const [revealKey, setRevealKey] = useState(false);
   const version = useRef(0);
+  const account = useRef(accessToken);
   const blocked = loading || loadError || busy !== null;
   const provider = providers.find((item) => item.id === selected)!;
   const filteredCandidates =
@@ -128,18 +129,7 @@ export default function SettingsModels() {
           ? previous
           : {
               ...previous,
-              [selected]: {
-                base_url: value.base_url,
-                is_enabled: value.is_enabled,
-                models: value.enabled_models.map((model) => ({
-                  model_id: model.model_id,
-                  capabilities: model.capabilities ?? [],
-                })),
-                key: "",
-                keyEdited: false,
-                hasKey: value.has_api_key,
-                initialized: true,
-              },
+              [selected]: providerDraft(value),
             },
       );
     } catch (error) {
@@ -151,6 +141,15 @@ export default function SettingsModels() {
       if (current === version.current) setLoading(false);
     }
   }, [selected, i18n]);
+  useEffect(() => {
+    if (account.current === accessToken) return;
+    account.current = accessToken;
+    setDrafts({});
+    setCandidates(null);
+    setChosen([]);
+    setSearch("");
+    setRevealKey(false);
+  }, [accessToken]);
   useEffect(() => {
     void load();
     const requestVersion = version;
@@ -174,10 +173,6 @@ export default function SettingsModels() {
   }
   async function act(action: "save" | "discover" | "test") {
     if (blocked) return;
-    if (!draft.base_url.trim()) {
-      toast.error(t("Enter a Base URL"));
-      return;
-    }
     const current = version.current;
     const body = request();
     setBusy(action);
@@ -185,12 +180,20 @@ export default function SettingsModels() {
       if (action === "save") {
         const result = await saveModelProvider(selected, body);
         if (current !== version.current) return;
-        edit({
-          key: "",
-          keyEdited: false,
-          hasKey: draft.keyEdited ? Boolean(draft.key) : draft.hasKey,
-          initialized: true,
-        });
+        let saved: ModelProvider;
+        try {
+          saved = await getModelProvider(selected);
+        } catch {
+          if (current !== version.current) return;
+          edit({ key: "", keyEdited: false });
+          toast.warning(t("Saved, but reloading the provider failed"));
+          return;
+        }
+        if (current !== version.current) return;
+        setDrafts((previous) => ({
+          ...previous,
+          [selected]: providerDraft(saved),
+        }));
         if (result.cache_refreshed) toast.success(t("Saved"));
         else toast.warning(t("Saved, but refreshing the model cache failed"));
       } else if (action === "discover") {
@@ -347,22 +350,6 @@ export default function SettingsModels() {
             </FieldDescription>
           </Field>
 
-          <InputGroup className="h-auto bg-muted/50">
-            <InputGroupAddon align="block-start">
-              <InputGroupText>
-                <Label htmlFor="provider-base-url">Base URL</Label>
-              </InputGroupText>
-            </InputGroupAddon>
-            <InputGroupInput
-              id="provider-base-url"
-              value={draft.base_url}
-              onChange={(event) => edit({ base_url: event.target.value })}
-              type="url"
-              disabled={blocked}
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </InputGroup>
         </FieldGroup>
 
         <Separator className="mt-7" />

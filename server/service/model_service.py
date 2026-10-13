@@ -20,11 +20,11 @@ from server.entities.model import (
     ModelProviderUpdate,
     ModelSettingsRequest,
     ModelSummary,
-    ModelType,
     ProviderWriteResult,
     SettingsModel,
 )
 from server.service.model_outbound import UnsafeModelTarget, resolve_public_target
+from src.configs.model import DEFAULT_BASE_MODEL_PROVIER
 from src.database.models import ModelProvider
 from src.database.repositories.model_repository import ModelRepository
 from src.model import get_model_catalog
@@ -36,6 +36,10 @@ from src.model.model_cache import (
 
 _catalog_adapter = TypeAdapter(list[ModelSummary])
 _CACHE_ERRORS = (RedisError, OSError, ValueError)
+_SETTINGS_PROVIDER_DEFAULTS = {
+    "deepseek": ("DeepSeek", DEFAULT_BASE_MODEL_PROVIER["deepseek"].base_url),
+    "qwen": ("Qwen", DEFAULT_BASE_MODEL_PROVIER["dashscope"].base_url),
+}
 
 
 class ModelConnectionError(RuntimeError):
@@ -79,11 +83,46 @@ async def list_providers(db: AsyncSession, user_id: int) -> list[ModelProviderRe
     return [_public_provider(provider) for provider in await ModelRepository(db, user_id).list_providers()]
 
 
-async def list_provider_summaries(db: AsyncSession, user_id: int) -> list[ModelProviderSummary]:
-    return [ModelProviderSummary(
-        provider_id=provider.provider_id, name=provider.name,
-        is_enabled=provider.is_enabled, has_api_key=bool(provider.api_key),
-    ) for provider in await ModelRepository(db, user_id).list_providers()]
+def _settings_provider_defaults(provider_id: str) -> tuple[str, str]:
+    try:
+        return _SETTINGS_PROVIDER_DEFAULTS[provider_id]
+    except KeyError:
+        raise ValueError("不支持的模型供应商") from None
+
+
+async def get_settings_provider(
+    db: AsyncSession, user_id: int, provider_id: str,
+) -> ModelProviderResponse:
+    name, base_url = _settings_provider_defaults(provider_id)
+    provider = await ModelRepository(db, user_id).get_provider_by_id(provider_id)
+    if provider is not None:
+        return _public_provider(provider)
+    return ModelProviderResponse(
+        provider_id=provider_id,
+        name=name,
+        base_url=base_url,
+        protocol="openai_compatible",
+        is_enabled=False,
+        has_api_key=False,
+        enabled_models=[],
+    )
+
+
+async def list_settings_provider_summaries(
+    db: AsyncSession, user_id: int,
+) -> list[ModelProviderSummary]:
+    repository = ModelRepository(db, user_id)
+    summaries = []
+    for provider_id in _SETTINGS_PROVIDER_DEFAULTS:
+        provider = await repository.get_provider_by_id(provider_id)
+        if provider is not None:
+            summaries.append(ModelProviderSummary(
+                provider_id=provider.provider_id,
+                name=provider.name,
+                is_enabled=provider.is_enabled,
+                has_api_key=bool(provider.api_key),
+            ))
+    return summaries
 
 
 def _write_values(config: ModelProviderCreate | ModelProviderUpdate) -> dict[str, Any]:
@@ -329,11 +368,10 @@ async def _test_connection(connection: ModelConnection) -> ConnectionTestResult:
 async def _settings_draft(
     db: AsyncSession, user_id: int, provider_id: str, request: ModelSettingsRequest,
 ) -> tuple[ModelProviderCreate, bool]:
-    if provider_id not in get_args(ModelType):
-        raise ValueError("不支持的模型供应商")
+    name, _ = _settings_provider_defaults(provider_id)
     provider = await ModelRepository(db, user_id).get_provider_by_id(provider_id)
     values = _settings(provider).model_dump() if provider else {
-        "provider_id": provider_id, "name": provider_id,
+        "provider_id": provider_id, "name": name,
     }
     previous = {item["model_id"]: item for item in values.get("enabled_models", [])}
     if provider and request.base_url != provider.base_url:

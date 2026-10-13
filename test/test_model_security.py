@@ -29,6 +29,7 @@ class ModelCredentialSecurityTest(SQLiteModelTestCase):
         explicit = ModelSettingsRequest(base_url="https://new.example/v1", api_key="new-key", models=[{"model_id": "chat"}])
         with patch.object(service, "_request_json", new_callable=AsyncMock, return_value={"data": []}) as remote:
             await service.discover_settings_models(self.db, self.user_id, "deepseek", explicit)
+            self.assertEqual(remote.call_args.args[0], "https://new.example/v1")
             self.assertEqual(remote.call_args.args[1], {"Authorization": "Bearer new-key"})
         original = await self.repository.get_provider_by_id("deepseek")
         self.assertEqual(original.api_key, "secret-key")

@@ -37,6 +37,10 @@ beforeEach(() => {
     error: null,
     status_code: null,
   });
+  vi.mocked(saveModelProvider).mockResolvedValue({
+    provider_id: "deepseek",
+    cache_refreshed: true,
+  });
 });
 
 afterEach(() => {
@@ -67,4 +71,55 @@ it("sends the unsaved API key to the backend test without requiring a model", as
   );
   expect(discoverProviderModels).not.toHaveBeenCalled();
   expect(saveModelProvider).not.toHaveBeenCalled();
+});
+
+it("shows only DeepSeek and Qwen", async () => {
+  render(<SettingsModels />);
+
+  await screen.findByRole("button", { name: "DeepSeek" });
+  expect(screen.getByRole("button", { name: "Qwen" })).toBeTruthy();
+  expect(screen.queryByText("GLM")).toBeNull();
+  expect(screen.queryByText("Ollama")).toBeNull();
+});
+
+it("reloads the redacted provider after saving a new key", async () => {
+  vi.mocked(getModelProvider)
+    .mockResolvedValueOnce({
+      provider_id: "deepseek",
+      name: "DeepSeek",
+      base_url: "https://api.deepseek.com/v1",
+      is_enabled: false,
+      has_api_key: false,
+      enabled_models: [],
+    })
+    .mockResolvedValueOnce({
+      provider_id: "deepseek",
+      name: "DeepSeek",
+      base_url: "https://api.deepseek.com/v1",
+      is_enabled: false,
+      has_api_key: true,
+      enabled_models: [],
+    });
+  render(<SettingsModels />);
+
+  const apiKey = await screen.findByLabelText("API Key");
+  await waitFor(() =>
+    expect((apiKey as HTMLInputElement).disabled).toBe(false),
+  );
+  fireEvent.change(apiKey, { target: { value: "new-secret" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(saveModelProvider).toHaveBeenCalledWith("deepseek", {
+      base_url: "https://api.deepseek.com/v1",
+      api_key: "new-secret",
+      is_enabled: false,
+      models: [],
+    }),
+  );
+  await waitFor(() => expect(getModelProvider).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect((apiKey as HTMLInputElement).value).toBe(""),
+  );
+  expect((apiKey as HTMLInputElement).placeholder).toBe("••••••••••••••••");
 });

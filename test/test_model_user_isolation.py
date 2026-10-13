@@ -110,7 +110,10 @@ class ModelUserIsolationTest(SQLiteModelTestCase):
         self.assertEqual((await service.resolve_runtime_model(self.db, 2, "deepseek:chat-2")).api_key.get_secret_value(), "new-key-2")
         await service.delete_provider(self.db, 2, "deepseek")
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="https://test") as client:
-            self.assertEqual((await client.get("/api/models/providers/deepseek")).status_code, 404)
+            response = await client.get("/api/models/providers/deepseek")
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(response.json()["has_api_key"])
+            self.assertEqual(response.json()["base_url"], "https://api.deepseek.com/v1")
             self.assertEqual((await client.get("/api/models/providers")).json(), [])
             with patch.object(service, "_request_json", new_callable=AsyncMock, return_value={"data": []}) as remote:
                 await client.post("/api/models/providers/deepseek/discover", json=body)

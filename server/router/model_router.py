@@ -47,12 +47,12 @@ settings_router = APIRouter(prefix="/providers", route_class=ModelSettingsRoute)
 
 @settings_router.get("", response_model=list[ModelProviderSummary])
 async def get_model_providers(current_user: AuthenticatedUser, db: AsyncSession = Depends(get_db)):
-    return await model_service.list_provider_summaries(db, int(current_user.id))
+    return await model_service.list_settings_provider_summaries(db, int(current_user.id))
 
 
 @settings_router.get("/{provider_id}", response_model=ModelProviderResponse)
 async def get_model_provider(provider_id: str, current_user: AuthenticatedUser, db: AsyncSession = Depends(get_db)):
-    return await model_service.get_provider(db, int(current_user.id), provider_id)
+    return await model_service.get_settings_provider(db, int(current_user.id), provider_id)
 
 
 @settings_router.post("/{provider_id}", response_model=ProviderWriteResult)

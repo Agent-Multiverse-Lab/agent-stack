@@ -19,7 +19,7 @@ export interface ModelCatalogResponse {
   models: ChatModelOption[]
 }
 
-export type ModelProviderId = "deepseek" | "qwen" | "glm" | "minomax" | "gemini" | "chatgpt" | "ollama" | "vllm"
+export type ModelProviderId = "deepseek" | "qwen"
 export type ChatCapability = "chat" | "vision" | "reasoning" | "tools" | "code" | "audio" | "video"
 
 export interface SettingsModel {

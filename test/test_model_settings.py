@@ -1,4 +1,4 @@
-"""Settings 管理入口：不丢失私有配置，临时探测不写库，错误不泄露密钥。"""
+"""Settings 管理入口：双供应商模板、保存和凭据脱敏。"""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -24,22 +24,46 @@ class ModelSettingsTest(SQLiteModelTestCase):
 
     async def test_save_preserves_hidden_parameters_and_key(self):
         await self.insert_provider(
-            "ollama",
+            "qwen",
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             extra_headers={"X-Private": "header-secret"},
-            enabled_models=[{"model_id": "qwen3:8b", "model_type": "ollama", "body_overrides": {"temperature": 0.4}}],
+            enabled_models=[{"model_id": "qwen3:8b", "model_type": "qwen", "body_overrides": {"temperature": 0.4}}],
         )
         await self.db.commit()
-        request = ModelSettingsRequest(base_url="http://localhost:11434/v1", models=[{"model_id": "qwen3:8b", "capabilities": ["chat"]}])
-        await service.save_model_settings(self.db, self.user_id, "ollama", request)
-        saved = await self.repository.get_provider_by_id("ollama")
+        request = ModelSettingsRequest(
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            models=[{"model_id": "qwen3:8b", "capabilities": ["chat"]}],
+        )
+        with patch.object(service, "_request_json", new_callable=AsyncMock) as remote:
+            await service.save_model_settings(self.db, self.user_id, "qwen", request)
+            remote.assert_not_called()
+        saved = await self.repository.get_provider_by_id("qwen")
         self.assertEqual(saved.api_key, "secret-key")
         self.assertEqual(saved.extra_headers, {"X-Private": "header-secret"})
         self.assertEqual(saved.enabled_models[0]["body_overrides"], {"temperature": 0.4})
         self.assertEqual(saved.enabled_models[0]["capabilities"], ["chat"])
         self.assertFalse(saved.is_enabled)
         cleared = request.model_copy(update={"api_key": ""})
-        await service.save_model_settings(self.db, self.user_id, "ollama", cleared)
+        await service.save_model_settings(self.db, self.user_id, "qwen", cleared)
         self.assertEqual(saved.api_key, "")
+
+    async def test_supported_provider_template_does_not_write_and_others_are_rejected(self):
+        template = await service.get_settings_provider(self.db, self.user_id, "deepseek")
+        self.assertEqual(template.name, "DeepSeek")
+        self.assertEqual(template.base_url, "https://api.deepseek.com/v1")
+        self.assertFalse(template.is_enabled)
+        self.assertFalse(template.has_api_key)
+        self.assertEqual(template.enabled_models, [])
+        self.assertIsNone(await self.repository.get_provider_by_id("deepseek"))
+        with self.assertRaises(ValueError):
+            await service.get_settings_provider(self.db, self.user_id, "ollama")
+        with self.assertRaises(ValueError):
+            await service.save_model_settings(
+                self.db,
+                self.user_id,
+                "ollama",
+                ModelSettingsRequest(base_url="http://localhost:11434/v1"),
+            )
 
     async def test_discovery_uses_draft_without_saving_and_filters_non_chat(self):
         request = ModelSettingsRequest(base_url="http://localhost:8000/v1", api_key="draft-secret")
@@ -55,21 +79,26 @@ class ModelSettingsTest(SQLiteModelTestCase):
                 ]
             },
         ) as remote:
-            result = await service.discover_settings_models(self.db, self.user_id, "vllm", request)
+            result = await service.discover_settings_models(self.db, self.user_id, "qwen", request)
         self.assertEqual([m.model_id for m in result], ["chat", "unknown"])
         self.assertEqual(result[0].capabilities, ["chat", "tools"])
         self.assertEqual(result[1].capabilities, [])
+        self.assertEqual(remote.call_args.args[0], "http://localhost:8000/v1")
         self.assertEqual(remote.call_args.args[1], {"Authorization": "Bearer draft-secret"})
         self.db.commit.assert_not_called()
-        self.assertIsNone(await self.repository.get_provider_by_id("vllm"))
+        self.assertIsNone(await self.repository.get_provider_by_id("qwen"))
 
     async def test_probe_validates_unsaved_api_key_without_a_selected_model(self):
-        await self.insert_provider("ollama", extra_headers={"X-Private": "private"})
+        await self.insert_provider(
+            "qwen",
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            extra_headers={"X-Private": "private"},
+        )
         await self.db.commit()
         self.db.commit.reset_mock()
         request = ModelSettingsRequest(base_url="http://localhost:8000/v1", api_key="new-key")
         with patch.object(service, "_request_json", new_callable=AsyncMock, return_value={"data": []}) as remote:
-            result = await service.test_settings_connection(self.db, self.user_id, "ollama", request)
+            result = await service.test_settings_connection(self.db, self.user_id, "qwen", request)
         self.assertTrue(result.success)
         self.assertEqual(remote.call_args.args[0], "http://localhost:8000/v1")
         self.assertNotIn("X-Private", remote.call_args.args[1])
@@ -77,7 +106,7 @@ class ModelSettingsTest(SQLiteModelTestCase):
         self.assertEqual(remote.call_args.args[2], "/models")
         self.assertNotIn("body", remote.call_args.kwargs)
         self.db.commit.assert_not_called()
-        self.assertEqual((await self.repository.get_provider_by_id("ollama")).api_key, "secret-key")
+        self.assertEqual((await self.repository.get_provider_by_id("qwen")).api_key, "secret-key")
 
     async def test_probe_reports_rejected_api_key(self):
         request = ModelSettingsRequest(base_url="https://example.com/v1", api_key="bad-key")
@@ -110,11 +139,27 @@ class ModelSettingsTest(SQLiteModelTestCase):
             response = await client.get("/api/models/providers")
             self.assertEqual(response.status_code, 401)
             app.dependency_overrides[get_current_user] = override_user
+            response = await client.get("/api/models/providers/deepseek")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["base_url"], "https://api.deepseek.com/v1")
+            self.assertFalse(response.json()["has_api_key"])
+            self.assertIsNone(await self.repository.get_provider_by_id("deepseek"))
+            response = await client.get("/api/models/providers/ollama")
+            self.assertEqual(response.status_code, 422)
             response = await client.post("/api/models/providers/deepseek", json={"base_url": "invalid", "api_key": "private-secret"})
             self.assertEqual(response.status_code, 422)
             self.assertNotIn("private-secret", response.text)
-            response = await client.post("/api/models/providers/deepseek", json={"base_url": "http://localhost/v1", "api_key": "private-secret"})
+            with patch.object(service, "_request_json", new_callable=AsyncMock) as remote:
+                response = await client.post(
+                    "/api/models/providers/deepseek",
+                    json={"base_url": "https://api.deepseek.com/v1", "api_key": "private-secret"},
+                )
+                remote.assert_not_called()
             self.assertEqual(response.status_code, 200)
+            self.assertNotIn("private-secret", response.text)
+            response = await client.get("/api/models/providers/deepseek")
+            self.assertTrue(response.json()["has_api_key"])
+            self.assertNotIn("private-secret", response.text)
             response = await client.get("/api/models/providers")
             self.assertEqual(response.status_code, 200)
             self.assertNotIn("private-secret", response.text)

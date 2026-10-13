@@ -52,6 +52,3 @@
 | 产品身份和跨页面体验 | `docs/spec/product/` |
 | 本地启动、迁移和验证 | `docs/development.md` |
 | Pull Request 和 Git 提交 | `docs/contributing.md` |
-
-架构文档回答“哪个系统承载什么”；spec 文档回答“能力必须如何工作”；源码负责实现和验证，
-不要把这些详细规则重新复制回 `AGENTS.md`，也不要递归扫描整个 `docs/spec/`。
