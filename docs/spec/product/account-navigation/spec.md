@@ -15,7 +15,7 @@ Avatar。
 
 ### AM-ACCOUNT-001 Authenticated account entry
 
-存在 access token 时，Sidebar 底部显示账户入口。展开态和移动端显示 Avatar 与显示名；
+存在 access token 时，Sidebar 底部显示账户入口。展开态显示 Avatar 与显示名；
 桌面收起态只显示 Avatar，并保持与展开态相同的 Avatar 尺寸和垂直位置。没有 access
 token 时继续显示现有 Log in 入口，不显示账户菜单。
 
@@ -48,8 +48,8 @@ Log out 是 Store 与 Router 动作，没有独立界面，不创建空的 `Logo
 
 ### AM-ACCOUNT-005 Modal exclusivity
 
-Profile 和 Settings 不得同时打开。打开任一弹窗时关闭另一个；移动端选择菜单项后关闭
-Sidebar。Log out 关闭账户相关弹窗和移动 Sidebar，清理认证状态后进入 Login。
+Profile 和 Settings 不得同时打开。打开任一弹窗时关闭另一个。
+Log out 关闭账户相关弹窗，清理认证状态后进入 Login。
 
 ### AM-ACCOUNT-006 Accessibility
 
@@ -104,4 +104,4 @@ Avatar 是装饰内容。Profile 使用 dialog 语义、可访问标题、遮罩
 独立滚动容器占据导航与账号区域之间的剩余高度，通过“加载更多”访问后续对话。
 每行显示 title、当前对话高亮及右侧三点菜单，点击标题进入对应会话。
 菜单提供重命名和确认删除，调用现有 PATCH/DELETE 接口；失败保留弹窗并显示服务端错误。
-删除当前会话后进入新对话页，切换会话时刷新列表。折叠侧栏隐藏分组，移动侧栏展开时可用。
+删除当前会话后进入新对话页，切换会话时刷新列表。折叠侧栏隐藏分组。

@@ -15,8 +15,8 @@
 - 主体使用深海军蓝，保留青色、洋红和信号黄像素作为唯一高彩度品牌元素；
 - 保持硬边像素结构，不把母版的灰色背景和大面积光晕写入 Logo；
 - Logo 必须在 favicon、18px 侧栏标识和登录页 24px 标识中保持清晰；
-- 产品页面继续使用现有 paper/graphite/slate 中性色，霓虹色只出现在 Logo，
-  不扩展为新的全局 UI 主题。
+- 产品页面以白色和冷灰承载内容，青蓝主色用于操作，淡青蓝用于选中态；
+  成功、警告和错误使用独立状态色。霓虹色只出现在 Logo。
 
 ## 3. Requirements
 
@@ -48,10 +48,10 @@
 `au.access_token` 浏览器存储键。该键是已发布会话数据标识，不是用户可见品牌；
 保持它可避免无业务原因的强制登出。
 
-### AM-BRAND-005 Accessibility and responsive use
+### AM-BRAND-005 Accessibility and desktop use
 
 包含 Logo 的链接必须提供 `AM home` 等可访问名称；纯装饰 `<img>` 保持空 `alt`。
-Logo 在桌面展开侧栏、窄屏侧栏、登录页和 favicon 中不得变形或依赖动画；
+Logo 在桌面侧栏、登录页和 favicon 中不得变形或依赖动画；
 颜色不是识别 `M` 轮廓的唯一手段。
 
 ## 4. Non-goals
@@ -60,7 +60,7 @@ Logo 在桌面展开侧栏、窄屏侧栏、登录页和 favicon 中不得变形
 - 不重命名 `multi-agent-s2c` 仓库或现有 GitHub 地址。
 - 不把母版整张竖版图片作为页面背景，也不新增启动页或品牌动画。
 - 不为深色模式、营销站点、社交媒体或印刷物创建额外 Logo 变体。
-- 不重新设计当前页面布局、字体系统或全局色板。
+- 不重新设计当前页面布局或字体系统。
 
 ## 5. Acceptance Criteria
 

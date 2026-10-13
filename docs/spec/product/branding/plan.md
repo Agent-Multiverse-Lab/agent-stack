@@ -13,7 +13,7 @@
    `web/src/components/SettingsComponent.vue`，统一空会话、登录和设置中的产品名。
 4. 修改 `web/index.html` 的 favicon metadata、title 和 description；修改
    `web/package.json`、`web/package-lock.json` 与 `web/README.md` 的前端包/产品名称。
-5. 更新 `web/AGENTS.md` 的当前产品身份和 Logo 所有权；使用 `rg` 确认活跃 Web
+5. 更新 `docs/frontend/README.md` 的当前产品身份和 Logo 所有权；使用 `rg` 确认活跃 Web
    不再残留用户可见 `AU` 或 `Multi-Agent S2C`。
 6. 运行定向 ESLint、Vite build 和 diff check；不启动前端、API 或 Worker。
 
@@ -98,4 +98,4 @@ rg -n "AU|Multi-Agent S2C" web/src web/index.html web/README.md
 git diff --check -- web docs/spec/product/branding
 ```
 
-视觉核对 favicon、展开侧栏、窄屏侧栏、登录页和空 Chat；不启动后端进程。
+视觉核对 favicon、桌面侧栏、登录页和空 Chat；不启动后端进程。

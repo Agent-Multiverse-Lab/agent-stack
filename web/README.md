@@ -2,6 +2,7 @@
 
 React frontend for AM (Agent Multiverse). The current Chat flow uses the FastAPI authentication,
 Thread, Agent Run, cancellation, and SSE endpoints through the Vite `/api` proxy.
+The web app targets desktop browsers and uses desktop layouts throughout.
 
 ## Technology stack
 
@@ -34,3 +35,9 @@ VITE_TIANDITU_TK=your-browser-key
 The key is exposed to the browser; configure the allowed website origin in the
 TianDiTu console. Satellite catalog search and Map conversation are not connected
 on this initial page.
+
+## Frontend conventions
+
+Directory ownership, naming, component selection, styling, theme tokens, interaction rules,
+and validation requirements are documented in
+[`docs/frontend/README.md`](../docs/frontend/README.md).

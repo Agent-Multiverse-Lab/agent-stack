@@ -19,20 +19,22 @@
 当前目录职责、依赖方向和数据所有权见
 [docs/architecture/overview.md](docs/architecture/overview.md)。
 
-## 2. 文档加载顺序
+## 2. 可加载的文档
 
-按任务范围按需读取，不扫描与当前任务无关的全部文档：
+以下是可读取文档，按当前任务类型按需读取，不读取与当前任务无关的文档：
 
-1. 读取 [docs/working-rules.md](docs/working-rules.md)，加载仓库级开发规则。
+1. 读取 [docs/working-rules.md](docs/working-rules.md)，加载当前仓库级开发规则。
 2. 读取 [docs/architecture/README.md](docs/architecture/README.md)，确定承载该任务的系统。
-3. 读取对应的 `docs/architecture/<system>-system.md`，确认模块职责和边界。
-4. 读取 [docs/spec/README.md](docs/spec/README.md)，再读取对应 domain README 和 capability 的
+3. 读取对应的 `docs/architecture/<system>-system.md`，各个具体模块职责和边界。
+4. 任务涉及 `web/` 的页面、组件、目录、命名、样式或交互时，读取
+   [docs/frontend/README.md](docs/frontend/README.md)。
+5. 读取 [docs/spec/README.md](docs/spec/README.md)，再读取对应 domain README 和 capability 的
    `spec.md`；需要设计或实施时，只读取该 capability 根目录当前的 `plan.md` 和 `tasks.md`。
    如果 `plan.md` 路由到 `implementation/`，只继续读取当前任务对应的实施切片。`history/`
    默认不加载，只有追溯已完成变更时才读取指定版本。
-5. 需要启动、迁移或验证时，读取 [docs/development.md](docs/development.md)。
-6. 需要提交或发起 Pull Request 时，读取 [docs/contributing.md](docs/contributing.md)。
-7. 只有任务涉及已有技术取舍时，才读取 [docs/adr/README.md](docs/adr/README.md) 和相关 ADR。
+6. 需要启动、迁移或验证时，读取 [docs/development.md](docs/development.md)。
+7. 需要提交或发起 Pull Request 时，读取 [docs/contributing.md](docs/contributing.md)。
+8. 只有任务涉及已有技术取舍时，才读取 [docs/adr/README.md](docs/adr/README.md) 和相关 ADR。
 
 ## 3. 能力路由
 
@@ -46,6 +48,7 @@
 | 沙箱和工具隔离 | `docs/architecture/sandbox-system.md` |
 | 卫星影像目录和多源检索 | `docs/architecture/data-platform-system.md`、`docs/spec/data-platform/` |
 | 跨系统拓扑和目录职责 | `docs/architecture/overview.md` |
+| Web 页面、组件、目录、命名、样式和交互 | `docs/frontend/README.md` |
 | 产品身份和跨页面体验 | `docs/spec/product/` |
 | 本地启动、迁移和验证 | `docs/development.md` |
 | Pull Request 和 Git 提交 | `docs/contributing.md` |

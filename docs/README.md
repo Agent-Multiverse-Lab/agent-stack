@@ -1,7 +1,7 @@
 # 文档总览
 
-本目录采用“能力优先、渐进披露”的文档架构：先用 architecture 定位系统，再读取一个
-capability 的现行 spec；只有需要设计或实施时才加载该 capability 当前的 plan / tasks。
+本目录采用“能力优先、渐进披露”的文档架构：先加载仓库规则，再用 architecture 定位系统并
+读取一个 capability 的现行 spec；只有需要设计或实施时才加载该 capability 当前的 plan / tasks。
 
 ## 文档结构
 
@@ -10,6 +10,7 @@ capability 的现行 spec；只有需要设计或实施时才加载该 capabilit
 | [working-rules.md](working-rules.md) | Agent 工作规则和变更边界 |
 | [constitution.md](constitution.md) | 稳定的仓库级原则 |
 | [architecture/](architecture/README.md) | 系统拓扑、模块职责和所有权边界 |
+| [frontend/](frontend/README.md) | Web 目录、命名、组件、样式与交互规范 |
 | [spec/](spec/README.md) | 现行能力契约、当前实施包和按版本隔离的计划历史 |
 | [development.md](development.md) | 本地开发、启动、迁移和验证命令 |
 | [contributing.md](contributing.md) | 贡献流程和 Git 提交规范 |
@@ -21,11 +22,12 @@ capability 的现行 spec；只有需要设计或实施时才加载该 capabilit
 
 1. `working-rules.md`
 2. `architecture/`（确定承载该任务的系统）
-3. `spec/`（对应 domain README 和 capability 的 `spec.md`；需要实施时读取该能力当前的
+3. `frontend/`（任务涉及 `web/` 的页面、组件、目录、命名、样式或交互时）
+4. `spec/`（对应 domain README 和 capability 的 `spec.md`；需要实施时读取该能力当前的
    `plan.md` / `tasks.md`，再按任务读取指定的 `implementation/` 切片）
-4. `development.md`（需要启动、迁移或验证时）
-5. `contributing.md`（需要提交或发起 PR 时）
-6. `adr/`（需要确认技术取舍时）
+5. `development.md`（需要启动、迁移或验证时）
+6. `contributing.md`（需要提交或发起 PR 时）
+7. `adr/`（需要确认技术取舍时）
 
 ## 边界
 

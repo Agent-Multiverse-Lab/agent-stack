@@ -8,7 +8,7 @@
 | AM-B02 | AM-BRAND-001/003/005 | `web/src/views/NavigationView.vue`, `web/src/views/AuthenticationView.vue` | 替换主导航与认证页品牌名和可访问名称 |
 | AM-B03 | AM-BRAND-001/003 | `web/src/views/ChatView.vue`, `web/src/components/LoginComponent.vue`, `web/src/components/SettingsComponent.vue` | 替换活跃界面产品文案 |
 | AM-B04 | AM-BRAND-001/003/004 | `web/index.html`, `web/package.json`, `web/package-lock.json`, `web/README.md` | 同步浏览器与前端包 metadata，保留稳定技术标识 |
-| AM-B05 | AM-BRAND-002/004 | `web/AGENTS.md` | 记录 AM 产品身份、Logo 归属和不变的仓库/会话标识 |
+| AM-B05 | AM-BRAND-002/004 | `docs/frontend/README.md` | 记录 AM 产品身份、Logo 归属和不变的仓库/会话标识 |
 | AM-B06 | AM-BRAND-001/002/003/005 | `web/` | 搜索残留、定向 lint、构建、diff 与品牌入口视觉核对 |
 
 ## Done Conditions

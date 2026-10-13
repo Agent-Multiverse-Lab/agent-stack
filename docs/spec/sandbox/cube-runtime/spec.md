@@ -93,3 +93,28 @@ Run 取消沿用现有业务终态处理；不因取消一个 Run 就杀掉同�
 
 静态检查、SDK 单测、Compose 配置展开、真实 Ubuntu 主机运行分别记录。
 只有 Linux 上完成创建、命令、文件、前端读取、跨进程重连、并发创建和回收验证，才算替换完成。
+
+### SB-CUBE-009 工作区文件操作
+
+Sandbox 工作区使用桌面三段式布局：左侧文件树、中间文件 item 区域、右侧推拉式预览与编辑
+drawer。界面保持扁平，不增加手机布局、路径说明或额外解释性文字。
+
+Sandbox 文件 item 使用 shadcn 下拉菜单提供重命名、编辑内容和删除；目录仅提供打开操作。
+重命名和删除使用 Dialog，删除必须确认。文本编辑在右侧预览 drawer 内完成，提供保存和取消。
+操作失败保留输入并显示错误，成功后刷新当前目录；删除当前预览文件时关闭 drawer，重命名时
+同步预览名称与路径。
+
+所有操作先验证会话归属，再通过当前 Cube backend 访问 `/workspace` 内的普通文件。拒绝目录、
+符号链接和越界路径；重命名限定同目录文件名，并拒绝覆盖已有目标。文件编辑只接受完整 UTF-8
+文本，保留换行格式；保存携带读取时的完整内容，内容已变化时返回 409 并保留用户草稿。
+读取超过 2,000 行或 200,000 字符的编辑内容时标记截断，前端禁止保存截断文本。
+
+| 接口 | 行为 |
+| --- | --- |
+| `GET /api/sandbox/workspace/content?thread_id=…&path=…&editable=true` | 完整编辑文本与截断标记，保留末尾换行 |
+| `POST /api/sandbox/workspace/rename` | 接收 `thread_id/path/name`，返回新 `path` |
+| `PUT /api/sandbox/workspace/content` | 接收 `thread_id/path/content/previous_content`，成功返回 204 |
+| `DELETE /api/sandbox/workspace/file?thread_id=…&path=…` | 删除普通文件，成功返回 204 |
+
+原有目录列表与默认预览接口保持现有响应结构。文件不存在返回 404，非法输入返回 422，
+同名目标或保存冲突返回 409，Cube 操作失败返回 502。远端文件调用结束后归还连接引用。
