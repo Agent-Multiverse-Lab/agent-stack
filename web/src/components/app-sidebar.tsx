@@ -10,7 +10,6 @@ import {
   SquarePenIcon,
   SquareTerminalIcon,
 } from "lucide-react"
-import { useEffect } from "react"
 import { useLocation, useNavigate } from "react-router"
 
 import logoUrl from "@/assets/logo.svg"
@@ -27,7 +26,6 @@ import {
   SidebarRail,
   SidebarSeparator,
   SidebarTrigger,
-  useSidebar,
 } from "@/components/ui/sidebar"
 import { useAuth } from "@/context/AuthContext"
 import { useTranslation } from "@/i18n"
@@ -46,11 +44,8 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const { accessToken, user, logout } = useAuth()
   const { t } = useTranslation()
-  const { setOpenMobile } = useSidebar()
   const location = useLocation()
   const navigate = useNavigate()
-
-  useEffect(() => setOpenMobile(false), [location.pathname, setOpenMobile])
 
   const data = {
     user: {
@@ -134,10 +129,7 @@ export function AppSidebar({
             aria-label={t("Search conversations")}
             title={t("Search conversations")}
             className="size-7 shrink-0 text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:hidden"
-            onClick={() => {
-              setOpenMobile(false)
-              onSearch()
-            }}
+            onClick={onSearch}
           >
             <SearchIcon className="size-4" />
           </Button>

@@ -5,7 +5,7 @@ export default function AgentPage() {
   const { t } = useTranslation();
   return (
     <main
-      className="flex h-full min-h-0 w-full items-center justify-center bg-background px-5 pb-[6rem] text-foreground"
+      className="flex h-full min-h-0 w-full items-center justify-center bg-card px-5 pb-[6rem] text-foreground"
       aria-label={t("Agent")}
     >
       <section

@@ -86,8 +86,8 @@ export function SearchChat({
     >
       <DialogContent
         showCloseButton={false}
-        overlayClassName="z-[100] bg-primary/36"
-        className="top-[10dvh] z-[101] flex h-[min(60vh,620px)] w-[min(84vw,980px)] max-w-[980px] translate-y-0 flex-col gap-0 overflow-hidden rounded-2xl bg-background p-0 text-foreground shadow-2xl sm:max-w-[980px]"
+        overlayClassName="z-[100]"
+        className="top-[10dvh] z-[101] flex h-[min(60vh,620px)] w-[min(84vw,980px)] max-w-[980px] translate-y-0 flex-col gap-0 overflow-hidden rounded-2xl bg-popover p-0 text-foreground shadow-2xl"
       >
         <DialogTitle className="sr-only">{t("Search conversation threads")}</DialogTitle>
         <DialogDescription className="sr-only">
@@ -186,8 +186,8 @@ export function ProfileDialog({
     >
       <DialogContent
         showCloseButton={false}
-        overlayClassName="z-[100] bg-primary/36"
-        className="z-[101] w-full max-w-none gap-0 overflow-hidden rounded-t-lg bg-background p-0 text-foreground max-[767px]:top-auto max-[767px]:bottom-0 max-[767px]:translate-y-0 max-[767px]:rounded-b-none min-[768px]:max-w-[440px]"
+        overlayClassName="z-[100]"
+        className="z-[101] w-[440px] max-w-[440px] gap-0 overflow-hidden rounded-lg bg-popover p-0 text-foreground"
       >
         <DialogHeader className="flex min-h-[3.25rem] flex-row items-center justify-between px-5">
           <DialogTitle id="profile-title" className="text-[0.95rem] font-semibold">
@@ -206,7 +206,7 @@ export function ProfileDialog({
         <div className="grid gap-6 px-5 pt-3 pb-6">
           <div className="grid justify-items-center gap-3 border-b border-border pb-6 text-center">
             <Avatar className="size-14" aria-hidden="true">
-              <AvatarFallback className="bg-primary font-mono text-lg font-bold text-primary-foreground">
+              <AvatarFallback className="bg-muted font-mono text-lg font-bold text-muted-foreground">
                 A
               </AvatarFallback>
             </Avatar>

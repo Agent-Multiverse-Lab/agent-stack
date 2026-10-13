@@ -89,7 +89,7 @@ export function Settings({ open, close, user }: SettingsProps) {
     sections.find((item) => item.id === section) ?? sections[0];
 
   const setting = (label: string, control: ReactNode) => (
-    <Field orientation="responsive" className="min-h-16 py-4 [&>[data-slot=switch]]:w-9">
+    <Field orientation="horizontal" className="min-h-16 py-4 [&>[data-slot=switch]]:w-9">
       <FieldContent>
         <FieldTitle>{label}</FieldTitle>
       </FieldContent>
@@ -105,8 +105,8 @@ export function Settings({ open, close, user }: SettingsProps) {
       }}
     >
       <DialogContent
-        overlayClassName="z-[100] bg-primary/36"
-        className="z-[101] h-[min(92dvh,760px)] overflow-hidden p-0 sm:max-w-[calc(100%-2rem)] md:max-w-[760px] lg:max-w-[1120px]"
+        overlayClassName="z-[100]"
+        className="z-[101] h-[min(92dvh,760px)] max-w-[1120px] overflow-hidden p-0"
       >
         <DialogTitle className="sr-only">{t("Settings")}</DialogTitle>
         <DialogDescription className="sr-only">
@@ -120,7 +120,6 @@ export function Settings({ open, close, user }: SettingsProps) {
           <Sidebar
             collapsible="none"
             aria-label={t("Settings sections")}
-            className="hidden md:flex"
           >
             <SidebarContent>
               <SidebarGroup className="py-4">
@@ -149,8 +148,8 @@ export function Settings({ open, close, user }: SettingsProps) {
           </Sidebar>
 
           <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            <header className="flex h-14 shrink-0 items-center px-4 pr-12 md:px-6 md:pr-12">
-              <Breadcrumb className="hidden md:block">
+            <header className="flex h-14 shrink-0 items-center px-6 pr-12">
+              <Breadcrumb>
                 <BreadcrumbList>
                   <BreadcrumbItem>
                     <span className="text-muted-foreground">
@@ -163,33 +162,12 @@ export function Settings({ open, close, user }: SettingsProps) {
                   </BreadcrumbItem>
                 </BreadcrumbList>
               </Breadcrumb>
-
-              <Select
-                value={section}
-                onValueChange={(value) => {
-                  if (value) setSection(value as Section);
-                }}
-              >
-                <SelectTrigger
-                  aria-label={t("Settings sections")}
-                  className="h-10 w-full md:hidden"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent align="start">
-                  {sections.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </header>
             <Separator />
 
             <ScrollArea className="min-h-0 flex-1">
               <section
-                className="px-4 pt-5 pb-6 md:px-6"
+                className="px-6 pt-5 pb-6"
                 aria-live="polite"
                 aria-labelledby="settings-section-title"
               >

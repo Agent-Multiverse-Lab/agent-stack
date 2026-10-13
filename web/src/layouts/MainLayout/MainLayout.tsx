@@ -11,11 +11,9 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { useAuth } from "@/context/AuthContext";
-import { Separator } from "@/components/ui/separator";
 import {
   SidebarInset,
   SidebarProvider,
-  SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -73,7 +71,7 @@ export default function MainLayout() {
         style={{ "--sidebar-width": "15.5rem" } as CSSProperties}
       >
         <AppSidebar
-          variant="inset"
+          variant="sidebar"
           aria-label={t("Application navigation")}
           onProfile={openProfile}
           onSettings={openSettings}
@@ -87,19 +85,14 @@ export default function MainLayout() {
             )}
           >
             <div className="flex items-center gap-2 px-4">
-              <SidebarTrigger className="-ml-1 md:hidden" />
-              <Separator
-                orientation="vertical"
-                className="mr-2 data-[orientation=vertical]:h-4 md:hidden"
-              />
               <Breadcrumb>
                 <BreadcrumbList>
-                  <BreadcrumbItem className="hidden md:block">
+                  <BreadcrumbItem>
                     <BreadcrumbLink render={<Link to="/" />}>
                       Agent Multiverse
                     </BreadcrumbLink>
                   </BreadcrumbItem>
-                  <BreadcrumbSeparator className="hidden md:block" />
+                  <BreadcrumbSeparator />
                   <BreadcrumbItem>
                     <BreadcrumbPage>{t(page)}</BreadcrumbPage>
                   </BreadcrumbItem>

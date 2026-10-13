@@ -14,7 +14,7 @@ function SelectTrigger({ className, children, ...props }: SelectPrimitive.Trigge
   return (
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
-      className={cn("flex h-8 w-fit items-center justify-between gap-2 whitespace-nowrap rounded-lg border border-input bg-background px-2.5 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50", className)}
+      className={cn("flex h-8 w-fit items-center justify-between gap-2 whitespace-nowrap rounded-lg border border-input bg-card px-2.5 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50", className)}
       {...props}
     >
       {children}
@@ -58,7 +58,7 @@ function SelectItem({ className, children, ...props }: SelectPrimitive.Item.Prop
   return (
     <SelectPrimitive.Item
       data-slot="select-item"
-      className={cn("relative flex min-h-8 w-full cursor-default items-center rounded-md px-2 py-1.5 pr-8 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50", className)}
+      className={cn("relative flex min-h-8 w-full cursor-default items-center rounded-md px-2 py-1.5 pr-8 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-selected:bg-selection data-selected:text-selection-foreground data-selected:font-medium data-selected:data-highlighted:bg-selection data-selected:data-highlighted:text-selection-foreground data-disabled:pointer-events-none data-disabled:opacity-50", className)}
       {...props}
     >
       <SelectPrimitive.ItemText className="shrink-0 whitespace-nowrap">{children}</SelectPrimitive.ItemText>

@@ -90,9 +90,9 @@ export function LoginForm({
       className="gap-0 overflow-hidden p-0 shadow-sm"
       aria-labelledby="authentication-title"
     >
-      <CardContent className="grid min-h-144 p-0 md:grid-cols-2">
+      <CardContent className="grid min-h-144 p-0 grid-cols-2">
         <form
-          className="flex flex-col justify-center p-6 md:p-8 lg:p-10"
+          className="flex flex-col justify-center p-10"
           onSubmit={(event) => void submit(event)}
         >
           <FieldGroup className="gap-5">
@@ -186,7 +186,7 @@ export function LoginForm({
                     maxLength={128}
                     required={isRegister}
                     placeholder={t("Ensure your password")}
-                    className="h-10 pr-11 hover:border-ring focus-visible:border-foreground/60 focus-visible:ring-0"
+                    className="h-10 pr-11"
                     value={confirmPassword}
                     disabled={submitting || !isRegister}
                     onChange={(event) => {
@@ -213,8 +213,8 @@ export function LoginForm({
               </Field>
             </div>
 
-            {registrationComplete && (
-              <Alert>
+{registrationComplete && (
+              <Alert variant="success">
                 <CircleCheck />
                 <AlertDescription>
                   {t("Account created successfully. Please log in.")}
@@ -252,7 +252,7 @@ export function LoginForm({
             </FieldDescription>
           </FieldGroup>
         </form>
-        <div className="relative hidden bg-muted md:block" aria-hidden="true">
+        <div className="relative block bg-muted" aria-hidden="true">
           <img
             className="absolute inset-0 size-full object-cover object-center"
             src={authIllustrationUrl}

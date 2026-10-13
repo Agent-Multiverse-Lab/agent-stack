@@ -62,7 +62,7 @@ export function FileContentViewer({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {truncated ? (
-        <div className="border-b border-amber-500/25 bg-amber-500/10 px-4 py-2 text-xs text-amber-800 dark:text-amber-300">
+        <div className="border-b border-warning/25 bg-warning/10 px-4 py-2 text-xs text-warning">
           {t("This preview is truncated.")}
         </div>
       ) : null}
@@ -87,10 +87,10 @@ export function FileContentViewer({
         ) : (
           <Tabs defaultValue="preview" className="min-h-0 flex-1">
             <TabsList className="h-10 w-full justify-start gap-5 border-b px-4">
-              <TabsTrigger value="preview" className="h-10 border-b-2 border-transparent px-0 data-active:border-foreground">
+              <TabsTrigger value="preview" className="h-10 border-b-2 border-transparent px-0 data-active:border-primary">
                 {t("Rendered")}
               </TabsTrigger>
-              <TabsTrigger value="source" className="h-10 border-b-2 border-transparent px-0 data-active:border-foreground">
+              <TabsTrigger value="source" className="h-10 border-b-2 border-transparent px-0 data-active:border-primary">
                 {t("Source")}
               </TabsTrigger>
             </TabsList>

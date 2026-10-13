@@ -57,7 +57,7 @@ export default function KnowledgeBaseDetailPage() {
     return (
       <div className="grid h-full place-items-center text-sm text-muted-foreground">
         {error}
-        <Link to="/knowledge" className="mt-2 text-primary hover:underline">
+        <Link to="/knowledge" className="mt-2 text-primary underline underline-offset-4 hover:text-primary-hover">
           {t("Back to knowledge bases")}
         </Link>
       </div>
@@ -65,7 +65,7 @@ export default function KnowledgeBaseDetailPage() {
   }
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden bg-background font-sans text-foreground">
+    <div className="flex h-full w-full flex-col overflow-hidden bg-card font-sans text-foreground">
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
         <Link
           to="/knowledge"
@@ -87,19 +87,19 @@ export default function KnowledgeBaseDetailPage() {
         <TabsList className="h-10 w-full justify-start gap-5 border-b px-4">
           <TabsTrigger
             value="documents"
-            className="h-10 border-b-2 border-transparent px-0 data-active:border-foreground"
+            className="h-10 border-b-2 border-transparent px-0 data-active:border-primary"
           >
             {t("Documents")}
           </TabsTrigger>
           <TabsTrigger
             value="graph"
-            className="h-10 border-b-2 border-transparent px-0 data-active:border-foreground"
+            className="h-10 border-b-2 border-transparent px-0 data-active:border-primary"
           >
             {t("Knowledge Graph")}
           </TabsTrigger>
           <TabsTrigger
             value="chat"
-            className="h-10 border-b-2 border-transparent px-0 data-active:border-foreground"
+            className="h-10 border-b-2 border-transparent px-0 data-active:border-primary"
           >
             {t("Knowledge Chat")}
           </TabsTrigger>

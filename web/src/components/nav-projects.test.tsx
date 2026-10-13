@@ -5,12 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import { listThreads, renameThread } from "@/api/agent"
 import { NavProjects } from "@/components/nav-projects"
 import { AppSidebar } from "@/components/app-sidebar"
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar"
+import { SidebarProvider } from "@/components/ui/sidebar"
 import { installBrowserStubs } from "@/test/browserStubs"
 import type { ThreadSummaryResponse } from "@/types/chat"
 
@@ -81,42 +76,6 @@ it("renames a conversation from the shadcn sidebar", async () => {
 
   expect(await screen.findByRole("link", { name: "New title" })).toBeTruthy()
   expect(renameThread).toHaveBeenCalledWith("thread-1", "New title")
-})
-
-it("opens a conversation action dialog inside the mobile sidebar", async () => {
-  installBrowserStubs()
-  vi.stubGlobal("innerWidth", 375)
-  mockThreads()
-
-  render(
-    <MemoryRouter initialEntries={["/c/thread-1"]}>
-      <SidebarProvider>
-        <Sidebar collapsible="icon">
-          <SidebarContent>
-            <Routes>
-              <Route
-                path="/c/:threadId"
-                element={<NavProjects onSearch={vi.fn()} />}
-              />
-            </Routes>
-          </SidebarContent>
-        </Sidebar>
-        <SidebarTrigger />
-      </SidebarProvider>
-    </MemoryRouter>,
-  )
-
-  fireEvent.click(screen.getByRole("button", { name: "Toggle Sidebar" }))
-  expect(await screen.findByRole("link", { name: "Old title" })).toBeTruthy()
-  fireEvent.click(
-    screen.getByRole("button", {
-      name: "Conversation actions: Old title",
-    }),
-  )
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }))
-  expect(
-    screen.getByRole("dialog", { name: "Rename conversation" }),
-  ).toBeTruthy()
 })
 
 it("opens conversation search dialog from the sidebar header search button", async () => {

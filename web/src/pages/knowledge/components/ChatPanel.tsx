@@ -72,8 +72,8 @@ export function ChatPanel({ kbId }: { kbId: string }) {
                 <div
                   className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm ${
                     message.role === "user"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted"
+                      ? "bg-message text-foreground"
+                      : "bg-transparent text-foreground"
                   }`}
                 >
                   {message.content}
@@ -112,7 +112,7 @@ export function ChatPanel({ kbId }: { kbId: string }) {
           handleSend()
         }}
       >
-        <div className="mx-auto flex max-w-3xl items-center gap-2 rounded-2xl border border-border bg-muted px-3 py-2">
+        <div className="mx-auto flex max-w-3xl items-center gap-2 rounded-2xl border border-input bg-card px-3 py-2 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/20">
           <Textarea
             value={draft}
             onChange={(event) => setDraft(event.target.value)}

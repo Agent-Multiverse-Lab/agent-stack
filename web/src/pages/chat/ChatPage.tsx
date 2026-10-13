@@ -339,7 +339,7 @@ export default function ChatPage() {
   const displayedError = chatState.uploadError || chatState.error;
 
   return (
-    <section className="relative flex h-full min-h-0 flex-col bg-background text-foreground">
+    <section className="relative flex h-full min-h-0 flex-col bg-card text-foreground">
       <div
         ref={scroller}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
@@ -369,17 +369,17 @@ export default function ChatPage() {
       <footer
         className={`inset-x-0 px-[clamp(0.75rem,4vw,2rem)] ${
           docked
-            ? "shrink-0 bg-background pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]"
+            ? "shrink-0 bg-card pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]"
             : "absolute top-[38%] -translate-y-1/2"
         } ${pending ? "max-h-full overflow-y-auto overscroll-contain" : ""}`}
       >
         <div className="relative mx-auto grid w-full max-w-[48rem] gap-2">
           {!docked && !chatState.loading && (
             <div className="mb-4 text-center select-none">
-              <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+              <h1 className="text-4xl font-semibold tracking-tight">
                 {t("Welcome to AM")}
               </h1>
-              <p className="mt-2 text-sm text-muted-foreground sm:text-base">
+              <p className="mt-2 text-base text-muted-foreground">
                 {t("What would you like to explore or build today?")}
               </p>
             </div>
@@ -397,7 +397,7 @@ export default function ChatPage() {
               type="button"
               aria-label={t("Scroll to latest message")}
               title={t("Scroll to latest message")}
-              className="z-10 grid size-9 place-items-center justify-self-center rounded-full border border-border bg-background text-muted-foreground shadow-sm"
+              className="z-10 grid size-9 place-items-center justify-self-center rounded-full border border-border bg-card text-muted-foreground shadow-sm"
               onClick={() => {
                 scroller.current?.scrollTo({
                   top: scroller.current.scrollHeight,

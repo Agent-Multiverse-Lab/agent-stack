@@ -484,7 +484,7 @@ export function AgentMessageComposer({
           aria-label={t("Message")}
           placeholder={listening ? t("Listening…") : t("Ask anything")}
           rows={1}
-          className={`field-sizing-fixed max-h-40 min-h-10 min-w-0 resize-none border-0 bg-transparent px-2 py-2 text-base leading-6 shadow-none focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent disabled:opacity-60 md:text-sm ${
+          className={`field-sizing-fixed max-h-40 min-h-10 min-w-0 resize-none border-0 bg-transparent px-2 py-2 text-sm leading-6 shadow-none focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent disabled:opacity-60 ${
             expanded
               ? "col-span-full col-start-1 row-start-1"
               : "col-start-2 row-start-1"

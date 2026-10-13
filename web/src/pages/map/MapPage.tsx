@@ -78,11 +78,11 @@ export default function MapPage() {
 
   return (
     <main
-      className="flex h-full min-h-0 flex-col overflow-y-auto bg-background text-foreground xl:flex-row xl:overflow-hidden"
+      className="flex h-full min-h-0 flex-row overflow-hidden bg-background text-foreground"
       aria-label={t("Map")}
     >
       <section
-        className="relative min-h-[52vh] flex-1 overflow-hidden bg-muted xl:min-h-0"
+        className="relative min-h-0 flex-1 overflow-hidden bg-muted"
         aria-label={t("Map canvas")}
       >
         <div ref={mapElement} className="absolute inset-0" />
@@ -114,7 +114,7 @@ export default function MapPage() {
         )}
       </section>
 
-      <aside className="flex min-h-[18rem] w-full shrink-0 flex-col border-t border-border bg-background xl:min-h-0 xl:w-[22rem] xl:border-t-0 xl:border-l">
+      <aside className="flex min-h-0 w-[22rem] shrink-0 flex-col border-l border-border bg-card">
         <div className="border-b border-border px-5 py-4">
           <h1 className="m-0 text-base font-semibold">{t("Image search")}</h1>
         </div>

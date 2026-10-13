@@ -35,7 +35,6 @@ import {
   SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
 } from "@/components/ui/sidebar"
 import { useTranslation } from "@/i18n"
 import type { ThreadSummaryResponse } from "@/types/chat"
@@ -44,7 +43,6 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
   const { t } = useTranslation()
   const { threadId } = useParams()
   const navigate = useNavigate()
-  const { isMobile, setOpenMobile } = useSidebar()
   const [threads, setThreads] = useState<ThreadSummaryResponse[]>([])
   const [cursor, setCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -169,7 +167,6 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
                 render={
                   <Link
                     to={`/c/${encodeURIComponent(item.thread_id)}`}
-                    onClick={() => setOpenMobile(false)}
                   />
                 }
                 isActive={threadId === item.thread_id}
@@ -197,14 +194,11 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
                   className="w-fit"
-                  side={isMobile ? "bottom" : "right"}
-                  align={isMobile ? "end" : "start"}
+                  side="right"
+                  align="start"
                 >
                   <DropdownMenuItem
-                    onClick={() => {
-                      setOpenMobile(false)
-                      navigate(`/c/${encodeURIComponent(item.thread_id)}`)
-                    }}
+                    onClick={() => navigate(`/c/${encodeURIComponent(item.thread_id)}`)}
                   >
                     <FolderIcon />
                     <span>{t("Open conversation")}</span>
@@ -276,10 +270,7 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
           <SidebarMenuItem>
             <SidebarMenuButton
               className="text-sidebar-foreground/70"
-              onClick={() => {
-                setOpenMobile(false)
-                onSearch()
-              }}
+              onClick={onSearch}
             >
               <MoreHorizontalIcon className="text-sidebar-foreground/70" />
               <span>{t("More")}</span>

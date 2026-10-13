@@ -12,7 +12,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
 } from "@/components/ui/sidebar"
 import { useTranslation } from "@/i18n"
 import {
@@ -38,13 +37,7 @@ export function NavUser({
   onLogout: () => void
 }) {
   const { t } = useTranslation()
-  const { isMobile, setOpenMobile } = useSidebar()
   const fallback = user.name.charAt(0).toUpperCase() || "A"
-
-  const select = (action: () => void) => {
-    setOpenMobile(false)
-    action()
-  }
 
   return (
     <SidebarMenu>
@@ -68,7 +61,7 @@ export function NavUser({
           </DropdownMenuTrigger>
           <DropdownMenuContent
             className="w-fit"
-            side={isMobile ? "bottom" : "right"}
+            side="right"
             align="end"
             sideOffset={4}
           >
@@ -88,11 +81,11 @@ export function NavUser({
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem onClick={() => select(onProfile)}>
+              <DropdownMenuItem onClick={onProfile}>
                 <BadgeCheckIcon />
                 {t("Profile")}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => select(onSettings)}>
+              <DropdownMenuItem onClick={onSettings}>
                 <Settings2Icon />
                 {t("Settings")}
               </DropdownMenuItem>
@@ -100,7 +93,7 @@ export function NavUser({
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
-              onClick={() => select(onLogout)}
+              onClick={onLogout}
             >
               <LogOutIcon />
               {t("Log out")}

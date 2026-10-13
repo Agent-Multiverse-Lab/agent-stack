@@ -103,7 +103,7 @@ export function ChatMessage({ message }: { message: ChatMessageType }) {
   if (message.type === "human")
     return (
       <article className="flex justify-end">
-        <div className="max-w-[min(82%,42rem)] rounded-[1.15rem] bg-muted px-4 py-2.5 text-foreground">
+        <div className="max-w-[min(82%,42rem)] rounded-[1.15rem] bg-message px-4 py-2.5 text-foreground">
           {content && (
             <p className="m-0 whitespace-pre-wrap leading-7">{content}</p>
           )}

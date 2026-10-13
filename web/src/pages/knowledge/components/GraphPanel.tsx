@@ -80,15 +80,17 @@ export function GraphPanel({ kbId }: { kbId: string }) {
   }, [])
 
   useEffect(() => {
-    if (!svgRef.current || !gRef.current) return
+    const svg = svgRef.current
+    const group = gRef.current
+    if (!svg || !group) return
     const behavior = zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.25, 4])
       .on("zoom", (event) => {
-        select(gRef.current).attr("transform", event.transform.toString())
+        select(group).attr("transform", event.transform.toString())
       })
-    select(svgRef.current).call(behavior)
+    select(svg).call(behavior)
     return () => {
-      select(svgRef.current).on(".zoom", null)
+      select(svg).on(".zoom", null)
     }
   }, [graph])
 
@@ -153,7 +155,7 @@ export function GraphPanel({ kbId }: { kbId: string }) {
     try {
       const result = await searchKnowledgeEntities(kbId, text)
       setMatchedIds(new Set(result.hits.map((hit) => hit.entity_id)))
-    } catch (caught) {
+    } catch {
       setMatchedIds(new Set())
     } finally {
       setSearching(false)

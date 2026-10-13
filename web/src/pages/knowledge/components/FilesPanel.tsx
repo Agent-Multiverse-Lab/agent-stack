@@ -34,6 +34,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTranslation } from "@/i18n"
@@ -230,7 +231,7 @@ export function FilesPanel({ kbId }: { kbId: string }) {
             )}
             {t("Upload files")}
           </Button>
-          <input
+          <Input
             ref={fileInput}
             type="file"
             multiple
@@ -258,14 +259,14 @@ export function FilesPanel({ kbId }: { kbId: string }) {
                   key={file.file_id}
                   className={`flex min-h-14 min-w-0 items-center gap-1 rounded-lg border px-2 hover:bg-accent ${
                     selectedId === file.file_id
-                      ? "border-border bg-muted"
+                      ? "border-primary/25 bg-selection shadow-[inset_3px_0_0_var(--selection-foreground)] hover:bg-selection"
                       : "border-transparent"
                   }`}
                 >
                   <Button
                     variant="ghost"
                     type="button"
-                    className="h-auto min-w-0 flex-1 justify-start gap-2 text-left"
+                    className="h-auto min-w-0 flex-1 justify-start gap-2 text-left hover:bg-transparent aria-[current=true]:text-selection-foreground"
                     aria-current={
                       selectedId === file.file_id ? "true" : undefined
                     }
@@ -429,11 +430,9 @@ function StatusBadge({ file }: { file: KnowledgeFile }) {
   const variant =
     file.status === "failed"
       ? "destructive"
-      : file.status === "extracted"
+      : (file.status === "extracted" || file.status === "indexed")
         ? "success"
-        : file.status === "indexed"
-          ? "default"
-          : "outline"
+        : "outline"
   const label =
     file.status === "extracting"
       ? t("Extracting…")
@@ -446,7 +445,7 @@ function StatusBadge({ file }: { file: KnowledgeFile }) {
             )
   const badge = (
     <Badge
-      variant={variant as "default"}
+      variant={variant}
       className="shrink-0 whitespace-nowrap"
     >
       {PROCESSING.includes(file.status) && (

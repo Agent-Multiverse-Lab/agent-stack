@@ -18,7 +18,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
 } from "@/components/ui/sidebar"
 import { useTranslation } from "@/i18n"
 
@@ -37,7 +36,6 @@ export function TeamSwitcher({
   onSettings: () => void
 }) {
   const { t } = useTranslation()
-  const { isMobile, setOpenMobile } = useSidebar()
   const navigate = useNavigate()
   const activeTeam = teams.find((team) => team.isActive) ?? teams[0]
 
@@ -68,7 +66,7 @@ export function TeamSwitcher({
           <DropdownMenuContent
             className="w-fit"
             align="start"
-            side={isMobile ? "bottom" : "right"}
+            side="right"
             sideOffset={4}
           >
             <DropdownMenuGroup>
@@ -78,10 +76,7 @@ export function TeamSwitcher({
               {teams.map((team, index) => (
                 <DropdownMenuItem
                   key={team.name}
-                  onClick={() => {
-                    setOpenMobile(false)
-                    navigate(team.url)
-                  }}
+                  onClick={() => navigate(team.url)}
                   className="gap-2 p-2"
                 >
                   <div className="flex size-6 items-center justify-center rounded-md border">
@@ -96,10 +91,7 @@ export function TeamSwitcher({
             <DropdownMenuGroup>
               <DropdownMenuItem
                 className="gap-2 p-2"
-                onClick={() => {
-                  setOpenMobile(false)
-                  onSettings()
-                }}
+                onClick={onSettings}
               >
                 <div className="flex size-6 items-center justify-center rounded-md border bg-transparent">
                   <Settings2Icon className="size-4" />

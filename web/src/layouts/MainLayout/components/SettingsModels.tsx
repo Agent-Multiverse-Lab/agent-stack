@@ -223,9 +223,9 @@ export default function SettingsModels() {
     }
   }
   return (
-    <FieldGroup className="grid min-h-full min-w-0 grid-cols-1 content-start gap-6 min-[1024px]:grid-cols-[176px_minmax(0,1fr)] min-[1024px]:gap-9">
+    <FieldGroup className="grid min-h-full min-w-0 grid-cols-[176px_minmax(0,1fr)] content-start gap-9">
       <nav aria-label={t("Model providers")} className="min-w-0">
-        <ItemGroup className="flex-row gap-1 overflow-x-auto pb-1 min-[1024px]:flex-col">
+        <ItemGroup className="flex-col gap-1">
           {providers.map((item) => (
             <Item
               key={item.id}
@@ -239,7 +239,7 @@ export default function SettingsModels() {
               variant={selected === item.id ? "muted" : "default"}
               size="sm"
               aria-pressed={selected === item.id}
-              className="min-h-11 shrink-0 flex-nowrap justify-start text-left disabled:opacity-60"
+              className="min-h-11 shrink-0 flex-nowrap justify-start text-left aria-pressed:bg-selection aria-pressed:text-selection-foreground aria-pressed:shadow-[inset_3px_0_0_var(--selection-foreground)] aria-pressed:hover:bg-selection disabled:opacity-60"
               onClick={() => setSelected(item.id)}
             >
               <ItemMedia variant="image" className="size-6">
@@ -262,7 +262,7 @@ export default function SettingsModels() {
       </nav>
 
       <FieldGroup
-        className="min-w-0 gap-0 min-[1024px]:min-h-[490px]"
+        className="min-h-[490px] min-w-0 gap-0"
         aria-busy={loading}
       >
         <Item className="mb-7 flex-nowrap px-0 py-0">
@@ -453,7 +453,7 @@ export default function SettingsModels() {
         }}
       >
         <DialogContent
-          className="z-[1100] sm:max-w-lg"
+          className="z-[1100] max-w-lg"
           overlayClassName="z-[1090]"
         >
           <DialogHeader>

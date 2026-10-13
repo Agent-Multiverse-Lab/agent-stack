@@ -190,18 +190,6 @@ describe("authentication routes", () => {
     expect(screen.getByRole("option", { name: "Dark" })).toBeTruthy()
   })
 
-  it("opens the mobile sidebar and closes it after navigation", async () => {
-    vi.stubGlobal("innerWidth", 375)
-    localStorage.setItem("au.access_token", "test-token")
-    renderRoute("/agent")
-    expect(await screen.findByRole("main", { name: "Agent" })).toBeTruthy()
-
-    fireEvent.click(screen.getByRole("button", { name: "Toggle Sidebar" }))
-    const sidebar = await screen.findByRole("dialog")
-    fireEvent.click(within(sidebar).getByRole("link", { name: "Sandbox" }))
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
-  })
-
   it("shows the shared sidebar on the knowledge route", async () => {
     localStorage.setItem("au.access_token", "test-token")
     renderRoute("/knowledge")
