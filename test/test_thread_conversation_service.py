@@ -148,12 +148,16 @@ class FakeUserRepository:
 class FakeAgentRepository:
     """返回固定顶层 Agent。"""
 
+    def __init__(self):
+        self.agent_config = {"model": "dashscope/qwen3.8-max"}
+
     async def get_by_slug_for_run_type(self, *, slug, run_type):
         """返回请求的顶层 Agent。"""
         return SimpleNamespace(
             slug=slug,
             backend_id="leader-backend",
             role=run_type,
+            agent_config=self.agent_config,
         )
 
 
@@ -258,6 +262,31 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
             "leader-backend",
             conversation.conversation_metadata["backend_id"],
         )
+        self.assertEqual("dashscope/qwen3.8-max", conversation.conversation_metadata["model"])
+
+    async def test_create_thread_prefers_selected_model_and_preserves_client_metadata(self):
+        metadata = {"model": "deepseek/deepseek-v4-flash", "workspace": "research"}
+        conversation = await thread_service.create_thread(
+            self.db, uid="user-1", agent_id="leaderagent", title=None, summary=None, metadata=metadata,
+        )
+        self.assertEqual(conversation.conversation_metadata["model"], "deepseek/deepseek-v4-flash")
+        self.assertEqual(conversation.conversation_metadata["workspace"], "research")
+        self.assertNotIn("backend_id", metadata)
+
+    async def test_create_thread_without_agent_model_uses_config_default(self):
+        self.agents.agent_config = {}
+        conversation = await thread_service.create_thread(
+            self.db, uid="user-1", agent_id="leaderagent", title=None, summary=None, metadata=None,
+        )
+        self.assertEqual(conversation.conversation_metadata["model"], "dashscope/qwen3.8-max")
+
+    async def test_invalid_thread_model_is_rejected_before_creation(self):
+        for model in (42, "unknown/model", " deepseek/deepseek-v4-flash"):
+            with self.subTest(model=model), self.assertRaises(ValueError):
+                await thread_service.create_thread(
+                    self.db, uid="user-1", agent_id="leaderagent", title=None, summary=None, metadata={"model": model},
+                )
+        self.assertIsNone(self.conversations.created_values)
 
     async def test_list_threads_returns_stable_cursor(self) -> None:
         """列表只返回 limit 条并按最后一项生成游标。"""
@@ -333,11 +362,15 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
         self.conversations.conversation = make_conversation(1)
         self.runs.pending_interaction_run = SimpleNamespace(
             id="parent-run",
+            thread_id="thread-1",
             run_metadata={
                 "interrupt": {
                     "kind": "ask_user",
-                    "question": "请选择数据库",
-                    "options": ["PostgreSQL", "MySQL"],
+                    "questions": [{
+                        "question_id": "database",
+                        "question": "请选择数据库",
+                        "options": [{"label": "PostgreSQL", "value": "postgresql"}, {"label": "MySQL", "value": "mysql"}],
+                    }],
                 }
             },
         )
@@ -351,10 +384,16 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             {
+                "status": "ask_human",
+                "thread_id": "thread-1",
+                "run_id": "parent-run",
                 "kind": "ask_user",
                 "parent_run_id": "parent-run",
-                "question": "请选择数据库",
-                "options": ["PostgreSQL", "MySQL"],
+                "questions": [{
+                    "question_id": "database",
+                    "question": "请选择数据库",
+                    "options": [{"label": "PostgreSQL", "value": "postgresql"}, {"label": "MySQL", "value": "mysql"}],
+                }],
             },
             result["pending_interaction"],
         )

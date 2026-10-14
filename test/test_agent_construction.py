@@ -20,13 +20,15 @@ import src.agents.buildin as agent
 from server import worker
 from server.exception import AgentRunTimeOut
 from server.service import agent_run_service, thread_service
+from src.agents.base_agent import BaseAgent
+from src.agents.base_context import BaseContext
+from src.agents.buildin.leader.agent import LeaderAgent
+from src.agents.buildin.subagents import SubAgentContext, SubAgentGraph
 from src.agents.library import AgentLibrary
 from src.agents.library.leader import LEADER_AGENT
 from src.agents.library.subagents import CITATION_AGENT, SEARCH_AGENT, SUBAGENTS
-from src.agents.base_agent import BaseAgent
-from src.agents.buildin.leader.agent import LeaderAgent
-from src.agents.buildin.subagents import SubAgentContext, SubAgentGraph
 from src.agents.middlewares.subagent_middlware import SubAgentMiddleware
+from src.configs import config as sys_config
 from src.database.models import Agent
 from src.database.repositories.agent_repository import AgentRepository
 
@@ -200,17 +202,47 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_runtime_context_freezes_default_model_and_overrides_run_identity(self):
         values = dict(uid="user-1", run_id="run-1", thread_id="thread-1", request_id="request-1")
-        with patch.object(thread_service.config, "default_model", "configured/model"):
+        with patch.object(sys_config, "default_model", "configured/model"):
             context = await thread_service._build_agent_runtime_context(
                 **values, defaults={"uid": "ignored", "model": ""}, parent_run_id="parent-1",
             )
-        with patch.object(thread_service.config, "default_model", "changed/model"):
+        with patch.object(sys_config, "default_model", "changed/model"):
             self.assertEqual(context["model"], "configured/model")
             agent_context = SubAgentContext()
             agent_context.update_context(context)
             self.assertEqual(agent_context.model, "configured/model")
         self.assertEqual(context["uid"], "user-1")
         self.assertEqual(context["parent_run_id"], "parent-1")
+
+    async def test_context_uses_run_snapshot_then_conversation_then_agent_then_config(self):
+        identity = dict(uid="user-1", run_id="run-1", thread_id="thread-1", request_id="request-1")
+        for run_model, conversation_model, agent_model, expected in (
+            ("run/model", "conversation/model", "agent/model", "run/model"),
+            (None, "conversation/model", "agent/model", "conversation/model"),
+            ("", None, "agent/model", "agent/model"),
+            (None, "", None, "configured/model"),
+        ):
+            with self.subTest(expected=expected), patch.object(sys_config, "default_model", "configured/model"):
+                runtime = await thread_service._build_agent_runtime_context(
+                    **identity, model=run_model, conversation_model=conversation_model,
+                    defaults={"model": agent_model},
+                )
+                context = SubAgentContext()
+                context.update_context(runtime)
+                self.assertEqual(context.model, expected)
+
+    async def test_new_agent_binds_config_model_without_mutating_definition(self):
+        definition = AgentLibrary(
+            slug="configured-agent", name="Configured", description="", backend_id="SubAgentGraph",
+            context={"system_prompt": "Prompt"},
+        )
+        with patch.object(sys_config, "default_model", "configured/model"):
+            await self.repository.ensure_agent(definition=definition, role="subagent", internal_only=True)
+            context = BaseContext()
+        row = await self.repository._get_by_slug(definition.slug)
+        self.assertEqual(row.agent_config["model"], "configured/model")
+        self.assertEqual(context.model, "configured/model")
+        self.assertNotIn("model", definition.context)
 
     async def test_unknown_backend_and_context_are_rejected_before_execution(self):
         row = await self.repository._get_by_slug(SEARCH_AGENT.slug)

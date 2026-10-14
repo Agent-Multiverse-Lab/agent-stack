@@ -28,12 +28,13 @@ from server.utils.agent_run_utils import format_agent_run_sse
 from src.configs import config
 from src.database.models import AgentRun, User
 from src.database.repositories import (
+    AgentRepository,
     AgentRunRepository,
     ConversationRepository,
     MessageAttachmentRepository,
 )
 from src.database.session import session_context
-from src.model import is_model_available
+from src.model import is_model_available, resolve_chat_model_selection
 from src.utils import logger
 
 _TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "interrupted"}
@@ -62,7 +63,7 @@ async def create_agent_run_service(
 
     run_metadata = dict(thread_metadata)
     model_id = run_metadata.get("model")
-    if model_id is not None and (
+    if model_id is not None and model_id != "" and (
         not isinstance(model_id, str) or not is_model_available(model_id)
     ):
         raise ValueError("所选模型不在当前可用模型目录中")
@@ -81,6 +82,20 @@ async def create_agent_run_service(
     )
     if conversation is None:
         raise LookupError("当前会话不存在或已删除")
+    if conversation.agent_id != agent_id:
+        raise ValueError("当前会话未绑定所选智能体")
+    agent = await AgentRepository(db).get_by_slug_for_run_type(slug=agent_id, run_type="chat")
+    if agent is None:
+        raise LookupError("智能体不存在或已停用")
+    conversation_metadata = dict(conversation.conversation_metadata or {})
+    model_id = resolve_chat_model_selection(
+        model=model_id,
+        conversation_model=conversation_metadata.get("model"),
+        agent_model=(agent.agent_config or {}).get("model"),
+    )
+    if not is_model_available(model_id):
+        raise ValueError("所选模型不在当前可用模型目录中")
+    run_metadata["model"] = model_id
 
     # FIXEME: 待回答 ask_user 时不能再追加普通 HumanMessage。
     if (
@@ -97,6 +112,14 @@ async def create_agent_run_service(
     copied_objects: list[tuple[str, str]] = []
 
     try:
+        if conversation_metadata.get("model") != model_id:
+            conversation_metadata["model"] = model_id
+            await conversation_repository.update_conversation(
+                conversation,
+                title=conversation.title,
+                summary=conversation.summary,
+                conversation_metadata=conversation_metadata,
+            )
         attachments, copied_objects = await prepare_message_attachments(
             db,
             user_id=int(current_user.id),

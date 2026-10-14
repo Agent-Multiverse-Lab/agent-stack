@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import server.service.agent_run_service as agent_run_service
 from server.service.input_message_service import AgentInputMsg
 from src.database.models import AgentRun, Conversation, Message
-from src.database.repositories import AgentRunRepository, ConversationRepository
+from src.database.repositories import AgentRepository, AgentRunRepository, ConversationRepository
+from src.model import is_model_available, resolve_chat_model_selection
 
 
 class SubAgentMessageRecord(TypedDict):
@@ -190,6 +191,13 @@ class SubAgentRunService:
             if str(parent_conversation.uid) != str(parent_run.uid):
                 raise ValueError("父运行与父会话的用户归属不一致")
 
+            agent = await AgentRepository(self.db).get_by_slug_for_run_type(slug=agent_slug, run_type="subagent")
+            if agent is None:
+                raise ValueError("子智能体不存在或已停用")
+            model = resolve_chat_model_selection(agent_model=(agent.agent_config or {}).get("model"))
+            if not is_model_available(model):
+                raise ValueError("所选模型不在当前可用模型目录中")
+
             child_thread_id = str(uuid4())
 
             child_conversation = await self.conversation_repository.create_conversation(
@@ -197,6 +205,7 @@ class SubAgentRunService:
                 thread_id=child_thread_id,
                 agent_slug=agent_slug,
                 parent_conversation_id=int(parent_conversation.id),
+                conversation_metadata={"model": model},
             )
             trigger_message = (
                 await self.conversation_repository.create_agent_input_message(
@@ -220,7 +229,7 @@ class SubAgentRunService:
                 trigger_message_id=int(trigger_message.id),
                 run_type="subagent",
                 parent_run_id=parent_run_id,
-                run_metadata={"tool_call_id": tool_call_id},
+                run_metadata={"tool_call_id": tool_call_id, "model": model},
             )
             trigger_message.agent_run_id = child_run.id
             await self.db.flush()

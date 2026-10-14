@@ -29,6 +29,7 @@ def provider_config(**changes):
             "base_url": "http://localhost:11434/v1/",
             "api_key": "secret-key",
             "extra_headers": {"X-Private": "secret-header"},
+            "is_enabled": True,
             "enabled_models": [{"model_id": "qwen3:8b", "model_type": "ollama", "body_overrides": {"temperature": 0.2}}],
             **changes,
         }
@@ -40,6 +41,7 @@ def update_config(**changes):
         {
             "name": "Updated",
             "base_url": "http://localhost:11434/v1",
+            "is_enabled": True,
             "enabled_models": [{"model_id": "qwen3:8b", "model_type": "ollama"}],
             **changes,
         }
@@ -149,96 +151,87 @@ class ModelServiceTest(SQLiteModelTestCase):
         self.addCleanup(target_patch.stop)
 
     async def test_crud_secret_retention_and_public_catalog(self):
-        result = await service.create_provider(self.db, self.user_id, provider_config())
-        self.assertTrue(result.cache_refreshed)
-        self.assertEqual(self.redis.events[0][0], "delete")
-        self.assertEqual(self.redis.events[1], ("set", model_cache.PROVIDER_CATALOG_CACHE_KEY.format(user_id=self.user_id), 3600))
-        serialized = json.dumps(self.redis.data)
-        self.assertNotIn("secret-key", serialized)
-        self.assertNotIn("secret-header", serialized)
-        self.assertNotIn("base_url", serialized)
-        public = await service.get_provider(self.db, self.user_id, "local")
+        result = await service.create_provider(self.db, provider_config())
+        self.assertFalse(result.cache_refreshed)
+        self.assertEqual(self.redis.events, [])
+        public = await service.get_provider(self.db, "local")
         self.assertTrue(public.has_api_key)
         self.assertNotIn("secret-key", public.model_dump_json())
         self.assertNotIn("extra_headers", public.model_dump())
-        connection = await service.resolve_runtime_model(self.db, self.user_id, "local:qwen3:8b")
+        connection = await service.resolve_runtime_model(self.db, "local:qwen3:8b")
         self.assertEqual(connection.api_key.get_secret_value(), "secret-key")
         self.assertEqual(connection.request_headers()["X-Private"], "secret-header")
         self.assertNotIn("secret-header", repr(connection))
         self.assertNotIn("secret-key", connection.model_dump_json())
-        await service.update_provider(self.db, self.user_id, "local", update_config())
-        self.assertEqual((await service.resolve_runtime_model(self.db, self.user_id, "local:qwen3:8b")).api_key.get_secret_value(), "secret-key")
-        await service.update_provider(self.db, self.user_id, "local", update_config(api_key=""))
-        self.assertFalse((await service.get_provider(self.db, self.user_id, "local")).has_api_key)
-        self.assertEqual(len(await service.list_providers(self.db, self.user_id)), 1)
-        await service.delete_provider(self.db, self.user_id, "local")
-        self.assertEqual(await service.list_enabled_models(self.db, self.user_id), [])
+        await service.update_provider(self.db, "local", update_config())
+        self.assertEqual((await service.resolve_runtime_model(self.db, "local:qwen3:8b")).api_key.get_secret_value(), "secret-key")
+        await service.update_provider(self.db, "local", update_config(api_key=""))
+        self.assertFalse((await service.get_provider(self.db, "local")).has_api_key)
+        self.assertEqual(len(await service.list_providers(self.db)), 1)
+        await service.delete_provider(self.db, "local")
+        self.assertEqual(await service.list_enabled_models(self.db), [])
         with self.assertRaises(LookupError):
-            await service.resolve_runtime_model(self.db, self.user_id, "local:qwen3:8b")
+            await service.resolve_runtime_model(self.db, "local:qwen3:8b")
 
-    async def test_disabled_runtime_rejected_even_with_stale_catalog(self):
-        await service.create_provider(self.db, self.user_id, provider_config())
+    async def test_disabled_provider_removed_from_enabled_list_and_runtime(self):
+        await service.create_provider(self.db, provider_config())
         with Session(self.engine) as writer:
-            provider = writer.get(ModelProvider, (self.user_id, "local"))
+            provider = writer.get(ModelProvider, "local")
             provider.is_enabled = False
             writer.commit()
-        self.assertEqual(len(await service.list_enabled_models(self.db, self.user_id)), 1)
+        self.assertEqual(await service.list_enabled_models(self.db), [])
         with self.assertRaisesRegex(ValueError, "停用"):
-            await service.resolve_runtime_model(self.db, self.user_id, "local:qwen3:8b")
-        self.assertTrue(await service.rebuild_model_cache(self.db, self.user_id))
-        self.assertEqual(await service.list_enabled_models(self.db, self.user_id), [])
+            await service.resolve_runtime_model(self.db, "local:qwen3:8b")
 
     async def test_all_types_and_model_names_round_trip_through_database(self):
         models = [{"model_id": f"org/{kind}:tag", "model_type": kind} for kind in get_args(ModelType)]
-        await service.create_provider(self.db, self.user_id, provider_config(enabled_models=models))
+        await service.create_provider(self.db, provider_config(enabled_models=models))
         for model in models:
-            resolved = await service.resolve_runtime_model(self.db, self.user_id, "local:" + model["model_id"])
+            resolved = await service.resolve_runtime_model(self.db, "local:" + model["model_id"])
             self.assertEqual(resolved.model_id, model["model_id"])
             self.assertEqual(resolved.model_type, model["model_type"])
         for invalid in ["local", ":model", "local:"]:
             with self.assertRaises(ValueError):
-                await service.resolve_runtime_model(self.db, self.user_id, invalid)
+                await service.resolve_runtime_model(self.db, invalid)
         for missing in ["unknown:model", "local:missing"]:
             with self.assertRaises(LookupError):
-                await service.resolve_runtime_model(self.db, self.user_id, missing)
+                await service.resolve_runtime_model(self.db, missing)
 
     async def test_commit_failure_rolls_back_and_does_not_refresh_cache(self):
         self.db.commit.side_effect = SQLAlchemyError("secret-key")
         with self.assertRaisesRegex(RuntimeError, "保存模型供应商失败") as error:
-            await service.create_provider(self.db, self.user_id, provider_config())
+            await service.create_provider(self.db, provider_config())
         self.assertNotIn("secret-key", str(error.exception))
         self.assertEqual(self.redis.events, [])
         self.db.rollback.assert_awaited_once()
         self.assertIsNone(await self.repository.get_provider_by_id("local"))
 
     async def test_duplicate_create_preserves_cache_and_original_config(self):
-        await service.create_provider(self.db, self.user_id, provider_config())
+        await service.create_provider(self.db, provider_config())
         self.redis.events.clear()
         with self.assertRaisesRegex(ValueError, "已存在"):
-            await service.create_provider(self.db, self.user_id, provider_config(api_key="other-key"))
+            await service.create_provider(self.db, provider_config(api_key="other-key"))
         self.assertEqual(self.redis.events, [])
-        resolved = await service.resolve_runtime_model(self.db, self.user_id, "local:qwen3:8b")
+        resolved = await service.resolve_runtime_model(self.db, "local:qwen3:8b")
         self.assertEqual(resolved.api_key.get_secret_value(), "secret-key")
 
-    async def test_redis_outage_preserves_committed_write_and_database_fallback(self):
+    async def test_provider_write_and_reads_are_independent_of_redis(self):
         self.redis.error = True
-        result = await service.create_provider(self.db, self.user_id, provider_config())
+        result = await service.create_provider(self.db, provider_config())
         self.assertFalse(result.cache_refreshed)
         with Session(self.engine) as verifier:
             self.assertIsNotNone(verifier.scalar(select(ModelProvider)))
-        self.assertEqual((await service.list_enabled_models(self.db, self.user_id))[0].id, "local:qwen3:8b")
-        self.redis.error = False
-        self.assertTrue(await service.rebuild_model_cache(self.db, self.user_id))
+        self.assertEqual((await service.list_enabled_models(self.db))[0].id, "local:qwen3:8b")
+        self.assertEqual(self.redis.events, [])
 
-    async def test_cache_hit_miss_and_malformed_payload(self):
-        await service.create_provider(self.db, self.user_id, provider_config())
-        with patch.object(service.ModelRepository, "list_providers", side_effect=AssertionError("cache hit must not query DB")):
-            self.assertEqual(len(await service.list_enabled_models(self.db, self.user_id)), 1)
-        for raw in [None, "invalid json", "{}", '[{"id":"bad"}]', '[{"id":12}]']:
-            with self.subTest(raw=raw):
-                self.redis.data[model_cache.PROVIDER_CATALOG_CACHE_KEY.format(user_id=self.user_id)] = raw
-                result = await service.list_enabled_models(self.db, self.user_id)
-                self.assertEqual(result[0].id, "local:qwen3:8b")
+    async def test_provider_writes_leave_existing_chat_catalog_untouched(self):
+        cached = '{"models":[{"id":"static/model"}]}'
+        self.redis.data[model_cache.MODEL_CATALOG_CACHE_KEY] = cached
+        await service.create_provider(self.db, provider_config())
+        await service.update_provider(self.db, "local", update_config())
+        await service.delete_provider(self.db, "local")
+        self.assertEqual(self.redis.data, {model_cache.MODEL_CATALOG_CACHE_KEY: cached})
+        self.assertEqual(self.redis.events, [])
 
     def http_mock(self, handler):
         return patch.object(
@@ -251,7 +244,7 @@ class ModelServiceTest(SQLiteModelTestCase):
         )
 
     async def test_discovery_deduplicates_filters_and_does_not_enable_models(self):
-        await service.create_provider(self.db, self.user_id, provider_config())
+        await service.create_provider(self.db, provider_config())
 
         def handler(request):
             self.assertEqual(str(request.url), "http://localhost:11434/v1/models")
@@ -273,11 +266,11 @@ class ModelServiceTest(SQLiteModelTestCase):
             )
 
         with self.http_mock(handler):
-            self.assertEqual(await service.discover_models(self.db, self.user_id, "local"), ["text", "vision"])
-        self.assertEqual(len((await service.get_provider(self.db, self.user_id, "local")).enabled_models), 1)
+            self.assertEqual(await service.discover_models(self.db, "local"), ["text", "vision"])
+        self.assertEqual(len((await service.get_provider(self.db, "local")).enabled_models), 1)
 
     async def test_chat_probe_on_disabled_provider_uses_overrides_and_saved_model(self):
-        await service.create_provider(self.db, self.user_id, provider_config(is_enabled=False))
+        await service.create_provider(self.db, provider_config(is_enabled=False))
 
         def handler(request):
             body = json.loads(request.content)
@@ -289,13 +282,13 @@ class ModelServiceTest(SQLiteModelTestCase):
             return httpx.Response(200, json={"choices": [{"message": {"role": "assistant", "content": "OK"}}]})
 
         with self.http_mock(handler):
-            result = await service.test_model_connection(self.db, self.user_id, "local:qwen3:8b")
+            result = await service.test_model_connection(self.db, "local:qwen3:8b")
         self.assertTrue(result.success)
         self.assertGreaterEqual(result.elapsed_ms, 0)
-        self.assertFalse((await service.get_provider(self.db, self.user_id, "local")).is_enabled)
+        self.assertFalse((await service.get_provider(self.db, "local")).is_enabled)
 
     async def test_http_failures_are_sanitized_and_redirects_not_followed(self):
-        await service.create_provider(self.db, self.user_id, provider_config())
+        await service.create_provider(self.db, provider_config())
         for status in [301, 401, 429, 500]:
             requests = []
 
@@ -304,29 +297,29 @@ class ModelServiceTest(SQLiteModelTestCase):
                 return httpx.Response(status, text="secret-key secret-header", headers={"Location": "https://elsewhere.example"})
 
             with self.subTest(status=status), self.http_mock(handler):
-                result = await service.test_model_connection(self.db, self.user_id, "local:qwen3:8b")
+                result = await service.test_model_connection(self.db, "local:qwen3:8b")
                 self.assertFalse(result.success)
                 self.assertEqual(result.status_code, status)
                 self.assertNotIn("secret", result.model_dump_json())
                 self.assertEqual(len(requests), 1)
                 with self.assertRaises(service.ModelConnectionError) as error:
-                    await service.discover_models(self.db, self.user_id, "local")
+                    await service.discover_models(self.db, "local")
                 self.assertEqual(str(error.exception), "http_error")
 
     async def test_timeout_transport_and_malformed_response(self):
-        await service.create_provider(self.db, self.user_id, provider_config())
+        await service.create_provider(self.db, provider_config())
         for exception, code in [(httpx.ReadTimeout, "timeout"), (httpx.ConnectError, "connection_error")]:
 
             def handler(request):
                 raise exception("secret-key", request=request)
 
             with self.subTest(code=code), self.http_mock(handler):
-                result = await service.test_model_connection(self.db, self.user_id, "local:qwen3:8b")
+                result = await service.test_model_connection(self.db, "local:qwen3:8b")
                 self.assertEqual(result.error, code)
         for payload in [{}, {"choices": []}, {"choices": [None]}, {"choices": [{"message": {"role": "user", "content": "bad"}}]}]:
             with self.subTest(payload=payload), self.http_mock(lambda request: httpx.Response(200, json=payload)):
-                self.assertEqual((await service.test_model_connection(self.db, self.user_id, "local:qwen3:8b")).error, "invalid_response")
+                self.assertEqual((await service.test_model_connection(self.db, "local:qwen3:8b")).error, "invalid_response")
         for payload in [{}, {"data": [None]}, {"data": [{"id": ""}]}]:
             with self.subTest(payload=payload), self.http_mock(lambda request: httpx.Response(200, json=payload)):
                 with self.assertRaises(service.ModelConnectionError):
-                    await service.discover_models(self.db, self.user_id, "local")
+                    await service.discover_models(self.db, "local")

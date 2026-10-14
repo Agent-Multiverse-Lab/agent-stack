@@ -15,41 +15,6 @@ from src.utils import logger
 
 MODEL_CATALOG_CACHE_KEY = "model:catalog:v2"
 MODEL_CATALOG_CACHE_TTL_SECONDS = 3600
-PROVIDER_CATALOG_CACHE_KEY = "model:providers:v2:user:{user_id}"
-PROVIDER_CATALOG_CACHE_TTL_SECONDS = 3600
-
-
-def _provider_cache_key(user_id: int) -> str:
-    if type(user_id) is not int or user_id <= 0:
-        raise ValueError("必须提供有效的用户 ID")
-    return PROVIDER_CATALOG_CACHE_KEY.format(user_id=user_id)
-
-
-async def get_provider_catalog_cache(user_id: int) -> list[dict[str, Any]] | None:
-    """读取数据库管理能力的公开目录；数据合同由 Service 校验。"""
-    redis = await get_async_redis_client()
-    raw = await redis.get(_provider_cache_key(user_id))
-    if raw is None:
-        return None
-    try:
-        payload = json.loads(raw)
-    except (TypeError, ValueError, UnicodeDecodeError):
-        return None
-    return payload if isinstance(payload, list) else None
-
-
-async def set_provider_catalog_cache(user_id: int, catalog: list[dict[str, Any]]) -> None:
-    redis = await get_async_redis_client()
-    await redis.set(
-        _provider_cache_key(user_id),
-        json.dumps(catalog, ensure_ascii=False, allow_nan=False),
-        ex=PROVIDER_CATALOG_CACHE_TTL_SECONDS,
-    )
-
-
-async def invalidate_provider_catalog_cache(user_id: int) -> None:
-    redis = await get_async_redis_client()
-    await redis.delete(_provider_cache_key(user_id))
 
 _SUPPORTED_CHAT_PROVIDERS = frozenset({
     "dashscope", "openai", "deepseek", "qwen", "glm", "minomax",

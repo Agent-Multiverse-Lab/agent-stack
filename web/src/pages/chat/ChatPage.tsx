@@ -180,6 +180,10 @@ export default function ChatPage() {
     }
   });
   const onUnmount = useEffectEvent(() => invalidate());
+  const boundModelId = chat.state.thread?.metadata.model;
+  useEffect(() => {
+    if (typeof boundModelId === "string" && boundModelId) selectModel(boundModelId);
+  }, [boundModelId, chat.state.thread?.thread_id, selectModel]);
   useEffect(() => {
     onRouteChange(threadId);
   }, [threadId]);
@@ -229,7 +233,7 @@ export default function ChatPage() {
         const agents = await listChatAgents();
         const leader = agents.find((agent) => agent.id === "LeaderAgent");
         if (!leader) throw new Error(t("Leader agent is unavailable"));
-        const created = await createThread(leader.id);
+        const created = await createThread(leader.id, selectedModelId || undefined);
         if (operation.current !== expected) return;
         currentThread = chat.applyCreatedThread(created);
         if (threadId !== created.thread_id) {

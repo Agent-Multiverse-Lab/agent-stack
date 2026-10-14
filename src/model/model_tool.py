@@ -15,6 +15,22 @@ from src.configs.model import EmbeddingModelProvider, RerankModelProvider
 from .reranker import BaseReranker, DashScopeReranker
 
 
+def resolve_chat_model_selection(
+    *,
+    model: str | None = None,
+    conversation_model: str | None = None,
+    agent_model: str | None = None,
+) -> str:
+    """依次选择 Run 快照、会话绑定、Agent 配置和配置文件默认模型。"""
+    for candidate in (model, conversation_model, agent_model, sys_config.default_model):
+        if candidate is None or candidate == "":
+            continue
+        if not isinstance(candidate, str) or candidate != candidate.strip():
+            raise ValueError("模型配置必须是非空、无首尾空白的字符串")
+        return candidate
+    raise ValueError("未配置聊天模型")
+
+
 def load_model(model: str):
     """按 provider/model 规格创建聊天模型。"""
     provider, model_name = model.split("/")

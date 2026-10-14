@@ -3,7 +3,7 @@
 import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from server.entities.agent import AgentRunCreateRequest
 from server.service import agent_run_service
@@ -31,7 +31,9 @@ class FakeSession:
 class FakeConversationRepository:
     def __init__(self, events) -> None:
         self.events = events
-        self.conversation = SimpleNamespace(id=9, agent_id="leaderagent")
+        self.conversation = SimpleNamespace(
+            id=9, agent_id="leaderagent", title="Conversation", summary=None, conversation_metadata={},
+        )
         self.lookup_arguments = None
         self.message_arguments = None
 
@@ -43,6 +45,10 @@ class FakeConversationRepository:
         self.events.append("message")
         self.message_arguments = values
         return SimpleNamespace(id=21, agent_run_id=None)
+
+    async def update_conversation(self, conversation, **values):
+        conversation.conversation_metadata = values["conversation_metadata"]
+        return conversation
 
 
 class FakeAgentRunRepository:
@@ -102,6 +108,8 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
         self.conversations = FakeConversationRepository(self.events)
         self.runs = FakeAgentRunRepository(self.events)
         self.links = FakeMessageAttachmentRepository(self.events)
+        self.agent = SimpleNamespace(agent_config={"model": "dashscope/qwen3.8-max"})
+        self.agents = SimpleNamespace(get_by_slug_for_run_type=AsyncMock(return_value=self.agent))
         self.attachments = [
             SimpleNamespace(id=31, file_id=FILE_ID_1),
             SimpleNamespace(id=32, file_id=FILE_ID_2),
@@ -131,6 +139,7 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
             self.events.append(("delete_targets", copied_objects))
 
         patches = (
+            patch.object(agent_run_service, "AgentRepository", return_value=self.agents),
             patch(
                 "server.service.agent_run_service.ConversationRepository",
                 return_value=self.conversations,
@@ -340,12 +349,39 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
             "dashscope/qwen3.8-max",
             self.runs.arguments["run_metadata"]["model"],
         )
+        self.assertEqual("dashscope/qwen3.8-max", self.conversations.conversation.conversation_metadata["model"])
+
+    async def test_existing_conversation_binding_overrides_agent_configuration(self):
+        self.conversations.conversation.conversation_metadata = {"model": "deepseek/deepseek-v4-flash", "workspace": "research"}
+        with patch.object(agent_run_service, "enqueue_agent_run", AsyncMock()):
+            await self.create_run()
+        self.assertEqual(self.runs.arguments["run_metadata"]["model"], "deepseek/deepseek-v4-flash")
+        self.agent.agent_config["model"] = "changed/model"
+        self.conversations.conversation.conversation_metadata["model"] = "changed/conversation-model"
+        self.assertEqual(self.runs.arguments["run_metadata"]["model"], "deepseek/deepseek-v4-flash")
+
+    async def test_explicit_model_switch_updates_binding_and_snapshot(self):
+        self.conversations.conversation.conversation_metadata = {"model": "dashscope/qwen3.8-max", "workspace": "research"}
+        with patch.object(agent_run_service, "enqueue_agent_run", AsyncMock()):
+            await self.create_run(thread_metadata={"model": "deepseek/deepseek-v4-flash"})
+        self.assertEqual(self.runs.arguments["run_metadata"]["model"], "deepseek/deepseek-v4-flash")
+        self.assertEqual(self.conversations.conversation.conversation_metadata, {"model": "deepseek/deepseek-v4-flash", "workspace": "research"})
+
+    async def test_legacy_conversation_inherits_agent_model_then_config_default(self):
+        for agent_config in ({"model": "deepseek/deepseek-v4-flash"}, {}):
+            self.agent.agent_config = agent_config
+            self.conversations.conversation.conversation_metadata = {}
+            with self.subTest(agent_config=agent_config), patch.object(agent_run_service, "enqueue_agent_run", AsyncMock()):
+                await self.create_run(thread_metadata={"model": ""})
+            expected = agent_config.get("model", "dashscope/qwen3.8-max")
+            self.assertEqual(self.runs.arguments["run_metadata"]["model"], expected)
+            self.assertEqual(self.conversations.conversation.conversation_metadata["model"], expected)
 
     async def test_unavailable_model_is_rejected_before_writes(self):
         with self.assertRaisesRegex(ValueError, "可用模型目录"):
             await self.create_run(
                 thread_metadata={
-                    "model": "gemini/gemini-3-pro",
+                    "model": "unavailable/model",
                 }
             )
 

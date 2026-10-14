@@ -1,9 +1,12 @@
+from copy import deepcopy
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents.library import AgentLibrary
 from src.database.models import Agent
+from src.model import resolve_chat_model_selection
 
 
 class AgentRepository:
@@ -22,11 +25,13 @@ class AgentRepository:
         internal_only: bool = False,
     ) -> None:
         """按预设补齐缺失的 Agent，已有 slug 的记录保持原样。"""
+        agent_config = deepcopy(definition.context)
+        agent_config["model"] = resolve_chat_model_selection(agent_model=agent_config.get("model"))
         values = {
             "backend_id": definition.backend_id,
             "name": definition.name,
             "description": definition.description,
-            "agent_config": definition.context,
+            "agent_config": agent_config,
             "role": role,
             "is_subagent": role == "subagent",
             "internal_only": internal_only,

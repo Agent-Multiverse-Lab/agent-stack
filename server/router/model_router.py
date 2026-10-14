@@ -47,27 +47,27 @@ settings_router = APIRouter(prefix="/providers", route_class=ModelSettingsRoute)
 
 @settings_router.get("", response_model=list[ModelProviderSummary])
 async def get_model_providers(current_user: AuthenticatedUser, db: AsyncSession = Depends(get_db)):
-    return await model_service.list_settings_provider_summaries(db, int(current_user.id))
+    return await model_service.list_settings_provider_summaries(db)
 
 
 @settings_router.get("/{provider_id}", response_model=ModelProviderResponse)
 async def get_model_provider(provider_id: str, current_user: AuthenticatedUser, db: AsyncSession = Depends(get_db)):
-    return await model_service.get_settings_provider(db, int(current_user.id), provider_id)
+    return await model_service.get_settings_provider(db, provider_id)
 
 
 @settings_router.post("/{provider_id}", response_model=ProviderWriteResult)
 async def save_model_provider(provider_id: str, payload: ModelSettingsRequest, current_user: AuthenticatedUser, db: AsyncSession = Depends(get_db)):
-    return await model_service.save_model_settings(db, int(current_user.id), provider_id, payload)
+    return await model_service.save_model_settings(db, provider_id, payload)
 
 
 @settings_router.post("/{provider_id}/discover", response_model=list[SettingsModel])
 async def discover_provider_models(provider_id: str, payload: ModelSettingsRequest, current_user: AuthenticatedUser, db: AsyncSession = Depends(get_db)):
-    return await model_service.discover_settings_models(db, int(current_user.id), provider_id, payload)
+    return await model_service.discover_settings_models(db, provider_id, payload)
 
 
 @settings_router.post("/{provider_id}/test", response_model=ConnectionTestResult)
 async def test_provider_connection(provider_id: str, payload: ModelSettingsRequest, current_user: AuthenticatedUser, db: AsyncSession = Depends(get_db)):
-    return await model_service.test_settings_connection(db, int(current_user.id), provider_id, payload)
+    return await model_service.test_settings_connection(db, provider_id, payload)
 
 
-router.include_router(settings_router)
+# Provider 管理路由在管理员授权接入后挂载；本阶段只开放现有 Chat 目录。

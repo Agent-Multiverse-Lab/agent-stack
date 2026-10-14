@@ -24,11 +24,11 @@ class ModelCredentialSecurityTest(SQLiteModelTestCase):
         with patch.object(service, "_request_json", new_callable=AsyncMock) as remote:
             for method in (service.save_model_settings, service.discover_settings_models, service.test_settings_connection):
                 with self.assertRaises(ValueError):
-                    await method(self.db, self.user_id, "deepseek", draft)
+                    await method(self.db, "deepseek", draft)
             remote.assert_not_called()
         explicit = ModelSettingsRequest(base_url="https://new.example/v1", api_key="new-key", models=[{"model_id": "chat"}])
         with patch.object(service, "_request_json", new_callable=AsyncMock, return_value={"data": []}) as remote:
-            await service.discover_settings_models(self.db, self.user_id, "deepseek", explicit)
+            await service.discover_settings_models(self.db, "deepseek", explicit)
             self.assertEqual(remote.call_args.args[0], "https://new.example/v1")
             self.assertEqual(remote.call_args.args[1], {"Authorization": "Bearer new-key"})
         original = await self.repository.get_provider_by_id("deepseek")
@@ -52,7 +52,7 @@ class ModelCredentialSecurityTest(SQLiteModelTestCase):
     async def test_missing_cipher_key_fails_without_committing_plaintext(self):
         with patch.object(config, "model_credential_key", SecretStr("")):
             with self.assertRaises(RuntimeError):
-                await service.create_provider(self.db, self.user_id, ModelProviderCreate(provider_id="deepseek", name="DeepSeek", base_url="https://example.com/v1", api_key="must-not-persist"))
+                await service.create_provider(self.db, ModelProviderCreate(provider_id="deepseek", name="DeepSeek", base_url="https://example.com/v1", api_key="must-not-persist"))
         self.assertEqual(self.session.execute(text("SELECT count(*) FROM model_provider")).scalar_one(), 0)
 
 class ModelOutboundSecurityTest(unittest.IsolatedAsyncioTestCase):

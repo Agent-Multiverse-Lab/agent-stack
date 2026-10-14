@@ -23,7 +23,7 @@ class BaseContext:
 
     tools: list = field(default_factory=list, metadata={"description": "工具集合"})
 
-    model: str = field(default=config.default_model, metadata={"description": "agent使用的模型"})
+    model: str = field(default_factory=lambda: config.default_model, metadata={"description": "agent使用的模型"})
 
     summary_threshold: int = field(
         default=100,

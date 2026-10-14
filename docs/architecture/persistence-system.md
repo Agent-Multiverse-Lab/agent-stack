@@ -10,12 +10,14 @@
 
 ### PostgreSQL (Source of Truth)
 - `User / Agent / Conversation / Message / Attachment / AgentRun / KnowledgeFile` 等业务状态。
+- 平台级 `ModelProvider` 连接配置、启用状态和 Chat 模型清单。
 - 卫星目录的 `Source / Collection / Scene / SceneAsset`；空间范围由 PostGIS 保存和索引。
 - 状态变更要求事务可见、可幂等、可追溯。
 
 ### Redis
 - ARQ 队列元数据、`run:cancel:{run_id}`（cancel signal）。
 - `run:events:{run_id}`（可读事件流）。
+- `model:catalog:v3`：从 PostgreSQL 派生的全局已启用 Chat 模型脱敏目录。
 
 ### RustFS
 - 原始上传文件、解析产物、Markdown 快照。
@@ -47,6 +49,9 @@
 | `run:{run_id}` | ARQ | 后台任务 Job ID |
 | `run:events:{run_id}` | Redis Stream | 事件传输和重连游标 |
 | `run:cancel:{run_id}` | Redis | 运行时取消信号 |
+| `ModelProvider` | PostgreSQL | 平台共享的模型连接、启用状态和模型选择 |
+| `model:catalog:v3` | Redis | `ModelProvider` 已启用 Chat 模型的可丢弃、可重建、不含连接参数的全局展示投影 |
 
 Redis、内存、RustFS 和 Milvus 不得复制 PostgreSQL 的权威业务状态；如果新增副本，
 必须先在对应能力文档中说明 Owner、生命周期、一致性和清理规则。
+全局模型目录不是可独立修改的业务状态；缓存失效、损坏或过期时必须从 PostgreSQL 重建。

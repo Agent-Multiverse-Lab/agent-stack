@@ -181,7 +181,7 @@ class ResumeStreamTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.config = {"configurable": {"thread_id": "thread-1", "uid": "user-1"}}
         self.saved = AsyncMock()
-        self.require = AsyncMock()
+        self.require = AsyncMock(return_value=SimpleNamespace(conversation_metadata={}))
         for name, value in (("save_message_from_langgraph_state", self.saved), ("_require_thread", self.require)):
             p = patch.object(thread_service, name, value)
             p.start()
@@ -268,7 +268,7 @@ class NormalStreamFinalizationTest(unittest.IsolatedAsyncioTestCase):
                 raise save_error
         agent = SimpleNamespace(agent_context=FixtureContext, stream_messages_with_event=events)
         with patch.object(thread_service, "_build_agent_runtime", AsyncMock(return_value=(SimpleNamespace(slug="LeaderAgent", agent_config={}), agent))), patch.object(
-            thread_service, "_check_conv_status", AsyncMock()
+            thread_service, "_check_conv_status", AsyncMock(return_value=SimpleNamespace(conversation_metadata={}))
         ), patch.object(thread_service, "check_agent_interrupt_handler", handler), patch.object(
             thread_service, "save_message_from_langgraph_state", side_effect=save
         ) as saved, patch.object(thread_service, "_reslove_interrupt_state", wraps=thread_service._reslove_interrupt_state) as resolve:

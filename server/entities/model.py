@@ -2,7 +2,7 @@
 
 import json
 import re
-from typing import Annotated, Literal
+from typing import Annotated
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -15,10 +15,9 @@ from pydantic import (
     model_validator,
 )
 
-ModelType = Literal["deepseek", "qwen", "glm", "minomax", "gemini", "chatgpt", "ollama", "vllm"]
-ModelProtocol = Literal["openai_compatible"]
+from src.model.providers.builtin import ChatCapability, ModelProtocol, ModelType
+
 ProviderId = Annotated[str, Field(pattern=r"^[a-z0-9_-]+$", min_length=1, max_length=64)]
-ChatCapability = Literal["chat", "vision", "reasoning", "tools", "code", "audio", "video"]
 
 
 class EnabledModel(BaseModel):
@@ -28,6 +27,13 @@ class EnabledModel(BaseModel):
     model_type: ModelType
     body_overrides: dict[str, JsonValue] = Field(default_factory=dict)
     capabilities: list[ChatCapability] = Field(default_factory=list)
+
+    @field_validator("capabilities")
+    @classmethod
+    def validate_capabilities(cls, value: list[ChatCapability]) -> list[ChatCapability]:
+        if len(value) != len(set(value)):
+            raise ValueError("模型能力不得重复")
+        return value
 
     @field_validator("model_id")
     @classmethod
@@ -68,7 +74,7 @@ class ProviderSettings(BaseModel):
     base_url: str
     protocol: ModelProtocol = "openai_compatible"
     extra_headers: dict[str, SecretStr] = Field(default_factory=dict, repr=False)
-    is_enabled: bool = Field(default=True, strict=True)
+    is_enabled: bool = Field(default=False, strict=True)
     enabled_models: list[EnabledModel] = Field(default_factory=list)
 
     @field_validator("name")
@@ -217,6 +223,7 @@ class SettingsModel(BaseModel):
     capabilities: list[ChatCapability] = Field(default_factory=list)
 
     _id_validator = field_validator("model_id")(EnabledModel.validate_model_id.__func__)
+    _capability_validator = field_validator("capabilities")(EnabledModel.validate_capabilities.__func__)
 
 
 class ModelSettingsRequest(BaseModel):

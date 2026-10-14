@@ -9,6 +9,7 @@ from .model_tool import (
     load_embedding_model,
     load_model,
     load_reranker,
+    resolve_chat_model_selection,
     resolve_embedding_model,
     resolve_rerank_model,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "load_embedding_model",
     "load_model",
     "load_reranker",
+    "resolve_chat_model_selection",
     "build_model_catalog",
     "get_model_catalog",
     "is_model_available",

@@ -46,6 +46,7 @@
 | 状态和存储所有权 | `docs/architecture/persistence-system.md`、`docs/spec/persistence/` |
 | 认证和用户身份 | `docs/architecture/auth-system.md` |
 | 沙箱和工具隔离 | `docs/architecture/sandbox-system.md` |
+| 模型供应商预置、平台配置和目录缓存 | `docs/architecture/model-system.md`、`docs/spec/model/` |
 | 卫星影像目录和多源检索 | `docs/architecture/data-platform-system.md`、`docs/spec/data-platform/` |
 | 跨系统拓扑和目录职责 | `docs/architecture/overview.md` |
 | Web 页面、组件、目录、命名、样式和交互 | `docs/frontend/README.md` |

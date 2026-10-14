@@ -34,7 +34,10 @@ agent 运行上下文只来自：
 上下文能力由 `src/agents/base_context.py` 和具体 Agent/SubAgent context 承载；
 `server/service/` 或 Worker 在执行入口组装运行时值，再通过方法契约传入 Agent。
 消息等单次调用数据属于 Graph State，不属于平行的运行配置来源。
-模型选择在入口按本次 Run、SQL 预设、应用默认值的优先级确定；构图和摘要仅消费 Context 快照。
+模型选择在入口按 Run 模型快照、会话 metadata 绑定、Agent 配置、应用默认值的优先级确定；
+构图和摘要仅消费 Context 快照。会话创建持久化 `conversation_metadata.model`，Agent 首次注册持久化
+`agent_config.model`，普通 Run 创建解析并保存 `run_metadata.model`。
+配置文件中的默认模型在 Context 实例或执行快照创建时读取，通过 `update_context()` 传入执行链路。
 
 ## 4. Sub-agent Rule
 

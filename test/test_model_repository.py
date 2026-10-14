@@ -37,7 +37,7 @@ class SQLiteModelTestCase(unittest.IsolatedAsyncioTestCase):
         self.db.add.side_effect = self.session.add
         for name in ("execute", "flush", "commit", "rollback", "delete"):
             getattr(self.db, name).side_effect = getattr(self.session, name)
-        self.repository = ModelRepository(self.db, self.user_id)
+        self.repository = ModelRepository(self.db)
 
     async def asyncTearDown(self):
         self.session.close()
@@ -70,7 +70,7 @@ class ModelRepositoryTest(SQLiteModelTestCase):
         await self.repository.update_provider(first, enabled_models=replacement)
         await self.db.commit()
         with Session(self.engine) as verifier:
-            saved = verifier.get(ModelProvider, (self.user_id, "local"))
+            saved = verifier.get(ModelProvider, "local")
             self.assertEqual(saved.enabled_models, replacement)
             self.assertIsNotNone(saved.created_at)
         await self.repository.delete_provider(first)

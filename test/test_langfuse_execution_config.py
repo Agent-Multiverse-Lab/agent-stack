@@ -156,9 +156,9 @@ class LangfuseExecutionConfigTest(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 thread_service,
                 "_build_agent_runtime",
-                AsyncMock(return_value=(SimpleNamespace(slug="LeaderAgent"), agent)),
+                AsyncMock(return_value=(SimpleNamespace(slug="LeaderAgent", agent_config={}), agent)),
             ),
-            patch.object(thread_service, "_check_conv_status", AsyncMock()),
+            patch.object(thread_service, "_check_conv_status", AsyncMock(return_value=SimpleNamespace(conversation_metadata={}))),
             patch.object(
                 thread_service,
                 "with_langfuse_config",
@@ -208,8 +208,8 @@ class LangfuseExecutionConfigTest(unittest.IsolatedAsyncioTestCase):
         }
 
         with (
-            patch.object(thread_service, "_require_thread", AsyncMock()),
-            patch.object(thread_service, "_build_agent_runtime", AsyncMock(return_value=(SimpleNamespace(slug="LeaderAgent"), agent))),
+            patch.object(thread_service, "_require_thread", AsyncMock(return_value=SimpleNamespace(conversation_metadata={}))),
+            patch.object(thread_service, "_build_agent_runtime", AsyncMock(return_value=(SimpleNamespace(slug="LeaderAgent", agent_config={}), agent))),
             patch.object(thread_service, "_reslove_agent_interrupt", return_value=object()),
             patch.object(
                 thread_service,

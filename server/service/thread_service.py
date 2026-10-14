@@ -21,7 +21,6 @@ from server.utils.interrupt_utils import AskHumanPayload, parse_interrupt_questi
 from src.agents import BaseAgent
 from src.agents import CustomAgentState as AgentState
 from src.agents.base_agent import unpack_data
-from src.configs import config
 from src.database import (
     Agent,
     AgentRun,
@@ -39,6 +38,7 @@ from src.database.repositories import (
     MessageAttachmentRepository,
     UserRepository,
 )
+from src.model import is_model_available, resolve_chat_model_selection
 from src.storage import get_storage
 from src.storage.minio import ATTACHMENT_BUCKET_NAME
 from src.utils import logger
@@ -76,6 +76,12 @@ async def create_thread(
     summary_text = summary.strip() if summary is not None else None
     thread_metadata = dict(metadata or {})
     thread_metadata["backend_id"] = str(agent.backend_id)
+    thread_metadata["model"] = resolve_chat_model_selection(
+        conversation_model=thread_metadata.get("model"),
+        agent_model=(agent.agent_config or {}).get("model"),
+    )
+    if not is_model_available(thread_metadata["model"]):
+        raise ValueError("所选模型不在当前可用模型目录中")
 
     return await ConversationRepository(db).create_conversation(
         uid=uid,
@@ -245,6 +251,11 @@ async def update_thread(
         if metadata is None:
             raise ValueError("对话 metadata 必须是对象")
         thread_metadata = dict(metadata)
+        model = thread_metadata.get("model")
+        if model is None or model == "":
+            thread_metadata.pop("model", None)
+        elif not isinstance(model, str) or not is_model_available(model):
+            raise ValueError("所选模型不在当前可用模型目录中")
         for key in _SYSTEM_THREAD_METADATA_KEYS:
             if key in existing_metadata:
                 thread_metadata[key] = existing_metadata[key]
@@ -524,6 +535,7 @@ async def _build_agent_runtime_context(
     model: str | None = None,
     defaults: dict[str, Any] | None = None,
     parent_run_id: str | None = None,
+    conversation_model: str | None = None,
 ):
     """复制 SQL 默认配置，注入本次 Run 身份和模型选择，生成运行快照。"""
     agent_runtime_context = deepcopy(defaults or {})
@@ -537,7 +549,11 @@ async def _build_agent_runtime_context(
             "request_id": request_id,
         }
     )
-    agent_runtime_context["model"] = model or agent_runtime_context.get("model") or config.default_model
+    agent_runtime_context["model"] = resolve_chat_model_selection(
+        model=model,
+        conversation_model=conversation_model,
+        agent_model=agent_runtime_context.get("model"),
+    )
     if parent_run_id:
         agent_runtime_context["parent_run_id"] = parent_run_id
     return agent_runtime_context
@@ -545,7 +561,7 @@ async def _build_agent_runtime_context(
 
 async def _check_conv_status(
     *, conv_repo: ConversationRepository, thread_id: str, uid: str, agent_item: Agent
-):
+) -> Conversation:
     """确保当前的conv存在"""
     # FIXME: run 只能使用已经创建且属于当前用户的 Conversation。
     current_conv = await conv_repo.get_conversation_by_thread_id_for_user(
@@ -557,7 +573,7 @@ async def _check_conv_status(
     if current_conv.agent_id != agent_item.slug:
         raise ValueError(f"当前会话未绑定智能体：{agent_item.slug}")
 
-    # TODO 其他的错点
+    return current_conv
 
 
 def _make_stream_msg_key(
@@ -1271,6 +1287,12 @@ async def stream_agent_response(
             "has_image": bool(image_content),
         }
     )
+    conversation = await _check_conv_status(
+        conv_repo=ConversationRepository(db),
+        thread_id=thread_id,
+        uid=current_user.uid,
+        agent_item=agent_item,
+    )
     agent_runtime_context = await _build_agent_runtime_context(
         uid=current_user.uid,  # ty:ignore[invalid-argument-type]
         run_id=run_id,
@@ -1279,6 +1301,7 @@ async def stream_agent_response(
         model=runtime_metadata.get("model"),
         defaults=agent_item.agent_config,
         parent_run_id=runtime_metadata.get("parent_run_id"),
+        conversation_model=(conversation.conversation_metadata or {}).get("model"),
     )
     agent_context = agent_instance.agent_context()
     agent_context.update_context(agent_runtime_context)
@@ -1286,12 +1309,6 @@ async def stream_agent_response(
     lc_accumulated_msg = None
 
     try:
-        await _check_conv_status(
-            conv_repo=ConversationRepository(db),
-            thread_id=thread_id,
-            uid=current_user.uid,  # ty:ignore[invalid-argument-type]
-            agent_item=agent_item,
-        )
         attachment_file_ids = thread_input_message.msg_metadata.get(
             "attachment_file_ids", []
         )
@@ -1437,7 +1454,7 @@ async def resume_agent_response(
             raise ValueError("Resume Run 缺少 thread_id、run_id 或 request_id")
         if not isinstance(resume_input, dict) or not resume_input:
             raise ValueError("Resume Run 缺少回答字典")
-        await _require_thread(
+        conversation = await _require_thread(
             conversations=ConversationRepository(db),
             thread_id=thread_id,
             uid=current_user.uid,
@@ -1457,6 +1474,7 @@ async def resume_agent_response(
             request_id=runtime_metadata["request_id"],
             model=runtime_metadata.get("model"),
             defaults=agent_item.agent_config,
+            conversation_model=(conversation.conversation_metadata or {}).get("model"),
         )
         agent_context = agent_instance.agent_context()
         agent_context.update_context(agent_runtime_context)

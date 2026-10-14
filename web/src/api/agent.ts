@@ -12,6 +12,7 @@ import type {
   AgentRunResumeResponse,
   AgentRunStreamEvent,
   AgentSummary,
+  JsonObject,
   ThreadDetailResponse,
   ThreadListResponse,
   ThreadSummaryResponse,
@@ -71,10 +72,10 @@ export const renameThread = async (threadId: string, title: string): Promise<Thr
 export const deleteThread = (threadId: string) =>
   apiClient.apiDelete(`/api/chat/thread/${encodeURIComponent(threadId)}`, { requiresAuth: true })
 
-export const createThread = (agentId: string) =>
-  apiClient.apiPost<ThreadResponse, { agent_id: string }>(
+export const createThread = (agentId: string, modelId?: string) =>
+  apiClient.apiPost<ThreadResponse, { agent_id: string; metadata: JsonObject }>(
     "/api/chat/thread",
-    { agent_id: agentId },
+    { agent_id: agentId, metadata: modelId ? { model: modelId } : {} },
     { requiresAuth: true }
   )
 

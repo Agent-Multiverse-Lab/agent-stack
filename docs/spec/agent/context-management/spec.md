@@ -6,7 +6,8 @@
 
 1. Context 声明的配置默认值。
 2. SQL `agent.agent_config` 中的角色配置。
-3. 当前 Run 明确选择的模型及受信任的运行身份。
+3. SQL `conversation.conversation_metadata.model` 中的会话模型绑定。
+4. 当前 Run 已持久化的模型快照及受信任的运行身份。
 
 用户消息进入 Graph State，不将整份消息 metadata 或 Run metadata 混入 Context。
 本能力不替代 Run 生命周期、数据库连接或模型凭据管理。
@@ -16,10 +17,14 @@
 ### AG-CONT-001：显式来源与覆盖顺序
 
 Worker 从持久化 AgentRun、用户和输入消息构造执行参数；Run 的身份字段覆盖 metadata 同名值。
-Service 深拷贝 SQL 配置，模型优先级为：非空 Run 选择 > 非空 SQL 预设 > 应用默认模型。
+Service 深拷贝 SQL 配置，模型优先级为：非空 Run 模型快照 > 非空会话绑定 > 非空 Agent 配置 > 应用默认模型。
+会话创建时将显式选择或 Agent / 应用默认模型写入 `conversation_metadata.model`；
+普通 Run 创建时解析会话模型并保存到 `run_metadata.model`，显式选择同时更新会话绑定，事务原子提交。
+已有会话缺少模型绑定时沿用 Agent 配置；子会话创建时使用子 Agent 自己的配置确定初始绑定。
 `uid`、`run_id`、`thread_id`、`request_id` 和子 Run 的 `parent_run_id` 来自本次执行参数。
 SQL 预设中的运行身份和未知 Context 字段由 Agent 构造入口拒绝。
-应用默认模型在入口或 Context 默认值中确定，构图和摘要中间件只消费 `context.model`。
+应用默认模型从配置文件读取，在入口或 Context 实例创建时确定，再通过 `update_context()` 写入本次 Context。
+构图和摘要中间件只消费 `context.model`。
 平台连接、凭据和存储根目录属于基础设施配置，不作为当前用户或 Run 身份的隐式来源。
 
 ### AG-CONT-002：单次运行快照
@@ -40,6 +45,7 @@ Context 不负责修改数据库中的 Run 状态。
 ## 3. Acceptance
 
 - Run 身份不会被 SQL 预设或未筛选的 metadata 覆盖。
-- 非空模型选择按上述顺序生效，空字符串不会清除 SQL 预设。
+- 会话模型覆盖 Agent 配置；缺少会话模型时沿用 Agent 配置，两者缺失时使用应用默认模型。
+- 显式选择更新会话绑定和本次 Run 快照，空字符串保持既有绑定；无效模型在写入前被拒绝。
 - 全局默认模型在快照构造后改变，不影响已有快照；构图与摘要使用同一个模型值。
 - 嵌套配置在不同 Run 之间隔离；普通执行、子 Run 和 Resume 的 Context 入口均可追踪。

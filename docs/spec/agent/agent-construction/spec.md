@@ -35,6 +35,8 @@ Prompt 与 Context 配置编辑、Markdown 编译、定义版本系统不在本�
 `backend_id` 等于执行实体类的类名，只支持 `LeaderAgent` 和 `SubAgentGraph`，
 SQL 不序列化 Python class 对象。角色 `slug` 用于查询记录，Backend ID 用于解析执行类。
 基础信息写入现有 `agent` 列，`context` 写入 `agent.agent_config`。
+首次注册时将角色预置中的 `model` 写入 `agent_config.model`；预置未指定时读取应用默认模型补齐，
+配置容器先复制，保持代码预置和 SQL 配置独立。
 `agent.is_subagent` 是非空布尔字段，数据库默认值为 `false`。
 主 Agent 为 `false`，子 Agent 为 `true`；创建时按 `role == 'subagent'` 写入。
 已有数据通过 schema 迁移按 `role` 回填；启动初始化不修改已有记录的标记。
@@ -60,8 +62,8 @@ Leader 使用自己的 `get_agent(context)`，通过构造参数接收数据库�
 Service 直接校验 SQL 中的角色标记和 `agent_config`，拒绝未知 Context 字段和预设 Run 身份。
 `BaseAgent` 的执行协议、checkpointer 和 store 接口继续使用。
 每次 Run 创建独立执行实例、Context 和绑定该 Context 的 Middleware。
-Context 预设配置在使用前复制；运行身份来自当前 Run，显式模型选择覆盖预设模型，
-缺省模型选择不以空字符串覆盖定义默认值。
+Context 预设配置在使用前复制；运行身份来自当前 Run，模型先使用 Run 快照，
+缺少快照时依次使用会话 metadata 绑定、Agent 配置和应用默认模型。空字符串表示未指定。
 
 ### AG-CON-005：统一执行类解析
 
