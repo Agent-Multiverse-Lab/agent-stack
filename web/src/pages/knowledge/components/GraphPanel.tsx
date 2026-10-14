@@ -212,7 +212,7 @@ export function GraphPanel({ kbId }: { kbId: string }) {
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t("Search entities")}
             aria-label={t("Search entities")}
-            className="min-w-0 border-0 bg-transparent px-2 py-1 focus-visible:ring-0"
+            className="min-w-0 border-0 bg-transparent px-2 py-1"
           />
           {matchedIds.size > 0 && (
             <Button

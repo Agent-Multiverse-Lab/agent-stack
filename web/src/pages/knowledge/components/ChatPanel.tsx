@@ -112,7 +112,7 @@ export function ChatPanel({ kbId }: { kbId: string }) {
           handleSend()
         }}
       >
-        <div className="mx-auto flex max-w-3xl items-center gap-2 rounded-2xl border border-input bg-card px-3 py-2 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/20">
+        <div className="mx-auto flex max-w-3xl items-center gap-2 rounded-2xl border border-input bg-card px-3 py-2">
           <Textarea
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
@@ -129,7 +129,7 @@ export function ChatPanel({ kbId }: { kbId: string }) {
             placeholder={t("Ask a question")}
             aria-label={t("Ask this knowledge base")}
             rows={1}
-            className="min-h-0 min-w-0 flex-1 resize-none border-0 bg-transparent px-0 py-0 focus-visible:ring-0"
+            className="min-h-0 min-w-0 flex-1 resize-none border-0 bg-transparent px-0 py-0 "
           />
           <Button
             variant="default"

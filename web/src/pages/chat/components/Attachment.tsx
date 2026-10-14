@@ -46,7 +46,7 @@ export function Attachment({
           <TooltipTrigger
             render={<Button variant="ghost" size="icon-sm" />}
             type="button"
-            className="rounded-full text-muted-foreground transition-transform duration-150 hover:bg-muted hover:text-foreground active:scale-90 motion-reduce:transform-none"
+            className="rounded-full text-muted-foreground hover:bg-muted hover:text-foreground active:scale-90 motion-reduce:transform-none"
             aria-label={t("Remove attachment {{name}}", { name: attachment.file_name })}
             onClick={() => remove(attachment.file_id)}
           >

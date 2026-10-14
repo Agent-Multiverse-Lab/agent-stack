@@ -372,7 +372,7 @@ export function AgentMessageComposer({
       aria-label={t("Agent message composer")}
       aria-busy={uploading > 0}
       data-expanded={expanded}
-      className="relative isolate flex w-full flex-col overflow-hidden rounded-4xl border border-border bg-card p-2 shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20"
+      className="relative isolate flex w-full flex-col overflow-hidden rounded-4xl border border-border bg-card p-2 shadow-sm transition-[border-color,box-shadow]"
       onSubmit={onSubmit}
       onDragOver={(event) => event.preventDefault()}
       onDrop={onDrop}
@@ -436,7 +436,7 @@ export function AgentMessageComposer({
             disabled={disabled}
             aria-label={t("Action menu")}
             data-composer-control="actions"
-            className={`rounded-full bg-muted/70 text-muted-foreground transition-transform duration-150 hover:text-foreground active:scale-[0.94] motion-reduce:transform-none ${
+            className={`rounded-full bg-muted/70 text-muted-foreground hover:text-foreground active:scale-[0.94] motion-reduce:transform-none ${
               expanded ? "col-start-1 row-start-2" : "col-start-1 row-start-1"
             }`}
           >
@@ -484,7 +484,7 @@ export function AgentMessageComposer({
           aria-label={t("Message")}
           placeholder={listening ? t("Listening…") : t("Ask anything")}
           rows={1}
-          className={`field-sizing-fixed max-h-40 min-h-10 min-w-0 resize-none border-0 bg-transparent px-2 py-2 text-sm leading-6 shadow-none focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent disabled:opacity-60 ${
+          className={`field-sizing-fixed max-h-40 min-h-10 min-w-0 resize-none border-0 bg-transparent px-2 py-2 text-sm leading-6 shadow-none disabled:bg-transparent disabled:opacity-60 ${
             expanded
               ? "col-span-full col-start-1 row-start-1"
               : "col-start-2 row-start-1"
@@ -518,7 +518,7 @@ export function AgentMessageComposer({
             aria-pressed={listening}
             data-composer-control="dictation"
             onClick={toggleDictation}
-            className={`rounded-xl text-muted-foreground transition-transform duration-150 hover:bg-muted hover:text-foreground active:scale-[0.94] motion-reduce:transform-none ${
+            className={`rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground active:scale-[0.94] motion-reduce:transform-none ${
               expanded ? "col-start-4 row-start-2" : "col-start-4 row-start-1"
             }`}
           >
@@ -548,7 +548,7 @@ export function AgentMessageComposer({
             aria-label={running ? t("Cancel response") : t("Send message")}
             data-composer-control="submit"
             onClick={running ? cancel : submitMessage}
-            className={`rounded-full transition-transform duration-150 active:scale-[0.94] motion-reduce:transform-none ${
+            className={`rounded-full active:scale-[0.94] motion-reduce:transform-none ${
               expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"
             }`}
           >

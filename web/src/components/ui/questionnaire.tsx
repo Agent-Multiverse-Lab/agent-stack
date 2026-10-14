@@ -104,7 +104,7 @@ function QuestionnaireChoice({
     <QuestionnairePrimitive.Choice
       data-slot="questionnaire-choice"
       className={cn(
-        "group/questionnaire-choice relative flex min-h-0 cursor-pointer items-start gap-2.5 rounded-lg border border-input bg-card px-3 py-2.5 text-start text-sm transition-colors outline-none select-none hover:bg-accent has-[>input:focus-visible]:border-ring has-[>input:focus-visible]:ring-3 has-[>input:focus-visible]:ring-ring/50 data-invalid:border-destructive data-checked:border-primary data-checked:bg-selection data-checked:hover:bg-selection",
+        "group/questionnaire-choice relative flex min-h-0 cursor-pointer items-start gap-2.5 rounded-lg border border-input bg-card px-3 py-2.5 text-start text-sm transition-colors duration-(--hover-transition-duration) ease-in-out outline-none select-none hover:bg-accent data-invalid:border-destructive data-checked:border-primary data-checked:bg-selection data-checked:hover:bg-selection",
         "data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-50",
         className
       )}
@@ -164,7 +164,7 @@ function QuestionnaireInput({
       <QuestionnairePrimitive.Input
         data-slot="questionnaire-input"
         className={cn(
-          "h-8 min-h-0 w-full min-w-0 rounded-lg border border-input bg-card px-2.5 py-1 text-sm transition-[color,box-shadow,background-color] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40",
+          "h-8 min-h-0 w-full min-w-0 rounded-lg border border-input bg-card px-2.5 py-1 text-sm transition-[color,box-shadow,background-color] outline-none disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-50 aria-invalid:border-destructive dark:aria-invalid:border-destructive/50",
           "selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground",
           className
         )}

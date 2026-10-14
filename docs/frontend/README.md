@@ -125,8 +125,11 @@ Tailwind 颜色。页面使用语义类名，不依赖具体色值。
 不要假定按钮文字始终为白色。
 
 主按钮的默认、悬停和按下状态分别使用 `primary`、`primary-hover`、`primary-active`。普通控件悬停
-使用 `accent`，当前选中项使用 `selection`，两者不混用。焦点指示使用 `ring`，Dialog 和 Sheet 的
-遮罩使用 `overlay`。
+使用 `accent`，当前选中项使用 `selection`，两者不混用。侧栏的悬停和选中状态分别使用
+`sidebar-accent` 与 `sidebar-primary`。未选中项悬停时使用比侧栏底色略深的同色系背景；选中项使用
+卡片背景，浅色主题中为白色，悬停时保留选中配色。侧栏选项在悬停和选中状态下显示由
+`sidebar-border` 提供的 1px 灰色完整外轮廓。聚焦时保持组件原有边框颜色，不增加 focus ring
+或额外外框；Dialog 和 Sheet 的遮罩使用 `overlay`。
 
 按钮外观通过共享 `Button` variant 选择：
 
@@ -144,9 +147,11 @@ Tailwind 颜色。页面使用语义类名，不依赖具体色值。
 ## 8. 交互与可访问性
 
 - 图标按钮必须有可访问名称，通常使用 `aria-label`；Tooltip 只补充提示，不代替可访问名称。
-- 键盘焦点必须可见，不移除共享组件提供的 focus ring。
+- 共享组件聚焦时保持原有边框，不使用 focus ring；菜单高亮、选中态和禁用态按各自状态样式呈现。
 - 加载、空状态、错误和禁用状态应在原位置呈现，避免因状态切换造成主要布局跳动。
 - 动画只用于表达状态变化，并遵守 `prefers-reduced-motion`。
+- 共享控件的 hover 使用 `--hover-transition-duration`（300ms）和 `ease-in-out`，背景、文字、
+  描边与外轮廓应平缓过渡；按钮点击按下反馈使用 150ms。减少动态效果时 hover 过渡时长为 0ms。
 - 删除、覆盖等不可逆操作使用明确的危险样式，并按产品能力要求提供确认流程。
 
 ## 9. 修改与验证

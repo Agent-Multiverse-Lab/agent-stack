@@ -99,7 +99,7 @@ export function SearchChat({
             ref={input}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="h-auto w-full border-0 bg-transparent px-0 py-0 text-lg text-foreground placeholder:text-muted-foreground focus-visible:ring-0"
+            className="h-auto w-full border-0 bg-transparent px-0 py-0 text-lg text-foreground placeholder:text-muted-foreground"
             placeholder={t("Search conversation")}
           />
           {query && (

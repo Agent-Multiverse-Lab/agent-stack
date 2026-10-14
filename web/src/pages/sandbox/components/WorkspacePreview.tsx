@@ -119,7 +119,7 @@ export default function WorkspacePreview({
           <form className="flex min-h-0 flex-1 flex-col" onSubmit={(event) => { event.preventDefault(); void save(); }}>
             {canEdit ? <Textarea autoFocus aria-label={t("File content")} value={draft} maxLength={200_000} disabled={saving}
               onChange={(event) => setDraft(event.target.value)}
-              className="h-full min-h-0 flex-1 resize-none rounded-none border-0 px-5 py-4 font-mono text-xs leading-6 focus-visible:ring-0 field-sizing-fixed" />
+              className="h-full min-h-0 flex-1 resize-none rounded-none border-0 px-5 py-4 font-mono text-xs leading-6 field-sizing-fixed" />
               : <div className="min-h-0 flex-1 overflow-auto">
                   {file.truncated && current ? <p role="alert" className="px-5 py-4 text-sm text-destructive">{t("This file is too large to edit")}</p>
                     : <FileContentViewer path={path} content="" loading={!current || file.loading} error={current ? file.error : ""} />}

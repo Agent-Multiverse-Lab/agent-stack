@@ -45,7 +45,7 @@ export function NavUser({
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <SidebarMenuButton size="lg" className="aria-expanded:bg-muted" />
+              <SidebarMenuButton size="lg" className="aria-expanded:bg-sidebar-accent aria-expanded:text-sidebar-accent-foreground aria-expanded:shadow-[0_0_0_1px_var(--sidebar-border)]" />
             }
             aria-label={t("Open AM User account menu")}
           >

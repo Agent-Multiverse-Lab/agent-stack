@@ -168,7 +168,7 @@ function SandboxWorkspace({ threadId, threads, onThreadChange }: {
 
   return (
     <section aria-label={t("Workspace")} className="flex h-full min-h-0 min-w-0 overflow-hidden">
-      <aside className="flex w-56 shrink-0 flex-col bg-muted">
+      <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-card">
         <div className="flex min-h-14 shrink-0 flex-col justify-center px-4 py-3">
           <h2 className="text-sm font-medium">{t("Files")}</h2>
           {threadSelect}
@@ -181,7 +181,7 @@ function SandboxWorkspace({ threadId, threads, onThreadChange }: {
         </ResizablePanel>
         <ResizableHandle aria-label={t("Resize preview")} disabled={!previewOpen || expanded}
           className={previewOpen && !expanded
-            ? "w-1 bg-transparent after:bg-transparent before:h-8 before:w-0.5 before:rounded-full before:bg-border hover:before:bg-ring"
+            ? "w-1 bg-transparent after:bg-transparent before:h-8 before:w-0.5 before:rounded-full before:bg-border"
             : "hidden"} />
         <ResizablePanel id="sandbox-preview" panelRef={previewPanel} defaultSize="0%" collapsedSize="0%"
           minSize="280px" maxSize={expanded ? "100%" : "70%"} collapsible={!previewOpen}>

@@ -57,7 +57,7 @@ export default function KnowledgeBaseDetailPage() {
     return (
       <div className="grid h-full place-items-center text-sm text-muted-foreground">
         {error}
-        <Link to="/knowledge" className="mt-2 text-primary underline underline-offset-4 hover:text-primary-hover">
+        <Link to="/knowledge" className="mt-2 text-primary underline underline-offset-4 transition-colors duration-(--hover-transition-duration) ease-in-out hover:text-primary-hover">
           {t("Back to knowledge bases")}
         </Link>
       </div>
@@ -69,7 +69,7 @@ export default function KnowledgeBaseDetailPage() {
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
         <Link
           to="/knowledge"
-          className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent"
+          className="grid size-8 place-items-center rounded-md text-muted-foreground transition-colors duration-(--hover-transition-duration) ease-in-out hover:bg-accent"
           aria-label={t("Back to knowledge bases")}
         >
           <ArrowLeft size={16} />

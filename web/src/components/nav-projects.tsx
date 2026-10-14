@@ -182,7 +182,7 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
                   render={
                     <SidebarMenuAction
                       showOnHover
-                      className="aria-expanded:bg-muted"
+                      className="aria-expanded:bg-sidebar-accent aria-expanded:text-sidebar-accent-foreground"
                     />
                   }
                   aria-label={t("Conversation actions: {{title}}", {

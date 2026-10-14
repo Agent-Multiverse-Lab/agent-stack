@@ -100,7 +100,7 @@ export function LoginForm({
               <Link
                 to="/"
                 aria-label={t("AM home")}
-                className="mb-3 inline-flex items-center gap-2 rounded-md font-semibold focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+                className="mb-3 inline-flex items-center gap-2 rounded-md font-semibold outline-none"
               >
                 <img className="size-6" src={logoUrl} alt="" aria-hidden />
                 <span>AM</span>

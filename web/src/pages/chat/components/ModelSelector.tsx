@@ -74,7 +74,7 @@ export default function ModelSelector({
         render={<Button type="button" variant="ghost" />}
         disabled={disabled || loading || available.length === 0}
         aria-label={t("Select model")}
-        className="flex h-10 min-w-0 max-w-48 shrink-0 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-muted-foreground transition-[color,background-color,transform] duration-150 hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground active:scale-[0.96] motion-reduce:transform-none"
+        className="flex h-10 min-w-0 max-w-48 shrink-0 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground active:scale-[0.96] motion-reduce:transform-none"
       >
         <span className="truncate">{triggerLabel}</span>
         <ChevronDownIcon

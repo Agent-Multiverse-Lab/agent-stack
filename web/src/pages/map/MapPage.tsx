@@ -82,12 +82,12 @@ export default function MapPage() {
       aria-label={t("Map")}
     >
       <section
-        className="relative min-h-0 flex-1 overflow-hidden bg-muted"
+        className="relative min-h-0 flex-1 overflow-hidden bg-background"
         aria-label={t("Map canvas")}
       >
         <div ref={mapElement} className="absolute inset-0" />
         {status !== "ready" && (
-          <div className="absolute inset-0 z-10 grid place-items-center bg-muted px-6 text-center">
+          <div className="absolute inset-0 z-10 grid place-items-center bg-background px-6 text-center">
             <div className="grid justify-items-center gap-3">
               <MapPinned className="size-9 text-muted-foreground" aria-hidden />
               <p role={status === "error" ? "alert" : "status"} className="m-0 text-sm font-medium">

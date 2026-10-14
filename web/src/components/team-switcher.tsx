@@ -51,7 +51,7 @@ export function TeamSwitcher({
             render={
               <SidebarMenuButton
                 size="default"
-                className="data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground"
+                className="data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground data-open:shadow-[0_0_0_1px_var(--sidebar-border)]"
               />
             }
           >
@@ -61,7 +61,7 @@ export function TeamSwitcher({
             <span className="min-w-0 flex-1 truncate text-left font-medium">
               {activeTeam.name}
             </span>
-            <ChevronDownIcon className="ml-auto size-4 text-muted-foreground" />
+            <ChevronDownIcon className="ml-auto size-4" />
           </DropdownMenuTrigger>
           <DropdownMenuContent
             className="w-fit"

@@ -161,7 +161,7 @@ export default function KnowledgePage() {
                           <DropdownMenuTrigger
                             aria-label={t("Open file actions")}
                             title={t("Open file actions")}
-                            className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent"
+                            className="grid size-8 place-items-center rounded-md text-muted-foreground transition-colors duration-(--hover-transition-duration) ease-in-out hover:bg-accent"
                           >
                             <MoreHorizontal size={16} />
                           </DropdownMenuTrigger>

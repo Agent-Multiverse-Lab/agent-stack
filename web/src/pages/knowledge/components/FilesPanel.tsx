@@ -257,7 +257,7 @@ export function FilesPanel({ kbId }: { kbId: string }) {
               {files.map((file) => (
                 <li
                   key={file.file_id}
-                  className={`flex min-h-14 min-w-0 items-center gap-1 rounded-lg border px-2 hover:bg-accent ${
+                  className={`flex min-h-14 min-w-0 items-center gap-1 rounded-lg border px-2 transition-colors duration-(--hover-transition-duration) ease-in-out hover:bg-accent ${
                     selectedId === file.file_id
                       ? "border-primary/25 bg-selection shadow-[inset_3px_0_0_var(--selection-foreground)] hover:bg-selection"
                       : "border-transparent"
@@ -282,7 +282,7 @@ export function FilesPanel({ kbId }: { kbId: string }) {
                     <DropdownMenuTrigger
                       aria-label={t("Open file actions")}
                       title={t("Open file actions")}
-                      className="grid size-9 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent"
+                      className="grid size-9 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors duration-(--hover-transition-duration) ease-in-out hover:bg-accent"
                     >
                       <MoreHorizontal size={16} />
                     </DropdownMenuTrigger>
