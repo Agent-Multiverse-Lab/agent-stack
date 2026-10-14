@@ -100,7 +100,6 @@ def main():
             ["openssl", "req", "-x509", "-newkey", "rsa:3072", "-nodes", "-keyout", str(key), "-out", str(ca), "-days", "3650", "-subj", "/CN=Agent Stack Cube CA", "-addext", "basicConstraints=critical,CA:TRUE"],
             check=True,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
         )
     # Egress worker uid/gid 8049 reads the CA for TLS interception.
     os.chown(key, 0, 8049)
@@ -112,8 +111,9 @@ def main():
             raise RuntimeError(f"Incomplete Cube certificate: {name}")
         if not cert.exists():
             csr = cert_dir / f"{name}.csr"
-            subprocess.run(["openssl", "req", "-newkey", "rsa:2048", "-nodes", "-keyout", str(leaf_key), "-out", str(csr), "-subj", f"/CN={name}"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["openssl", "x509", "-req", "-in", str(csr), "-CA", str(ca), "-CAkey", str(key), "-CAcreateserial", "-out", str(cert), "-days", "3650"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subject = "/CN=" + name.replace("+", r"\+")
+            subprocess.run(["openssl", "req", "-newkey", "rsa:2048", "-nodes", "-keyout", str(leaf_key), "-out", str(csr), "-subj", subject], check=True, stdout=subprocess.DEVNULL)
+            subprocess.run(["openssl", "x509", "-req", "-in", str(csr), "-CA", str(ca), "-CAkey", str(key), "-CAcreateserial", "-out", str(cert), "-days", "3650"], check=True, stdout=subprocess.DEVNULL)
             leaf_key.chmod(0o600)
             csr.unlink()
     (cert_dir / "cube.app+3.pem").write_bytes((cert_dir / "cube.app+3.crt").read_bytes())

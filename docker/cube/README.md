@@ -22,6 +22,7 @@ sudo env CUBE_NODE_IP=192.168.1.20 bash docker/cube/preflight.sh
 | 配置 | 含义 |
 | --- | --- |
 | `CUBE_NODE_IP` | 宿主机真实 IPv4，控制容器必须能够回连此 IP 的 9999 端口 |
+| `CUBE_SANDBOX_ETH_NAME` | 可选；显式指定宿主机上联网卡，有代理/TUN 时填写实际网卡名 |
 | `CUBE_DB_PASSWORD` | Cube 独立数据库密码，16–128 个 URL 安全字符 |
 | `CUBE_ADMIN_TOKEN` | Master/Proxy/生命周期管理器共用的管理 token |
 | `CUBE_TEMPLATE_CALLBACK_TOKEN` | Master 与 TemplateCenter 的回调 token |
@@ -35,6 +36,14 @@ sudo env CUBE_NODE_IP=192.168.1.20 bash docker/cube/preflight.sh
 
 VM 网络固定使用 `172.16.0.0/16`；它不能与主机已有路由冲突。官方 node-init 会进一步检查
 CPU/cgroup、BPF、网络、CubeCOW 依赖和端口，并以错误退出阻止后续启动。
+
+代理 TUN 改变策略路由时，Cubelet 的 `ip route get 1.1.1.1` 自动检测可能选中虚拟网卡，
+导致 `default gateway not found`。可保持 TUN 开启，用 `ip -4 route show default` 和
+`ip -4 -br addr` 确认实际网卡与地址，然后在 `.env` 同时填写 `CUBE_NODE_IP` 和
+`CUBE_SANDBOX_ETH_NAME`（例如 `192.168.0.108`、`eno1`）。显式网卡优先于自动检测。
+修改节点地址后，执行 `docker compose run --rm cube-prepare` 重新生成配置，再重新创建
+Cube 服务容器使配置生效。指定网卡只解决节点网络初始化，不保证 VM 的出站流量经过代理；
+真实 VM 的联网和隔离仍需按下文完成 smoke 验证。
 
 ## 2. 启动控制服务与计算节点
 

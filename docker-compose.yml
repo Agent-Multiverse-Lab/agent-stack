@@ -287,6 +287,7 @@ services:
     depends_on:
       cube-prepare: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
+      cube-ops: {condition: service_started}
 
   cube-templatecenter:
     <<: *cube-control
@@ -326,7 +327,8 @@ services:
     volumes:
       - /data/cube-stack/ops:/var/lib/cubeops
     depends_on:
-      cube-master: {condition: service_healthy}
+      cube-prepare: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
 
   cube-api:
     <<: *cube-control
@@ -460,6 +462,7 @@ services:
       CUBE_SANDBOX_NODE_ID: ${CUBE_NODE_ID:-agent-stack-node}
       CUBE_SANDBOX_ENDPOINT_IP: ${CUBE_NODE_IP}
       CUBE_PVM_ENABLE: "0"
+      CUBE_SANDBOX_ETH_NAME: ${CUBE_SANDBOX_ETH_NAME:-}
       CUBE_SANDBOX_AUTO_DETECT_ETH: "true"
       CUBE_SANDBOX_NETWORK_CIDR: 172.16.0.0/16
       CUBE_SANDBOX_DNS_SERVERS: ${CUBE_DNS_SERVERS:-1.1.1.1,8.8.8.8}
@@ -473,7 +476,7 @@ services:
       timeout: 5s
       retries: 30
     depends_on:
-      cube-ops: {condition: service_healthy}
+      cube-ops: {condition: service_started}
       cube-shim-install: {condition: service_healthy}
       cube-kernel-install: {condition: service_healthy}
       cube-guest-install: {condition: service_healthy}
