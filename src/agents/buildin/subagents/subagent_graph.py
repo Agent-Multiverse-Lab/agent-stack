@@ -3,6 +3,7 @@
 from langchain.agents import create_agent
 
 from server.service.mcp_service import get_mcp_server_errors, get_mcp_tools, list_mcp_servers
+from server.service.model_service import load_chat_model
 from src.agents.backends.composite_backend import create_custom_filesystem_middleware
 from src.agents.base_agent import BaseAgent
 from src.agents.buildin.subagents.subagent_context import SubAgentContext
@@ -49,12 +50,12 @@ class SubAgentGraph(BaseAgent):
     description: str = "创建子智能体的执行图，通过定义的subagentmiddlware的task工具"
     agent_context = SubAgentContext
 
-
     async def get_agent(self, context: SubAgentContext):
         """消费子 Run 自己的 Context，父 Run 只通过身份字段关联。"""
         tools, mcp_tool_names = await _create_tools(context)
+        chat_model = await load_chat_model(context.model)
         return create_agent(
-            model=self.require_chat_model(),
+            model=chat_model,
             system_prompt=context.system_prompt,
             tools=tools,
             middleware=_create_middlewares(context, mcp_tool_names=mcp_tool_names),

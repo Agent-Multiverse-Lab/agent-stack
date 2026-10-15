@@ -26,6 +26,7 @@ from server.service.agent_run_service import (
 )
 from server.service.input_message_service import build_agent_input_msg
 from src.agents.base_context import BaseContext
+from src.database.repositories.agent_repository import AgentRepository
 from src.database.session import session_context
 
 TASK_SYSTEM_PROMPT = """## `task`（子智能体任务工具）
@@ -515,13 +516,20 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
         return f"{self.system_prompt}\n可用子智能体：\n{self._available_agents()}"
 
 
-def create_subagent_middleware(
+async def create_subagent_middleware(
     *,
-    subagents: Sequence[Mapping[str, str]],
     parent_context: BaseContext,
     system_prompt: str | None = TASK_SYSTEM_PROMPT,
-) -> SubAgentMiddleware:
-    """创建绑定父 Agent context 的子智能体中间件。"""
+) -> SubAgentMiddleware | None:
+    """查询可委派角色，创建绑定当前 Context 的子智能体中间件。"""
+    async with session_context() as db:
+        records = await AgentRepository(db).list_agents(role="subagent", internal_only=True)
+        subagents = [
+            {"slug": item.slug, "name": item.name, "description": item.description}
+            for item in records
+        ]
+    if not subagents:
+        return None
 
     return SubAgentMiddleware(
         subagents=subagents,

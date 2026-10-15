@@ -6,6 +6,7 @@ from time import perf_counter
 from typing import Any, get_args
 
 import httpx
+from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import ValidationError
 from redis.exceptions import RedisError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -23,6 +24,7 @@ from server.entities.model import (
 )
 from server.service.model_outbound import UnsafeModelTarget, resolve_public_target
 from src.configs import config as sys_config
+from src.database import session_context
 from src.database.models import ModelProvider
 from src.database.repositories.model_repository import ModelRepository
 from src.model.provider import (
@@ -34,7 +36,7 @@ from src.model.provider import (
     validate_model_id,
 )
 from src.model.providers.builtin import MODEL_PROVIDER_PRESETS
-from src.model.runtime import ModelConnection, supports_chat_protocol
+from src.model.runtime import ModelConnection, create_chat_model, supports_chat_protocol
 from src.storage import get_async_redis_client
 from src.utils import logger
 
@@ -414,6 +416,13 @@ async def _resolve_connection(
 
 async def resolve_runtime_model(db: AsyncSession, model_ref: str) -> ModelConnection:
     return await _resolve_connection(db, model_ref, require_enabled=True)
+
+
+async def load_chat_model(model_ref: str) -> BaseChatModel:
+    """按 Context 中的模型 ID 解析当前供应商配置并创建 ChatModel。"""
+    async with session_context() as db:
+        connection = await resolve_runtime_model(db, model_ref)
+    return create_chat_model(connection)
 
 
 async def _request_json(

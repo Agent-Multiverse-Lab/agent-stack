@@ -118,6 +118,10 @@ class SatelliteGatewayTest(unittest.IsolatedAsyncioTestCase):
         graph = object()
         with (
             patch(
+                "src.agents.buildin.subagents.subagent_graph.load_chat_model",
+                new=AsyncMock(return_value=object()),
+            ),
+            patch(
                 "src.agents.buildin.subagents.subagent_graph.get_mcp_tools",
                 new=AsyncMock(return_value=(mcp_tool,)),
             ),
@@ -130,7 +134,7 @@ class SatelliteGatewayTest(unittest.IsolatedAsyncioTestCase):
         ):
             context = SubAgentContext(uid="user-1", thread_id="thread-1")
             context.update_context(SATELLITE_AGENT.context)
-            result = await SubAgentGraph(chat_model=object()).get_agent(context)
+            result = await SubAgentGraph().get_agent(context)
 
         self.assertIs(result, graph)
         names = [tool.name for tool in create_agent.call_args.kwargs["tools"]]

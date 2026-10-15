@@ -2,6 +2,7 @@
 
 import json
 import unittest
+from contextlib import asynccontextmanager
 from typing import get_args
 from unittest.mock import AsyncMock, patch
 
@@ -148,6 +149,27 @@ class ModelServiceTest(SQLiteModelTestCase):
         target_patch = patch.object(service, "resolve_public_target", side_effect=mock_target)
         target_patch.start()
         self.addCleanup(target_patch.stop)
+
+    async def test_load_chat_model_resolves_context_reference_through_runtime_factory(self):
+        await service.create_provider(self.db, provider_config())
+
+        @asynccontextmanager
+        async def session_context():
+            yield self.db
+
+        model = object()
+        with (
+            patch.object(service, "session_context", session_context),
+            patch.object(service, "create_chat_model", return_value=model) as create_model,
+        ):
+            self.assertIs(await service.load_chat_model("local/qwen3:8b"), model)
+            connection = create_model.call_args.args[0]
+            self.assertEqual(connection.model_id, "qwen3:8b")
+            self.assertEqual(connection.provider_id, "local")
+            await service.update_provider(self.db, "local", update_config(is_enabled=False))
+            with self.assertRaisesRegex(ValueError, "供应商已停用"):
+                await service.load_chat_model("local/qwen3:8b")
+            create_model.assert_called_once()
 
     async def test_crud_secret_retention_and_public_catalog(self):
         result = await service.create_provider(self.db, provider_config())

@@ -40,7 +40,6 @@ from src.database.repositories import (
     UserRepository,
 )
 from src.model import resolve_chat_model_selection
-from src.model.runtime import create_chat_model
 from src.storage import get_storage
 from src.storage.minio import ATTACHMENT_BUCKET_NAME
 from src.utils import logger
@@ -520,22 +519,7 @@ async def _build_agent_runtime(
         conversation_model=(current_thread.conversation_metadata or {}).get("model"),
         agent_model=context_config.get("model"),
     )
-    connection = await resolve_runtime_model(db, model_id)
-    chat_model = create_chat_model(connection)
-
-    constructor_args = {"chat_model": chat_model}
-    if not agent_record.is_subagent:
-        subagents = await agent_repo.list_agents(role="subagent", internal_only=True)
-        constructor_args = {
-            "name": agent_record.name,
-            "description": agent_record.description,
-            "subagents": tuple(
-                {"slug": item.slug, "name": item.name, "description": item.description}
-                for item in subagents
-            ),
-            "chat_model": chat_model,
-        }
-    agent_instance = agent_class(**constructor_args)
+    agent_instance = agent_class()
 
     return agent_record, agent_instance, model_id
 

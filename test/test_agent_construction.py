@@ -23,11 +23,15 @@ from server.service import agent_run_service, thread_service
 from src.agents.base_agent import BaseAgent
 from src.agents.base_context import BaseContext
 from src.agents.buildin.leader.agent import LeaderAgent
+from src.agents.buildin.leader.context import LeaderAgentContext
 from src.agents.buildin.subagents import SubAgentContext, SubAgentGraph
 from src.agents.library import AgentLibrary
 from src.agents.library.leader import LEADER_AGENT
 from src.agents.library.subagents import CITATION_AGENT, SEARCH_AGENT, SUBAGENTS
-from src.agents.middlewares.subagent_middlware import SubAgentMiddleware
+from src.agents.middlewares.subagent_middlware import (
+    SubAgentMiddleware,
+    create_subagent_middleware,
+)
 from src.configs import config as sys_config
 from src.database.models import Agent
 from src.database.repositories.agent_repository import AgentRepository
@@ -75,12 +79,6 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
         )
         with (
             patch.object(thread_service, "ConversationRepository", return_value=conversations),
-            patch.object(
-                thread_service,
-                "resolve_runtime_model",
-                AsyncMock(return_value=object()),
-            ),
-            patch.object(thread_service, "create_chat_model", return_value=object()),
         ):
             record, instance, _model_id = await thread_service._build_agent_runtime(
                 agent_slug=slug,
@@ -90,6 +88,14 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
                 run_type=run_type,
             )
         return record, instance
+
+    async def delegation_middleware(self):
+        @asynccontextmanager
+        async def session_context():
+            yield self.db
+
+        with patch("src.agents.middlewares.subagent_middlware.session_context", session_context):
+            return await create_subagent_middleware(parent_context=SubAgentContext())
 
     async def test_worker_creates_missing_agents_and_preserves_all_existing_fields(self):
         existing = {}
@@ -157,7 +163,7 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
         fresh_record, _ = await self.runtime(SEARCH_AGENT.slug)
         self.assertEqual(fresh_record.agent_config, SEARCH_AGENT.context)
 
-    async def test_public_list_and_leader_only_include_enabled_roles(self):
+    async def test_public_list_and_delegation_only_include_enabled_roles(self):
         row = await self.repository._get_by_slug(CITATION_AGENT.slug)
         row.enabled = False
         self.db.session.flush()
@@ -165,8 +171,15 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.slug for item in public], [LEADER_AGENT.slug])
         self.assertFalse(public[0].is_subagent)
         for run_type in ("chat", "resume"):
-            _, leader = await self.runtime(LEADER_AGENT.slug, run_type)
-            self.assertEqual([item["slug"] for item in leader.subagents], [SEARCH_AGENT.slug])
+            with patch.object(AgentRepository, "list_agents", side_effect=AssertionError("runtime loaded other agents")):
+                _, leader = await self.runtime(LEADER_AGENT.slug, run_type)
+            self.assertIsInstance(leader, LeaderAgent)
+        middleware = await self.delegation_middleware()
+        self.assertEqual(middleware.subagent_slugs, {SEARCH_AGENT.slug})
+        row = await self.repository._get_by_slug(SEARCH_AGENT.slug)
+        row.enabled = False
+        self.db.session.flush()
+        self.assertIsNone(await self.delegation_middleware())
 
     async def test_runtime_uses_database_attributes_without_agent_library(self):
         custom = Agent(
@@ -181,15 +194,12 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
         self.db.session.flush()
 
         with patch.object(AgentLibrary, "__post_init__", side_effect=AssertionError("runtime used AgentLibrary")):
-            _, leader = await self.runtime(LEADER_AGENT.slug, "chat")
+            current_record, leader = await self.runtime(LEADER_AGENT.slug, "chat")
             record, child = await self.runtime(custom.slug)
-            self.assertEqual(leader.name, leader_record.name)
-            self.assertEqual(leader.description, leader_record.description)
-            self.assertIn(
-                {"slug": custom.slug, "name": custom.name, "description": custom.description},
-                leader.subagents,
-            )
-            middleware = SubAgentMiddleware(subagents=leader.subagents, parent_context=SubAgentContext())
+            self.assertEqual(current_record.name, leader_record.name)
+            self.assertEqual(current_record.description, leader_record.description)
+            self.assertIsInstance(leader, LeaderAgent)
+            middleware = await self.delegation_middleware()
             self.assertIn("- database_only_agent (数据库子角色): 数据库中的子角色描述", middleware._system_prompt())
             self.assertIsInstance(child, SubAgentGraph)
             context = await thread_service._build_agent_runtime_context(
@@ -197,9 +207,9 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
                 defaults=record.agent_config,
             )
             self.assertEqual(context["system_prompt"], "数据库中的 Prompt")
-            leader.subagents[0]["description"] = "local mutation"
-            _, fresh = await self.runtime(LEADER_AGENT.slug, "resume")
-            self.assertNotEqual(fresh.subagents[0]["description"], "local mutation")
+            middleware._subagents[custom.slug]["description"] = "local mutation"
+            fresh = await self.delegation_middleware()
+            self.assertEqual(fresh._subagents[custom.slug]["description"], custom.description)
 
     async def test_context_defaults_survive_missing_model_and_do_not_share_nested_values(self):
         defaults = {"model": "preset/model", "mcps": ["configured-server"], "style_profolio": {"a": [1]}}
@@ -304,17 +314,42 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
             context.update_context(record.agent_config)
             with (
                 patch("src.agents.buildin.subagents.subagent_graph.get_mcp_tools", AsyncMock(return_value=[])),
+                patch("src.agents.buildin.subagents.subagent_graph.load_chat_model", AsyncMock(return_value=model)) as load_model,
                 patch.object(agent, "get_checkpointer", return_value=checkpointer),
                 patch.object(agent, "get_store", return_value=store),
             ):
-                agent.chat_model = model
                 graph = await agent.get_agent(context)
                 config = {"configurable": {"thread_id": context.thread_id}}
                 result = await graph.ainvoke({"messages": [HumanMessage(content="task")]}, config, context=context)
                 snapshot = await graph.aget_state(config)
             self.assertEqual(result["messages"][-1].content, "role result")
+            load_model.assert_awaited_once_with(context.model)
             self.assertEqual(snapshot.values["messages"][-1].content, "role result")
             self.assertIn(definition.context["system_prompt"], calls[-1][0].text)
+
+    async def test_leader_loads_context_model_for_graph_and_summary(self):
+        _, leader = await self.runtime(LEADER_AGENT.slug, "chat")
+        model = object()
+        module = "src.agents.buildin.leader.agent"
+        for model_id in ("first/model", "second/model"):
+            context = LeaderAgentContext(model=model_id)
+            with (
+                patch(f"{module}.get_mcp_tools", AsyncMock(return_value=[])),
+                patch(f"{module}.load_chat_model", AsyncMock(return_value=model)) as load_model,
+                patch(f"{module}.create_agent") as create_agent,
+                patch(f"{module}.create_composite_backend"),
+                patch(f"{module}.create_custom_filesystem_middleware"),
+                patch(f"{module}.create_summary_middleware_from_context") as summary,
+                patch(f"{module}.create_subagent_middleware", AsyncMock(return_value=None)) as delegation,
+                patch(f"{module}.SkillsMiddleware"),
+                patch.object(leader, "get_checkpointer", return_value=None),
+                patch.object(leader, "get_store", return_value=None),
+            ):
+                await leader.get_agent(context)
+            load_model.assert_awaited_once_with(model_id)
+            delegation.assert_awaited_once_with(parent_context=context)
+            self.assertIs(create_agent.call_args.kwargs["model"], model)
+            self.assertIs(summary.call_args.kwargs["model"], model)
 
     async def test_task_and_start_delegate_by_slug_using_parent_run_identity(self):
         middleware = SubAgentMiddleware(

@@ -2,7 +2,6 @@ from abc import abstractmethod
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
-from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.store.postgres import AsyncPostgresStore
@@ -69,20 +68,6 @@ class BaseAgent:
     name: str = "base_agent"
     description: str = ""
     agent_context: type[BaseContext] = BaseContext
-
-    def __init__(
-        self,
-        *,
-        chat_model: BaseChatModel | None = None,
-        **kwargs,
-    ):
-        self.agent = None
-        self.chat_model = chat_model
-
-    def require_chat_model(self) -> BaseChatModel:
-        if self.chat_model is None:
-            raise RuntimeError("Agent 未注入 ChatModel")
-        return self.chat_model
 
     def get_store(self) -> AsyncPostgresStore:
         '''获取当前进程已初始化的 LangGraph Store。'''

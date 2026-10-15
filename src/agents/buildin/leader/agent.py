@@ -11,6 +11,7 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
 from server.service.mcp_service import get_mcp_tools
+from server.service.model_service import load_chat_model
 from src.agents.backends.composite_backend import (
     ROUTE_SKILL,
     create_composite_backend,
@@ -36,25 +37,9 @@ class LeaderAgent(BaseAgent):
     context = LeaderAgentContext
     agent_context = LeaderAgentContext
 
-    def __init__(
-        self,
-        *,
-        name: str,
-        description: str,
-        subagents: tuple[dict[str, str], ...],
-        chat_model: BaseChatModel | None = None,
-    ):
-        super().__init__(chat_model=chat_model)
-        self.name = name
-        self.description = description
-        self.subagents = tuple(dict(item) for item in subagents)
-
-    def _create_middlewares(self, context, *, chat_model: BaseChatModel):
+    async def _create_middlewares(self, context, *, chat_model: BaseChatModel):
         backend = create_composite_backend(context)
-        delegation = (
-            [create_subagent_middleware(subagents=self.subagents, parent_context=context)]
-            if self.subagents else []
-        )
+        delegation = await create_subagent_middleware(parent_context=context)
         return [
             create_sandbox_middleware(),
             create_custom_filesystem_middleware(
@@ -71,7 +56,7 @@ class LeaderAgent(BaseAgent):
                 sources=[(ROUTE_SKILL, "Shared")],
             ),
             create_memory_middleware(),
-            *delegation,
+            *([delegation] if delegation is not None else []),
             PatchToolCallsMiddleware(),
             ModelRetryMiddleware(max_retries=3, on_failure="continue"),
             ToolRetryMiddleware(max_retries=5),
@@ -82,19 +67,21 @@ class LeaderAgent(BaseAgent):
         """消费已组装的 Context；不在构图过程中重新解析运行配置。"""
         runtime_context = context or self.context()
         mcp_tools = await get_mcp_tools(runtime_context.mcps)
+        chat_model = await load_chat_model(runtime_context.model)
         # FIXEME: ask_user 仅注册到顶层 LeaderAgent，不扩散到 SubAgent。
-        return self._build_agent(
+        return await self._build_agent(
             runtime_context,
             tools=[*mcp_tools, ask_user, calculator],
+            chat_model=chat_model,
         )
 
-    def _build_agent(
+    async def _build_agent(
         self,
         runtime_context: LeaderAgentContext,
         *,
         tools: list[BaseTool],
+        chat_model: BaseChatModel,
     ) -> CompiledStateGraph:
-        chat_model = self.require_chat_model()
         return create_agent(
             model=chat_model,
             tools=tools,
@@ -102,7 +89,7 @@ class LeaderAgent(BaseAgent):
             context_schema=type(runtime_context),
             checkpointer=self.get_checkpointer(),
             store=self.get_store(),
-            middleware=self._create_middlewares(
+            middleware=await self._create_middlewares(
                 runtime_context,
                 chat_model=chat_model,
             ),
