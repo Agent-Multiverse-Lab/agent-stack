@@ -12,7 +12,7 @@ Web/API -> Service -> Worker -> Agent Runtime -> Storage/RAG。
 - **Knowledge Domain**：文件上传、解析、切块、索引、检索、重排。
 - **Persistence Domain**：PostgreSQL / Redis / RustFS / Milvus 的状态与存储边界。
 - **Sandbox Domain**：外部能力执行隔离边界。
-- **Model Domain**：管理平台级 Chat 模型供应商预置、全局配置和脱敏展示目录。
+- **Model Domain**：管理平台级 Chat 模型供应商预置、全局配置、脱敏模型列表和运行时连接解析。
 - **Data Platform Domain**：卫星来源、集合、场景和波段资产的有界检索。
 
 ## 3. High-level Topology
@@ -33,7 +33,7 @@ SatelliteAgent -> Python gRPC Client -> Go Gateway -> PostgreSQL/PostGIS
 ## 4. Data Ownership
 
 - PostgreSQL: 用户、会话、消息、Run 及知识基础数据。
-- Redis: ARQ 队列、运行信号、`run:events:{run_id}` 流与可重建的全局模型展示目录。
+- Redis: ARQ 队列、运行信号、`run:events:{run_id}` 流与可重建的全局模型展示列表。
 - RustFS: 知识文件和解析产物。
 - Milvus: 向量索引数据。
 

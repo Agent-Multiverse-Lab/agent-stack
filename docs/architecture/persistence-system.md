@@ -17,7 +17,7 @@
 ### Redis
 - ARQ 队列元数据、`run:cancel:{run_id}`（cancel signal）。
 - `run:events:{run_id}`（可读事件流）。
-- `model:catalog:v3`：从 PostgreSQL 派生的全局已启用 Chat 模型脱敏目录。
+- `model:chat:list:v3`：从 PostgreSQL 派生的全局已启用 Chat 模型脱敏列表。
 
 ### RustFS
 - 原始上传文件、解析产物、Markdown 快照。
@@ -50,8 +50,8 @@
 | `run:events:{run_id}` | Redis Stream | 事件传输和重连游标 |
 | `run:cancel:{run_id}` | Redis | 运行时取消信号 |
 | `ModelProvider` | PostgreSQL | 平台共享的模型连接、启用状态和模型选择 |
-| `model:catalog:v3` | Redis | `ModelProvider` 已启用 Chat 模型的可丢弃、可重建、不含连接参数的全局展示投影 |
+| `model:chat:list:v3` | Redis | `ModelProvider` 已启用 Chat 模型的可丢弃、可重建、不含连接参数的全局展示投影 |
 
 Redis、内存、RustFS 和 Milvus 不得复制 PostgreSQL 的权威业务状态；如果新增副本，
 必须先在对应能力文档中说明 Owner、生命周期、一致性和清理规则。
-全局模型目录不是可独立修改的业务状态；缓存失效、损坏或过期时必须从 PostgreSQL 重建。
+全局模型列表不是可独立修改的业务状态；缓存失效、损坏或过期时必须从 PostgreSQL 重建。

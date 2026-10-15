@@ -4,7 +4,7 @@
 
 在现有 Settings 对话框内增加 Models 选项，管理可用于 Chat 的单模态/多模态模型。
 当前阶段按已确认设计实施页面与管理 HTTP 接口。
-后端供应商与连接参数合同见 `docs/spec/model/provider-management/spec.md`。
+后端供应商、模型列表与运行时连接合同见 `docs/spec/model/provider-management/spec.md`。
 
 ## 要求
 
@@ -30,7 +30,7 @@
 从上到下排列：名称与启用开关、模型连接配置、具体模型名称和功能描述。
 连接配置仅展示 API Key、Base URL，不展示协议和请求头选项。
 API Key 使用 Field 布局，标签位于输入框上方，下方显示密钥加密存储说明；Base URL 保留容器内上方名称、下方字段值。
-API Key 与输入值同排的右侧内嵌单色插头图标用于检测，与密钥显隐控件并列；不显示“检测”文字和按钮底色，底部不再单独展示测试连接按钮。图标按钮通过 aria-label 提供无障碍名称。点击检测时直接把当前未保存的 Base URL 与 API Key 发送给后端，由后端访问供应商模型目录验证凭据，不要求先选择聊天模型。
+API Key 与输入值同排的右侧内嵌单色插头图标用于检测，与密钥显隐控件并列；不显示“检测”文字和按钮底色，底部不再单独展示测试连接按钮。图标按钮通过 aria-label 提供无障碍名称。点击检测时直接把当前未保存的 Base URL 与 API Key 发送给后端，由后端访问供应商模型列表接口验证凭据，不要求先选择聊天模型。
 具体模型项将 model_id 与能力合为一行，名称居左，能力以统一单色彩块包裹并整体靠齐行最右侧，不另起描述行；只接入 Chat 模型。
 模型列表不展示请求体覆盖字段或字样；此展示调整不修改后端参数合同。
 模型行默认无背景、无边框，hover 时仅加深行背景，不增加额外控件或展开内容。
@@ -48,12 +48,12 @@ API Key 与输入值同排的右侧内嵌单色插头图标用于检测，与密
 
 在现有 `/api/models` 下保留 `/providers` 列表及 `/providers/{provider_id}` 保存接口，
 以及对应 `/discover`、`/test` POST 接口。全部 Provider 管理接口要求管理员授权，普通登录用户只能读取
-`GET /api/models` 的全局公开目录。列表返回全局供应商摘要，选择供应商后通过
+`GET /api/models` 的全局公开模型列表。管理接口返回全局供应商摘要，选择供应商后通过
 GET `/providers/{provider_id}` 加载脱敏详情。
-列表和详情由后端直接读取全局 PostgreSQL；Redis 只保存 `GET /api/models` 所需的已启用模型公开目录，
+列表和详情由后端直接读取全局 PostgreSQL；Redis 只保存 `GET /api/models` 所需的已启用模型公开列表，
 不参与 Settings 详情拼装。浏览器不直接连接 Redis，也不接收 Redis key、密文或额外请求头。
-管理员授权由 Auth Domain 提供；当前仓库没有角色能力时不得把该入口开放给全部 AuthenticatedUser。
-Chat 目录改为全局数据库投影，但不修改运行时模型实例的连接参数来源。
+管理员授权由 Auth Domain 基于部署配置 `ADMIN_EMAILS` 提供；配置为空时没有用户拥有管理权限，不能把该入口开放给全部 AuthenticatedUser。
+Chat 模型列表与运行时 ChatModel 都使用同一条全局 Provider 配置。
 探测使用当前表单参数，仅在 Base URL 未改变时允许省略 API Key 并沿用平台已保存密钥；不通过保存配置间接触发探测。
 保存仅修改页面字段；同地址下保留未展示的参数。变更 Base URL 必须重新提供已有 Key，私有请求头不自动转发或保留到新地址。
 API Key 不回传、不写入浏览器持久化存储，校验错误不返回原始输入值。
