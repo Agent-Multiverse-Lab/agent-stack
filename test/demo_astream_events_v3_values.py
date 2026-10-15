@@ -14,12 +14,22 @@ def add_numbers(a: int, b: int) -> int:
 
 
 async def main() -> None:
+    from server.service.model_service import resolve_runtime_model
     from src.configs import config
-    from src.model import load_model
+    from src.database import postgres_manager
+    from src.model.runtime import create_chat_model
+
+    await postgres_manager.initialize()
+    try:
+        async with postgres_manager.get_async_session_context() as db:
+            connection = await resolve_runtime_model(db, config.default_model)
+        model = create_chat_model(connection)
+    finally:
+        await postgres_manager.dispose()
 
     run_config = {"configurable": {"thread_id": "astream-events-v3-values-demo"}}
     agent = create_agent(
-        model=load_model(config.default_model),
+        model=model,
         tools=[add_numbers],
         system_prompt="处理加法计算时必须调用 add_numbers 工具。",
         checkpointer=InMemorySaver(),

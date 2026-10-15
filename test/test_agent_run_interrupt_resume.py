@@ -192,7 +192,7 @@ class ResumeStreamTest(unittest.IsolatedAsyncioTestCase):
                       runtime_metadata={"run_id": "resume-run", "request_id": "request-1"},
                       current_user=SimpleNamespace(uid="user-1"), db=SimpleNamespace())
         values.update(overrides)
-        with patch.object(thread_service, "_build_agent_runtime", AsyncMock(return_value=(SimpleNamespace(slug="LeaderAgent", agent_config={}), agent))) as get_agent:
+        with patch.object(thread_service, "_build_agent_runtime", AsyncMock(return_value=(SimpleNamespace(slug="LeaderAgent", agent_config={}), agent, "dashscope/qwen3.8-max"))) as get_agent:
             chunks = [json.loads(chunk) async for chunk in thread_service.resume_agent_response(**values)]
         if agent is not None:
             self.assertEqual(get_agent.await_args.kwargs["run_type"], "resume")
@@ -267,7 +267,7 @@ class NormalStreamFinalizationTest(unittest.IsolatedAsyncioTestCase):
             if save_error:
                 raise save_error
         agent = SimpleNamespace(agent_context=FixtureContext, stream_messages_with_event=events)
-        with patch.object(thread_service, "_build_agent_runtime", AsyncMock(return_value=(SimpleNamespace(slug="LeaderAgent", agent_config={}), agent))), patch.object(
+        with patch.object(thread_service, "_build_agent_runtime", AsyncMock(return_value=(SimpleNamespace(slug="LeaderAgent", agent_config={}), agent, "dashscope/qwen3.8-max"))), patch.object(
             thread_service, "_check_conv_status", AsyncMock(return_value=SimpleNamespace(conversation_metadata={}))
         ), patch.object(thread_service, "check_agent_interrupt_handler", handler), patch.object(
             thread_service, "save_message_from_langgraph_state", side_effect=save

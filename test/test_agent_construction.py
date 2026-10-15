@@ -68,15 +68,28 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
         await self.repository.ensure_agent(definition=LEADER_AGENT)
 
     async def runtime(self, slug, run_type="subagent"):
-        conversations = SimpleNamespace(get_conversation_by_thread_id_for_user=AsyncMock(return_value=object()))
-        with patch.object(thread_service, "ConversationRepository", return_value=conversations):
-            return await thread_service._build_agent_runtime(
+        conversations = SimpleNamespace(
+            get_conversation_by_thread_id_for_user=AsyncMock(
+                return_value=SimpleNamespace(conversation_metadata={})
+            )
+        )
+        with (
+            patch.object(thread_service, "ConversationRepository", return_value=conversations),
+            patch.object(
+                thread_service,
+                "resolve_runtime_model",
+                AsyncMock(return_value=object()),
+            ),
+            patch.object(thread_service, "create_chat_model", return_value=object()),
+        ):
+            record, instance, _model_id = await thread_service._build_agent_runtime(
                 agent_slug=slug,
                 user=SimpleNamespace(uid="user-1"),
                 thread_id="thread-1",
                 db=self.db,
                 run_type=run_type,
             )
+        return record, instance
 
     async def test_worker_creates_missing_agents_and_preserves_all_existing_fields(self):
         existing = {}
@@ -291,10 +304,10 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
             context.update_context(record.agent_config)
             with (
                 patch("src.agents.buildin.subagents.subagent_graph.get_mcp_tools", AsyncMock(return_value=[])),
-                patch("src.agents.buildin.subagents.subagent_graph.load_model", return_value=model),
                 patch.object(agent, "get_checkpointer", return_value=checkpointer),
                 patch.object(agent, "get_store", return_value=store),
             ):
+                agent.chat_model = model
                 graph = await agent.get_agent(context)
                 config = {"configurable": {"thread_id": context.thread_id}}
                 result = await graph.ainvoke({"messages": [HumanMessage(content="task")]}, config, context=context)

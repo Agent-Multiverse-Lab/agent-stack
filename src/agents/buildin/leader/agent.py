@@ -6,6 +6,7 @@ from langchain.agents.middleware import (
     TodoListMiddleware,
     ToolRetryMiddleware,
 )
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
@@ -25,7 +26,6 @@ from src.agents.middlewares.subagent_middlware import create_subagent_middleware
 from src.agents.middlewares.summary_middleware import (
     create_summary_middleware_from_context,
 )
-from src.model import load_model
 
 
 class LeaderAgent(BaseAgent):
@@ -36,13 +36,20 @@ class LeaderAgent(BaseAgent):
     context = LeaderAgentContext
     agent_context = LeaderAgentContext
 
-    def __init__(self, *, name: str, description: str, subagents: tuple[dict[str, str], ...]):
-        super().__init__()
+    def __init__(
+        self,
+        *,
+        name: str,
+        description: str,
+        subagents: tuple[dict[str, str], ...],
+        chat_model: BaseChatModel | None = None,
+    ):
+        super().__init__(chat_model=chat_model)
         self.name = name
         self.description = description
         self.subagents = tuple(dict(item) for item in subagents)
 
-    def _create_middlewares(self, context):
+    def _create_middlewares(self, context, *, chat_model: BaseChatModel):
         backend = create_composite_backend(context)
         delegation = (
             [create_subagent_middleware(subagents=self.subagents, parent_context=context)]
@@ -57,6 +64,7 @@ class LeaderAgent(BaseAgent):
             create_summary_middleware_from_context(
                 context,
                 backend=backend,
+                model=chat_model,
             ),
             SkillsMiddleware(
                 backend=backend,
@@ -86,12 +94,16 @@ class LeaderAgent(BaseAgent):
         *,
         tools: list[BaseTool],
     ) -> CompiledStateGraph:
+        chat_model = self.require_chat_model()
         return create_agent(
-            model=load_model(runtime_context.model),
+            model=chat_model,
             tools=tools,
             system_prompt=build_prompt(runtime_context),
             context_schema=type(runtime_context),
             checkpointer=self.get_checkpointer(),
             store=self.get_store(),
-            middleware=self._create_middlewares(runtime_context),
+            middleware=self._create_middlewares(
+                runtime_context,
+                chat_model=chat_model,
+            ),
         )  # ty:ignore[invalid-return-type]

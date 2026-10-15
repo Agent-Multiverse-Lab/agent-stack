@@ -6,8 +6,6 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from src.configs import config as sys_config
-from src.model import load_model
 from src.utils import logger
 
 _SYSTEM_PROMPT = (
@@ -46,8 +44,8 @@ class GraphExtractionResult(BaseModel):
 class GraphExtractor:
     """使用快速模型从文档中抽取实体与关系。"""
 
-    def __init__(self, model: Any | None = None) -> None:
-        self._model = model or load_model(sys_config.flash_model)
+    def __init__(self, model: Any) -> None:
+        self._model = model
 
     async def extract(self, markdown: str) -> GraphExtractionResult:
         """优先结构化输出，失败时回退 JSON 文本解析。"""

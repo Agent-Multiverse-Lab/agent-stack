@@ -1,32 +1,58 @@
 """平台 Chat 模型管理、远程探测和内部连接参数解析。"""
 
+import re
 from copy import deepcopy
 from time import perf_counter
 from typing import Any, get_args
 
 import httpx
+from pydantic import ValidationError
+from redis.exceptions import RedisError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.entities.model import (
-    ChatCapability,
+    ChatModelItem,
+    ChatModelListResponse,
     ConnectionTestResult,
-    EnabledModel,
-    ModelConnection,
-    ModelProviderCreate,
     ModelProviderResponse,
     ModelProviderSummary,
-    ModelProviderUpdate,
     ModelSettingsRequest,
-    ModelSummary,
     ProviderWriteResult,
     SettingsModel,
 )
 from server.service.model_outbound import UnsafeModelTarget, resolve_public_target
+from src.configs import config as sys_config
 from src.database.models import ModelProvider
 from src.database.repositories.model_repository import ModelRepository
-from src.model import get_model_catalog
+from src.model.provider import (
+    ChatCapability,
+    EnabledModel,
+    ModelProviderCreate,
+    ModelProviderUpdate,
+    ModelSummary,
+    validate_model_id,
+)
 from src.model.providers.builtin import MODEL_PROVIDER_PRESETS
+from src.model.runtime import ModelConnection, supports_chat_protocol
+from src.storage import get_async_redis_client
+from src.utils import logger
+
+MODEL_LIST_CACHE_KEY = "model:chat:list:v3"
+MODEL_LIST_CACHE_TTL_SECONDS = 3600
+
+_MODEL_FAMILIES = (
+    ("deepseek", "DeepSeek", "deepseek"),
+    ("gemini", "Gemini", "gemini"),
+    ("qwen", "Qwen", "qwen"),
+    ("glm", "GLM", "zhipu"),
+    ("minimax", "MiniMax", "minimax"),
+    ("minomax", "MiniMax", "minimax"),
+    ("chatgpt", "ChatGPT", "openai"),
+    ("gpt", "GPT", "openai"),
+    ("ollama", "Ollama", "ollama"),
+    ("vllm", "vLLM", "vllm"),
+)
 
 
 class ModelConnectionError(RuntimeError):
@@ -38,9 +64,159 @@ class ModelConnectionError(RuntimeError):
         super().__init__(code)
 
 
-async def list_models() -> dict[str, Any]:
-    """保留现有 Chat 选择器的静态目录合同。"""
-    return await get_model_catalog()
+def _format_version_token(token: str) -> str:
+    if re.fullmatch(r"v\d+(?:\.\d+)?", token):
+        return token.upper()
+    if re.fullmatch(r"\d+(?:\.\d+)?b", token):
+        return token.upper()
+    if re.fullmatch(r"a\d+b", token):
+        return token.upper()
+    if re.fullmatch(r"\d+(?:\.\d+)?[a-z]", token):
+        return token
+    if re.fullmatch(r"\d+(?:\.\d+)?", token):
+        return token
+    return token.capitalize()
+
+
+def _model_presentation(
+    model_name: str,
+    model_type: str,
+    provider_id: str,
+    provider_name: str,
+) -> tuple[str, str, str]:
+    normalized_name = model_name.lower()
+    for prefix, display_name, icon in _MODEL_FAMILIES:
+        if normalized_name.startswith(prefix):
+            raw_version = model_name[len(prefix) :].lstrip("-")
+            version = " ".join(
+                _format_version_token(token)
+                for token in raw_version.split("-")
+                if token
+            )
+            return display_name, version or model_name, icon
+
+    for prefix, display_name, icon in _MODEL_FAMILIES:
+        if model_type == prefix or provider_id == prefix:
+            return display_name, model_name, icon
+
+    return provider_name, model_name, provider_id.lower()
+
+
+async def build_model_list(db: AsyncSession) -> ChatModelListResponse:
+    """从 PostgreSQL 构建不含连接参数的公开 Chat 模型列表。"""
+    projected: list[dict[str, Any]] = []
+    for provider in await ModelRepository(db).list_providers(enabled_only=True):
+        config = _settings(provider)
+        available = supports_chat_protocol(config.protocol)
+        for model in config.enabled_models:
+            model_ref = f"{config.provider_id}/{model.model_id}"
+            display_name, version, icon = _model_presentation(
+                model.model_id,
+                model.model_type,
+                config.provider_id,
+                config.name,
+            )
+            projected.append(
+                {
+                    "id": model_ref,
+                    "name": model.model_id,
+                    "display_name": display_name,
+                    "version": version,
+                    "provider": config.provider_id,
+                    "icon": icon,
+                    "is_available": available,
+                }
+            )
+
+    available_ids = [
+        item["id"] for item in projected if item["is_available"]
+    ]
+    default_model = (
+        sys_config.default_model
+        if sys_config.default_model in available_ids
+        else available_ids[0]
+        if available_ids
+        else ""
+    )
+    fallback_model = (
+        sys_config.fallback_model
+        if sys_config.fallback_model in available_ids
+        else ""
+    )
+    flash_model = (
+        sys_config.flash_model if sys_config.flash_model in available_ids else ""
+    )
+    image_model = (
+        sys_config.image_model if sys_config.image_model in available_ids else ""
+    )
+    models = [
+        ChatModelItem(
+            **item,
+            is_default=item["id"] == default_model,
+            is_fallback=item["id"] == fallback_model,
+            is_flash=item["id"] == flash_model,
+        )
+        for item in projected
+    ]
+    return ChatModelListResponse(
+        default_model=default_model,
+        fallback_model=fallback_model,
+        flash_model=flash_model,
+        image_model=image_model,
+        models=models,
+    )
+
+
+async def _write_model_list_cache(catalog: ChatModelListResponse) -> None:
+    redis = await get_async_redis_client()
+    await redis.set(
+        MODEL_LIST_CACHE_KEY,
+        catalog.model_dump_json(),
+        ex=MODEL_LIST_CACHE_TTL_SECONDS,
+    )
+
+
+async def list_models(db: AsyncSession) -> ChatModelListResponse:
+    """读取全局模型列表；缓存失效或不可用时回源 PostgreSQL。"""
+    try:
+        redis = await get_async_redis_client()
+        cached = await redis.get(MODEL_LIST_CACHE_KEY)
+        if cached is not None:
+            try:
+                return ChatModelListResponse.model_validate_json(cached)
+            except ValidationError:
+                logger.warning("模型列表缓存结构无效，已回源 PostgreSQL")
+    except (RedisError, OSError, ValueError) as exc:
+        logger.warning("模型列表 Redis 读取失败，已回源 PostgreSQL：%s", exc)
+
+    catalog = await build_model_list(db)
+    try:
+        await _write_model_list_cache(catalog)
+    except (RedisError, OSError, ValueError) as exc:
+        logger.warning("模型列表 Redis 回填失败：%s", exc)
+    return catalog
+
+
+async def refresh_model_list_cache(
+    db: AsyncSession,
+    *,
+    raise_on_database_error: bool = False,
+) -> bool:
+    """从已提交数据重建全局模型列表缓存。"""
+    try:
+        catalog = await build_model_list(db)
+        redis = await get_async_redis_client()
+        await redis.delete(MODEL_LIST_CACHE_KEY)
+        await _write_model_list_cache(catalog)
+    except (SQLAlchemyError, ValidationError) as exc:
+        if raise_on_database_error:
+            raise
+        logger.warning("模型列表缓存重建失败：%s", exc)
+        return False
+    except (RedisError, OSError, ValueError) as exc:
+        logger.warning("模型列表 Redis 刷新失败：%s", exc)
+        return False
+    return True
 
 
 async def ensure_builtin_model_providers(db: AsyncSession) -> None:
@@ -153,7 +329,7 @@ async def create_provider(
         raise RuntimeError("保存模型供应商失败") from None
     return ProviderWriteResult(
         provider_id=config.provider_id,
-        cache_refreshed=False,
+        cache_refreshed=await refresh_model_list_cache(db),
     )
 
 
@@ -173,7 +349,7 @@ async def update_provider(
         raise RuntimeError("更新模型供应商失败") from None
     return ProviderWriteResult(
         provider_id=provider_id,
-        cache_refreshed=False,
+        cache_refreshed=await refresh_model_list_cache(db),
     )
 
 
@@ -187,7 +363,7 @@ async def delete_provider(db: AsyncSession, provider_id: str) -> ProviderWriteRe
         raise RuntimeError("删除模型供应商失败") from None
     return ProviderWriteResult(
         provider_id=provider_id,
-        cache_refreshed=False,
+        cache_refreshed=await refresh_model_list_cache(db),
     )
 
 
@@ -199,7 +375,7 @@ async def list_enabled_models(db: AsyncSession) -> list[ModelSummary]:
         for model in config.enabled_models:
             catalog.append(
                 ModelSummary(
-                    id=f"{config.provider_id}:{model.model_id}",
+            id=f"{config.provider_id}/{model.model_id}",
                     provider_id=config.provider_id,
                     provider_name=config.name,
                     model_id=model.model_id,
@@ -215,9 +391,9 @@ async def _resolve_connection(
     *,
     require_enabled: bool,
 ) -> ModelConnection:
-    provider_id, separator, model_id = model_ref.partition(":")
+    provider_id, separator, model_id = model_ref.partition("/")
     if not separator or not provider_id or not model_id:
-        raise ValueError("模型引用必须为 provider_id:model_id")
+        raise ValueError("模型引用必须为 provider_id/model_id")
     config = _settings(await _get_provider(db, provider_id))
     if require_enabled and not config.is_enabled:
         raise ValueError("模型供应商已停用")
@@ -406,7 +582,7 @@ async def _discover_config_models(config: ModelProviderCreate | ModelProviderUpd
         if not isinstance(model_id, str) or not model_id:
             raise ModelConnectionError("invalid_response")
         try:
-            EnabledModel.validate_model_id(model_id)
+            validate_model_id(model_id)
         except ValueError:
             raise ModelConnectionError("invalid_response") from None
         if _explicit_non_chat(item):

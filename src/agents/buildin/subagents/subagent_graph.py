@@ -13,7 +13,6 @@ from src.agents.middlewares.image_validation_middleware import (
 from src.agents.middlewares.model_retry_middleware import create_model_retry_middleware
 from src.agents.middlewares.sandbox_middleware import create_sandbox_middleware
 from src.knowledge.tools import knowledge_search, web_search_one, web_search_parallel
-from src.model import load_model
 from src.third_party.satellite_gateway.tools import build_satellite_catalog_tools
 
 
@@ -55,7 +54,7 @@ class SubAgentGraph(BaseAgent):
         """消费子 Run 自己的 Context，父 Run 只通过身份字段关联。"""
         tools, mcp_tool_names = await _create_tools(context)
         return create_agent(
-            model=load_model(context.model),
+            model=self.require_chat_model(),
             system_prompt=context.system_prompt,
             tools=tools,
             middleware=_create_middlewares(context, mcp_tool_names=mcp_tool_names),

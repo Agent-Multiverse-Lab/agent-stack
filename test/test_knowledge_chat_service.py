@@ -73,7 +73,12 @@ class KnowledgeChatServiceTest(unittest.IsolatedAsyncioTestCase):
             self._patch_search(hits=self._build_hits()),
             patch.object(
                 knowledge_service,
-                "load_model",
+                "resolve_runtime_model",
+                return_value=SimpleNamespace(),
+            ) as resolve_model,
+            patch.object(
+                knowledge_service,
+                "create_chat_model",
                 return_value=model,
             ),
         ):
@@ -91,17 +96,17 @@ class KnowledgeChatServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("f1:0", result["citations"][0]["chunk_id"])
         self.assertEqual(300, len(result["citations"][0]["excerpt"]))
         self.assertEqual(1, len(model.calls))
+        resolve_model.assert_awaited_once()
 
     async def test_chat_returns_fixed_answer_without_llm_when_no_hits(self) -> None:
         """无命中时不调用 LLM 并返回固定答语。"""
-        model = FakeModel()
         with (
             self._patch_search(hits=[]),
             patch.object(
                 knowledge_service,
-                "load_model",
-                return_value=model,
-            ),
+                "resolve_runtime_model",
+            ) as resolve_model,
+            patch.object(knowledge_service, "create_chat_model") as create_model,
         ):
             result = await knowledge_service.chat(
                 FakeSession(),
@@ -116,7 +121,8 @@ class KnowledgeChatServiceTest(unittest.IsolatedAsyncioTestCase):
             result["answer"],
         )
         self.assertEqual([], result["citations"])
-        self.assertEqual([], model.calls)
+        resolve_model.assert_not_awaited()
+        create_model.assert_not_called()
 
 
 if __name__ == "__main__":

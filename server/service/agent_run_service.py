@@ -24,6 +24,7 @@ from server.service.attachment_service import (
     prepare_message_attachments,
 )
 from server.service.input_message_service import build_agent_input_msg
+from server.service.model_service import resolve_runtime_model
 from server.utils.agent_run_utils import format_agent_run_sse
 from src.configs import config
 from src.database.models import AgentRun, User
@@ -34,7 +35,7 @@ from src.database.repositories import (
     MessageAttachmentRepository,
 )
 from src.database.session import session_context
-from src.model import is_model_available, resolve_chat_model_selection
+from src.model import resolve_chat_model_selection
 from src.utils import logger
 
 _TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "interrupted"}
@@ -63,10 +64,8 @@ async def create_agent_run_service(
 
     run_metadata = dict(thread_metadata)
     model_id = run_metadata.get("model")
-    if model_id is not None and model_id != "" and (
-        not isinstance(model_id, str) or not is_model_available(model_id)
-    ):
-        raise ValueError("所选模型不在当前可用模型目录中")
+    if model_id is not None and model_id != "" and not isinstance(model_id, str):
+        raise ValueError("所选模型必须是字符串")
 
     file_ids = attachment_file_ids(msg_metadata)
     input_message = build_agent_input_msg(
@@ -93,8 +92,7 @@ async def create_agent_run_service(
         conversation_model=conversation_metadata.get("model"),
         agent_model=(agent.agent_config or {}).get("model"),
     )
-    if not is_model_available(model_id):
-        raise ValueError("所选模型不在当前可用模型目录中")
+    await resolve_runtime_model(db, model_id)
     run_metadata["model"] = model_id
 
     # FIXEME: 待回答 ask_user 时不能再追加普通 HumanMessage。

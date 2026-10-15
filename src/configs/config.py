@@ -77,7 +77,7 @@ class Config(BaseSettings):
     default_model: str = Field(default="dashscope/qwen3.8-max", description="默认使用的模型名称")
     fallback_model: str = Field(default="deepseek/deepseek-v4-pro", description="备用模型名称")
     flash_model: str = Field(default="deepseek/deepseek-v4-flash", description="快速推断模型名称")
-    image_model: str = Field(default="qwen/qwen-image-2.0-pro-2026-04-22", description="图片生成模型名称")
+    image_model: str = Field(default="dashscope/qwen-image-2.0-pro-2026-04-22", description="图片生成模型名称")
 
     embed_model: str = Field(
         default="",
@@ -118,6 +118,10 @@ class Config(BaseSettings):
     jwt_secret: str = Field(default="", description="JWT 签名密钥")
     jwt_algorithm: str = Field(default="HS256", description="JWT 加密算法")
     jwt_expire_minutes: int = Field(default=60, description="Token 有效期（分钟）")
+    admin_emails: str = Field(
+        default="",
+        description="以逗号分隔的平台管理员邮箱",
+    )
 
     # ---------- RustFS ----------
     minio_endpoint: str = Field(default="", description="RustFS 服务地址")

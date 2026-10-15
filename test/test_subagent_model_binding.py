@@ -35,6 +35,7 @@ class SubAgentModelBindingTest(unittest.IsolatedAsyncioTestCase):
         self.conversations.create_agent_input_message.side_effect = message
         self.runs.create_run.side_effect = run
         self.enqueue = AsyncMock()
+        self.resolve_model = AsyncMock(return_value=object())
         for target, value in (
             ("AgentRepository", self.agents), ("AgentRunRepository", self.runs),
             ("ConversationRepository", self.conversations),
@@ -43,6 +44,13 @@ class SubAgentModelBindingTest(unittest.IsolatedAsyncioTestCase):
             current.start()
             self.addCleanup(current.stop)
         current = patch.object(subagent_service.agent_run_service, "enqueue_agent_run", self.enqueue)
+        current.start()
+        self.addCleanup(current.stop)
+        current = patch.object(
+            subagent_service,
+            "resolve_runtime_model",
+            self.resolve_model,
+        )
         current.start()
         self.addCleanup(current.stop)
 
@@ -69,7 +77,8 @@ class SubAgentModelBindingTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_unavailable_model_stops_before_creating_child(self):
         self.agent.agent_config = {"model": "unknown/model"}
-        with self.assertRaisesRegex(ValueError, "可用模型目录"):
+        self.resolve_model.side_effect = ValueError("聊天模型未配置")
+        with self.assertRaisesRegex(ValueError, "聊天模型未配置"):
             await self.create()
         self.conversations.create_conversation.assert_not_awaited()
         self.runs.create_run.assert_not_awaited()

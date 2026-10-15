@@ -26,6 +26,7 @@ class UserResponse(BaseModel):
     uid: str
     email: EmailStr
     is_active: bool
+    is_admin: bool
 
 
 class TokenResponse(BaseModel):

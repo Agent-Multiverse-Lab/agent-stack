@@ -180,6 +180,8 @@ class KnowledgeExtractServiceTest(unittest.IsolatedAsyncioTestCase):
             ("_get_knowledge", entity_store),
             ("get_graph_store", graph_store),
             ("_create_embedding_service", (FakeEmbeddingService(), "mock/model", 2)),
+            ("resolve_runtime_model", SimpleNamespace()),
+            ("create_chat_model", SimpleNamespace()),
         ):
             stack.enter_context(
                 patch.object(knowledge_service, target, return_value=fake)

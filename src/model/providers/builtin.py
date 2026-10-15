@@ -1,13 +1,10 @@
 """供应商首次创建值；字段映射和校验由 Model Service 显式执行。"""
 
 from dataclasses import dataclass, field
-from typing import Literal
 
 from pydantic import JsonValue
 
-ModelType = Literal["deepseek", "qwen", "glm", "minomax", "gemini", "chatgpt", "ollama", "vllm"]
-ModelProtocol = Literal["openai_compatible"]
-ChatCapability = Literal["chat", "vision", "reasoning", "tools", "code", "audio", "video"]
+from src.model.provider import ChatCapability, ModelProtocol, ModelType
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -39,7 +36,7 @@ MODEL_PROVIDER_PRESETS: tuple[ModelProviderPreset, ...] = (
         ),
     ),
     ModelProviderPreset(
-        provider_id="qwen",
+        provider_id="dashscope",
         name="Qwen",
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         enabled_models=(

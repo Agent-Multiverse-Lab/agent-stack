@@ -1,6 +1,5 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from deepagents.backends import CompositeBackend, FilesystemBackend
 from langgraph.constants import TAG_NOSTREAM
@@ -70,16 +69,12 @@ class SummaryMiddlewareTest(unittest.TestCase):
         )
         model = _DummyModel()
 
-        with patch(
-            "src.agents.middlewares.summary_middleware.load_model",
-            return_value=model,
-        ) as load_model:
-            middleware = create_summary_middleware_from_context(
-                context,
-                backend=_backend(),
-            )
+        middleware = create_summary_middleware_from_context(
+            context,
+            backend=_backend(),
+            model=model,
+        )
 
-        load_model.assert_called_once_with("run-specific/model")
         self.assertEqual(middleware._lc_helper.trigger, ("tokens", 64 * 1024))
         self.assertEqual(middleware._lc_helper.keep, ("messages", 8))
         self.assertEqual(middleware.tool_result_offload_token_limit, 256)

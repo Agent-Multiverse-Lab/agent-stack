@@ -28,15 +28,15 @@ class ModelProviderPresetTest(SQLiteModelTestCase):
         }
         await service.ensure_builtin_model_providers(self.db)
         await service.ensure_builtin_model_providers(self.db)
-        self.assertEqual([item.provider_id for item in await self.repository.list_providers()], ["custom", "deepseek", "qwen"])
+        self.assertEqual([item.provider_id for item in await self.repository.list_providers()], ["custom", "dashscope", "deepseek"])
         after = await self.repository.get_provider_by_id("deepseek")
         self.assertEqual({key: getattr(after, key) for key in before}, before)
-        qwen = await self.repository.get_provider_by_id("qwen")
+        qwen = await self.repository.get_provider_by_id("dashscope")
         self.assertFalse(qwen.is_enabled)
         self.assertEqual(qwen.api_key, "")
         self.assertEqual(qwen.extra_headers, {})
         self.assertEqual(len(qwen.enabled_models), 4)
-        self.assertEqual([item.provider_id for item in await service.list_settings_provider_summaries(self.db)], ["custom", "deepseek", "qwen"])
+        self.assertEqual([item.provider_id for item in await service.list_settings_provider_summaries(self.db)], ["custom", "dashscope", "deepseek"])
 
     async def test_all_presets_validated_before_first_insert(self):
         original = MODEL_PROVIDER_PRESETS[0]

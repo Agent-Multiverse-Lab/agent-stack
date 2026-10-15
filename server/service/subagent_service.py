@@ -7,9 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import server.service.agent_run_service as agent_run_service
 from server.service.input_message_service import AgentInputMsg
+from server.service.model_service import resolve_runtime_model
 from src.database.models import AgentRun, Conversation, Message
 from src.database.repositories import AgentRepository, AgentRunRepository, ConversationRepository
-from src.model import is_model_available, resolve_chat_model_selection
+from src.model import resolve_chat_model_selection
 
 
 class SubAgentMessageRecord(TypedDict):
@@ -195,8 +196,7 @@ class SubAgentRunService:
             if agent is None:
                 raise ValueError("子智能体不存在或已停用")
             model = resolve_chat_model_selection(agent_model=(agent.agent_config or {}).get("model"))
-            if not is_model_available(model):
-                raise ValueError("所选模型不在当前可用模型目录中")
+            await resolve_runtime_model(self.db, model)
 
             child_thread_id = str(uuid4())
 

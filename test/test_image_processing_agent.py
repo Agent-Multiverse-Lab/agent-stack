@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import AsyncMock, patch, sentinel
 
-from src.agents.library.subagents.image_processing import IMAGE_AGENT
 from src.agents.buildin.subagents import SubAgentContext, SubAgentGraph
+from src.agents.library.subagents.image_processing import IMAGE_AGENT
 
 
 class ImageProcessingAgentTest(unittest.IsolatedAsyncioTestCase):
@@ -11,12 +11,11 @@ class ImageProcessingAgentTest(unittest.IsolatedAsyncioTestCase):
         context = SubAgentContext(uid="user-1", thread_id="thread-1")
         context.update_context(IMAGE_AGENT.context)
         context.update_context({"mcps": ["image_server"], "model": "test/model"})
-        agent = SubAgentGraph()
+        agent = SubAgentGraph(chat_model=sentinel.model)
         with (
             patch(f"{module}.get_mcp_tools", AsyncMock(return_value=(sentinel.image_tool,))) as get_tools,
             patch(f"{module}.list_mcp_servers", return_value=("image_server",)),
             patch(f"{module}.get_mcp_server_errors", return_value={}),
-            patch(f"{module}.load_model", return_value=sentinel.model) as load_model,
             patch(f"{module}.create_agent", return_value=sentinel.graph) as create_agent,
             patch.object(agent, "get_checkpointer", return_value=sentinel.checkpointer),
             patch.object(agent, "get_store", return_value=sentinel.store),
@@ -24,7 +23,7 @@ class ImageProcessingAgentTest(unittest.IsolatedAsyncioTestCase):
             result = await agent.get_agent(context)
         self.assertIs(result, sentinel.graph)
         get_tools.assert_awaited_once_with(["image_server"])
-        load_model.assert_called_once_with("test/model")
+        self.assertIs(create_agent.call_args.kwargs["model"], sentinel.model)
         self.assertIn(sentinel.image_tool, create_agent.call_args.kwargs["tools"])
         self.assertIs(create_agent.call_args.kwargs["checkpointer"], sentinel.checkpointer)
         self.assertIs(create_agent.call_args.kwargs["store"], sentinel.store)
@@ -34,4 +33,4 @@ class ImageProcessingAgentTest(unittest.IsolatedAsyncioTestCase):
         context.update_context(IMAGE_AGENT.context)
         with patch("src.agents.buildin.subagents.subagent_graph.get_mcp_tools", AsyncMock(return_value=[])):
             with self.assertRaisesRegex(ValueError, "没有可用的 MCP 工具"):
-                await SubAgentGraph().get_agent(context)
+                await SubAgentGraph(chat_model=sentinel.model).get_agent(context)

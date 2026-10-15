@@ -1,11 +1,9 @@
 """根据统一 Provider 配置构造 LangChain 模型。"""
 
 from langchain_core.embeddings import Embeddings
-from langchain_deepseek import ChatDeepSeek
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 
 from src.configs import (
-    DEFAULT_BASE_MODEL_PROVIER,
     DEFAULT_EMBEDDING_MODEL_PROVIDER,
     DEFAULT_RERANK_MODEL_PROVIDER,
 )
@@ -29,32 +27,6 @@ def resolve_chat_model_selection(
             raise ValueError("模型配置必须是非空、无首尾空白的字符串")
         return candidate
     raise ValueError("未配置聊天模型")
-
-
-def load_model(model: str):
-    """按 provider/model 规格创建聊天模型。"""
-    provider, model_name = model.split("/")
-    provider_info = DEFAULT_BASE_MODEL_PROVIER.get(provider)
-    if not provider_info:
-        raise ValueError(f"未知模型提供商: {provider}")
-
-    base_url = provider_info.base_url
-    api_key_name = provider_info.api_key.lower()
-    api_key = getattr(sys_config, api_key_name, None)
-
-    if provider in ["dashscope", "openai"]:
-        return ChatOpenAI(
-            model=model_name,
-            api_key=api_key,
-            base_url=base_url,
-        )
-    if provider == "deepseek":
-        return ChatDeepSeek(
-            model=model_name,
-            api_key=api_key,
-            base_url=base_url,
-        )
-    raise ValueError(f"不支持的模型提供商: {provider}")
 
 
 def resolve_embedding_model(

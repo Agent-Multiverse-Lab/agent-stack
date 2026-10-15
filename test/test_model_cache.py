@@ -1,19 +1,19 @@
-"""模型目录展示字段与 Redis read-through cache 测试。"""
+"""PostgreSQL 模型目录投影与 Redis read-through cache 测试。"""
 
 import json
-import unittest
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from src.model import model_cache
+from server.service import model_service as service
+from test.test_model_repository import SQLiteModelTestCase
 
 
 class FakeRedis:
     def __init__(self, cached=None, error: Exception | None = None) -> None:
         self.cached = cached
         self.error = error
+        self.get_key = None
         self.set_arguments = None
 
     async def get(self, key):
@@ -23,103 +23,97 @@ class FakeRedis:
         return self.cached
 
     async def set(self, key, value, *, ex):
+        if self.error is not None:
+            raise self.error
         self.set_arguments = (key, value, ex)
 
 
-class ModelCatalogTest(unittest.TestCase):
-    def test_builds_public_name_version_and_icon_from_config(self):
-        catalog = model_cache.build_model_catalog()
-        by_id = {model["id"]: model for model in catalog["models"]}
+class ModelCatalogTest(SQLiteModelTestCase):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        await self.insert_provider(
+            "dashscope",
+            name="Qwen",
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            enabled_models=[
+                {"model_id": "qwen3.8-max", "model_type": "qwen"},
+            ],
+        )
+        await self.insert_provider(
+            "disabled",
+            name="Disabled",
+            is_enabled=False,
+            enabled_models=[
+                {"model_id": "hidden", "model_type": "openai"},
+            ],
+        )
+        await self.db.commit()
 
-        self.assertEqual("Qwen", by_id["dashscope/qwen3.8-max"]["display_name"])
-        self.assertEqual("3.8 Max", by_id["dashscope/qwen3.8-max"]["version"])
-        self.assertEqual("qwen", by_id["dashscope/qwen3.8-max"]["icon"])
-        self.assertEqual("V4 Pro", by_id["deepseek/deepseek-v4-pro"]["version"])
-        self.assertEqual("4o Mini", by_id["openai/gpt-4o-mini"]["version"])
+    async def test_builds_public_catalog_from_enabled_database_providers(self):
+        catalog = await service.build_model_list(self.db)
 
-    def test_marks_configured_supported_providers_available(self):
-        catalog = model_cache.build_model_catalog()
-        by_id = {model["id"]: model for model in catalog["models"]}
+        self.assertEqual(["dashscope/qwen3.8-max"], [item.id for item in catalog.models])
+        model = catalog.models[0]
+        self.assertEqual(
+            (model.display_name, model.version, model.icon),
+            ("Qwen", "3.8 Max", "qwen"),
+        )
+        self.assertTrue(model.is_available)
 
-        self.assertTrue(by_id["dashscope/qwen3.8-max"]["is_available"])
-        self.assertTrue(by_id["gemini/gemini-3-pro"]["is_available"])
-        self.assertTrue(model_cache.is_model_available("gemini/gemini-3-pro"))
-        self.assertFalse(model_cache.is_model_available("gemini/not-configured"))
-
-    def test_requested_providers_and_unknown_provider(self):
-        names = ["deepseek", "qwen", "glm", "minomax", "gemini", "chatgpt", "ollama", "vllm", "unknown"]
-        providers = {name: SimpleNamespace(model_list=["org/model:tag"]) for name in names}
-        with patch.object(model_cache, "DEFAULT_BASE_MODEL_PROVIER", providers):
-            catalog = model_cache.build_model_catalog()
-            for model in catalog["models"]:
-                with self.subTest(provider=model["provider"]):
-                    expected = model["provider"] != "unknown"
-                    self.assertEqual(expected, model["is_available"])
-                    self.assertEqual(expected, model_cache.is_model_available(model["id"]))
-
-    def test_added_family_names_and_local_provider_fallbacks(self):
-        cases = [
-            ("glm-4", "glm", ("GLM", "4", "zhipu")),
-            ("MiniMax-M2", "minomax", ("MiniMax", "M2", "minimax")),
-            ("chatgpt-4o", "chatgpt", ("ChatGPT", "4o", "openai")),
-            ("custom-model", "ollama", ("Ollama", "custom-model", "ollama")),
-            ("org/custom-model", "vllm", ("vLLM", "org/custom-model", "vllm")),
-        ]
-        for model, provider, expected in cases:
-            with self.subTest(model=model, provider=provider):
-                self.assertEqual(expected, model_cache._model_presentation(model, provider))
-
-
-class ModelCacheTest(unittest.IsolatedAsyncioTestCase):
-    async def test_cache_hit_returns_cached_catalog_without_rewrite(self):
+    async def test_cache_hit_returns_strict_cached_catalog_without_rewrite(self):
         cached_catalog = {
             "default_model": "dashscope/cached-model",
-            "models": [{"id": "dashscope/cached-model"}],
+            "fallback_model": "",
+            "flash_model": "",
+            "image_model": "",
+            "models": [
+                {
+                    "id": "dashscope/cached-model",
+                    "name": "cached-model",
+                    "display_name": "Qwen",
+                    "version": "cached-model",
+                    "provider": "dashscope",
+                    "icon": "qwen",
+                    "is_available": True,
+                    "is_default": True,
+                    "is_fallback": False,
+                    "is_flash": False,
+                }
+            ],
         }
         redis = FakeRedis(json.dumps(cached_catalog).encode())
 
-        with patch.object(
-            model_cache,
-            "get_async_redis_client",
-            return_value=redis,
-        ):
-            result = await model_cache.get_model_catalog()
+        with patch.object(service, "get_async_redis_client", return_value=redis):
+            result = await service.list_models(self.db)
 
-        self.assertEqual(cached_catalog, result)
-        self.assertEqual(model_cache.MODEL_CATALOG_CACHE_KEY, redis.get_key)
+        self.assertEqual(cached_catalog, result.model_dump())
+        self.assertEqual(service.MODEL_LIST_CACHE_KEY, redis.get_key)
         self.assertIsNone(redis.set_arguments)
 
-    async def test_cache_miss_builds_from_config_and_sets_ttl(self):
+    async def test_cache_miss_builds_from_database_and_sets_ttl(self):
         redis = FakeRedis()
 
-        with patch.object(
-            model_cache,
-            "get_async_redis_client",
-            return_value=redis,
-        ):
-            result = await model_cache.get_model_catalog()
+        with patch.object(service, "get_async_redis_client", return_value=redis):
+            result = await service.list_models(self.db)
 
         key, raw_catalog, ttl = redis.set_arguments
-        self.assertEqual(model_cache.MODEL_CATALOG_CACHE_KEY, key)
-        self.assertEqual(model_cache.MODEL_CATALOG_CACHE_TTL_SECONDS, ttl)
-        self.assertEqual(result, json.loads(raw_catalog))
+        self.assertEqual(service.MODEL_LIST_CACHE_KEY, key)
+        self.assertEqual(service.MODEL_LIST_CACHE_TTL_SECONDS, ttl)
+        self.assertEqual(result.model_dump(), json.loads(raw_catalog))
 
-    async def test_redis_failure_falls_back_to_config(self):
-        redis = FakeRedis(error=RedisConnectionError("unavailable"))
-
-        with (
-            patch.object(
-                model_cache,
+    async def test_invalid_cache_and_redis_failure_fall_back_to_database(self):
+        for redis in (
+            FakeRedis(b'{"models":[{"id":"incomplete"}]}'),
+            FakeRedis(error=RedisConnectionError("unavailable")),
+        ):
+            with self.subTest(redis=redis), patch.object(
+                service,
                 "get_async_redis_client",
                 return_value=redis,
-            ),
-            patch.object(model_cache.logger, "warning") as warning,
-        ):
-            result = await model_cache.get_model_catalog()
+            ):
+                result = await service.list_models(self.db)
 
-        self.assertEqual(model_cache.build_model_catalog(), result)
-        warning.assert_called_once()
-
-
-if __name__ == "__main__":
-    unittest.main()
+            self.assertEqual(
+                ["dashscope/qwen3.8-max"],
+                [item.id for item in result.models],
+            )

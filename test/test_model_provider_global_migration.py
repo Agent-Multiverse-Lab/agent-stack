@@ -124,3 +124,74 @@ class ModelProviderGlobalMigrationTest(unittest.TestCase):
             self.run_migration(model_provider_global_sources='{"deepseek":1}')
         self.run_migration()
         self.assertEqual(self.db.execute(select(self.table().c.api_key)).scalar_one(), original["api_key"])
+
+
+class QwenProviderIdMigrationTest(unittest.TestCase):
+    def setUp(self):
+        cipher = patch.object(
+            config,
+            "model_credential_key",
+            SecretStr(Fernet.generate_key().decode()),
+        )
+        cipher.start()
+        self.addCleanup(cipher.stop)
+        self.engine = create_engine("sqlite://")
+        ModelProvider.__table__.create(self.engine)
+        self.connection = self.engine.connect()
+        self.transaction = self.connection.begin()
+        self.operations = Operations(MigrationContext.configure(self.connection))
+        self.migration = migration("0016_qwen_provider_id.py")
+
+    def tearDown(self):
+        self.transaction.rollback()
+        self.connection.close()
+        self.engine.dispose()
+
+    def insert(self, provider_id: str):
+        self.connection.execute(
+            ModelProvider.__table__.insert().values(
+                provider_id=provider_id,
+                name="Qwen",
+                base_url="https://example.com/v1",
+                protocol="openai_compatible",
+                api_key="secret",
+                extra_headers={},
+                is_enabled=True,
+                enabled_models=[],
+            )
+        )
+
+    def test_upgrade_and_downgrade_rename_without_changing_configuration(self):
+        self.insert("qwen")
+        with patch.object(self.migration, "op", self.operations):
+            self.migration.upgrade()
+        row = self.connection.execute(
+            select(ModelProvider.__table__).where(
+                ModelProvider.__table__.c.provider_id == "dashscope"
+            )
+        ).mappings().one()
+        self.assertEqual(row["name"], "Qwen")
+        with patch.object(self.migration, "op", self.operations):
+            self.migration.downgrade()
+        self.assertEqual(
+            self.connection.execute(
+                select(ModelProvider.__table__.c.provider_id)
+            ).scalar_one(),
+            "qwen",
+        )
+
+    def test_conflicting_ids_stop_before_mutation(self):
+        self.insert("qwen")
+        self.insert("dashscope")
+        with patch.object(self.migration, "op", self.operations), self.assertRaises(
+            RuntimeError
+        ):
+            self.migration.upgrade()
+        self.assertEqual(
+            set(
+                self.connection.execute(
+                    select(ModelProvider.__table__.c.provider_id)
+                ).scalars()
+            ),
+            {"qwen", "dashscope"},
+        )

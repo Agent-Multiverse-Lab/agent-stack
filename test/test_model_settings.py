@@ -13,9 +13,20 @@ from test.test_model_repository import SQLiteModelTestCase
 
 
 class ModelSettingsTest(SQLiteModelTestCase):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        refresh = patch.object(
+            service,
+            "refresh_model_list_cache",
+            new_callable=AsyncMock,
+            return_value=True,
+        )
+        refresh.start()
+        self.addCleanup(refresh.stop)
+
     async def test_save_preserves_hidden_parameters_and_key(self):
         await self.insert_provider(
-            "qwen",
+            "dashscope",
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             extra_headers={"X-Private": "header-secret"},
             enabled_models=[{"model_id": "qwen3:8b", "model_type": "qwen", "body_overrides": {"temperature": 0.4}}],
@@ -26,16 +37,16 @@ class ModelSettingsTest(SQLiteModelTestCase):
             models=[{"model_id": "qwen3:8b", "capabilities": ["chat"]}],
         )
         with patch.object(service, "_request_json", new_callable=AsyncMock) as remote:
-            await service.save_model_settings(self.db, "qwen", request)
+            await service.save_model_settings(self.db, "dashscope", request)
             remote.assert_not_called()
-        saved = await self.repository.get_provider_by_id("qwen")
+        saved = await self.repository.get_provider_by_id("dashscope")
         self.assertEqual(saved.api_key, "secret-key")
         self.assertEqual(saved.extra_headers, {"X-Private": "header-secret"})
         self.assertEqual(saved.enabled_models[0]["body_overrides"], {"temperature": 0.4})
         self.assertEqual(saved.enabled_models[0]["capabilities"], ["chat"])
         self.assertFalse(saved.is_enabled)
         cleared = request.model_copy(update={"api_key": ""})
-        await service.save_model_settings(self.db, "qwen", cleared)
+        await service.save_model_settings(self.db, "dashscope", cleared)
         self.assertEqual(saved.api_key, "")
 
     async def test_details_read_database_and_missing_records_are_not_synthesized(self):
@@ -72,18 +83,18 @@ class ModelSettingsTest(SQLiteModelTestCase):
                 ]
             },
         ) as remote:
-            result = await service.discover_settings_models(self.db, "qwen", request)
+            result = await service.discover_settings_models(self.db, "dashscope", request)
         self.assertEqual([m.model_id for m in result], ["chat", "unknown"])
         self.assertEqual(result[0].capabilities, ["chat", "tools"])
         self.assertEqual(result[1].capabilities, [])
         self.assertEqual(remote.call_args.args[0], "http://localhost:8000/v1")
         self.assertEqual(remote.call_args.args[1], {"Authorization": "Bearer draft-secret"})
         self.db.commit.assert_not_called()
-        self.assertEqual(len((await self.repository.get_provider_by_id("qwen")).enabled_models), 4)
+        self.assertEqual(len((await self.repository.get_provider_by_id("dashscope")).enabled_models), 4)
 
     async def test_probe_validates_unsaved_api_key_without_a_selected_model(self):
         await self.insert_provider(
-            "qwen",
+            "dashscope",
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             extra_headers={"X-Private": "private"},
         )
@@ -91,7 +102,7 @@ class ModelSettingsTest(SQLiteModelTestCase):
         self.db.commit.reset_mock()
         request = ModelSettingsRequest(base_url="http://localhost:8000/v1", api_key="new-key")
         with patch.object(service, "_request_json", new_callable=AsyncMock, return_value={"data": []}) as remote:
-            result = await service.test_settings_connection(self.db, "qwen", request)
+            result = await service.test_settings_connection(self.db, "dashscope", request)
         self.assertTrue(result.success)
         self.assertEqual(remote.call_args.args[0], "http://localhost:8000/v1")
         self.assertNotIn("X-Private", remote.call_args.args[1])
@@ -99,7 +110,7 @@ class ModelSettingsTest(SQLiteModelTestCase):
         self.assertEqual(remote.call_args.args[2], "/models")
         self.assertNotIn("body", remote.call_args.kwargs)
         self.db.commit.assert_not_called()
-        self.assertEqual((await self.repository.get_provider_by_id("qwen")).api_key, "secret-key")
+        self.assertEqual((await self.repository.get_provider_by_id("dashscope")).api_key, "secret-key")
 
     async def test_probe_reports_rejected_api_key(self):
         await service.ensure_builtin_model_providers(self.db)
@@ -119,7 +130,7 @@ class ModelSettingsTest(SQLiteModelTestCase):
         self.assertEqual(result.status_code, 401)
         self.db.commit.assert_not_called()
 
-    async def test_provider_management_routes_are_not_connected(self):
+    async def test_model_routes_are_connected_and_require_authentication(self):
         app = FastAPI()
         app.include_router(router, prefix="/api")
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
@@ -132,13 +143,10 @@ class ModelSettingsTest(SQLiteModelTestCase):
             ):
                 with self.subTest(path=path), patch.object(service, "_request_json", new_callable=AsyncMock) as remote:
                     response = await client.request(method, path)
-                    self.assertEqual(response.status_code, 404)
+                    self.assertEqual(response.status_code, 401)
                     remote.assert_not_called()
-            catalog = {"models": [{"id": "static/model"}]}
-            with patch.object(service, "get_model_catalog", new_callable=AsyncMock, return_value=catalog):
-                response = await client.get("/api/models")
-                self.assertEqual(response.status_code, 200)
-                self.assertEqual(response.json(), catalog)
+            response = await client.get("/api/models")
+            self.assertEqual(response.status_code, 401)
 
     async def test_null_key_rejected(self):
         with self.assertRaises(ValidationError):

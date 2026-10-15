@@ -3,7 +3,7 @@
 import json
 import unittest
 from typing import get_args
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from pydantic import ValidationError
@@ -12,10 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from server.entities.model import EnabledModel, ModelProviderCreate, ModelProviderUpdate, ModelType
 from server.service import model_service as service
 from src.database.models import ModelProvider
-from src.model import model_cache
+from src.model.provider import EnabledModel, ModelProviderCreate, ModelProviderUpdate, ModelType
 from test.test_model_repository import SQLiteModelTestCase
 
 _AsyncClient = httpx.AsyncClient
@@ -141,7 +140,7 @@ class ModelServiceTest(SQLiteModelTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.redis = FakeRedis()
-        self.cache_patch = patch.object(model_cache, "get_async_redis_client", return_value=self.redis)
+        self.cache_patch = patch.object(service, "get_async_redis_client", return_value=self.redis)
         self.cache_patch.start()
         self.addCleanup(self.cache_patch.stop)
         async def mock_target(base_url):
@@ -152,26 +151,26 @@ class ModelServiceTest(SQLiteModelTestCase):
 
     async def test_crud_secret_retention_and_public_catalog(self):
         result = await service.create_provider(self.db, provider_config())
-        self.assertFalse(result.cache_refreshed)
-        self.assertEqual(self.redis.events, [])
+        self.assertTrue(result.cache_refreshed)
+        self.assertEqual(self.redis.events[0], ("delete", service.MODEL_LIST_CACHE_KEY))
         public = await service.get_provider(self.db, "local")
         self.assertTrue(public.has_api_key)
         self.assertNotIn("secret-key", public.model_dump_json())
         self.assertNotIn("extra_headers", public.model_dump())
-        connection = await service.resolve_runtime_model(self.db, "local:qwen3:8b")
+        connection = await service.resolve_runtime_model(self.db, "local/qwen3:8b")
         self.assertEqual(connection.api_key.get_secret_value(), "secret-key")
         self.assertEqual(connection.request_headers()["X-Private"], "secret-header")
         self.assertNotIn("secret-header", repr(connection))
         self.assertNotIn("secret-key", connection.model_dump_json())
         await service.update_provider(self.db, "local", update_config())
-        self.assertEqual((await service.resolve_runtime_model(self.db, "local:qwen3:8b")).api_key.get_secret_value(), "secret-key")
+        self.assertEqual((await service.resolve_runtime_model(self.db, "local/qwen3:8b")).api_key.get_secret_value(), "secret-key")
         await service.update_provider(self.db, "local", update_config(api_key=""))
         self.assertFalse((await service.get_provider(self.db, "local")).has_api_key)
         self.assertEqual(len(await service.list_providers(self.db)), 1)
         await service.delete_provider(self.db, "local")
         self.assertEqual(await service.list_enabled_models(self.db), [])
         with self.assertRaises(LookupError):
-            await service.resolve_runtime_model(self.db, "local:qwen3:8b")
+            await service.resolve_runtime_model(self.db, "local/qwen3:8b")
 
     async def test_disabled_provider_removed_from_enabled_list_and_runtime(self):
         await service.create_provider(self.db, provider_config())
@@ -181,19 +180,19 @@ class ModelServiceTest(SQLiteModelTestCase):
             writer.commit()
         self.assertEqual(await service.list_enabled_models(self.db), [])
         with self.assertRaisesRegex(ValueError, "停用"):
-            await service.resolve_runtime_model(self.db, "local:qwen3:8b")
+            await service.resolve_runtime_model(self.db, "local/qwen3:8b")
 
     async def test_all_types_and_model_names_round_trip_through_database(self):
         models = [{"model_id": f"org/{kind}:tag", "model_type": kind} for kind in get_args(ModelType)]
         await service.create_provider(self.db, provider_config(enabled_models=models))
         for model in models:
-            resolved = await service.resolve_runtime_model(self.db, "local:" + model["model_id"])
+            resolved = await service.resolve_runtime_model(self.db, "local/" + model["model_id"])
             self.assertEqual(resolved.model_id, model["model_id"])
             self.assertEqual(resolved.model_type, model["model_type"])
-        for invalid in ["local", ":model", "local:"]:
+        for invalid in ["local", "/model", "local/"]:
             with self.assertRaises(ValueError):
                 await service.resolve_runtime_model(self.db, invalid)
-        for missing in ["unknown:model", "local:missing"]:
+        for missing in ["unknown/model", "local/missing"]:
             with self.assertRaises(LookupError):
                 await service.resolve_runtime_model(self.db, missing)
 
@@ -212,7 +211,7 @@ class ModelServiceTest(SQLiteModelTestCase):
         with self.assertRaisesRegex(ValueError, "已存在"):
             await service.create_provider(self.db, provider_config(api_key="other-key"))
         self.assertEqual(self.redis.events, [])
-        resolved = await service.resolve_runtime_model(self.db, "local:qwen3:8b")
+        resolved = await service.resolve_runtime_model(self.db, "local/qwen3:8b")
         self.assertEqual(resolved.api_key.get_secret_value(), "secret-key")
 
     async def test_provider_write_and_reads_are_independent_of_redis(self):
@@ -221,17 +220,34 @@ class ModelServiceTest(SQLiteModelTestCase):
         self.assertFalse(result.cache_refreshed)
         with Session(self.engine) as verifier:
             self.assertIsNotNone(verifier.scalar(select(ModelProvider)))
-        self.assertEqual((await service.list_enabled_models(self.db))[0].id, "local:qwen3:8b")
+        self.assertEqual((await service.list_enabled_models(self.db))[0].id, "local/qwen3:8b")
         self.assertEqual(self.redis.events, [])
 
-    async def test_provider_writes_leave_existing_chat_catalog_untouched(self):
-        cached = '{"models":[{"id":"static/model"}]}'
-        self.redis.data[model_cache.MODEL_CATALOG_CACHE_KEY] = cached
+    async def test_cache_rebuild_database_error_is_soft_after_write_and_strict_at_startup(self):
+        with patch.object(
+            service,
+            "build_model_list",
+            new=AsyncMock(side_effect=SQLAlchemyError("database unavailable")),
+        ):
+            self.assertFalse(await service.refresh_model_list_cache(self.db))
+            with self.assertRaises(SQLAlchemyError):
+                await service.refresh_model_list_cache(
+                    self.db,
+                    raise_on_database_error=True,
+                )
+
+    async def test_provider_writes_refresh_public_model_list(self):
         await service.create_provider(self.db, provider_config())
+        created = json.loads(self.redis.data[service.MODEL_LIST_CACHE_KEY])
+        self.assertEqual(created["models"][0]["id"], "local/qwen3:8b")
         await service.update_provider(self.db, "local", update_config())
         await service.delete_provider(self.db, "local")
-        self.assertEqual(self.redis.data, {model_cache.MODEL_CATALOG_CACHE_KEY: cached})
-        self.assertEqual(self.redis.events, [])
+        deleted = json.loads(self.redis.data[service.MODEL_LIST_CACHE_KEY])
+        self.assertEqual(deleted["models"], [])
+        self.assertGreaterEqual(
+            self.redis.events.count(("delete", service.MODEL_LIST_CACHE_KEY)),
+            3,
+        )
 
     def http_mock(self, handler):
         return patch.object(
@@ -282,7 +298,7 @@ class ModelServiceTest(SQLiteModelTestCase):
             return httpx.Response(200, json={"choices": [{"message": {"role": "assistant", "content": "OK"}}]})
 
         with self.http_mock(handler):
-            result = await service.test_model_connection(self.db, "local:qwen3:8b")
+            result = await service.test_model_connection(self.db, "local/qwen3:8b")
         self.assertTrue(result.success)
         self.assertGreaterEqual(result.elapsed_ms, 0)
         self.assertFalse((await service.get_provider(self.db, "local")).is_enabled)
@@ -297,7 +313,7 @@ class ModelServiceTest(SQLiteModelTestCase):
                 return httpx.Response(status, text="secret-key secret-header", headers={"Location": "https://elsewhere.example"})
 
             with self.subTest(status=status), self.http_mock(handler):
-                result = await service.test_model_connection(self.db, "local:qwen3:8b")
+                result = await service.test_model_connection(self.db, "local/qwen3:8b")
                 self.assertFalse(result.success)
                 self.assertEqual(result.status_code, status)
                 self.assertNotIn("secret", result.model_dump_json())
@@ -314,11 +330,11 @@ class ModelServiceTest(SQLiteModelTestCase):
                 raise exception("secret-key", request=request)
 
             with self.subTest(code=code), self.http_mock(handler):
-                result = await service.test_model_connection(self.db, "local:qwen3:8b")
+                result = await service.test_model_connection(self.db, "local/qwen3:8b")
                 self.assertEqual(result.error, code)
         for payload in [{}, {"choices": []}, {"choices": [None]}, {"choices": [{"message": {"role": "user", "content": "bad"}}]}]:
             with self.subTest(payload=payload), self.http_mock(lambda request: httpx.Response(200, json=payload)):
-                self.assertEqual((await service.test_model_connection(self.db, "local:qwen3:8b")).error, "invalid_response")
+                self.assertEqual((await service.test_model_connection(self.db, "local/qwen3:8b")).error, "invalid_response")
         for payload in [{}, {"data": [None]}, {"data": [{"id": ""}]}]:
             with self.subTest(payload=payload), self.http_mock(lambda request: httpx.Response(200, json=payload)):
                 with self.assertRaises(service.ModelConnectionError):

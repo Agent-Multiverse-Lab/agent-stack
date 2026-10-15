@@ -3,7 +3,7 @@
 import importlib.util
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
@@ -11,17 +11,25 @@ from cryptography.fernet import Fernet
 from pydantic import SecretStr
 from sqlalchemy import create_engine, inspect, text
 
-from server.entities.model import ModelProviderCreate
 from server.service import model_service as service
 from src.configs import config
 from src.database.models import ModelProvider, User
 from src.database.repositories.model_repository import ModelRepository
+from src.model.provider import ModelProviderCreate
 from test.test_model_repository import SQLiteModelTestCase
 
 
 class ModelGlobalProviderTest(SQLiteModelTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
+        refresh = patch.object(
+            service,
+            "refresh_model_list_cache",
+            new_callable=AsyncMock,
+            return_value=True,
+        )
+        refresh.start()
+        self.addCleanup(refresh.stop)
         await service.create_provider(self.db, ModelProviderCreate(
             provider_id="deepseek", name="Shared", base_url="https://example.com/v1",
             api_key="shared-key", is_enabled=True,
@@ -32,7 +40,7 @@ class ModelGlobalProviderTest(SQLiteModelTestCase):
         other = ModelRepository(self.db)
         provider = await other.get_provider_by_id("deepseek")
         self.assertEqual(provider.name, "Shared")
-        self.assertEqual((await service.resolve_runtime_model(self.db, "deepseek:chat")).api_key.get_secret_value(), "shared-key")
+        self.assertEqual((await service.resolve_runtime_model(self.db, "deepseek/chat")).api_key.get_secret_value(), "shared-key")
         await service.delete_provider(self.db, "deepseek")
         self.assertIsNone(await other.get_provider_by_id("deepseek"))
 

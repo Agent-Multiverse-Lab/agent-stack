@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import src.agents.buildin as agent
 from server.service.input_message_service import AgentInputMsg
 from server.service.langfuse_service import with_langfuse_config
+from server.service.model_service import resolve_runtime_model
 from server.utils.auth import AuthenticatedUser
 from server.utils.interrupt_utils import AskHumanPayload, parse_interrupt_questions
 from src.agents import BaseAgent
@@ -38,7 +39,8 @@ from src.database.repositories import (
     MessageAttachmentRepository,
     UserRepository,
 )
-from src.model import is_model_available, resolve_chat_model_selection
+from src.model import resolve_chat_model_selection
+from src.model.runtime import create_chat_model
 from src.storage import get_storage
 from src.storage.minio import ATTACHMENT_BUCKET_NAME
 from src.utils import logger
@@ -80,8 +82,7 @@ async def create_thread(
         conversation_model=thread_metadata.get("model"),
         agent_model=(agent.agent_config or {}).get("model"),
     )
-    if not is_model_available(thread_metadata["model"]):
-        raise ValueError("所选模型不在当前可用模型目录中")
+    await resolve_runtime_model(db, thread_metadata["model"])
 
     return await ConversationRepository(db).create_conversation(
         uid=uid,
@@ -254,8 +255,10 @@ async def update_thread(
         model = thread_metadata.get("model")
         if model is None or model == "":
             thread_metadata.pop("model", None)
-        elif not isinstance(model, str) or not is_model_available(model):
-            raise ValueError("所选模型不在当前可用模型目录中")
+        elif not isinstance(model, str):
+            raise ValueError("所选模型必须是字符串")
+        else:
+            await resolve_runtime_model(db, model)
         for key in _SYSTEM_THREAD_METADATA_KEYS:
             if key in existing_metadata:
                 thread_metadata[key] = existing_metadata[key]
@@ -467,7 +470,8 @@ async def _build_agent_runtime(
     thread_id: str | None,
     db: AsyncSession,
     run_type: str = "chat",
-) -> tuple[Agent, BaseAgent]:
+    model: str | None = None,
+) -> tuple[Agent, BaseAgent, str]:
     """按角色 slug 读取数据库属性，并为本次 Run 创建执行实例。"""
     agent_repo = AgentRepository(db)
     conv_repo = ConversationRepository(db)
@@ -511,7 +515,15 @@ async def _build_agent_runtime(
     if unknown_fields:
         raise ValueError(f"未知 Agent Context 参数：{', '.join(sorted(unknown_fields))}")
 
-    constructor_args = {}
+    model_id = resolve_chat_model_selection(
+        model=model,
+        conversation_model=(current_thread.conversation_metadata or {}).get("model"),
+        agent_model=context_config.get("model"),
+    )
+    connection = await resolve_runtime_model(db, model_id)
+    chat_model = create_chat_model(connection)
+
+    constructor_args = {"chat_model": chat_model}
     if not agent_record.is_subagent:
         subagents = await agent_repo.list_agents(role="subagent", internal_only=True)
         constructor_args = {
@@ -521,10 +533,11 @@ async def _build_agent_runtime(
                 {"slug": item.slug, "name": item.name, "description": item.description}
                 for item in subagents
             ),
+            "chat_model": chat_model,
         }
     agent_instance = agent_class(**constructor_args)
 
-    return agent_record, agent_instance
+    return agent_record, agent_instance, model_id
 
 
 async def _build_agent_runtime_context(
@@ -1271,12 +1284,13 @@ async def stream_agent_response(
 
     image_content = thread_input_message.image_content
     human_msg: HumanMessage = thread_input_message.langchain_msg
-    agent_item, agent_instance = await _build_agent_runtime(
+    agent_item, agent_instance, model_id = await _build_agent_runtime(
         agent_slug=agent_slug,
         user=current_user,
         thread_id=thread_id,
         db=db,
         run_type=runtime_metadata.get("run_type", "chat"),
+        model=runtime_metadata.get("model"),
     )
     runtime_metadata.update(
         {
@@ -1298,7 +1312,7 @@ async def stream_agent_response(
         run_id=run_id,
         thread_id=thread_id,
         request_id=runtime_metadata["request_id"],
-        model=runtime_metadata.get("model"),
+        model=model_id,
         defaults=agent_item.agent_config,
         parent_run_id=runtime_metadata.get("parent_run_id"),
         conversation_model=(conversation.conversation_metadata or {}).get("model"),
@@ -1459,12 +1473,13 @@ async def resume_agent_response(
             thread_id=thread_id,
             uid=current_user.uid,
         )
-        agent_item, agent_instance = await _build_agent_runtime(
+        agent_item, agent_instance, model_id = await _build_agent_runtime(
             agent_slug=runtime_metadata.get("agent_slug") or "LeaderAgent",
             user=current_user,
             thread_id=thread_id,
             db=db,
             run_type="resume",
+            model=runtime_metadata.get("model"),
         )
         runtime_metadata.update({"thread_id": thread_id, "uid": current_user.uid})
         agent_runtime_context = await _build_agent_runtime_context(
@@ -1472,7 +1487,7 @@ async def resume_agent_response(
             run_id=run_id,
             thread_id=thread_id,
             request_id=runtime_metadata["request_id"],
-            model=runtime_metadata.get("model"),
+            model=model_id,
             defaults=agent_item.agent_config,
             conversation_model=(conversation.conversation_metadata or {}).get("model"),
         )

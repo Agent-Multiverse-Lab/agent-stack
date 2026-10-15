@@ -57,7 +57,14 @@ class FakeAgent:
 class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
     async def test_build_agent_runtime_looks_up_uuid_thread_for_user(self):
         thread_id = "b2308e62-68a3-433e-b051-7e0c218a9249"
-        conversation_repository = SimpleNamespace(get_conversation_by_thread_id_for_user=AsyncMock(return_value=SimpleNamespace(uid="user-1")))
+        conversation_repository = SimpleNamespace(
+            get_conversation_by_thread_id_for_user=AsyncMock(
+                return_value=SimpleNamespace(
+                    uid="user-1",
+                    conversation_metadata={},
+                )
+            )
+        )
         agent_item = SimpleNamespace(
             slug="test-agent",
             backend_id="SubAgentGraph",
@@ -69,6 +76,8 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
         )
         agent_repository = SimpleNamespace(get_by_slug_for_run_type=AsyncMock(return_value=agent_item))
         agent_instance = object()
+        chat_model = object()
+        db = object()
 
         with (
             patch(
@@ -84,16 +93,31 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                 "get_agent_class",
                 return_value=Mock(agent_context=SubAgentContext, return_value=agent_instance),
             ) as resolve_class,
+            patch.object(
+                thread_service,
+                "resolve_runtime_model",
+                AsyncMock(return_value=object()),
+            ) as resolve_model,
+            patch.object(
+                thread_service,
+                "create_chat_model",
+                return_value=chat_model,
+            ),
         ):
             result = await thread_service._build_agent_runtime(
                 agent_slug="test-agent",
                 user=SimpleNamespace(uid="user-1"),
                 thread_id=thread_id,
-                db=object(),
+                db=db,
             )
 
-        self.assertEqual((agent_item, agent_instance), result)
+        self.assertEqual((agent_item, agent_instance, "dashscope/qwen3.8-max"), result)
         resolve_class.assert_called_once_with(agent_item.backend_id)
+        resolve_model.assert_awaited_once_with(db, "dashscope/qwen3.8-max")
+        self.assertIs(
+            resolve_class.return_value.call_args.kwargs["chat_model"],
+            chat_model,
+        )
         conversation_repository.get_conversation_by_thread_id_for_user.assert_awaited_once_with(
             thread_id=thread_id,
             user_id="user-1",
@@ -127,7 +151,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             patch(
                 "server.service.thread_service._build_agent_runtime",
                 new_callable=AsyncMock,
-                return_value=(agent_item, agent),
+                return_value=(agent_item, agent, "dashscope/qwen3.8-max"),
             ),
             patch(
                 "server.service.thread_service.ConversationRepository",
@@ -264,7 +288,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             patch(
                 "server.service.thread_service._build_agent_runtime",
                 new_callable=AsyncMock,
-                return_value=(agent_item, agent),
+                return_value=(agent_item, agent, "dashscope/qwen3.8-max"),
             ),
             patch(
                 "server.service.thread_service._check_conv_status",
@@ -312,7 +336,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             patch(
                 "server.service.thread_service._build_agent_runtime",
                 new_callable=AsyncMock,
-                return_value=(agent_item, agent),
+                return_value=(agent_item, agent, "dashscope/qwen3.8-max"),
             ),
             patch(
                 "server.service.thread_service._check_conv_status",

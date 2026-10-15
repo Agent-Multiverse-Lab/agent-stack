@@ -110,6 +110,7 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
         self.links = FakeMessageAttachmentRepository(self.events)
         self.agent = SimpleNamespace(agent_config={"model": "dashscope/qwen3.8-max"})
         self.agents = SimpleNamespace(get_by_slug_for_run_type=AsyncMock(return_value=self.agent))
+        self.resolve_model = AsyncMock(return_value=object())
         self.attachments = [
             SimpleNamespace(id=31, file_id=FILE_ID_1),
             SimpleNamespace(id=32, file_id=FILE_ID_2),
@@ -140,6 +141,11 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
 
         patches = (
             patch.object(agent_run_service, "AgentRepository", return_value=self.agents),
+            patch.object(
+                agent_run_service,
+                "resolve_runtime_model",
+                self.resolve_model,
+            ),
             patch(
                 "server.service.agent_run_service.ConversationRepository",
                 return_value=self.conversations,
@@ -378,7 +384,8 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.conversations.conversation.conversation_metadata["model"], expected)
 
     async def test_unavailable_model_is_rejected_before_writes(self):
-        with self.assertRaisesRegex(ValueError, "可用模型目录"):
+        self.resolve_model.side_effect = ValueError("模型供应商已停用")
+        with self.assertRaisesRegex(ValueError, "模型供应商已停用"):
             await self.create_run(
                 thread_metadata={
                     "model": "unavailable/model",

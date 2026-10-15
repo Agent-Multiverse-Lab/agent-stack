@@ -8,6 +8,7 @@ from uuid import uuid4
 from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from server.service.model_service import resolve_runtime_model
 from src.configs import config as sys_config
 from src.database.models import (
     KnowledgeBase,
@@ -29,10 +30,10 @@ from src.knowledge.store.neo4j.neo4j_store import get_graph_store
 from src.model import (
     RerankDocument,
     load_embedding_model,
-    load_model,
     load_reranker,
     resolve_embedding_model,
 )
+from src.model.runtime import create_chat_model
 from src.storage.minio import get_storage, sanitize_filename
 from src.utils import logger
 
@@ -673,7 +674,10 @@ async def extract_file(
                 len(markdown_text),
             )
             markdown_text = markdown_text[:_EXTRACT_MAX_CHARS]
-        result = await GraphExtractor().extract(markdown_text)
+        connection = await resolve_runtime_model(db, sys_config.flash_model)
+        result = await GraphExtractor(
+            model=create_chat_model(connection)
+        ).extract(markdown_text)
 
         entities = []
         seen_names: set[str] = set()
@@ -911,7 +915,8 @@ async def chat(
             zip(citations, range(1, len(citations) + 1), strict=True)
         )
     )
-    model = load_model(sys_config.default_model)
+    connection = await resolve_runtime_model(db, sys_config.default_model)
+    model = create_chat_model(connection)
     response = await model.ainvoke(
         [
             SystemMessage(content=_CHAT_SYSTEM_PROMPT),

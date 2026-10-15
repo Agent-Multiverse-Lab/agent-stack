@@ -8,11 +8,12 @@ import httpx
 from pydantic import SecretStr
 from sqlalchemy import text
 
-from server.entities.model import ModelProviderCreate, ModelSettingsRequest
+from server.entities.model import ModelSettingsRequest
 from server.service import model_service as service
 from server.service.model_outbound import UnsafeModelTarget, resolve_public_target
 from src.configs import config
 from src.database.credential_types import decrypt_credential
+from src.model.provider import ModelProviderCreate
 from test.test_model_repository import SQLiteModelTestCase
 
 

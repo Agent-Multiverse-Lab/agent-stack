@@ -26,7 +26,6 @@ from langchain_core.messages.utils import count_tokens_approximately
 from langgraph.config import get_stream_writer
 from langgraph.constants import TAG_NOSTREAM
 
-from src.model import load_model
 from src.utils import logger
 
 DEFAULT_SUMMARY_THRESHOLD_K = 100
@@ -510,11 +509,12 @@ def create_summary_middleware_from_context(
     context,
     *,
     backend,
+    model: BaseChatModel,
 ) -> S2CSummarizationMiddleware:
     """按 Agent 运行时配置创建自动与主动压缩共用的摘要器。"""
     trigger_tokens = getattr(context, "summary_threshold", DEFAULT_SUMMARY_THRESHOLD_K) * 1024
     return create_summary_middleware(
-        model=load_model(context.model),
+        model=model,
         backend=backend,
         trigger=("tokens", trigger_tokens),
         keep=("messages", getattr(context, "summary_keep_messages", DEFAULT_SUMMARY_KEEP_MESSAGES)),

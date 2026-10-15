@@ -11,6 +11,7 @@ from server.utils.auth import (
     AuthenticatedUser,
     create_access_token,
     hash_password,
+    is_admin_user,
     verify_password,
 )
 from src.database import get_db
@@ -18,6 +19,18 @@ from src.database.repositories import UserRepository
 from src.utils import logger
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _user_response(user) -> UserResponse:
+    return UserResponse.model_validate(
+        {
+            "id": user.id,
+            "uid": user.uid,
+            "email": user.email,
+            "is_active": user.is_active,
+            "is_admin": is_admin_user(user),
+        }
+    )
 
 
 @router.post(
@@ -47,7 +60,7 @@ async def register(payload: RegisterRequest, session: AsyncSession = Depends(get
     await session.commit()
     await session.refresh(user)
     logger.info("User registered: user_id=%s.", user.id)
-    return UserResponse.model_validate(user)
+    return _user_response(user)
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -80,11 +93,11 @@ async def login(payload: LoginRequest, session: AsyncSession = Depends(get_db)):
     logger.info("Login succeeded: user_id=%s.", user.id)
     return TokenResponse(
         access_token=token,
-        user=UserResponse.model_validate(user),
+        user=_user_response(user),
     )
 
 
 @router.get("/me", response_model=UserResponse)
 async def me(current_user: AuthenticatedUser):
     logger.info("Current user requested: user_id=%s.", current_user.id)
-    return UserResponse.model_validate(current_user)
+    return _user_response(current_user)

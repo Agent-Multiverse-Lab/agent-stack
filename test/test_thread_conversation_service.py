@@ -3,7 +3,7 @@
 import unittest
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from server.router.thread_router import router
 from server.service import thread_service
@@ -215,6 +215,7 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
         self.users = FakeUserRepository()
         self.agents = FakeAgentRepository()
         self.storage = FakeStorage()
+        self.resolve_model = AsyncMock(return_value=object())
         patches = (
             patch(
                 "server.service.thread_service.ConversationRepository",
@@ -239,6 +240,10 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
             patch(
                 "server.service.thread_service.get_storage",
                 return_value=self.storage,
+            ),
+            patch(
+                "server.service.thread_service.resolve_runtime_model",
+                new=self.resolve_model,
             ),
         )
         for current_patch in patches:
@@ -281,6 +286,7 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conversation.conversation_metadata["model"], "dashscope/qwen3.8-max")
 
     async def test_invalid_thread_model_is_rejected_before_creation(self):
+        self.resolve_model.side_effect = ValueError("聊天模型未配置")
         for model in (42, "unknown/model", " deepseek/deepseek-v4-flash"):
             with self.subTest(model=model), self.assertRaises(ValueError):
                 await thread_service.create_thread(

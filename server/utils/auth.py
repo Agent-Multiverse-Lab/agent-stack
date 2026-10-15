@@ -115,3 +115,26 @@ async def get_current_user(
 
 
 AuthenticatedUser = Annotated[User, Depends(get_current_user)]
+
+
+def is_admin_user(user: User) -> bool:
+    admin_emails = {
+        value.strip().casefold()
+        for value in config.admin_emails.split(",")
+        if value.strip()
+    }
+    return str(user.email).casefold() in admin_emails
+
+
+async def get_current_admin_user(
+    current_user: AuthenticatedUser,
+) -> User:
+    if not is_admin_user(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator permission is required.",
+        )
+    return current_user
+
+
+AdminUser = Annotated[User, Depends(get_current_admin_user)]
