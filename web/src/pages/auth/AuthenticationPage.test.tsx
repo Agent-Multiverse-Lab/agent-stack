@@ -22,7 +22,8 @@ const user = {
   id: 1,
   uid: "test-user",
   email: "test@example.com",
-  is_active: true
+  is_active: true,
+  is_admin: false
 }
 
 function renderRoute(path: string) {

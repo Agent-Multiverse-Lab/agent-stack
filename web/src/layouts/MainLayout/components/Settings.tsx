@@ -78,10 +78,16 @@ export function Settings({ open, close, user }: SettingsProps) {
     if (open) setSection("general");
   }, [open]);
 
+  useEffect(() => {
+    if (!user?.is_admin && section === "models") setSection("general");
+  }, [section, user?.is_admin]);
+
   const sections: SectionOption[] = [
     { id: "general", name: t("General"), icon: Settings2Icon },
     { id: "account", name: t("Account"), icon: UserRoundIcon },
-    { id: "models", name: t("Models"), icon: BotIcon },
+    ...(user?.is_admin
+      ? [{ id: "models" as const, name: t("Models"), icon: BotIcon }]
+      : []),
     { id: "data", name: t("Data Controls"), icon: DatabaseIcon },
     { id: "about", name: t("About"), icon: InfoIcon },
   ];

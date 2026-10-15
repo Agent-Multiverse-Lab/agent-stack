@@ -44,6 +44,7 @@ import qwenLogo from "@/assets/models/qwen-color.svg";
 import {
   discoverProviderModels,
   getModelProvider,
+  listModelProviders,
   saveModelProvider,
   testProviderConnection,
 } from "@/api/model";
@@ -52,14 +53,21 @@ import { useTranslation } from "@/i18n";
 import type {
   ModelProvider,
   ModelProviderId,
+  ModelProviderSummary,
   ModelSettingsRequest,
   SettingsModel,
 } from "@/types/model";
 
-const providers: { id: ModelProviderId; name: string; logo: string }[] = [
-  { id: "deepseek", name: "DeepSeek", logo: deepseekLogo },
-  { id: "qwen", name: "Qwen", logo: qwenLogo },
-];
+const providerLogos: Record<string, string> = {
+  deepseek: deepseekLogo,
+  dashscope: qwenLogo,
+  qwen: qwenLogo,
+};
+
+function ProviderMark({ providerId }: { providerId: string }) {
+  const logo = providerLogos[providerId];
+  return logo ? <img src={logo} alt="" /> : <Bot aria-hidden="true" />;
+}
 interface Draft extends ModelSettingsRequest {
   key: string;
   keyEdited: boolean;
@@ -91,8 +99,9 @@ const providerDraft = (value: ModelProvider): Draft => ({
 export default function SettingsModels() {
   const { t, i18n } = useTranslation();
   const { accessToken } = useAuth();
-  const [selected, setSelected] = useState<ModelProviderId>("deepseek");
-  const [drafts, setDrafts] = useState<Partial<Record<ModelProviderId, Draft>>>(
+  const [providers, setProviders] = useState<ModelProviderSummary[]>([]);
+  const [selected, setSelected] = useState<ModelProviderId>("");
+  const [drafts, setDrafts] = useState<Partial<Record<string, Draft>>>(
     {},
   );
   const draft = drafts[selected] ?? emptyDraft();
@@ -103,21 +112,26 @@ export default function SettingsModels() {
   const [chosen, setChosen] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [revealKey, setRevealKey] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const version = useRef(0);
-  const account = useRef(accessToken);
-  const blocked = loading || loadError || busy !== null;
-  const provider = providers.find((item) => item.id === selected)!;
+  const provider = providers.find((item) => item.provider_id === selected);
+  const blocked = loading || loadError || busy !== null || !provider;
   const filteredCandidates =
     candidates?.filter((model) =>
       model.model_id.toLowerCase().includes(search.toLowerCase()),
     ) ?? [];
   function edit(patch: Partial<Draft>) {
+    if (!selected) return;
     setDrafts((previous) => ({
       ...previous,
       [selected]: { ...(previous[selected] ?? emptyDraft()), ...patch },
     }));
   }
   const load = useCallback(async () => {
+    if (!selected) {
+      setLoading(false);
+      return;
+    }
     const current = ++version.current;
     setLoading(true);
     setLoadError(false);
@@ -142,21 +156,44 @@ export default function SettingsModels() {
     }
   }, [selected, i18n]);
   useEffect(() => {
-    if (account.current === accessToken) return;
-    account.current = accessToken;
+    let cancelled = false;
+    const current = ++version.current;
+    setProviders([]);
+    setSelected("");
     setDrafts({});
     setCandidates(null);
     setChosen([]);
     setSearch("");
     setRevealKey(false);
-  }, [accessToken]);
-  useEffect(() => {
-    void load();
-    const requestVersion = version;
+    setLoadError(false);
+    if (!accessToken) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    void listModelProviders()
+      .then((items) => {
+        if (cancelled || current !== version.current) return;
+        setProviders(items);
+        setSelected(items[0]?.provider_id ?? "");
+        if (!items.length) setLoading(false);
+      })
+      .catch((error) => {
+        if (cancelled || current !== version.current) return;
+        setLoadError(true);
+        setLoading(false);
+        toast.error(
+          error instanceof Error ? error.message : i18n.t("Load failed"),
+        );
+      });
     return () => {
-      requestVersion.current++;
+      cancelled = true;
     };
-  }, [load, accessToken]);
+  }, [accessToken, i18n, reloadKey]);
+  useEffect(() => {
+    if (!selected) return;
+    void load();
+  }, [load, selected]);
   useEffect(() => {
     setRevealKey(false);
   }, [selected]);
@@ -172,7 +209,7 @@ export default function SettingsModels() {
     };
   }
   async function act(action: "save" | "discover" | "test") {
-    if (blocked) return;
+    if (blocked || !selected) return;
     const current = version.current;
     const body = request();
     setBusy(action);
@@ -231,7 +268,7 @@ export default function SettingsModels() {
         <ItemGroup className="flex-col gap-1">
           {providers.map((item) => (
             <Item
-              key={item.id}
+              key={item.provider_id}
               render={
                 <Button
                   type="button"
@@ -239,19 +276,22 @@ export default function SettingsModels() {
                   disabled={busy !== null || candidates !== null}
                 />
               }
-              variant={selected === item.id ? "muted" : "default"}
+              variant={selected === item.provider_id ? "muted" : "default"}
               size="sm"
-              aria-pressed={selected === item.id}
+              aria-pressed={selected === item.provider_id}
               className="min-h-11 shrink-0 flex-nowrap justify-start text-left aria-pressed:bg-selection aria-pressed:text-selection-foreground aria-pressed:shadow-[inset_3px_0_0_var(--selection-foreground)] aria-pressed:hover:bg-selection disabled:opacity-60"
-              onClick={() => setSelected(item.id)}
+              onClick={() => setSelected(item.provider_id)}
             >
-              <ItemMedia variant="image" className="size-6">
-                <img src={item.logo} alt="" />
+              <ItemMedia
+                variant={providerLogos[item.provider_id] ? "image" : "icon"}
+                className="size-6"
+              >
+                <ProviderMark providerId={item.provider_id} />
               </ItemMedia>
               <ItemContent>
                 <ItemTitle
                   className={
-                    selected === item.id
+                    selected === item.provider_id
                       ? "font-semibold"
                       : "text-muted-foreground"
                   }
@@ -269,11 +309,20 @@ export default function SettingsModels() {
         aria-busy={loading}
       >
         <Item className="mb-7 flex-nowrap px-0 py-0">
-          <ItemMedia variant="image" className="size-7">
-            <img src={provider.logo} alt="" />
+          <ItemMedia
+            variant={provider && providerLogos[provider.provider_id] ? "image" : "icon"}
+            className="size-7"
+          >
+            {provider ? (
+              <ProviderMark providerId={provider.provider_id} />
+            ) : (
+              <Bot aria-hidden="true" />
+            )}
           </ItemMedia>
           <ItemContent>
-            <ItemTitle className="text-lg">{provider.name}</ItemTitle>
+            <ItemTitle className="text-lg">
+              {provider?.name ?? t("No models available")}
+            </ItemTitle>
           </ItemContent>
           <ItemActions>
             <Label htmlFor="provider-enabled">{t("Enabled")}</Label>
@@ -300,7 +349,10 @@ export default function SettingsModels() {
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={() => void load()}
+                onClick={() => {
+                  if (selected) void load();
+                  else setReloadKey((value) => value + 1);
+                }}
               >
                 <RefreshCw />
                 {t("Retry")}

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   discoverProviderModels,
   getModelProvider,
+  listModelProviders,
   saveModelProvider,
   testProviderConnection,
 } from "@/api/model";
@@ -13,6 +14,7 @@ import { installBrowserStubs } from "@/test/browserStubs";
 vi.mock("@/api/model", () => ({
   discoverProviderModels: vi.fn(),
   getModelProvider: vi.fn(),
+  listModelProviders: vi.fn(),
   saveModelProvider: vi.fn(),
   testProviderConnection: vi.fn(),
 }));
@@ -23,10 +25,25 @@ vi.mock("@/context/AuthContext", () => ({
 
 beforeEach(() => {
   installBrowserStubs();
+  vi.mocked(listModelProviders).mockResolvedValue([
+    {
+      provider_id: "deepseek",
+      name: "DeepSeek",
+      is_enabled: false,
+      has_api_key: false,
+    },
+    {
+      provider_id: "dashscope",
+      name: "Qwen",
+      is_enabled: false,
+      has_api_key: false,
+    },
+  ]);
   vi.mocked(getModelProvider).mockResolvedValue({
     provider_id: "deepseek",
     name: "DeepSeek",
     base_url: "https://api.deepseek.com/v1",
+    protocol: "openai_compatible",
     is_enabled: false,
     has_api_key: false,
     enabled_models: [],
@@ -73,13 +90,26 @@ it("sends the unsaved API key to the backend test without requiring a model", as
   expect(saveModelProvider).not.toHaveBeenCalled();
 });
 
-it("shows only DeepSeek and Qwen", async () => {
+it("renders the provider navigation from the backend list", async () => {
+  vi.mocked(listModelProviders).mockResolvedValue([
+    {
+      provider_id: "deepseek",
+      name: "DeepSeek",
+      is_enabled: false,
+      has_api_key: false,
+    },
+    {
+      provider_id: "custom",
+      name: "Custom Gateway",
+      is_enabled: true,
+      has_api_key: true,
+    },
+  ]);
   render(<SettingsModels />);
 
   await screen.findByRole("button", { name: "DeepSeek" });
-  expect(screen.getByRole("button", { name: "Qwen" })).toBeTruthy();
-  expect(screen.queryByText("GLM")).toBeNull();
-  expect(screen.queryByText("Ollama")).toBeNull();
+  expect(screen.getByRole("button", { name: "Custom Gateway" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Qwen" })).toBeNull();
 });
 
 it("reloads the redacted provider after saving a new key", async () => {
@@ -88,6 +118,7 @@ it("reloads the redacted provider after saving a new key", async () => {
       provider_id: "deepseek",
       name: "DeepSeek",
       base_url: "https://api.deepseek.com/v1",
+      protocol: "openai_compatible",
       is_enabled: false,
       has_api_key: false,
       enabled_models: [],
@@ -96,6 +127,7 @@ it("reloads the redacted provider after saving a new key", async () => {
       provider_id: "deepseek",
       name: "DeepSeek",
       base_url: "https://api.deepseek.com/v1",
+      protocol: "openai_compatible",
       is_enabled: false,
       has_api_key: true,
       enabled_models: [],

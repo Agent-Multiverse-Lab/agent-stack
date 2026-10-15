@@ -38,3 +38,21 @@ it("uses sidebar navigation for Settings sections", () => {
     screen.getByRole("button", { name: "Account" }).hasAttribute("data-active"),
   ).toBe(true);
 });
+
+it("shows model management only to administrators", () => {
+  installBrowserStubs();
+  const user = {
+    id: 1,
+    uid: "user-1",
+    email: "admin@example.com",
+    is_active: true,
+    is_admin: true,
+  };
+  const { rerender } = render(
+    <Settings open close={() => {}} user={{ ...user, is_admin: false }} />,
+  );
+
+  expect(screen.queryByRole("button", { name: "Models" })).toBeNull();
+  rerender(<Settings open close={() => {}} user={user} />);
+  expect(screen.getByRole("button", { name: "Models" })).toBeTruthy();
+});

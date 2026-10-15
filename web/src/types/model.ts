@@ -19,7 +19,7 @@ export interface ModelCatalogResponse {
   models: ChatModelOption[]
 }
 
-export type ModelProviderId = "deepseek" | "qwen"
+export type ModelProviderId = string
 export type ChatCapability = "chat" | "vision" | "reasoning" | "tools" | "code" | "audio" | "video"
 
 export interface SettingsModel {
@@ -36,6 +36,7 @@ export interface ModelProviderSummary {
 
 export interface ModelProvider extends ModelProviderSummary {
   base_url: string
+  protocol: "openai_compatible"
   enabled_models: SettingsModel[]
 }
 
