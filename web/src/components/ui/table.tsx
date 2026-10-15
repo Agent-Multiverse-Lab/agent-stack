@@ -24,11 +24,11 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
 }
 
 function TableHead({ className, ...props }: React.ComponentProps<"th">) {
-  return <th data-slot="table-head" className={cn("h-10 px-2 text-left align-middle font-medium text-muted-foreground", className)} {...props} />
+  return <th data-slot="table-head" className={cn("h-10 bg-muted px-4 text-left align-middle font-medium text-foreground", className)} {...props} />
 }
 
 function TableCell({ className, ...props }: React.ComponentProps<"td">) {
-  return <td data-slot="table-cell" className={cn("p-2 align-middle", className)} {...props} />
+  return <td data-slot="table-cell" className={cn("px-4 py-3 align-middle", className)} {...props} />
 }
 
 export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell }

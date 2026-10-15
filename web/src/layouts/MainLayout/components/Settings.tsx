@@ -1,4 +1,5 @@
 import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
+import { useTheme } from "next-themes";
 import type { LucideIcon } from "lucide-react";
 import {
   BotIcon,
@@ -8,13 +9,6 @@ import {
   UserRoundIcon,
 } from "lucide-react";
 
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -47,7 +41,6 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from "@/components/ui/sidebar";
-import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import type { UserResponse } from "@/types/auth";
 import { useTranslation } from "@/i18n";
@@ -70,7 +63,7 @@ type SettingsProps = {
 export function Settings({ open, close, user }: SettingsProps) {
   const { t, i18n } = useTranslation();
   const [section, setSection] = useState<Section>("general");
-  const [theme, setTheme] = useState("light");
+  const { theme = "light", setTheme } = useTheme();
   const [followUps, setFollowUps] = useState(true);
   const [improveModel, setImproveModel] = useState(false);
 
@@ -78,16 +71,10 @@ export function Settings({ open, close, user }: SettingsProps) {
     if (open) setSection("general");
   }, [open]);
 
-  useEffect(() => {
-    if (!user?.is_admin && section === "models") setSection("general");
-  }, [section, user?.is_admin]);
-
   const sections: SectionOption[] = [
     { id: "general", name: t("General"), icon: Settings2Icon },
     { id: "account", name: t("Account"), icon: UserRoundIcon },
-    ...(user?.is_admin
-      ? [{ id: "models" as const, name: t("Models"), icon: BotIcon }]
-      : []),
+    { id: "models", name: t("Models"), icon: BotIcon },
     { id: "data", name: t("Data Controls"), icon: DatabaseIcon },
     { id: "about", name: t("About"), icon: InfoIcon },
   ];
@@ -95,7 +82,7 @@ export function Settings({ open, close, user }: SettingsProps) {
     sections.find((item) => item.id === section) ?? sections[0];
 
   const setting = (label: string, control: ReactNode) => (
-    <Field orientation="horizontal" className="min-h-16 py-4 [&>[data-slot=switch]]:w-9">
+    <Field orientation="horizontal" className="min-h-14 py-3">
       <FieldContent>
         <FieldTitle>{label}</FieldTitle>
       </FieldContent>
@@ -112,7 +99,7 @@ export function Settings({ open, close, user }: SettingsProps) {
     >
       <DialogContent
         overlayClassName="z-[100]"
-        className="z-[101] h-[min(92dvh,760px)] max-w-[1120px] overflow-hidden p-0"
+        className="z-[101] top-[5vh] h-[min(84dvh,840px)] w-[90%] max-w-[980px] translate-y-0 [&>[data-slot=dialog-close]]:top-2.5 [&>[data-slot=dialog-close]]:right-auto [&>[data-slot=dialog-close]]:left-3.5 [&>[data-slot=dialog-close]]:size-8 overflow-hidden p-0"
       >
         <DialogTitle className="sr-only">{t("Settings")}</DialogTitle>
         <DialogDescription className="sr-only">
@@ -121,23 +108,25 @@ export function Settings({ open, close, user }: SettingsProps) {
 
         <SidebarProvider
           className="min-h-0 items-start"
-          style={{ "--sidebar-width": "13rem" } as CSSProperties}
+          style={{ "--sidebar-width": "11rem" } as CSSProperties}
         >
           <Sidebar
             collapsible="none"
             aria-label={t("Settings sections")}
+            className="border-r border-border bg-secondary"
           >
             <SidebarContent>
-              <SidebarGroup className="py-4">
+              <SidebarGroup className="px-2.5 pt-[52px] pb-3">
                 <SidebarGroupContent>
-                  <SidebarMenu>
+                  <SidebarMenu className="gap-2">
                     {sections.map((item) => {
                       const Icon = item.icon;
                       return (
                         <SidebarMenuItem key={item.id}>
                           <SidebarMenuButton
                             type="button"
-                            size="lg"
+                            size="default"
+                            className="h-9 gap-2.5 px-3 py-1.5 text-[15px] [&>svg]:size-[18px]"
                             isActive={section === item.id}
                             onClick={() => setSection(item.id)}
                           >
@@ -153,33 +142,16 @@ export function Settings({ open, close, user }: SettingsProps) {
             </SidebarContent>
           </Sidebar>
 
-          <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            <header className="flex h-14 shrink-0 items-center px-6 pr-12">
-              <Breadcrumb>
-                <BreadcrumbList>
-                  <BreadcrumbItem>
-                    <span className="text-muted-foreground">
-                      {t("Settings")}
-                    </span>
-                  </BreadcrumbItem>
-                  <BreadcrumbSeparator />
-                  <BreadcrumbItem>
-                    <BreadcrumbPage>{currentSection.name}</BreadcrumbPage>
-                  </BreadcrumbItem>
-                </BreadcrumbList>
-              </Breadcrumb>
-            </header>
-            <Separator />
-
+          <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
             <ScrollArea className="min-h-0 flex-1">
               <section
-                className="px-6 pt-5 pb-6"
+                className="p-4"
                 aria-live="polite"
                 aria-labelledby="settings-section-title"
               >
                 <h2
                   id="settings-section-title"
-                  className="mb-5 text-lg font-semibold"
+                  className="my-3 text-[16px] leading-[1.4] font-medium"
                 >
                   {currentSection.name}
                 </h2>

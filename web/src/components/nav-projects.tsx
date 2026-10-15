@@ -169,6 +169,7 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
                     to={`/c/${encodeURIComponent(item.thread_id)}`}
                   />
                 }
+                className="px-2 text-[13px]"
                 isActive={threadId === item.thread_id}
                 title={item.title}
                 aria-current={

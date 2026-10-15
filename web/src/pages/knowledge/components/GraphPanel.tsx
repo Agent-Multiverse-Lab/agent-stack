@@ -220,7 +220,7 @@ export function GraphPanel({ kbId }: { kbId: string }) {
               type="button"
               size="sm"
               aria-label={t("Clear")}
-              className="grid size-7 shrink-0 place-items-center rounded-full p-0 text-muted-foreground"
+              className="grid size-7 shrink-0 place-items-center rounded-md p-0 text-muted-foreground"
               onClick={() => {
                 setMatchedIds(new Set())
                 setQuery("")
@@ -234,7 +234,7 @@ export function GraphPanel({ kbId }: { kbId: string }) {
             type="submit"
             aria-label={t("Search")}
             disabled={!query.trim() || searching}
-            className="grid size-7 shrink-0 place-items-center rounded-full p-0"
+            className="grid size-7 shrink-0 place-items-center rounded-md p-0"
           >
             {searching ? <Spinner className="size-3.5" /> : <Search size={14} />}
           </Button>
@@ -335,7 +335,7 @@ export function GraphPanel({ kbId }: { kbId: string }) {
               variant="ghost"
               type="button"
               aria-label={t("Close")}
-              className="grid size-7 shrink-0 place-items-center rounded-full p-0 text-muted-foreground"
+              className="grid size-7 shrink-0 place-items-center rounded-md p-0 text-muted-foreground"
               onClick={() => setSelectedId(null)}
             >
               <X size={14} />

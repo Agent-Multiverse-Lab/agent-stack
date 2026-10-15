@@ -355,7 +355,7 @@ export default function ChatPage() {
           );
         }}
       >
-        <div className="mx-auto grid w-full max-w-[52rem] content-start gap-7 px-[clamp(1rem,4vw,2rem)] pt-6 pb-10">
+        <div className="mx-auto grid w-full max-w-[800px] content-start gap-6 px-8 py-4">
           {chatState.loading ? (
             <Thinking label="Loading conversation" />
           ) : (
@@ -371,16 +371,16 @@ export default function ChatPage() {
       </div>
 
       <footer
-        className={`inset-x-0 px-[clamp(0.75rem,4vw,2rem)] ${
+        className={`inset-x-0 ${
           docked
-            ? "shrink-0 bg-card pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]"
-            : "absolute top-[38%] -translate-y-1/2"
+            ? "shrink-0 bg-card px-3.5 pt-3.5 pb-[max(1rem,env(safe-area-inset-bottom))]"
+            : "absolute top-[45%] mx-auto w-[90%] max-w-[800px] -translate-y-1/2 px-0"
         } ${pending ? "max-h-full overflow-y-auto overscroll-contain" : ""}`}
       >
-        <div className="relative mx-auto grid w-full max-w-[48rem] gap-2">
+        <div className="relative mx-auto grid w-full max-w-[800px] gap-2">
           {!docked && !chatState.loading && (
             <div className="mb-4 text-center select-none">
-              <h1 className="text-4xl font-semibold tracking-tight">
+              <h1 className="text-2xl font-semibold">
                 {t("Welcome to AM")}
               </h1>
               <p className="mt-2 text-base text-muted-foreground">
@@ -391,7 +391,7 @@ export default function ChatPage() {
           {displayedError && (
             <p
               role="alert"
-              className="m-0 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              className="m-0 rounded-md bg-destructive-muted px-3 py-2 text-sm text-destructive"
             >
               {displayedError}
             </p>
@@ -401,7 +401,7 @@ export default function ChatPage() {
               type="button"
               aria-label={t("Scroll to latest message")}
               title={t("Scroll to latest message")}
-              className="z-10 grid size-9 place-items-center justify-self-center rounded-full border border-border bg-card text-muted-foreground shadow-sm"
+              className="z-10 grid size-9 place-items-center justify-self-center rounded-full border border-border bg-card text-muted-foreground"
               onClick={() => {
                 scroller.current?.scrollTo({
                   top: scroller.current.scrollHeight,

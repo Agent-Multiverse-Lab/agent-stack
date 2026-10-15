@@ -86,19 +86,19 @@ export default function WorkspacePreview({
         finalFocus={() => returnFocus.current?.isConnected ? returnFocus.current : false}
         className="absolute! inset-0! z-10 h-full! w-full! max-w-none! gap-0 rounded-none border-0 bg-card p-0 shadow-none motion-reduce:transition-none"
       >
-        <SheetHeader className="flex h-14 shrink-0 flex-row items-center gap-2 px-5 py-2">
+        <SheetHeader className="flex h-12 shrink-0 flex-row items-center gap-2 px-5 py-2">
           <FileText className="size-5 shrink-0 text-muted-foreground" strokeWidth={1.5} />
           <SheetTitle className="min-w-0 flex-1 truncate text-sm font-medium">
             {entry?.name ?? t("File preview")}
           </SheetTitle>
           <SheetDescription className="sr-only">{t("File preview")}</SheetDescription>
-          {!editing && canEdit && <Button type="button" variant="ghost" size="icon-sm" className="rounded-none"
+          {!editing && canEdit && <Button type="button" variant="ghost" size="icon-sm" className="rounded-md"
             aria-label={t("Edit content")} onClick={() => onEditingChange(true)}><FilePenLine /></Button>}
-          <Button type="button" variant="ghost" size="icon-sm" className="rounded-none"
+          <Button type="button" variant="ghost" size="icon-sm" className="rounded-md"
             aria-label={t(expanded ? "Restore preview width" : "Expand preview")} onClick={onExpand}>
             {expanded ? <Minimize2 /> : <Maximize2 />}
           </Button>
-          <SheetClose disabled={saving} render={<Button type="button" variant="ghost" size="icon-sm" className="rounded-none" aria-label={t("Close preview")} />}>
+          <SheetClose disabled={saving} render={<Button type="button" variant="ghost" size="icon-sm" className="rounded-md" aria-label={t("Close preview")} />}>
             <X />
           </SheetClose>
         </SheetHeader>

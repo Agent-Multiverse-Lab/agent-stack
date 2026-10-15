@@ -45,7 +45,7 @@ export default function MainLayout() {
     <>
       <SidebarProvider
         className="h-dvh min-h-0 overflow-hidden"
-        style={{ "--sidebar-width": "15.5rem" } as CSSProperties}
+        style={{ "--sidebar-width": "230px" } as CSSProperties}
       >
         <AppSidebar
           variant="sidebar"

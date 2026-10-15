@@ -18,7 +18,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import {
   InputGroup,
   InputGroupAddon,
@@ -263,7 +263,7 @@ export default function SettingsModels() {
     }
   }
   return (
-    <FieldGroup className="grid min-h-full min-w-0 grid-cols-[176px_minmax(0,1fr)] content-start gap-9">
+    <FieldGroup className="grid min-h-full min-w-0 grid-cols-[176px_minmax(0,1fr)] content-start gap-6">
       <nav aria-label={t("Model providers")} className="min-w-0">
         <ItemGroup className="flex-col gap-1">
           {providers.map((item) => (
@@ -308,7 +308,7 @@ export default function SettingsModels() {
         className="min-h-[490px] min-w-0 gap-0"
         aria-busy={loading}
       >
-        <Item className="mb-7 flex-nowrap px-0 py-0">
+        <Item className="mb-6 flex-nowrap px-0 py-0">
           <ItemMedia
             variant={provider && providerLogos[provider.provider_id] ? "image" : "icon"}
             className="size-7"
@@ -364,7 +364,7 @@ export default function SettingsModels() {
         <FieldGroup className="gap-3">
           <Field>
             <FieldLabel htmlFor="provider-api-key">API Key</FieldLabel>
-            <InputGroup className="bg-muted/50">
+            <InputGroup>
               <InputGroupInput
                 id="provider-api-key"
                 value={draft.key}
@@ -376,7 +376,6 @@ export default function SettingsModels() {
                 placeholder={draft.hasKey ? "••••••••••••••••" : "sk-..."}
                 autoComplete="off"
                 spellCheck={false}
-                aria-describedby="provider-api-key-description"
               />
               <InputGroupAddon align="inline-end">
                 <InputGroupButton
@@ -397,16 +396,13 @@ export default function SettingsModels() {
                 </InputGroupButton>
               </InputGroupAddon>
             </InputGroup>
-            <FieldDescription id="provider-api-key-description">
-              {t("Your API key is encrypted and stored securely.")}
-            </FieldDescription>
           </Field>
 
         </FieldGroup>
 
-        <Separator className="mt-7" />
+        <Separator className="mt-6" />
 
-        <FieldGroup className="gap-3 pt-5">
+        <FieldGroup className="gap-4 pt-6">
           <Item className="px-0 py-0">
             <ItemContent>
               <ItemTitle>{t("Models")}</ItemTitle>
@@ -467,7 +463,7 @@ export default function SettingsModels() {
           )}
         </FieldGroup>
 
-        <ItemActions className="mt-auto justify-end pt-10">
+        <ItemActions className="mt-auto justify-end pt-6">
           <Button
             type="button"
             disabled={blocked}

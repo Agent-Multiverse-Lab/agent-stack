@@ -12,7 +12,7 @@ function RadioGroupItem({ className, ...props }: RadioPrimitive.Root.Props) {
   return (
     <RadioPrimitive.Root
       data-slot="radio-group-item"
-      className={cn("group/radio-group-item peer relative grid size-4 shrink-0 place-items-center rounded-full border border-input bg-card outline-none data-checked:border-primary data-checked:bg-primary disabled:cursor-not-allowed disabled:opacity-50", className)}
+      className={cn("group/radio-group-item peer relative grid size-4 shrink-0 place-items-center rounded-full border border-input bg-card outline-none focus-visible:ring-2 focus-visible:ring-ring/25 data-checked:border-primary data-checked:bg-primary disabled:cursor-not-allowed disabled:opacity-50", className)}
       {...props}
     >
       <RadioPrimitive.Indicator data-slot="radio-group-indicator" className="grid place-items-center">

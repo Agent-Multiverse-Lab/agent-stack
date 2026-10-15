@@ -66,7 +66,7 @@ export default function KnowledgeBaseDetailPage() {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-card font-sans text-foreground">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-(--page-padding)">
         <Link
           to="/knowledge"
           className="grid size-8 place-items-center rounded-md text-muted-foreground transition-colors duration-(--hover-transition-duration) ease-in-out hover:bg-accent"
@@ -75,7 +75,7 @@ export default function KnowledgeBaseDetailPage() {
           <ArrowLeft size={16} />
         </Link>
         <Database size={16} className="text-muted-foreground" />
-        <h1 className="min-w-0 truncate text-base font-semibold">
+        <h1 className="min-w-0 truncate text-[16px] font-semibold">
           {base.name}
         </h1>
       </header>

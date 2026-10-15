@@ -57,10 +57,10 @@ export function AskUser({ interaction, disabled = false, submit }: AskUserProps)
   return (
     <article
       aria-label={t("Agent questions")}
-      className="w-full max-w-[36rem] overflow-hidden rounded-[1.25rem] border border-border bg-background shadow-lg"
+      className="w-full max-w-[36rem] overflow-hidden rounded-lg border border-border bg-background"
     >
       <header className="border-b border-border px-5 py-4">
-        <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+        <p className="text-xs font-medium text-muted-foreground">
           {t("Input required")}
         </p>
         <h2 className="mt-1 text-base font-semibold text-foreground">

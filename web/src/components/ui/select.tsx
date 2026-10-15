@@ -14,7 +14,7 @@ function SelectTrigger({ className, children, ...props }: SelectPrimitive.Trigge
   return (
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
-      className={cn("flex h-8 w-fit items-center justify-between gap-2 whitespace-nowrap rounded-lg border border-input bg-card px-2.5 py-1 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50", className)}
+      className={cn("flex h-8 w-fit items-center justify-between gap-2 whitespace-nowrap rounded-lg border border-input bg-card px-[11px] py-1 text-sm transition-colors duration-(--hover-transition-duration) outline-none hover:border-primary-hover focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50", className)}
       {...props}
     >
       {children}
@@ -44,7 +44,7 @@ function SelectContent({
       >
         <SelectPrimitive.Popup
           data-slot="select-content"
-          className={cn("relative isolate z-[120] max-h-(--available-height) min-w-(--anchor-width) overflow-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10", className)}
+          className={cn("relative isolate z-[120] max-h-(--available-height) min-w-(--anchor-width) overflow-auto rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md", className)}
           {...props}
         >
           <SelectPrimitive.List>{children}</SelectPrimitive.List>

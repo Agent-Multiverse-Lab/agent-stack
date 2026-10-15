@@ -40,12 +40,12 @@ export default function WorkspaceFileList({
           <div key={entry.path} role="listitem">
             <Item
               className={cn(
-                "h-14 flex-nowrap gap-0 rounded-none border-0 p-0 hover:bg-muted",
+                "h-12 flex-nowrap gap-0 rounded-none border-0 p-0 hover:bg-muted",
                 selected && "bg-selection text-selection-foreground shadow-[inset_3px_0_0_var(--selection-foreground)] hover:bg-selection",
               )}
             >
               <Button type="button" variant="ghost"
-                className="h-full min-w-0 flex-1 justify-start gap-2.5 rounded-none px-4 text-left font-normal hover:bg-transparent aria-[current=true]:text-selection-foreground aria-[current=true]:hover:text-selection-foreground"
+                className="h-full min-w-0 flex-1 justify-start gap-2 rounded-md px-3 text-left font-normal hover:bg-transparent aria-[current=true]:text-selection-foreground aria-[current=true]:hover:text-selection-foreground"
                 aria-current={selected ? "true" : undefined}
                 onClick={() => entry.kind === "directory" ? onOpenFolder(entry.path) : onSelect(entry)}>
                 <ItemMedia className={cn("text-muted-foreground", selected && "text-selection-foreground")}>
@@ -56,7 +56,7 @@ export default function WorkspaceFileList({
               {entry.kind === "file" && (
                 <ItemActions className="pr-3">
                   <DropdownMenu>
-                    <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" className="rounded-none" />}
+                    <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" className="rounded-md" />}
                       aria-label={t("File actions: {{name}}", { name: entry.name })}>
                       <MoreHorizontal />
                     </DropdownMenuTrigger>

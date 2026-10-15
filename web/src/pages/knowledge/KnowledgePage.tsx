@@ -118,8 +118,8 @@ export default function KnowledgePage() {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-background font-sans text-foreground">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border px-6">
-        <h1 className="text-base font-semibold">{t("Knowledge Bases")}</h1>
+      <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-(--page-padding)">
+        <h1 className="text-[16px] font-semibold">{t("Knowledge Bases")}</h1>
         <Button
           type="button"
           variant="default"
@@ -131,7 +131,7 @@ export default function KnowledgePage() {
         </Button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-6">
+      <div className="min-h-0 flex-1 overflow-y-auto p-(--page-padding)">
         {loading ? (
           <div className="grid min-h-48 place-items-center text-muted-foreground">
             <Spinner className="size-6" />
@@ -145,7 +145,7 @@ export default function KnowledgePage() {
             {bases.map((base) => (
               <li key={base.kb_id}>
                 <Card
-                  className="cursor-pointer hover:border-border"
+                  className="cursor-pointer hover:border-input"
                   onClick={() => navigate(`/knowledge/${base.kb_id}`)}
                 >
                   <CardHeader className="pr-2">

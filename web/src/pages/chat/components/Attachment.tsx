@@ -18,10 +18,10 @@ export function Attachment({
   const { t } = useTranslation();
   return (
     <li
-      className={`grid h-11 max-w-[17rem] min-w-0 shrink-0 items-center gap-2 rounded-full border border-border bg-background p-1 text-foreground motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-200 ${remove ? "grid-cols-[2rem_minmax(0,1fr)_2rem]" : "grid-cols-[2rem_minmax(0,1fr)] pr-3"}`}
+      className={`relative grid w-[220px] min-w-0 shrink-0 grid-cols-[40px_minmax(0,1fr)] items-center gap-3 rounded-xl border border-border bg-background py-2.5 pl-3 text-foreground ${remove ? "pr-[34px]" : "pr-3"}`}
     >
       <span
-        className="grid size-8 place-items-center overflow-hidden rounded-full bg-muted text-muted-foreground"
+        className="grid size-10 place-items-center overflow-hidden rounded-[10px] bg-muted text-muted-foreground"
         aria-hidden="true"
       >
         {attachment.content_type.startsWith("image/") &&
@@ -36,7 +36,7 @@ export function Attachment({
         )}
       </span>
       <strong
-        className="min-w-0 truncate text-sm font-medium"
+        className="min-w-0 truncate text-sm leading-[1.35] font-semibold"
         title={attachment.file_name}
       >
         {attachment.file_name}
@@ -46,7 +46,7 @@ export function Attachment({
           <TooltipTrigger
             render={<Button variant="ghost" size="icon-sm" />}
             type="button"
-            className="rounded-full text-muted-foreground hover:bg-muted hover:text-foreground active:scale-90 motion-reduce:transform-none"
+            className="absolute top-1.5 right-1.5 size-5 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
             aria-label={t("Remove attachment {{name}}", { name: attachment.file_name })}
             onClick={() => remove(attachment.file_id)}
           >

@@ -50,14 +50,14 @@ export default function AgentPage() {
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col bg-background text-foreground" aria-label={t("Agent")}>
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border px-6">
-        <h1 className="text-base font-semibold">{t("Agent")}</h1>
+      <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-(--page-padding)">
+        <h1 className="text-[16px] font-semibold">{t("Agent")}</h1>
         <Button variant="ghost" size="icon" onClick={refresh} disabled={loading} aria-label={t("Refresh agents")}>
           <RefreshCw className="size-4" aria-hidden />
         </Button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-6">
+      <div className="min-h-0 flex-1 overflow-y-auto p-(--page-padding)">
         {loading ? (
           <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground" role="status">
             <Spinner className="size-5" />
@@ -79,7 +79,7 @@ export default function AgentPage() {
             {leader && (
               <section className="space-y-3" aria-labelledby="main-agent-heading">
                 <h2 id="main-agent-heading" className="text-sm font-medium">{t("Main agent")}</h2>
-                <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]">
+                <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
                   <AgentCard agent={leader} onUpdated={handleAgentUpdated} />
                 </div>
               </section>
@@ -90,7 +90,7 @@ export default function AgentPage() {
                 <h2 id="agents-heading" className="flex items-center gap-2 text-sm font-medium">
                   {t("Agents")} <Badge>{agents.length}</Badge>
                 </h2>
-                <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]">
+                <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
                   {agents.map((agent) => <li key={agent.id}><AgentCard agent={agent} onUpdated={handleAgentUpdated} /></li>)}
                 </ul>
               </section>
@@ -101,7 +101,7 @@ export default function AgentPage() {
                 {t("Sub agents")} <Badge>{catalog.subagents.length}</Badge>
               </h2>
               {catalog.subagents.length > 0 ? (
-                <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]">
+                <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
                   {catalog.subagents.map((agent) => <li key={agent.id}><AgentCard agent={agent} onUpdated={handleAgentUpdated} /></li>)}
                 </ul>
               ) : (

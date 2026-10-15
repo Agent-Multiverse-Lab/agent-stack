@@ -87,7 +87,7 @@ export function SearchChat({
       <DialogContent
         showCloseButton={false}
         overlayClassName="z-[100]"
-        className="top-[10dvh] z-[101] flex h-[min(60vh,620px)] w-[min(84vw,980px)] max-w-[980px] translate-y-0 flex-col gap-0 overflow-hidden rounded-2xl bg-popover p-0 text-foreground shadow-2xl"
+        className="top-[10dvh] z-[101] flex h-[min(60vh,620px)] w-[min(84vw,980px)] max-w-[980px] translate-y-0 flex-col gap-0 overflow-hidden rounded-xl bg-popover p-0 text-foreground shadow-lg"
       >
         <DialogTitle className="sr-only">{t("Search conversation threads")}</DialogTitle>
         <DialogDescription className="sr-only">

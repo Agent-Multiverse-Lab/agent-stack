@@ -87,16 +87,16 @@ export function LoginForm({
 
   return (
     <Card
-      className="gap-0 overflow-hidden p-0 shadow-sm"
+      className="gap-0 overflow-hidden rounded-2xl border-0 p-0 shadow-[0_0_40px_rgb(0_0_0/0.05)]"
       aria-labelledby="authentication-title"
     >
-      <CardContent className="grid min-h-144 p-0 grid-cols-2">
+      <CardContent className="flex min-h-[560px] p-0">
         <form
-          className="flex flex-col justify-center p-10"
+          className="order-2 flex flex-1 flex-col justify-center p-10"
           onSubmit={(event) => void submit(event)}
         >
-          <FieldGroup className="gap-5">
-            <header className="flex flex-col items-center gap-2 text-center">
+          <FieldGroup className="mx-auto max-w-[320px] gap-5">
+            <header className="flex flex-col items-start gap-2 text-left">
               <Link
                 to="/"
                 aria-label={t("AM home")}
@@ -107,7 +107,7 @@ export function LoginForm({
               </Link>
               <h1
                 id="authentication-title"
-                className="text-2xl font-bold tracking-tight"
+                className="text-lg leading-[1.4] font-semibold"
               >
                 {isRegister ? t("Create your account") : t("Welcome back")}
               </h1>
@@ -123,7 +123,7 @@ export function LoginForm({
                 maxLength={255}
                 required
                 placeholder="m@example.com"
-                className="h-10"
+                className="h-11 text-[16px]"
                 value={email}
                 disabled={submitting}
                 onChange={(event) => {
@@ -145,7 +145,7 @@ export function LoginForm({
                   maxLength={128}
                   required
                   placeholder={t("Enter your password")}
-                  className="h-10 pr-11"
+                  className="h-11 text-[16px] pr-11"
                   value={password}
                   disabled={submitting}
                   onChange={(event) => {
@@ -158,7 +158,7 @@ export function LoginForm({
                   variant="ghost"
                   size="icon"
                   aria-label={showPassword ? t("Hide password") : t("Show password")}
-                  className="absolute top-1 right-1 text-muted-foreground"
+                  className="absolute top-1.5 right-1 text-muted-foreground"
                   disabled={submitting}
                   onClick={() => setShowPassword(!showPassword)}
                 >
@@ -186,7 +186,7 @@ export function LoginForm({
                     maxLength={128}
                     required={isRegister}
                     placeholder={t("Ensure your password")}
-                    className="h-10 pr-11"
+                    className="h-11 text-[16px] pr-11"
                     value={confirmPassword}
                     disabled={submitting || !isRegister}
                     onChange={(event) => {
@@ -203,7 +203,7 @@ export function LoginForm({
                         ? t("Hide confirmation password")
                         : t("Show confirmation password")
                     }
-                    className="absolute top-1 right-1 text-muted-foreground"
+                    className="absolute top-1.5 right-1 text-muted-foreground"
                     disabled={submitting || !isRegister}
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                   >
@@ -229,7 +229,7 @@ export function LoginForm({
             )}
 
             <Field>
-              <Button type="submit" size="lg" className="w-full" disabled={submitting}>
+              <Button type="submit" size="lg" className="h-11 w-full" disabled={submitting}>
                 {submitting && <LoaderCircle className="animate-spin" aria-hidden />}
                 {isRegister ? t("Create Account") : t("Sign In")}
               </Button>
@@ -252,7 +252,7 @@ export function LoginForm({
             </FieldDescription>
           </FieldGroup>
         </form>
-        <div className="relative block bg-muted" aria-hidden="true">
+        <div className="relative order-1 block flex-[1.4] bg-muted" aria-hidden="true">
           <img
             className="absolute inset-0 size-full object-cover object-center"
             src={authIllustrationUrl}

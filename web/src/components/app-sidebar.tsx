@@ -117,7 +117,7 @@ export function AppSidebar({
 
   return (
     <Sidebar collapsible="icon" {...props}>
-      <SidebarHeader className="h-12 flex-row items-center gap-1">
+      <SidebarHeader className="mt-1.5 h-8 flex-row items-center gap-0.5 px-2 py-0">
         <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
           <TeamSwitcher teams={data.teams} onSettings={onSettings} />
         </div>
@@ -128,20 +128,20 @@ export function AppSidebar({
             size="icon-sm"
             aria-label={t("Search conversations")}
             title={t("Search conversations")}
-            className="size-7 shrink-0 text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:hidden"
+            className="size-[30px] shrink-0 rounded-[7px] text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:hidden"
             onClick={onSearch}
           >
             <SearchIcon className="size-4" />
           </Button>
         )}
-        <SidebarTrigger className="shrink-0 group-data-[collapsible=icon]:mx-auto" />
+        <SidebarTrigger className="size-[30px] shrink-0 rounded-[7px] group-data-[collapsible=icon]:mx-auto" />
       </SidebarHeader>
-      <SidebarContent className="gap-2 py-1">
+      <SidebarContent className="gap-2 py-0">
         <NavMain items={data.navMain} />
         {accessToken && <SidebarSeparator className="mx-2.5 my-1 group-data-[collapsible=icon]:hidden" />}
         {accessToken && <NavProjects onSearch={onSearch} />}
       </SidebarContent>
-      <SidebarFooter className="border-t border-sidebar-border p-2">
+      <SidebarFooter className="px-2 pt-0 pb-1.5">
         <NavUser
           user={data.user}
           onProfile={onProfile}

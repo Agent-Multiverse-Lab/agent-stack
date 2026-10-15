@@ -51,14 +51,14 @@ export function TeamSwitcher({
             render={
               <SidebarMenuButton
                 size="default"
-                className="data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground data-open:shadow-[0_0_0_1px_var(--sidebar-border)]"
+                className="gap-2.5 px-1 data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground"
               />
             }
           >
-            <div className="flex size-5 shrink-0 items-center justify-center [&_svg]:size-4">
+            <div className="flex size-6 shrink-0 items-center justify-center rounded-md [&_svg]:size-6 [&_img]:size-6">
               {activeTeam.logo}
             </div>
-            <span className="min-w-0 flex-1 truncate text-left font-medium">
+            <span className="min-w-0 flex-1 truncate text-left text-[15px] leading-5 font-[650]">
               {activeTeam.name}
             </span>
             <ChevronDownIcon className="ml-auto size-4" />

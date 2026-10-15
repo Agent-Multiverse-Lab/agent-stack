@@ -103,9 +103,9 @@ export function ChatMessage({ message }: { message: ChatMessageType }) {
   if (message.type === "human")
     return (
       <article className="flex justify-end">
-        <div className="max-w-[min(82%,42rem)] rounded-[1.15rem] bg-message px-4 py-2.5 text-foreground">
+        <div className="my-[0.8rem] max-w-[95%] rounded-lg bg-message px-4 py-2 text-sm leading-6 tracking-[0.25px] text-foreground">
           {content && (
-            <p className="m-0 whitespace-pre-wrap leading-7">{content}</p>
+            <p className="m-0 whitespace-pre-wrap leading-6">{content}</p>
           )}
           {attachments.length > 0 && (
             <ul
@@ -121,7 +121,7 @@ export function ChatMessage({ message }: { message: ChatMessageType }) {
     );
   if (message.payload.type === "tool") return <AgentTasks event={event} />;
   return (
-    <article className="min-w-0 max-w-full leading-7 text-foreground">
+    <article className="min-w-0 max-w-full text-sm leading-6 tracking-[0.25px] text-foreground">
       {content && (
         <div className="chat-markdown max-w-none">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
