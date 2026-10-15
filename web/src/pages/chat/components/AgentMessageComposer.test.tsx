@@ -122,7 +122,7 @@ describe("AgentMessageComposer", () => {
     Object.defineProperty(editor, "scrollHeight", { get: () => contentHeight });
 
     rerender(<AgentMessageComposer {...baseProps} draft={"Long line\n".repeat(20)} />);
-    expect(editor.style.height).toBe("160px");
+    expect(editor.style.height).toBe("200px");
     expect(editor.style.overflowY).toBe("auto");
     expect(composer.getAttribute("data-expanded")).toBe("true");
 
@@ -131,15 +131,15 @@ describe("AgentMessageComposer", () => {
     expect(editor.style.height).toBe("88px");
     expect(editor.style.overflowY).toBe("hidden");
 
-    contentHeight = 40;
+    contentHeight = 44;
     rerender(<AgentMessageComposer {...baseProps} draft="Short" />);
-    expect(editor.style.height).toBe("40px");
+    expect(editor.style.height).toBe("44px");
     expect(composer.getAttribute("data-expanded")).toBe("false");
 
     contentHeight = 400;
     rerender(<AgentMessageComposer {...baseProps} draft={"Long line\n".repeat(20)} />);
     rerender(<AgentMessageComposer {...baseProps} draft="" />);
-    expect(editor.style.height).toBe("40px");
+    expect(editor.style.height).toBe("44px");
     expect(editor.style.overflowY).toBe("hidden");
     expect(composer.getAttribute("data-expanded")).toBe("false");
   });

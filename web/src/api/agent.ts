@@ -3,6 +3,7 @@ import i18n from "@/i18n"
 import type { UploadedAttachmentResponse } from "@/types/attachment"
 import type {
   AgentCatalogResponse,
+  AgentContextConfiguration,
   AgentCatalogEntry,
   AgentUpdateRequest,
   AgentRunCancelResponse,
@@ -28,6 +29,12 @@ export const getAgentCatalog = (signal?: AbortSignal) =>
   apiClient.apiGet<AgentCatalogResponse>("/api/agent/catalog", {
     requiresAuth: true,
     signal
+  })
+
+export const getAgentContext = (agentId: string, signal?: AbortSignal) =>
+  apiClient.apiGet<AgentContextConfiguration>(`/api/agent/${encodeURIComponent(agentId)}/context`, {
+    requiresAuth: true,
+    signal,
   })
 
 export const updateAgent = async (

@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
-import { getAgentCatalog, updateAgent } from "@/api/agent"
+import { getAgentCatalog, getAgentContext, updateAgent } from "@/api/agent"
 import AgentPage from "@/pages/agent/AgentPage"
 import { installBrowserStubs } from "@/test/browserStubs"
 import type { AgentCatalogEntry, AgentCatalogResponse } from "@/types/chat"
 
-vi.mock("@/api/agent", () => ({ getAgentCatalog: vi.fn(), updateAgent: vi.fn() }))
+vi.mock("@/api/agent", () => ({ getAgentCatalog: vi.fn(), getAgentContext: vi.fn(), updateAgent: vi.fn() }))
 
 const catalog: AgentCatalogResponse = {
   agents: [
@@ -46,6 +46,11 @@ const catalog: AgentCatalogResponse = {
 beforeEach(() => {
   installBrowserStubs()
   vi.mocked(getAgentCatalog).mockResolvedValue(catalog)
+  vi.mocked(getAgentContext).mockResolvedValue({
+    model: "provider/model", system_prompt: "Persisted system prompt", summary_threshold: 64,
+    summary_keep_messages: 8, summary_tool_result_token_limit: 250, summary_prompt: "Summarize findings",
+    tools: ["search"], mcps: ["documents"], skill_root: "/skills", style_profolio: { tone: "concise" },
+  })
 })
 
 afterEach(() => {
@@ -149,6 +154,13 @@ it("opens the main agent details, closes with Escape, and opens a different agen
   expect(mainDetails.getByText("Main agent")).toBeTruthy()
   expect(mainDetails.getByRole("switch", { name: "Enable agent" }).getAttribute("aria-checked"))
     .toBe("true")
+  const prompt = await mainDetails.findByRole("textbox", { name: "System prompt" }) as HTMLTextAreaElement
+  expect(prompt.value).toBe("Persisted system prompt")
+  expect(prompt.readOnly).toBe(true)
+  expect(mainDetails.getByText("64 K tokens")).toBeTruthy()
+  expect(mainDetails.getByText("documents")).toBeTruthy()
+  expect(mainDetails.getByRole("region", { name: "Style assets" }).textContent).toContain("concise")
+  expect(getAgentContext).toHaveBeenCalledWith("LeaderAgent", expect.any(AbortSignal))
 
   fireEvent.keyDown(mainDialog, { key: "Escape", code: "Escape" })
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())

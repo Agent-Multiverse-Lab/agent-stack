@@ -1,5 +1,14 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, CpuIcon } from "lucide-react";
+
+import deepseekIcon from "@/assets/models/deepseek-color.svg";
+import geminiIcon from "@/assets/models/gemini-color.svg";
+import minimaxIcon from "@/assets/models/minimax-color.svg";
+import ollamaIcon from "@/assets/models/ollama-color.svg";
+import openaiIcon from "@/assets/models/openai.svg";
+import qwenIcon from "@/assets/models/qwen-color.svg";
+import vllmIcon from "@/assets/models/vllm-color.svg";
+import zhipuIcon from "@/assets/models/zhipu-color.svg";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +25,17 @@ import type { ChatModelOption } from "@/types/model";
 type HighlightBox = {
   height: number;
   top: number;
+};
+
+const modelIcons: Record<string, string> = {
+  deepseek: deepseekIcon,
+  gemini: geminiIcon,
+  minimax: minimaxIcon,
+  ollama: ollamaIcon,
+  openai: openaiIcon,
+  qwen: qwenIcon,
+  vllm: vllmIcon,
+  zhipu: zhipuIcon,
 };
 
 export default function ModelSelector({
@@ -60,10 +80,11 @@ export default function ModelSelector({
 
   const triggerLabel = loading
     ? t("Loading")
-    : selected?.display_name || selected?.name || t("Select model");
+    : selected?.name || t("Select model");
 
   return (
     <DropdownMenu
+      modal={false}
       open={open}
       onOpenChange={(nextOpen) => {
         setOpen(nextOpen);
@@ -74,7 +95,8 @@ export default function ModelSelector({
         render={<Button type="button" variant="ghost" />}
         disabled={disabled || loading || available.length === 0}
         aria-label={t("Select model")}
-        className="flex h-10 min-w-0 max-w-48 shrink-0 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground active:scale-[0.96] motion-reduce:transform-none"
+        title={triggerLabel}
+        className="flex h-[30px] w-auto min-w-0 max-w-[168px] shrink-0 items-center gap-1 rounded-lg px-2 text-[13px] leading-none font-normal text-muted-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
       >
         <span className="truncate">{triggerLabel}</span>
         <ChevronDownIcon
@@ -88,14 +110,14 @@ export default function ModelSelector({
         align="end"
         sideOffset={8}
         aria-label={t("Select model")}
-        className="relative w-64 max-w-[calc(100vw-2rem)] rounded-2xl p-1.5"
+        className="relative w-64 max-w-[calc(100vw-2rem)] rounded-lg p-1"
         onPointerLeave={() => setActiveId(null)}
       >
         {highlight && (
           <span
             aria-hidden="true"
             data-model-highlight=""
-            className="pointer-events-none absolute inset-x-1.5 top-0 z-0 rounded-xl bg-accent transition-[transform,height] duration-200 ease-out motion-reduce:transition-none"
+            className="pointer-events-none absolute inset-x-1.5 top-0 z-0 rounded-md bg-accent transition-[transform,height] duration-200 ease-out motion-reduce:transition-none"
             style={{
               height: highlight.height,
               transform: `translateY(${highlight.top}px)`,
@@ -103,7 +125,7 @@ export default function ModelSelector({
           />
         )}
         {models.length === 0 ? (
-          <DropdownMenuItem disabled className="rounded-xl px-3 py-2.5">
+          <DropdownMenuItem disabled className="rounded-md px-2 py-1.5">
             {t("No models available")}
           </DropdownMenuItem>
         ) : (
@@ -121,20 +143,21 @@ export default function ModelSelector({
                   else items.current.delete(model.id);
                 }}
                 value={model.id}
+                closeOnClick
                 disabled={!model.is_available}
                 onPointerEnter={() => setActiveId(model.id)}
                 onFocus={() => setActiveId(model.id)}
-                className="relative z-10 rounded-xl bg-transparent py-2 pr-9 pl-3 focus:bg-transparent data-checked:bg-selection data-checked:text-selection-foreground data-checked:focus:bg-selection data-checked:focus:text-selection-foreground [&_[data-slot=dropdown-menu-radio-item-indicator]]:right-3"
+                className="relative z-10 rounded-md bg-transparent py-1.5 pr-8 pl-2 focus:bg-transparent data-checked:bg-selection data-checked:text-selection-foreground data-checked:focus:bg-selection data-checked:focus:text-selection-foreground [&_[data-slot=dropdown-menu-radio-item-indicator]]:right-3"
               >
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="truncate font-medium">
-                    {model.display_name || model.name}
-                  </span>
-                  {(model.provider || model.version) && (
-                    <span className="truncate text-xs text-muted-foreground">
-                      {[model.provider, model.version].filter(Boolean).join(" · ")}
-                    </span>
+                <span className="flex min-w-0 flex-1 items-center gap-2" title={model.name}>
+                  {modelIcons[model.icon] ? (
+                    <img src={modelIcons[model.icon]} alt="" className="size-4 shrink-0" />
+                  ) : (
+                    <CpuIcon className="size-4 shrink-0" aria-hidden="true" />
                   )}
+                  <span className="truncate font-medium">
+                    {model.name}
+                  </span>
                 </span>
               </DropdownMenuRadioItem>
             ))}

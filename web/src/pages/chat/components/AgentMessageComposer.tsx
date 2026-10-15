@@ -91,8 +91,8 @@ type SpeechRecognitionWindow = Window & {
   webkitSpeechRecognition?: SpeechRecognitionConstructor;
 };
 
-const COMPOSER_MIN_HEIGHT = 40;
-const COMPOSER_MAX_HEIGHT = 160;
+const COMPOSER_MIN_HEIGHT = 44;
+const COMPOSER_MAX_HEIGHT = 200;
 const CONTROL_MOTION_DURATION = 240;
 
 export function AgentMessageComposer({
@@ -372,7 +372,7 @@ export function AgentMessageComposer({
       aria-label={t("Agent message composer")}
       aria-busy={uploading > 0}
       data-expanded={expanded}
-      className="relative isolate flex w-full flex-col overflow-hidden rounded-4xl border border-border bg-card p-2 shadow-sm transition-[border-color,box-shadow]"
+      className="relative isolate flex w-full flex-col overflow-hidden rounded-[1.4rem] border border-border bg-card px-3 pt-[0.8rem] pb-[0.6rem] shadow-[0_2px_8px_rgb(0_0_0/0.05)]"
       onSubmit={onSubmit}
       onDragOver={(event) => event.preventDefault()}
       onDrop={onDrop}
@@ -397,7 +397,7 @@ export function AgentMessageComposer({
           ))}
           {uploading > 0 && (
             <li
-              className="flex h-9 items-center gap-2 rounded-full bg-muted px-3 text-xs text-muted-foreground motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-200"
+              className="flex h-9 items-center gap-2 rounded-md bg-muted px-3 text-xs text-muted-foreground motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-200"
               role="status"
             >
               <LoaderCircleIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
@@ -411,11 +411,7 @@ export function AgentMessageComposer({
 
       <div
         ref={controls}
-        className={`relative z-10 grid w-full items-end gap-x-1.5 gap-y-1 ${
-          expanded
-            ? "grid-cols-[2.5rem_auto_minmax(0,1fr)_2.5rem_2.5rem]"
-            : "grid-cols-[2.5rem_minmax(0,1fr)_auto_2.5rem_2.5rem]"
-        }`}
+        className="relative z-10 grid w-full grid-cols-[30px_minmax(0,1fr)_auto_30px_32px] items-center gap-x-1 gap-y-2"
       >
         <Input
           ref={fileInput}
@@ -431,14 +427,12 @@ export function AgentMessageComposer({
 
         <DropdownMenu>
           <DropdownMenuTrigger
-            render={<Button variant="ghost" size="icon-lg" />}
+            render={<Button variant="ghost" size="icon" />}
             type="button"
             disabled={disabled}
             aria-label={t("Action menu")}
             data-composer-control="actions"
-            className={`rounded-full bg-muted/70 text-muted-foreground hover:text-foreground active:scale-[0.94] motion-reduce:transform-none ${
-              expanded ? "col-start-1 row-start-2" : "col-start-1 row-start-1"
-            }`}
+            className="col-start-1 row-start-2 size-[30px] rounded-lg text-muted-foreground hover:text-foreground"
           >
             <PlusIcon className="transition-transform duration-200 group-aria-expanded/button:rotate-45 motion-reduce:transition-none" />
           </DropdownMenuTrigger>
@@ -450,7 +444,7 @@ export function AgentMessageComposer({
             className="p-2"
           >
             <DropdownMenuItem
-              className="gap-3 rounded-lg px-3 py-2.5"
+              className="gap-2 rounded-md px-2 py-1.5"
               onClick={() => fileInput.current?.click()}
             >
               <PaperclipIcon aria-hidden="true" />
@@ -461,7 +455,7 @@ export function AgentMessageComposer({
                 </span>
               </span>
             </DropdownMenuItem>
-            <DropdownMenuItem disabled className="gap-3 rounded-lg px-3 py-2.5">
+            <DropdownMenuItem disabled className="gap-2 rounded-md px-2 py-1.5">
               <PlugIcon aria-hidden="true" />
               <span className="flex min-w-0 flex-col gap-0.5">
                 <span>{t("Connectors")}</span>
@@ -484,20 +478,12 @@ export function AgentMessageComposer({
           aria-label={t("Message")}
           placeholder={listening ? t("Listening…") : t("Ask anything")}
           rows={1}
-          className={`field-sizing-fixed max-h-40 min-h-10 min-w-0 resize-none border-0 bg-transparent px-2 py-2 text-sm leading-6 shadow-none disabled:bg-transparent disabled:opacity-60 ${
-            expanded
-              ? "col-span-full col-start-1 row-start-1"
-              : "col-start-2 row-start-1"
-          }`}
+          className="col-span-full col-start-1 row-start-1 field-sizing-fixed max-h-[200px] min-h-11 min-w-0 resize-none rounded-none border-0 bg-transparent p-0 text-[15px] leading-[1.5] shadow-none focus-visible:ring-0 disabled:bg-transparent disabled:opacity-60"
         />
 
         <div
           data-composer-control="model"
-          className={
-            expanded
-              ? "col-start-2 row-start-2 min-w-0 justify-self-start"
-              : "col-start-3 row-start-1 min-w-0"
-          }
+          className="col-start-3 row-start-2 min-w-0"
         >
           <ModelSelector
             models={models}
@@ -511,16 +497,14 @@ export function AgentMessageComposer({
 
         <Tooltip>
           <TooltipTrigger
-            render={<Button variant="ghost" size="icon-lg" />}
+            render={<Button variant="ghost" size="icon" />}
             type="button"
             disabled={disabled || running || speechSupported !== true}
             aria-label={dictationLabel}
             aria-pressed={listening}
             data-composer-control="dictation"
             onClick={toggleDictation}
-            className={`rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground active:scale-[0.94] motion-reduce:transform-none ${
-              expanded ? "col-start-4 row-start-2" : "col-start-4 row-start-1"
-            }`}
+            className="col-start-4 row-start-2 size-[30px] rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             {listening ? (
               <span className="flex h-4 items-center gap-0.5" aria-hidden="true">
@@ -540,7 +524,7 @@ export function AgentMessageComposer({
             render={
               <Button
                 variant={running ? "secondary" : "default"}
-                size="icon-lg"
+                size="icon"
               />
             }
             type="button"
@@ -548,9 +532,7 @@ export function AgentMessageComposer({
             aria-label={running ? t("Cancel response") : t("Send message")}
             data-composer-control="submit"
             onClick={running ? cancel : submitMessage}
-            className={`rounded-full active:scale-[0.94] motion-reduce:transform-none ${
-              expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"
-            }`}
+            className="col-start-5 row-start-2 rounded-full shadow-[0_2px_6px_rgb(0_0_0/0.08)] disabled:shadow-none"
           >
             {running ? (
               <SquareIcon className="size-3.5" fill="currentColor" />

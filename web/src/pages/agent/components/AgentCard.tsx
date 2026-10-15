@@ -24,6 +24,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useTranslation } from "@/i18n"
 import type { AgentCatalogEntry } from "@/types/chat"
+import { AgentConfiguration } from "@/pages/agent/components/AgentConfiguration"
 
 export function AgentCard({
   agent,
@@ -79,31 +80,33 @@ export function AgentCard({
   return (
     <article aria-label={agent.name} className="h-full">
       <Sheet open={open} onOpenChange={handleOpenChange}>
-        <Card className="h-full min-h-48 rounded-none">
+        <Card className="relative h-full cursor-pointer hover:border-input hover:bg-muted">
           <CardHeader>
-            <div className="flex min-w-0 items-center gap-3">
-              <span className="grid size-10 shrink-0 place-items-center bg-secondary text-secondary-foreground">
-                <Icon className="size-5" aria-hidden />
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span className="grid size-8 shrink-0 place-items-center rounded-[7px] border border-border bg-secondary text-secondary-foreground">
+                <Icon className="size-4" aria-hidden />
               </span>
               <div className="min-w-0 space-y-1">
-                <h3 className="truncate text-base font-medium">{agent.name}</h3>
+                <h3 className="truncate text-sm font-semibold">{agent.name}</h3>
                 <p className="text-xs text-muted-foreground">{agentType}</p>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="flex flex-1 flex-col gap-5">
-            <p className="line-clamp-2 min-h-10 break-words text-sm leading-relaxed text-muted-foreground">
+          <CardContent className="flex flex-1 flex-col gap-2.5">
+            <p className="line-clamp-2 min-h-[2.8em] break-words text-[13px] leading-[1.4] text-muted-foreground">
               {agent.description || t("No description")}
             </p>
             <div className="mt-auto flex items-center justify-between gap-3">
               <Badge variant={agent.enabled ? "success" : "default"}>
                 {t(agent.enabled ? "Enabled" : "Disabled")}
               </Badge>
-              <SheetTrigger render={<Button variant="outline" size="sm" aria-label={t("View {{name}} details", { name: agent.name })} />}>
-                {t("View details")} <ArrowRight aria-hidden />
-              </SheetTrigger>
+              <span aria-hidden className="inline-flex h-6 items-center gap-1 rounded-sm border border-input bg-card px-2 text-xs">
+                {t("View details")} <ArrowRight className="size-3.5" />
+              </span>
             </div>
           </CardContent>
+          <SheetTrigger render={<Button variant="ghost" aria-label={t("View {{name}} details", { name: agent.name })}
+            className="absolute inset-0 z-10 h-full w-full rounded-lg border-0 p-0 hover:bg-transparent focus-visible:ring-inset" />} />
         </Card>
 
         <SheetContent side="right" showCloseButton={false} initialFocus={nameInput}
@@ -128,12 +131,13 @@ export function AgentCard({
             <Field>
               <FieldLabel htmlFor={`${formId}-description`}>{t("Description")}</FieldLabel>
               <Textarea id={`${formId}-description`} value={description} onChange={(event) => setDescription(event.target.value)}
-                rows={7} className="min-h-40 resize-y" disabled={saving} />
+                rows={7} className="h-40 min-h-0 resize-none overflow-y-auto field-sizing-fixed" disabled={saving} />
             </Field>
             <Field orientation="horizontal">
               <FieldLabel htmlFor={`${formId}-enabled`} className="flex-1">{t("Enable agent")}</FieldLabel>
               <Switch id={`${formId}-enabled`} checked={enabled} onCheckedChange={setEnabled} disabled={saving} />
             </Field>
+            {open && <AgentConfiguration agentId={agent.id} />}
             {error && <FieldError>{error}</FieldError>}
           </form>
           <SheetFooter className="shrink-0 flex-row justify-end border-t border-border p-4">

@@ -19,6 +19,19 @@ export interface AgentCatalogResponse {
   subagents: AgentCatalogEntry[]
 }
 
+export interface AgentContextConfiguration {
+  system_prompt: string
+  model: string
+  summary_threshold: number
+  summary_keep_messages: number
+  summary_prompt: string
+  summary_tool_result_token_limit: number
+  tools: unknown[]
+  mcps: string[]
+  skill_root: string | null
+  style_profolio: Record<string, unknown>
+}
+
 export interface AgentUpdateRequest {
   name?: string
   description?: string
