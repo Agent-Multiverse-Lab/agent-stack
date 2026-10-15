@@ -130,6 +130,32 @@ class AgentCatalogTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"agents": [], "subagents": []})
 
+    async def test_context_returns_stored_configuration_and_base_defaults(self):
+        row = await self.repository._get_by_slug("z_disabled_child")
+        row.agent_config = {
+            "system_prompt": "Stored prompt", "model": "provider/custom",
+            "summary_threshold": 64, "mcps": ["documents"],
+            "style_profolio": {"tone": "concise"},
+        }
+        self.db.session.flush()
+        app = self.create_app(authenticated=True)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+            response = await client.get("/api/agent/z_disabled_child/context")
+            self.assertEqual((await client.get("/api/agent/missing/context")).status_code, 404)
+        self.assertEqual(response.status_code, 200)
+        context = response.json()
+        self.assertEqual(context["system_prompt"], "Stored prompt")
+        self.assertEqual(context["model"], "provider/custom")
+        self.assertEqual(context["summary_threshold"], 64)
+        self.assertEqual(context["summary_keep_messages"], 10)
+        self.assertEqual(context["summary_tool_result_token_limit"], 300)
+        self.assertEqual(context["mcps"], ["documents"])
+        self.assertEqual(context["style_profolio"], {"tone": "concise"})
+        self.assertTrue({"uid", "thread_id", "run_id", "request_id"}.isdisjoint(context))
+        app = self.create_app()
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+            self.assertEqual((await client.get("/api/agent/z_disabled_child/context")).status_code, 401)
+
     async def test_partial_update_persists_and_preserves_role_and_configuration(self):
         row = await self.repository._get_by_slug("z_disabled_child")
         protected_fields = (

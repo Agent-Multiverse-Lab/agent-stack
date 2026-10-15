@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.entities.agent import (
     AgentCatalogEntry,
     AgentCatalogResponse,
+    AgentContextResponse,
     AgentRunCreateRequest,
     AgentRunResumeRequest,
     AgentUpdateRequest,
@@ -18,6 +19,7 @@ from server.service.agent_run_service import (
     create_resume_agent_run_service,
     stream_agent_run_events,
 )
+from server.service.agent_service import get_agent_context
 from server.utils.auth import AuthenticatedUser
 from src.configs import config
 from src.database import get_db
@@ -62,6 +64,19 @@ async def list_agent_catalog(
             for agent in subagents
         ],
     )
+
+
+@agent_router.get("/{agent_id}/context", response_model=AgentContextResponse)
+async def read_agent_context(
+    agent_id: str,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+) -> AgentContextResponse:
+    """读取已认证用户查看的 Agent 基础配置。"""
+    context = await get_agent_context(db, agent_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Agent 不存在")
+    return context
 
 
 @agent_router.patch("/{agent_id}", response_model=AgentCatalogEntry)

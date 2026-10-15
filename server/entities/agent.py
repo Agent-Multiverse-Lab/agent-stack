@@ -86,6 +86,21 @@ class AgentCatalogResponse(BaseModel):
     subagents: list[AgentCatalogEntry]
 
 
+class AgentContextResponse(BaseModel):
+    """详情抽屉展示的基础配置。"""
+
+    system_prompt: str
+    model: str
+    summary_threshold: int
+    summary_keep_messages: int
+    summary_prompt: str
+    summary_tool_result_token_limit: int
+    tools: list[Any]
+    mcps: list[str]
+    skill_root: str | None
+    style_profolio: dict[str, Any]
+
+
 class AgentUpdateRequest(BaseModel):
     """只更新数据库 Agent 的基础展示字段和启用状态。"""
 

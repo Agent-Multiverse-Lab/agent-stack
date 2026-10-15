@@ -96,6 +96,15 @@ Service 和 Worker 均通过它取得 `BaseAgent` 子类；调用方不再维护
 未提供的基础字段以及 slug、角色、backend、内部可见性、Prompt 和 Context 配置保持不变；
 这些结构与运行配置字段不在当前编辑接口中暴露或接受。
 
+### AG-CON-008：基础配置展示
+
+详情抽屉打开时通过认证 `GET /api/agent/{agent_id}/context` 读取基础配置；不存在的角色返回 404。
+响应从 `BaseContext` 默认值和数据库 `agent_config` 覆盖值构成，包含 `system_prompt`、`model`、
+`summary_threshold`、`summary_keep_messages`、`summary_prompt`、`summary_tool_result_token_limit`、
+`tools`、`mcps`、`skill_root`、`style_profolio`。运行身份字段不在该响应中。
+界面按模型与提示词、上下文摘要、工具与技能、素材配置分区，只读展示这些配置。
+描述与提示词文本框使用固定高度，禁止手动 resize，超出内容通过内部纵向滚动查看。
+
 ## 3. 验收
 
 - 两个专业 slug 可以映射同一个 `SubAgentGraph`，各自 Prompt 和预设配置正确生效。

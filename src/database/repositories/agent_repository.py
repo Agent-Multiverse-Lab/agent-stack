@@ -66,6 +66,11 @@ class AgentRepository:
         )
         return list(result.scalars().all())
 
+    async def get_agent_config(self, slug: str) -> dict | None:
+        """读取包括禁用角色在内的持久化配置。"""
+        agent = await self._get_by_slug(slug)
+        return agent.agent_config if agent is not None else None
+
     async def update_agent(
         self,
         slug: str,
