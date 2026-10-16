@@ -4,6 +4,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -176,6 +177,12 @@ class AgentRun(Base):
             "conversation_id",
             "agent_status",
         ),
+        ForeignKeyConstraint(
+            ["id", "current_attempt_id"],
+            ["agent_run_attempt.run_id", "agent_run_attempt.id"],
+            name="fk_agent_run_current_attempt",
+            use_alter=True,
+        ),
     )
 
     id = Column(String(64), primary_key=True, comment="运行ID")
@@ -193,6 +200,9 @@ class AgentRun(Base):
     )
     # FIXEME: interrupt/resume 第一版沿用现有状态字段，不新增交互表。
     agent_status = Column(String(32), nullable=False, default="pending", comment="运行状态 pending, running, cancel_requested, interrupted, completed, failed, cancelled")
+    # 仅预留执行归属结构；现有 Worker 尚不读写这些字段。
+    current_attempt_id = Column(String(64), nullable=True, comment="当前执行尝试ID")
+    owner_worker_id = Column(String(128), nullable=True, comment="当前执行Worker标识")
 
     trigger_message_id = Column(Integer, nullable=True, comment="Input message ID")
     output_message_id = Column(
@@ -224,6 +234,32 @@ class AgentRun(Base):
         back_populates="agent_run",
         foreign_keys="Message.agent_run_id",
     )
+
+
+class AgentRunAttempt(Base):
+    """Run 执行尝试历史的表结构；由后续运行时接入负责写入。"""
+
+    __tablename__ = "agent_run_attempt"
+    __table_args__ = (
+        UniqueConstraint("run_id", "id", name="uq_agent_run_attempt_run_id_id"),
+        Index("ix_agent_run_attempt_run_started", "run_id", "started_at"),
+    )
+
+    id = Column(String(64), primary_key=True, comment="执行尝试ID")
+    run_id = Column(
+        String(64),
+        ForeignKey("agent_run.id", ondelete="CASCADE", name="fk_agent_run_attempt_run"),
+        nullable=False,
+        comment="所属Run ID",
+    )
+    worker_id = Column(String(128), nullable=False, comment="执行Worker标识")
+    status = Column(String(32), nullable=False, comment="执行尝试状态")
+    started_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), comment="开始时间"
+    )
+    finished_at = Column(DateTime(timezone=True), nullable=True, comment="结束时间")
+    error = Column(Text, nullable=True, comment="错误信息")
+    error_type = Column(String(64), nullable=True, comment="错误信息类型")
 
 
 class Agent(Base):
