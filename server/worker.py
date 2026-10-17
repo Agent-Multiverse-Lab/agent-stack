@@ -229,26 +229,27 @@ async def _cancellable_stream(
     while True:
         cancel_task = asyncio.create_task(run_controller.wait_cancel_signal())
         stream_task = asyncio.create_task(anext(stream))
-        done, _ = await asyncio.wait(
-            {stream_task, cancel_task},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if cancel_task in done:
-            stream_task.cancel()
-            try:
-                await stream_task
-            except asyncio.CancelledError:
-                pass
-            await cancel_task
-            raise asyncio.CancelledError()
-        cancel_task.cancel()
-        await asyncio.gather(cancel_task, return_exceptions=True)
-
         try:
-            yield stream_task.result()
+            done, _ = await asyncio.wait(
+                {stream_task, cancel_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if cancel_task in done:
+                await cancel_task
+                raise asyncio.CancelledError()
+            try:
+                chunk = stream_task.result()
+            except StopAsyncIteration:
+                return
+        finally:
+            # asyncio.wait 不会随外层取消自动取消它等待的独立任务。
+            # 先回收两个子任务，再传播原始异常或向调用方交付 chunk。
+            for task in (stream_task, cancel_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(stream_task, cancel_task, return_exceptions=True)
 
-        except StopAsyncIteration:
-            return
+        yield chunk
 
 
 async def write_stream_event(
