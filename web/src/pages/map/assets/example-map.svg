@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1100" viewBox="0 0 1400 1100">
+  <!-- Local illustrative cartography, not a navigational or survey map. -->
+  <defs>
+    <pattern id="blocks" width="103" height="84" patternUnits="userSpaceOnUse" patternTransform="rotate(-12)">
+      <rect width="103" height="84" fill="#f1f0e9"/>
+      <path d="M0 0H103M0 0V84" stroke="#fffefa" stroke-width="9"/>
+      <path d="M15 16h27v18H15zM48 16h38v18H48zM15 42h48v25H15zM71 42h15v25H71z" fill="#e5e5dd" stroke="#dedfd6" stroke-width="1"/>
+    </pattern>
+    <pattern id="trees" width="49" height="47" patternUnits="userSpaceOnUse">
+      <circle cx="12" cy="13" r="9" fill="#cbd9bc"/><circle cx="38" cy="35" r="11" fill="#cbd9bc"/>
+    </pattern>
+  </defs>
+  <rect width="1400" height="1100" fill="url(#blocks)"/>
+  <path d="M0 0H580L540 98 555 178 488 230 500 300 414 344 437 427 372 502 391 589 338 681 394 755 347 836 402 902 361 1100H0Z" fill="#dce5ce"/>
+  <path d="M0 0H480L440 98 455 178 388 230 400 300 314 344 337 427 272 502 291 589 238 681 294 755 247 836 302 902 261 1100H0Z" fill="url(#trees)" opacity=".7"/>
+  <g fill="none" stroke="#c9d7bb" stroke-width="2" opacity=".8">
+    <path d="M5 76Q232 4 286 179T130 404 210 612 70 895 140 1090"/><path d="M5 126Q192 54 236 199T80 424 160 632 20 915 90 1090"/><path d="M5 26Q272 -46 336 159T180 384 260 592 120 875 190 1090"/>
+    <path d="M0 296Q130 196 166 310T30 509 119 711 26 1041"/>
+  </g>
+  <g fill="#d9e5cd" stroke="#cad9be" stroke-width="2">
+    <path d="M549 295L647 281 701 319 677 370 600 384 538 347Z"/>
+    <path d="M664 703L773 673 805 735 751 804 670 781Z"/>
+    <path d="M996 121L1116 98 1129 173 1012 201Z"/>
+    <path d="M1052 474L1200 445 1241 538 1109 566Z"/>
+    <path d="M845 887L961 862 1001 960 868 991Z"/>
+  </g>
+  <path d="M474 350C487 314 522 300 553 312L595 340 670 352 716 402C751 453 742 521 721 563L708 638 674 687 610 730 548 746 493 719 456 654 432 593 418 510 428 422Z" fill="#bddadd" stroke="#accfd2" stroke-width="3"/>
+  <path d="M500 381L620 696M472 402Q540 424 676 397" fill="none" stroke="#d9e5ce" stroke-width="11"/>
+  <path d="M500 381L620 696M472 402Q540 424 676 397" fill="none" stroke="#fffcef" stroke-width="3"/>
+  <path d="M557 580q33-28 48-3t-16 42-32-39" fill="#d9e5ce" stroke="#c5d8bb" stroke-width="2"/>
+  <g fill="none" stroke="#dad8cc" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M-40 308L350 265 528 218 790 237 1460 90"/><path d="M700-30L738 166 820 333 864 562 957 1130"/>
+    <path d="M1075-40L1129 260 1187 443 1271 702 1330 1130"/><path d="M-20 844L383 800 693 784 918 739 1470 622"/>
+    <path d="M-20 1034L307 947 551 924 891 901 1450 780"/>
+    <path d="M347 252Q419 333 399 454T429 674 531 776"/>
+    <path d="M531 776L669 741Q791 669 777 505L748 374 681 309 540 273"/>
+    <path d="M778 484L1400 352"/>
+  </g>
+  <g fill="none" stroke="#fffefa" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M-40 308L350 265 528 218 790 237 1460 90"/><path d="M700-30L738 166 820 333 864 562 957 1130"/>
+    <path d="M1075-40L1129 260 1187 443 1271 702 1330 1130"/><path d="M-20 844L383 800 693 784 918 739 1470 622"/>
+    <path d="M-20 1034L307 947 551 924 891 901 1450 780"/>
+    <path d="M347 252Q419 333 399 454T429 674 531 776"/>
+    <path d="M531 776L669 741Q791 669 777 505L748 374 681 309 540 273"/>
+    <path d="M778 484L1400 352"/>
+  </g>
+  <g fill="none" stroke="#e6d5ac" stroke-width="12" stroke-linecap="round">
+    <path d="M845-30Q870 193 949 356T1040 704 1127 1130"/><path d="M-40 135L598 108 967 40 1460-20"/>
+  </g>
+  <g fill="none" stroke="#fff4d9" stroke-width="8" stroke-linecap="round">
+    <path d="M845-30Q870 193 949 356T1040 704 1127 1130"/><path d="M-40 135L598 108 967 40 1460-20"/>
+  </g>
+  <g font-family="Arial,'Noto Sans CJK SC',sans-serif" text-anchor="middle" fill="#8a9385">
+    <text x="266" y="461" font-size="20" letter-spacing="5">西 湖 风 景 区</text>
+    <text x="580" y="500" font-size="28" fill="#68979f" letter-spacing="8">西 湖</text>
+    <text x="580" y="527" font-size="12" fill="#7fa6ac" letter-spacing="4">WEST LAKE</text>
+    <text x="1067" y="299" font-size="25" fill="#999a8c" letter-spacing="8">杭 州</text>
+    <text x="1067" y="326" font-size="11" letter-spacing="4">HANGZHOU</text>
+    <text x="651" y="293" font-size="15">北山街</text><text x="800" y="653" font-size="15" transform="rotate(68 800 653)">南山路</text>
+    <text x="923" y="528" font-size="14" transform="rotate(73 923 528)">延安路</text>
+    <text x="633" y="829" font-size="15">南屏山</text><text x="306" y="733" font-size="15">龙井</text>
+    <text x="1069" y="153" font-size="13">城市绿地</text><text x="1152" y="513" font-size="13">城市绿地</text>
+    <text x="587" y="355" font-size="13">孤山</text>
+  </g>
+</svg>

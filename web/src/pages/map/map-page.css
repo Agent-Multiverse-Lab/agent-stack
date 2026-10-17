@@ -1,0 +1,13 @@
+.map-stage {
+  background-color: var(--muted);
+  background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+.map-float {
+  border: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 5%);
+}
+.map-place[aria-pressed="true"] { background: var(--selection); }
+@media (max-width: 1150px) { .map-explorer { width: 320px; } }
+@media (prefers-reduced-motion: reduce) { .map-workspace * { scroll-behavior: auto; transition: none; } }
