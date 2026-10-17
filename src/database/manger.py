@@ -146,17 +146,8 @@ class PostgreManger:
                     "NOT NULL DEFAULT 'chat'"
                 )
             )
-            await connection.execute(
-                text(
-                    "UPDATE agent_run AS ar "
-                    "SET run_type = CASE "
-                    "WHEN a.role = 'subagent' THEN 'subagent' ELSE 'chat' END "
-                    "FROM agent AS a "
-                    "WHERE a.slug = ar.agent_id "
-                    "AND ar.run_type IS DISTINCT FROM CASE "
-                    "WHEN a.role = 'subagent' THEN 'subagent' ELSE 'chat' END"
-                )
-            )
+            # 历史类型回填由 Alembic 0005 执行一次。启动时不能按 Agent.role
+            # 重算已有 Run，否则会覆盖 resume 等运行语义及历史记录。
             await connection.execute(
                 text(
                     "CREATE INDEX IF NOT EXISTS ix_agent_run_run_type "
