@@ -11,3 +11,4 @@ Product Domain 管理产品身份与跨页面体验。先读取一个能力的 `
 | chat-tool-group | [spec.md](chat-tool-group/spec.md) | Chat 工具调用的分组展示 |
 | chat-model-selection | [spec.md](chat-model-selection/spec.md) | Chat 模型目录、选择与 Run 接入 |
 | model-settings | [spec.md](model-settings/spec.md) | Settings 模型配置布局与交互 |
+| extension-settings | [spec.md](extension-settings/spec.md) | Skills 与 MCP 分级弹窗和本地预览边界 |

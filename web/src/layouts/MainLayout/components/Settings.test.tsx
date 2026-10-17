@@ -36,13 +36,13 @@ it("switches the application language from Settings and persists the choice", as
   expect(window.localStorage.getItem("am-language")).toBe("zh-CN");
 });
 
-it("shows only functional Settings sections and controls", () => {
+it("shows the approved Settings sections without unrelated controls", () => {
   installBrowserStubs();
   render(<Settings open close={() => {}} user={null} />);
 
   const navigation = within(screen.getByLabelText("Settings sections"));
   expect(navigation.getAllByRole("button").map((button) => button.textContent))
-    .toEqual(["General", "Account", "Models"]);
+    .toEqual(["General", "Account", "Models", "Skills", "MCP"]);
   expect(screen.getByRole("combobox", { name: "Theme" })).toBeTruthy();
   expect(screen.getByRole("combobox", { name: "Language" })).toBeTruthy();
   expect(screen.queryByRole("switch")).toBeNull();
@@ -90,7 +90,7 @@ it.each([true, false])("displays the real account email and is_active=%s", (isAc
   expect(screen.queryByText("Not logged in")).toBeNull();
 });
 
-it.each(["Account", "Models"])("reopens General after closing %s", async (section) => {
+it.each(["Account", "Models", "Skills", "MCP"])("reopens General after closing %s", async (section) => {
   installBrowserStubs();
   const close = vi.fn();
   const { rerender } = render(<Settings open close={close} user={null} />);

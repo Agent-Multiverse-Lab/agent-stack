@@ -3,6 +3,8 @@ import { useTheme } from "next-themes";
 import type { LucideIcon } from "lucide-react";
 import {
   BotIcon,
+  BlocksIcon,
+  PlugIcon,
   Settings2Icon,
   UserRoundIcon,
 } from "lucide-react";
@@ -42,8 +44,10 @@ import {
 import type { UserResponse } from "@/types/auth";
 import { useTranslation } from "@/i18n";
 import SettingsModels from "@/layouts/MainLayout/components/SettingsModels";
+import { Skill } from "./settings-extensions/Skill";
+import { Mcp } from "./settings-extensions/Mcp";
 
-type Section = "general" | "account" | "models";
+type Section = "general" | "account" | "models" | "skills" | "mcp";
 
 type SectionOption = {
   id: Section;
@@ -70,6 +74,8 @@ export function Settings({ open, close, user }: SettingsProps) {
     { id: "general", name: t("General"), icon: Settings2Icon },
     { id: "account", name: t("Account"), icon: UserRoundIcon },
     { id: "models", name: t("Models"), icon: BotIcon },
+    { id: "skills", name: t("Skills"), icon: BlocksIcon },
+    { id: "mcp", name: "MCP", icon: PlugIcon },
   ];
   const currentSection =
     sections.find((item) => item.id === section) ?? sections[0];
@@ -121,6 +127,7 @@ export function Settings({ open, close, user }: SettingsProps) {
                             size="default"
                             className="h-9 gap-2.5 px-3 py-1.5 text-[15px] [&>svg]:size-[18px]"
                             isActive={section === item.id}
+                            aria-current={section === item.id ? "page" : undefined}
                             onClick={() => setSection(item.id)}
                           >
                             <Icon aria-hidden="true" />
@@ -151,6 +158,10 @@ export function Settings({ open, close, user }: SettingsProps) {
 
                 {section === "models" ? (
                   <SettingsModels />
+                ) : section === "skills" ? (
+                  <Skill key={user?.uid ?? "guest"} />
+                ) : section === "mcp" ? (
+                  <Mcp key={user?.uid ?? "guest"} />
                 ) : section === "general" ? (
                   <FieldGroup className="max-w-3xl gap-0">
                     {setting(
