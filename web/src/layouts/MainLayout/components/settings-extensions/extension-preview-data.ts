@@ -18,12 +18,22 @@ export interface SkillPreview extends PreviewBase {
   fileContent: string;
 }
 
+export type ToolSchema = boolean | { [key: string]: unknown };
+
+/** Metadata declared by the local fixture, not discovered from an MCP server. */
+export interface McpToolPreview {
+  name: string;
+  description?: string;
+  inputSchema?: ToolSchema;
+  outputSchema?: ToolSchema;
+}
+
 export interface McpPreview extends PreviewBase {
   kind: "mcp";
   transport: McpTransport;
   endpoint: string;
   authentication: McpAuthentication;
-  tools: string[];
+  tools: McpToolPreview[];
 }
 
 export type ExtensionPreview = SkillPreview | McpPreview;
@@ -56,19 +66,63 @@ function createEnglishPreviewItems(kind: ExtensionKind): ExtensionPreview[] {
       kind, id: "documents", name: "Document service", isEnabled: true,
       description: "An example connection for browsing and searching documents.",
       transport: "http", endpoint: "https://mcp.example.invalid/documents", authentication: "bearer",
-      tools: ["search_documents", "read_document", "list_collections"],
+      tools: [
+        {
+          name: "search_documents", description: "Search documents by keyword and optional collection.",
+          inputSchema: {
+            type: "object", properties: {
+              query: { type: "string" },
+              filters: { type: "object", properties: { collection_id: { type: "string" } } },
+              limit: { type: "integer", minimum: 1, maximum: 50, default: 10 },
+            }, required: ["query"],
+          },
+          outputSchema: {
+            type: "object", properties: {
+              documents: { type: "array", items: { type: "object", properties: { id: { type: "string" }, title: { type: "string" } }, required: ["id", "title"] } },
+            }, required: ["documents"],
+          },
+        },
+        {
+          name: "read_document", description: "Read the text of a document by its identifier.",
+          inputSchema: { type: "object", properties: { document_id: { type: "string" } }, required: ["document_id"] },
+          outputSchema: { type: "object", properties: { title: { type: "string" }, text: { type: "string" } }, required: ["title", "text"] },
+        },
+        {
+          name: "list_collections", description: "List the collections in the document catalog.",
+          inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        },
+      ],
     },
     {
       kind, id: "database", name: "Database service", isEnabled: true,
       description: "An example connection for inspecting a database catalog.",
       transport: "sse", endpoint: "https://mcp.example.invalid/database", authentication: "none",
-      tools: ["list_tables", "describe_table"],
+      tools: [
+        {
+          name: "list_tables", description: "List table names in a database schema.",
+          inputSchema: { type: "object", properties: { schema: { type: "string" } } },
+          outputSchema: { type: "object", properties: { tables: { type: "array", items: { type: "string" } } }, required: ["tables"] },
+        },
+        {
+          name: "describe_table", description: "Inspect the columns of a named table.",
+          inputSchema: { type: "object", properties: { table: { type: "string" } }, required: ["table"] },
+        },
+      ],
     },
     {
       kind, id: "web-search", name: "Web search", isEnabled: false,
       description: "An example connection for finding and reading web sources.",
       transport: "http", endpoint: "https://mcp.example.invalid/search", authentication: "none",
-      tools: ["search_web", "read_page"],
+      tools: [
+        {
+          name: "search_web", description: "Find web pages matching a search query.",
+          inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+        },
+        {
+          name: "read_page", description: "Read the text content of a web page.",
+          inputSchema: { type: "object", properties: { url: { type: "string", format: "uri" } }, required: ["url"] },
+        },
+      ],
     },
   ];
 }

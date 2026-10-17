@@ -6,6 +6,23 @@ const supportedLanguages = ["en", "zh-CN"] as const;
 type Language = (typeof supportedLanguages)[number];
 
 const translations = {
+  "Back to tools": "返回工具列表",
+  "Example metadata": "示例工具信息",
+  "Description unavailable": "暂无用途说明",
+  "Input schema": "输入参数",
+  "Output schema": "输出结构",
+  "Input schema unavailable": "未提供输入结构",
+  "Output schema unavailable": "未提供输出结构",
+  "Type unspecified": "未声明类型",
+  "Required": "必填",
+  "No declared parameters": "未声明参数",
+  "Search documents by keyword and optional collection.": "按关键词搜索文档，可限定文档集合。",
+  "Read the text of a document by its identifier.": "根据文档标识读取正文。",
+  "List the collections in the document catalog.": "列出文档目录中的集合。",
+  "List table names in a database schema.": "列出数据库模式中的表名。",
+  "Inspect the columns of a named table.": "查看指定数据表的列信息。",
+  "Find web pages matching a search query.": "查找与检索词匹配的网页。",
+  "Read the text content of a web page.": "读取网页的文本内容。",
   "Enter an example server address.": "请输入示例服务地址。",
   "Use an HTTP(S) example address without credentials.": "请使用不含凭据的 HTTP(S) 示例地址。",
 
@@ -84,6 +101,8 @@ const translations = {
   "Back to list": "返回列表",
   "Back to details": "返回详情",
   "Back to configuration": "返回配置",
+  "Read only": "只读",
+  "Web management API unavailable": "网页管理接口尚未提供",
   "MCP configuration sections": "MCP 配置分区",
   "Skill configuration sections": "技能配置分区",
   "Connection settings": "连接设置",

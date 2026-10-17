@@ -59,8 +59,7 @@ export function SkillDetail({ draft, onChange, nameInputRef, activeTab, onTabCha
         </FieldGroup>
       </TabsContent>
       <TabsContent value="files" className="space-y-4">
-        <p className="text-sm text-muted-foreground">{t("Read-only sample. This file is not installed or executed.")}</p>
-        <p className="flex items-center gap-2 text-sm font-medium"><FileTextIcon aria-hidden="true" className="size-4" />SKILL.md</p>
+        <p className="flex items-center gap-2 text-sm font-medium"><FileTextIcon aria-hidden="true" className="size-4" />SKILL.md <Badge>{t("Read only")}</Badge></p>
         <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-muted p-4 font-mono text-xs leading-6 text-muted-foreground">{t(draft.fileContent)}</pre>
       </TabsContent>
     </Tabs>

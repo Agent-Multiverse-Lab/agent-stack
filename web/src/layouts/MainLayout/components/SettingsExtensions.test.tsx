@@ -55,8 +55,7 @@ async function finishClosing(name: string) {
 
 it.each(["skills", "mcp"] as const)("keeps %s server-managed with no fabricated installed list", (kind) => {
   render(<Harness kind={kind} />);
-  expect(screen.getByText("Managed on the server")).toBeTruthy();
-  expect(screen.getByText(/is not available in the web interface yet/)).toBeTruthy();
+  expect(screen.getByText("Web management API unavailable")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Explore local preview" })).toBeTruthy();
   expect(screen.queryByRole("list")).toBeNull();
   expect(screen.queryByRole("textbox")).toBeNull();
@@ -74,7 +73,8 @@ it.each([
   enterPreview();
   const row = screen.getByRole("button", { name: first });
   let dialog = await openExample(first);
-  expect(within(dialog).getByText("Local preview · No server changes")).toBeTruthy();
+  expect(within(dialog).getAllByText("Local preview · No server changes")).toHaveLength(2);
+  expect(within(dialog).queryByText("Changes only last in this preview. Nothing is saved to the server.")).toBeNull();
   expect((within(dialog).getByRole("textbox", { name: field }) as HTMLInputElement).value).toBe(first);
   expect(within(dialog).getByRole("button", { name: "Apply to preview" })).toBeTruthy();
   expect(within(dialog).queryByRole("button", { name: "Edit configuration" })).toBeNull();
@@ -100,7 +100,7 @@ it("switches SkillDetail tabs without losing drafts or leaving configuration", a
   fireEvent.click(within(configuration).getByRole("tab", { name: "Example file" }));
   expect(screen.getByRole("dialog", { name: "Research brief" })).toBe(configuration);
   expect(within(configuration).getByRole("tab", { name: "Example file" }).getAttribute("aria-selected")).toBe("true");
-  expect(within(configuration).getByText("Read-only sample. This file is not installed or executed.")).toBeTruthy();
+  expect(within(configuration).getByText("Read only")).toBeTruthy();
   expect(within(configuration).getByText(/This sample is not installed or executed\./)).toBeTruthy();
   expect(within(configuration).queryByRole("textbox")).toBeNull();
   fireEvent.click(within(configuration).getByRole("tab", { name: "Basic configuration" }));
@@ -206,7 +206,7 @@ it("adds only local examples, validates a name, and clears additions on exit", a
   await waitFor(() => expect(document.activeElement).toBe(add));
   expect(within(screen.getByRole("list", { name: "Example skills" })).getAllByRole("listitem")).toHaveLength(4);
   fireEvent.click(screen.getByRole("button", { name: "Exit preview" }));
-  expect(screen.getByText("Managed on the server")).toBeTruthy();
+  expect(screen.getByText("Web management API unavailable")).toBeTruthy();
   enterPreview();
   expect(within(screen.getByRole("list", { name: "Example skills" })).getAllByRole("listitem")).toHaveLength(3);
   expect(screen.queryByText("New local skill")).toBeNull();
@@ -216,7 +216,9 @@ it("never accepts credentials or fabricates MCP connection or tool discovery res
   render(<Harness kind="mcp" />);
   enterPreview();
   const configuration = await openExample("Document service");
-  expect(within(configuration).getByText("Example tools")).toBeTruthy();
+  fireEvent.click(within(configuration).getByRole("tab", { name: /^Tools/ }));
+  expect(within(configuration).getByRole("list", { name: "Example tools" })).toBeTruthy();
+  fireEvent.click(within(configuration).getByRole("tab", { name: "Basic configuration" }));
   fireEvent.change(within(configuration).getByRole("textbox", { name: "Service name" }), { target: { value: "Edited preview service" } });
   fireEvent.click(within(configuration).getByRole("tab", { name: "Connection settings" }));
   expect(within(configuration).getByText("Connection not tested")).toBeTruthy();
@@ -239,7 +241,7 @@ it("resets preview across kinds and remounts without sharing records", async () 
   enterPreview();
   fireEvent.change(screen.getByRole("textbox", { name: "Search example skills" }), { target: { value: "missing" } });
   rerender(<SettingsExtensions kind="mcp" />);
-  expect(screen.getByText("Managed on the server")).toBeTruthy();
+  expect(screen.getByText("Web management API unavailable")).toBeTruthy();
   enterPreview();
   expect(within(screen.getByRole("list", { name: "Example MCP services" })).getAllByRole("listitem")).toHaveLength(3);
   expect(screen.queryByText("Research brief")).toBeNull();
@@ -247,7 +249,7 @@ it("resets preview across kinds and remounts without sharing records", async () 
   unmount();
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   render(<SettingsExtensions kind="mcp" />);
-  expect(screen.getByText("Managed on the server")).toBeTruthy();
+  expect(screen.getByText("Web management API unavailable")).toBeTruthy();
   expect(screen.queryByText("Document service")).toBeNull();
 });
 
@@ -301,6 +303,7 @@ it("rejects credential-bearing or invalid MCP addresses and validates additions 
   fireEvent.click(within(configuration).getByRole("button", { name: "Apply to preview" }));
   await finishClosing("Add example MCP service");
   const reopened = await openExample("Local test service");
+  fireEvent.click(within(reopened).getByRole("tab", { name: /^Tools/ }));
   expect(within(reopened).getByText("No example tools")).toBeTruthy();
   fireEvent.click(within(reopened).getByRole("tab", { name: "Connection settings" }));
   expect(within(reopened).getByText("Connection not tested")).toBeTruthy();
@@ -339,7 +342,7 @@ it("preserves edits on both MCP tabs and reveals the tab containing an invalid f
 
 it.each(["skills", "mcp"] as const)("provides the %s section through its named list component", (kind) => {
   render(kind === "skills" ? <Skill /> : <Mcp />);
-  expect(screen.getByText("Managed on the server")).toBeTruthy();
+  expect(screen.getByText("Web management API unavailable")).toBeTruthy();
   enterPreview();
   expect(within(screen.getByRole("list", { name: kind === "skills" ? "Example skills" : "Example MCP services" })).getAllByRole("listitem")).toHaveLength(3);
 });

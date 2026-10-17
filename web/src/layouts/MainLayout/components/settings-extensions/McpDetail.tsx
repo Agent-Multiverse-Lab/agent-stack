@@ -1,7 +1,6 @@
-import { type RefObject, useId } from "react";
+import { type RefObject, useId, useRef, useState } from "react";
 import { LockKeyholeIcon, PlugIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -9,7 +8,9 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useTranslation } from "@/i18n";
-import type { McpPreview } from "./extension-preview-data";
+import type { McpPreview, McpToolPreview } from "./extension-preview-data";
+import { ToolCard } from "./ToolCard";
+import { ToolDetail } from "./ToolDetail";
 
 type McpDetailProps = {
   draft: McpPreview;
@@ -22,11 +23,19 @@ type McpDetailProps = {
 export function McpDetail({ draft, onChange, nameInputRef, activeTab, onTabChange }: McpDetailProps) {
   const { t } = useTranslation();
   const fieldId = useId();
+  const [selectedTool, setSelectedTool] = useState<McpToolPreview | null>(null);
+  const [isToolOpen, setIsToolOpen] = useState(false);
+  const toolReturnFocusRef = useRef<HTMLElement | null>(null);
+  const toolsTabRef = useRef<HTMLButtonElement>(null);
   return (
+    <>
     <Tabs value={activeTab} onValueChange={(value) => onTabChange(String(value))} className="gap-5">
       <TabsList aria-label={t("MCP configuration sections")} className="w-full justify-start gap-6 border-b">
         <TabsTrigger value="general" className="pb-3 data-active:border-b-2 data-active:border-primary">{t("Basic configuration")}</TabsTrigger>
         <TabsTrigger value="connection" className="pb-3 data-active:border-b-2 data-active:border-primary">{t("Connection settings")}</TabsTrigger>
+        <TabsTrigger ref={toolsTabRef} value="tools" className="pb-3 data-active:border-b-2 data-active:border-primary">
+          {t("Tools")}<span aria-hidden="true" className="text-xs tabular-nums text-muted-foreground">{draft.tools.length}</span>
+        </TabsTrigger>
       </TabsList>
       <TabsContent value="general">
         <FieldGroup className="gap-5">
@@ -44,12 +53,6 @@ export function McpDetail({ draft, onChange, nameInputRef, activeTab, onTabChang
             <Textarea id={`${fieldId}-description`} name="description" className="min-h-24 resize-y" rows={3}
               value={draft.description} onChange={(event) => onChange({ ...draft, description: event.target.value })} />
           </Field>
-          <section className="space-y-3" aria-label={t("Example tools")}>
-            <h3 className="text-xs font-medium text-muted-foreground">{t("Example tools")}</h3>
-            {draft.tools.length ? <div className="flex flex-wrap gap-2">
-              {draft.tools.map((tool) => <Badge className="font-mono" key={tool}>{tool}</Badge>)}
-            </div> : <p className="text-sm text-muted-foreground">{t("No example tools")}</p>}
-          </section>
         </FieldGroup>
       </TabsContent>
       <TabsContent value="connection">
@@ -84,6 +87,26 @@ export function McpDetail({ draft, onChange, nameInputRef, activeTab, onTabChang
           </div>
         </FieldGroup>
       </TabsContent>
+      <TabsContent value="tools">
+        {draft.tools.length ? <ul aria-label={t("Example tools")} className="divide-y">
+          {draft.tools.map((tool) => <li key={tool.name}>
+            <ToolCard tool={tool} onOpen={(target) => {
+              toolReturnFocusRef.current = target;
+              setSelectedTool(tool);
+              setIsToolOpen(true);
+            }} />
+          </li>)}
+        </ul> : <p className="py-8 text-center text-sm text-muted-foreground">{t("No example tools")}</p>}
+      </TabsContent>
     </Tabs>
+    {selectedTool && <ToolDetail
+      tool={selectedTool}
+      isOpen={isToolOpen}
+      returnFocusRef={toolReturnFocusRef}
+      fallbackFocusRef={toolsTabRef}
+      onClose={() => setIsToolOpen(false)}
+      onClosed={() => setSelectedTool(null)}
+    />}
+    </>
   );
 }

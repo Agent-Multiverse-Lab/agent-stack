@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Blocks, Info, Plug, Plus, RotateCcw, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { useTranslation } from "@/i18n";
 import { ExtensionDialog } from "./settings-extensions/ExtensionDialog";
@@ -54,19 +54,13 @@ function ExtensionSettings({ kind }: { kind: ExtensionKind }) {
       <Empty className="min-h-[390px] justify-center border-0">
         <EmptyHeader>
           <EmptyMedia variant="icon"><Icon aria-hidden="true" /></EmptyMedia>
-          <EmptyTitle>{t("Managed on the server")}</EmptyTitle>
-          <EmptyDescription>
-            {t(kind === "skills"
-              ? "Skills are configured on the server. Viewing and managing installed skills is not available in the web interface yet."
-              : "MCP services are configured on the server. Viewing and managing connections is not available in the web interface yet.")}
-          </EmptyDescription>
+          <EmptyTitle>{t("Web management API unavailable")}</EmptyTitle>
         </EmptyHeader>
         <Button ref={previewButtonRef} variant="outline" onClick={() => {
           resetPreview();
           setAnnouncement("");
           setIsPreview(true);
         }}>{t("Explore local preview")}</Button>
-        <p className="max-w-sm text-xs leading-5 text-muted-foreground">{t("Try the interface with example data. No server changes or connections.")}</p>
       </Empty>
     );
   }
@@ -136,13 +130,11 @@ function ExtensionSettings({ kind }: { kind: ExtensionKind }) {
           <Empty className="min-h-48 border-0">
             <EmptyHeader><EmptyMedia variant="icon"><Search aria-hidden="true" /></EmptyMedia>
               <EmptyTitle>{t("No matching examples")}</EmptyTitle>
-              <EmptyDescription>{t("Try another search or filter.")}</EmptyDescription>
             </EmptyHeader>
             <Button variant="outline" size="sm" onClick={() => { setSearch(""); setFilter("all"); }}>{t("Clear filters")}</Button>
           </Empty>
         )}
       </div>
-      <p className="mt-auto text-xs leading-5 text-muted-foreground">{t("Changes only last in this preview. Leaving this section, closing Settings, resetting, or exiting clears them.")}</p>
       <p className="sr-only" role="status">{announcement}</p>
 
       {selection && <ExtensionDialog key={selection.session} item={selection.item} isNew={selection.isNew}

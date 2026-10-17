@@ -1,5 +1,5 @@
 import { useRef, useState, type RefObject } from "react";
-import { ArrowLeft, Info } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -102,18 +102,14 @@ export function ExtensionDialog({
             <ArrowLeft aria-hidden="true" />
             {t("Back to list")}
           </Button>
-          <Badge className="ml-auto">{t("Example configuration")}</Badge>
+          <Badge className="ml-auto" aria-hidden="true">{t("Local preview · No server changes")}</Badge>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-          <p className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
-            <Info aria-hidden="true" className="size-3.5 shrink-0" />
-            {t("Local preview · No server changes")}
-          </p>
           <DialogHeader className="mb-5">
             <DialogTitle className="min-w-0 break-words">{title}</DialogTitle>
-            <DialogDescription>
-              {t("Changes only last in this preview. Nothing is saved to the server.")}
+            <DialogDescription className="sr-only">
+              {t("Local preview · No server changes")}
             </DialogDescription>
           </DialogHeader>
 
