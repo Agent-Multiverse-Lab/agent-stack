@@ -3,8 +3,6 @@ import { useTheme } from "next-themes";
 import type { LucideIcon } from "lucide-react";
 import {
   BotIcon,
-  DatabaseIcon,
-  InfoIcon,
   Settings2Icon,
   UserRoundIcon,
 } from "lucide-react";
@@ -41,12 +39,11 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from "@/components/ui/sidebar";
-import { Switch } from "@/components/ui/switch";
 import type { UserResponse } from "@/types/auth";
 import { useTranslation } from "@/i18n";
 import SettingsModels from "@/layouts/MainLayout/components/SettingsModels";
 
-type Section = "general" | "account" | "models" | "data" | "about";
+type Section = "general" | "account" | "models";
 
 type SectionOption = {
   id: Section;
@@ -64,8 +61,6 @@ export function Settings({ open, close, user }: SettingsProps) {
   const { t, i18n } = useTranslation();
   const [section, setSection] = useState<Section>("general");
   const { theme = "light", setTheme } = useTheme();
-  const [followUps, setFollowUps] = useState(true);
-  const [improveModel, setImproveModel] = useState(false);
 
   useEffect(() => {
     if (open) setSection("general");
@@ -75,8 +70,6 @@ export function Settings({ open, close, user }: SettingsProps) {
     { id: "general", name: t("General"), icon: Settings2Icon },
     { id: "account", name: t("Account"), icon: UserRoundIcon },
     { id: "models", name: t("Models"), icon: BotIcon },
-    { id: "data", name: t("Data Controls"), icon: DatabaseIcon },
-    { id: "about", name: t("About"), icon: InfoIcon },
   ];
   const currentSection =
     sections.find((item) => item.id === section) ?? sections[0];
@@ -167,7 +160,9 @@ export function Settings({ open, close, user }: SettingsProps) {
                         onValueChange={(value) => setTheme(value ?? "light")}
                       >
                         <SelectTrigger aria-label={t("Theme")}>
-                          <SelectValue />
+                          <SelectValue>
+                            {t(theme === "dark" ? "Dark" : theme === "system" ? "System" : "Light")}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="light">{t("Light")}</SelectItem>
@@ -188,7 +183,9 @@ export function Settings({ open, close, user }: SettingsProps) {
                         }}
                       >
                         <SelectTrigger aria-label={t("Language")}>
-                          <SelectValue />
+                          <SelectValue>
+                            {i18n.resolvedLanguage === "zh-CN" ? "简体中文" : "English"}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="en">English</SelectItem>
@@ -196,17 +193,8 @@ export function Settings({ open, close, user }: SettingsProps) {
                         </SelectContent>
                       </Select>,
                     )}
-                    <FieldSeparator />
-                    {setting(
-                      t("Show follow-up suggestions"),
-                      <Switch
-                        aria-label={t("Show follow-up suggestions")}
-                        checked={followUps}
-                        onCheckedChange={setFollowUps}
-                      />,
-                    )}
                   </FieldGroup>
-                ) : section === "account" ? (
+                ) : (
                   <FieldGroup className="max-w-3xl gap-0">
                     {setting(
                       t("Status"),
@@ -222,29 +210,6 @@ export function Settings({ open, close, user }: SettingsProps) {
                     {setting(
                       t("Account"),
                       <Badge variant="outline">{user?.email ?? "—"}</Badge>,
-                    )}
-                  </FieldGroup>
-                ) : section === "data" ? (
-                  <FieldGroup className="max-w-3xl gap-0">
-                    {setting(
-                      t("Improve the model"),
-                      <Switch
-                        aria-label={t("Improve the model")}
-                        checked={improveModel}
-                        onCheckedChange={setImproveModel}
-                      />,
-                    )}
-                  </FieldGroup>
-                ) : (
-                  <FieldGroup className="max-w-3xl gap-0">
-                    {setting(
-                      t("Product"),
-                      <Badge variant="outline">AM</Badge>,
-                    )}
-                    <FieldSeparator />
-                    {setting(
-                      t("Version"),
-                      <Badge variant="secondary">{t("Preview")}</Badge>,
                     )}
                   </FieldGroup>
                 )}
