@@ -117,16 +117,16 @@ export default function KnowledgePage() {
         ) : error ? (
           <Empty className="min-h-72"><EmptyMedia><BookOpen /></EmptyMedia><EmptyTitle>{t("Unable to load knowledge bases")}</EmptyTitle><EmptyDescription role="alert">{error}</EmptyDescription><Button variant="outline" onClick={() => setReload((value) => value + 1)}>{t("Retry")}</Button></Empty>
         ) : visibleBases.length ? (
-          <ul className={view === "grid" ? "grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(min(100%,265px),1fr))]" : "grid gap-2"}>
+          <ul className={view === "grid" ? "grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr))]" : "grid gap-2"}>
             {visibleBases.map((base) => {
               const index = bases.indexOf(base) + 1
               return (
                 <li key={base.kb_id} className={`group relative min-w-0 rounded-xl border border-border bg-card ${view === "grid" ? "" : "pr-10"}`}>
-                  <Link to={`/knowledge/${base.kb_id}`} className={`block rounded-xl outline-none transition-colors duration-(--hover-transition-duration) ease-in-out hover:bg-accent/40 focus-visible:bg-accent ${view === "grid" ? "p-5" : "flex min-h-24 items-center gap-5 p-4"}`}>
-                    <div aria-hidden="true" className={view === "grid" ? "relative mb-6 flex h-36 items-center justify-center overflow-hidden rounded-lg bg-muted/55" : "grid size-14 shrink-0 place-items-center rounded-lg bg-muted"}>
+                  <Link to={`/knowledge/${base.kb_id}`} className={`block rounded-xl outline-none transition-colors duration-(--hover-transition-duration) ease-in-out hover:bg-accent/40 focus-visible:bg-accent ${view === "grid" ? "p-3" : "flex min-h-24 items-center gap-5 p-4"}`}>
+                    <div aria-hidden="true" className={view === "grid" ? "relative mb-3 flex h-20 items-center justify-center overflow-hidden rounded-lg bg-muted/55" : "grid size-14 shrink-0 place-items-center rounded-lg bg-muted"}>
                       {view === "grid" ? <>
                         <span className="absolute left-3.5 top-3 font-mono text-[10px] text-muted-foreground">{String(index).padStart(2, "0")}</span>
-                        <div className="relative h-24 w-32 text-primary">
+                        <div className="relative h-24 w-32 scale-[0.65] text-primary">
                           <div className="absolute left-5 top-1 h-20 w-24 -rotate-12 rounded-md border border-primary/15 bg-background" />
                           <div className="absolute left-5 top-1 h-20 w-24 rotate-6 rounded-md border border-primary/20 bg-card px-4 pt-4">
                             <span className="mb-2 block h-1 w-7 rounded-full bg-primary/25" /><span className="mb-1.5 block h-0.5 w-full bg-border" /><span className="mb-1.5 block h-0.5 w-full bg-border" /><span className="block h-0.5 w-8 bg-border" />
@@ -136,10 +136,10 @@ export default function KnowledgePage() {
                       </> : <FolderOpen className="size-6 text-primary" strokeWidth={1.5} />}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <h3 className="truncate text-[17px] font-medium tracking-tight">{base.name}</h3>
-                      {base.description && <p className={`mt-2 text-[13px] leading-6 text-muted-foreground ${view === "grid" ? "line-clamp-2 min-h-12" : "truncate"}`}>{base.description}</p>}
-                      {view === "grid" && !base.description && <div className="h-14" />}
-                      <div className={`flex items-center justify-between gap-2 ${view === "grid" ? "mt-5 border-t border-border/70 pt-3" : "mt-2"}`}>
+                      <h3 className="truncate text-sm font-medium tracking-tight">{base.name}</h3>
+                      {base.description && <p className={`mt-1 text-[13px] leading-5 text-muted-foreground ${view === "grid" ? "line-clamp-2 min-h-10" : "truncate"}`}>{base.description}</p>}
+                      {view === "grid" && !base.description && <div className="h-11" />}
+                      <div className={`flex items-center justify-between gap-2 ${view === "grid" ? "mt-3 border-t border-border/70 pt-2" : "mt-2"}`}>
                         <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><span className={`size-1.5 rounded-full ${base.status === "active" ? "bg-success" : "bg-muted-foreground"}`} />{base.status === "active" ? t("Active") : base.status}</span>
                         {view === "grid" && <ArrowUpRight className="size-4 text-muted-foreground" />}
                       </div>

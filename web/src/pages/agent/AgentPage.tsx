@@ -74,11 +74,11 @@ export default function AgentPage() {
             <EmptyTitle>{t("No agents yet")}</EmptyTitle>
           </Empty>
         ) : (
-          <div className="space-y-8">
+          <div className="space-y-6">
             {leader && (
               <section className="space-y-3" aria-labelledby="main-agent-heading">
                 <h2 id="main-agent-heading" className="text-sm font-medium">{t("Main agent")}</h2>
-                <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
+                <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr))]">
                   <AgentCard agent={leader} onUpdated={handleAgentUpdated} />
                 </div>
               </section>
@@ -89,7 +89,7 @@ export default function AgentPage() {
                 <h2 id="agents-heading" className="flex items-center gap-2 text-sm font-medium">
                   {t("Agents")} <Badge>{agents.length}</Badge>
                 </h2>
-                <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
+                <ul className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr))]">
                   {agents.map((agent) => <li key={agent.id}><AgentCard agent={agent} onUpdated={handleAgentUpdated} /></li>)}
                 </ul>
               </section>
@@ -100,7 +100,7 @@ export default function AgentPage() {
                 {t("Sub agents")} <Badge>{catalog.subagents.length}</Badge>
               </h2>
               {catalog.subagents.length > 0 ? (
-                <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
+                <ul className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr))]">
                   {catalog.subagents.map((agent) => <li key={agent.id}><AgentCard agent={agent} onUpdated={handleAgentUpdated} /></li>)}
                 </ul>
               ) : (

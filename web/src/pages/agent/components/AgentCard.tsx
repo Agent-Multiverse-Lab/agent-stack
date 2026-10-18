@@ -80,19 +80,19 @@ export function AgentCard({
   return (
     <article aria-label={agent.name} className="h-full">
       <Sheet open={open} onOpenChange={handleOpenChange}>
-        <Card className="relative h-full cursor-pointer hover:border-input hover:bg-muted">
+        <Card className="relative h-full cursor-pointer gap-2 [--card-spacing:--spacing(3)] hover:border-input hover:bg-muted">
           <CardHeader>
             <div className="flex min-w-0 items-center gap-2.5">
               <span className="grid size-8 shrink-0 place-items-center rounded-[7px] border border-border bg-secondary text-secondary-foreground">
                 <Icon className="size-4" aria-hidden />
               </span>
-              <div className="min-w-0 space-y-1">
+              <div className="min-w-0 space-y-0.5">
                 <h3 className="truncate text-sm font-semibold">{agent.name}</h3>
                 <p className="text-xs text-muted-foreground">{agentType}</p>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="flex flex-1 flex-col gap-2.5">
+          <CardContent className="flex flex-1 flex-col gap-2">
             <p className="line-clamp-2 min-h-[2.8em] break-words text-[13px] leading-[1.4] text-muted-foreground">
               {agent.description || t("No description")}
             </p>
