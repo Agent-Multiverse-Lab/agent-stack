@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router"
-import { ArrowDownAZ, ArrowUpRight, BookOpen, FolderOpen, LayoutGrid, List, MoreHorizontal, Plus, Search, Trash2, X } from "lucide-react"
+import { ArrowDownAZ, ArrowUpRight, BookOpen, FolderOpen, LayoutGrid, List, Plus, Search, X } from "lucide-react"
 import { toast } from "sonner"
 
-import { createKnowledgeBase, deleteKnowledgeBase, listKnowledgeBases } from "@/api/knowledge"
+import { createKnowledgeBase, listKnowledgeBases } from "@/api/knowledge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -30,8 +29,6 @@ export default function KnowledgePage() {
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const [creating, setCreating] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState<KnowledgeBase | null>(null)
   const mutationRef = useRef(false)
 
   useEffect(() => {
@@ -63,23 +60,6 @@ export default function KnowledgePage() {
     } finally {
       mutationRef.current = false
       setCreating(false)
-    }
-  }
-
-  async function handleDelete() {
-    if (!confirmDelete || mutationRef.current) return
-    mutationRef.current = true
-    setDeleting(true)
-    try {
-      await deleteKnowledgeBase(confirmDelete.kb_id)
-      setBases((items) => items.filter((item) => item.kb_id !== confirmDelete.kb_id))
-      toast.success(t("Knowledge base deleted"))
-      setConfirmDelete(null)
-    } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : t("Request failed"))
-    } finally {
-      mutationRef.current = false
-      setDeleting(false)
     }
   }
 
@@ -119,13 +99,11 @@ export default function KnowledgePage() {
         ) : visibleBases.length ? (
           <ul className={view === "grid" ? "grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr))]" : "grid gap-2"}>
             {visibleBases.map((base) => {
-              const index = bases.indexOf(base) + 1
               return (
-                <li key={base.kb_id} className={`group relative min-w-0 rounded-xl border border-border bg-card ${view === "grid" ? "" : "pr-10"}`}>
+                <li key={base.kb_id} className="min-w-0 rounded-xl border border-border bg-card">
                   <Link to={`/knowledge/${base.kb_id}`} className={`block rounded-xl outline-none transition-colors duration-(--hover-transition-duration) ease-in-out hover:bg-accent/40 focus-visible:bg-accent ${view === "grid" ? "p-3" : "flex min-h-24 items-center gap-5 p-4"}`}>
                     <div aria-hidden="true" className={view === "grid" ? "relative mb-3 flex h-20 items-center justify-center overflow-hidden rounded-lg bg-muted/55" : "grid size-14 shrink-0 place-items-center rounded-lg bg-muted"}>
                       {view === "grid" ? <>
-                        <span className="absolute left-3.5 top-3 font-mono text-[10px] text-muted-foreground">{String(index).padStart(2, "0")}</span>
                         <div className="relative h-24 w-32 scale-[0.65] text-primary">
                           <div className="absolute left-5 top-1 h-20 w-24 -rotate-12 rounded-md border border-primary/15 bg-background" />
                           <div className="absolute left-5 top-1 h-20 w-24 rotate-6 rounded-md border border-primary/20 bg-card px-4 pt-4">
@@ -146,10 +124,6 @@ export default function KnowledgePage() {
                     </div>
                     {view === "list" && <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />}
                   </Link>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger render={<Button variant="ghost" size="icon" />} aria-label={t("Collection actions for {{name}}", { name: base.name })} className="absolute right-3 top-3"><MoreHorizontal /></DropdownMenuTrigger>
-                    <DropdownMenuContent align="end"><DropdownMenuItem variant="destructive" onClick={() => setConfirmDelete(base)}><Trash2 />{t("Delete knowledge base")}</DropdownMenuItem></DropdownMenuContent>
-                  </DropdownMenu>
                 </li>
               )
             })}
@@ -175,12 +149,6 @@ export default function KnowledgePage() {
             </div>
             <DialogFooter><Button variant="ghost" type="button" disabled={creating} onClick={() => setCreateOpen(false)}>{t("Cancel")}</Button><Button type="submit" disabled={!name.trim() || creating}>{creating && <Spinner />}{t("Create knowledge base")}</Button></DialogFooter>
           </form>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={confirmDelete !== null} onOpenChange={(open) => { if (!open && !deleting) setConfirmDelete(null) }}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>{t("Delete this knowledge base?")}</DialogTitle><DialogDescription>{t("This will permanently delete {{name}} and all of its files.", { name: confirmDelete?.name })}</DialogDescription></DialogHeader>
-          <DialogFooter><Button variant="ghost" disabled={deleting} onClick={() => setConfirmDelete(null)}>{t("Cancel")}</Button><Button variant="destructive" disabled={deleting} onClick={handleDelete}>{deleting && <Spinner />}{t("Delete knowledge base")}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -2,11 +2,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
-import { createKnowledgeBase, deleteKnowledgeBase, listKnowledgeBases } from "@/api/knowledge"
+import { createKnowledgeBase, listKnowledgeBases } from "@/api/knowledge"
 import KnowledgePage from "@/pages/knowledge/KnowledgePage"
 import { installBrowserStubs } from "@/test/browserStubs"
 
-vi.mock("@/api/knowledge", () => ({ listKnowledgeBases: vi.fn(), createKnowledgeBase: vi.fn(), deleteKnowledgeBase: vi.fn() }))
+vi.mock("@/api/knowledge", () => ({ listKnowledgeBases: vi.fn(), createKnowledgeBase: vi.fn() }))
 const base = { kb_id: "kb-1", name: "Docs", description: "Project documentation", status: "active" }
 function renderPage() {
   return render(<MemoryRouter initialEntries={["/knowledge"]}><Routes><Route path="/knowledge" element={<KnowledgePage />} /><Route path="/knowledge/:kbId" element={<h1>Collection detail</h1>} /></Routes></MemoryRouter>)
@@ -50,22 +50,22 @@ it("creates a collection with trimmed input and opens it", async () => {
   expect(await screen.findByRole("heading", { name: "Collection detail" })).toBeTruthy()
 })
 
-it("deletes only after confirmation and blocks duplicate submissions", async () => {
-  let resolveDelete: (result: { kb_id: string; deleted_file_count: number }) => void = () => {}
-  vi.mocked(deleteKnowledgeBase).mockImplementation(() => new Promise((resolve) => { resolveDelete = resolve }))
+it("keeps the whole card as the only collection entry without numbers or action menus", async () => {
   renderPage()
-  await screen.findByText("Docs")
-  fireEvent.click(screen.getByRole("button", { name: "Collection actions for Docs" }))
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Delete knowledge base" }))
-  const dialog = await screen.findByRole("dialog")
-  expect(deleteKnowledgeBase).not.toHaveBeenCalled()
-  const confirm = within(dialog).getByRole("button", { name: "Delete knowledge base" })
-  fireEvent.click(confirm)
-  fireEvent.click(confirm)
-  expect(deleteKnowledgeBase).toHaveBeenCalledTimes(1)
-  expect(deleteKnowledgeBase).toHaveBeenCalledWith("kb-1")
-  resolveDelete({ kb_id: "kb-1", deleted_file_count: 0 })
-  expect(await screen.findByText("No knowledge bases yet")).toBeTruthy()
+  const link = await screen.findByRole("link", { name: /Docs/ })
+  const card = link.closest("li")!
+  expect(within(card).queryByText("01")).toBeNull()
+  expect(within(card).queryByRole("button")).toBeNull()
+  expect(within(card).getAllByRole("link")).toEqual([link])
+  expect(link.getAttribute("href")).toBe("/knowledge/kb-1")
+  link.focus()
+  expect(document.activeElement).toBe(link)
+
+  fireEvent.click(screen.getByRole("button", { name: "List view" }))
+  const listLink = screen.getByRole("link", { name: /Docs/ })
+  expect(within(listLink.closest("li")!).queryByRole("button")).toBeNull()
+  fireEvent.click(listLink)
+  expect(screen.getByRole("heading", { name: "Collection detail" })).toBeTruthy()
 })
 
 it("offers retry after a failed collection request", async () => {
