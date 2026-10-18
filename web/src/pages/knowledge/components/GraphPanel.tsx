@@ -9,11 +9,11 @@ import {
 import type { SimulationNodeDatum } from "d3-force"
 import { select } from "d3-selection"
 import { zoom } from "d3-zoom"
-import { Search, X } from "lucide-react"
+import { Network, Search, X } from "lucide-react"
 import { getKnowledgeGraph, searchKnowledgeEntities } from "@/api/knowledge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Empty, EmptyDescription, EmptyTitle } from "@/components/ui/empty"
+import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { useTranslation } from "@/i18n"
@@ -34,6 +34,9 @@ export function GraphPanel({ kbId }: { kbId: string }) {
   const [graph, setGraph] = useState<KnowledgeGraphResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [reload, setReload] = useState(0)
+  const [searchError, setSearchError] = useState("")
+  const [hasSearched, setHasSearched] = useState(false)
   const [size, setSize] = useState(DEFAULT_SIZE)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [matchedIds, setMatchedIds] = useState<Set<string>>(new Set())
@@ -42,6 +45,11 @@ export function GraphPanel({ kbId }: { kbId: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const gRef = useRef<SVGGElement>(null)
+  const searchGeneration = useRef(0)
+
+  useEffect(() => () => {
+    searchGeneration.current += 1
+  }, [kbId])
 
   useEffect(() => {
     let active = true
@@ -63,7 +71,7 @@ export function GraphPanel({ kbId }: { kbId: string }) {
     return () => {
       active = false
     }
-  }, [kbId, t])
+  }, [kbId, t, reload])
 
   useEffect(() => {
     const container = containerRef.current
@@ -77,7 +85,7 @@ export function GraphPanel({ kbId }: { kbId: string }) {
     })
     observer.observe(container)
     return () => observer.disconnect()
-  }, [])
+  }, [graph])
 
   useEffect(() => {
     const svg = svgRef.current
@@ -151,20 +159,26 @@ export function GraphPanel({ kbId }: { kbId: string }) {
   async function handleSearch() {
     const text = query.trim()
     if (!text || searching) return
+    const generation = ++searchGeneration.current
     setSearching(true)
+    setSearchError("")
     try {
       const result = await searchKnowledgeEntities(kbId, text)
+      if (generation !== searchGeneration.current) return
       setMatchedIds(new Set(result.hits.map((hit) => hit.entity_id)))
-    } catch {
-      setMatchedIds(new Set())
+      setHasSearched(true)
+    } catch (caught) {
+      if (generation === searchGeneration.current) {
+        setSearchError(caught instanceof Error ? caught.message : t("Request failed"))
+      }
     } finally {
-      setSearching(false)
+      if (generation === searchGeneration.current) setSearching(false)
     }
   }
 
   function labelVisible(node: { entity_id: string }): boolean {
     return (
-      focus?.has(node.entity_id) === true || matchedIds.has(node.entity_id)
+      (graph?.nodes.length ?? 0) <= 24 || focus?.has(node.entity_id) === true || matchedIds.has(node.entity_id)
     )
   }
 
@@ -177,17 +191,16 @@ export function GraphPanel({ kbId }: { kbId: string }) {
   }
   if (error) {
     return (
-      <div className="grid h-full place-items-center text-sm text-muted-foreground">
-        {error}
-      </div>
+      <div className="grid h-full place-content-center justify-items-center gap-4 text-sm text-muted-foreground"><p role="alert">{error}</p><Button variant="outline" onClick={() => setReload((value) => value + 1)}>{t("Retry")}</Button></div>
     )
   }
   if (!graph?.nodes.length) {
     return (
       <div className="grid h-full place-items-center">
         <Empty>
+          <EmptyMedia className="mb-2 grid size-16 place-items-center rounded-2xl bg-selection text-selection-foreground"><Network className="size-7" strokeWidth={1.4} /></EmptyMedia>
           <EmptyTitle>{t("No entities yet")}</EmptyTitle>
-          <EmptyDescription>{t("Extract graph")}</EmptyDescription>
+          <EmptyDescription>{t("Index files and extract a graph to explore their connections.")}</EmptyDescription>
         </Empty>
       </div>
     )
@@ -197,11 +210,11 @@ export function GraphPanel({ kbId }: { kbId: string }) {
     <div className="grid h-full min-h-0 [grid-template-columns:minmax(0,1fr)_auto]">
       <div
         ref={containerRef}
-        className="relative min-h-0 min-w-0 overflow-hidden bg-background"
+        className="relative min-h-0 min-w-0 overflow-hidden bg-background [background-image:radial-gradient(var(--border)_1px,transparent_1px)] [background-size:24px_24px]"
       >
         <form
           role="search"
-          className="absolute left-4 top-4 z-10 flex w-64 items-center gap-1 rounded-lg border border-border bg-background p-1"
+          className="absolute left-6 top-6 z-10 flex w-64 items-center gap-1 rounded-lg border border-border bg-card p-1"
           onSubmit={(event) => {
             event.preventDefault()
             handleSearch()
@@ -214,7 +227,7 @@ export function GraphPanel({ kbId }: { kbId: string }) {
             aria-label={t("Search entities")}
             className="min-w-0 border-0 bg-transparent px-2 py-1"
           />
-          {matchedIds.size > 0 && (
+          {(query || hasSearched) && (
             <Button
               variant="ghost"
               type="button"
@@ -222,8 +235,12 @@ export function GraphPanel({ kbId }: { kbId: string }) {
               aria-label={t("Clear")}
               className="grid size-7 shrink-0 place-items-center rounded-md p-0 text-muted-foreground"
               onClick={() => {
+                searchGeneration.current += 1
+                setSearching(false)
                 setMatchedIds(new Set())
                 setQuery("")
+                setHasSearched(false)
+                setSearchError("")
               }}
             >
               <X size={14} />
@@ -240,6 +257,8 @@ export function GraphPanel({ kbId }: { kbId: string }) {
           </Button>
         </form>
 
+        {(searchError || hasSearched) && <div className="absolute left-6 top-19 z-10 max-w-64 rounded-md bg-card px-3 py-2 text-xs text-muted-foreground" role="status">{searchError || t("{{count}} matching entities", { count: matchedIds.size })}</div>}
+        <div className="absolute bottom-5 left-6 z-10 flex gap-4 rounded-md bg-card px-3 py-2 text-[11px] text-muted-foreground"><span>{t("{{count}} entities", { count: graph.entity_count })}</span><span>{t("{{count}} relations", { count: graph.relation_count })}</span></div>
         <svg
           ref={svgRef}
           width="100%"
@@ -278,7 +297,14 @@ export function GraphPanel({ kbId }: { kbId: string }) {
               return (
                 <g
                   key={node.entity_id}
-                  className="cursor-pointer"
+                  className="cursor-pointer outline-none focus-visible:stroke-primary"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={node.name}
+                  aria-pressed={node.entity_id === selectedId}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedId(node.entity_id === selectedId ? null : node.entity_id) }
+                  }}
                   style={{ opacity: dimmed ? 0.15 : 1 }}
                   onClick={(event) => {
                     event.stopPropagation()
@@ -294,7 +320,7 @@ export function GraphPanel({ kbId }: { kbId: string }) {
                     r={10}
                     className={
                       matched
-                        ? "fill-amber-500"
+                        ? "fill-primary"
                         : node.entity_id === selectedId
                           ? "fill-primary"
                           : "fill-muted-foreground"
@@ -305,7 +331,7 @@ export function GraphPanel({ kbId }: { kbId: string }) {
                       cx={position.x}
                       cy={position.y}
                       r={14}
-                      className="fill-none stroke-amber-500"
+                      className="fill-none stroke-primary"
                       strokeWidth={2}
                     />
                   )}
@@ -356,7 +382,7 @@ export function GraphPanel({ kbId }: { kbId: string }) {
               {t("Relations")}: {adjacency.get(selectedNode.entity_id)?.size ?? 0}
             </div>
             <div className="truncate" title={selectedNode.file_id}>
-              file: {selectedNode.file_id}
+              {t("Source file")}: {selectedNode.file_id}
             </div>
           </div>
         </aside>

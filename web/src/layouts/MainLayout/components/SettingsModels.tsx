@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Alert, AlertAction, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -38,7 +36,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
-import { Bot, Eye, EyeOff, Plug, RefreshCw, Search } from "lucide-react";
+import { Bot, ChevronRight, Eye, EyeOff, Plug, RefreshCw, Search } from "lucide-react";
 import deepseekLogo from "@/assets/models/deepseek-color.svg";
 import qwenLogo from "@/assets/models/qwen-color.svg";
 import {
@@ -57,6 +55,7 @@ import type {
   ModelSettingsRequest,
   SettingsModel,
 } from "@/types/model";
+import { SettingsModelOption } from "./SettingsModelOption";
 
 const providerLogos: Record<string, string> = {
   deepseek: deepseekLogo,
@@ -265,7 +264,7 @@ export default function SettingsModels() {
   return (
     <FieldGroup className="grid min-h-full min-w-0 grid-cols-[176px_minmax(0,1fr)] content-start gap-6">
       <nav aria-label={t("Model providers")} className="min-w-0">
-        <ItemGroup className="flex-col gap-1">
+        <ItemGroup className="flex-col gap-2">
           {providers.map((item) => (
             <Item
               key={item.provider_id}
@@ -278,8 +277,9 @@ export default function SettingsModels() {
               }
               variant={selected === item.provider_id ? "muted" : "default"}
               size="sm"
+              aria-label={item.name}
               aria-pressed={selected === item.provider_id}
-              className="min-h-11 shrink-0 flex-nowrap justify-start text-left aria-pressed:bg-selection aria-pressed:text-selection-foreground aria-pressed:shadow-[inset_3px_0_0_var(--selection-foreground)] aria-pressed:hover:bg-selection disabled:opacity-60"
+              className="h-auto min-h-16 shrink-0 flex-nowrap justify-start gap-3 text-left aria-pressed:bg-selection aria-pressed:text-selection-foreground aria-pressed:hover:bg-selection disabled:opacity-60"
               onClick={() => setSelected(item.provider_id)}
             >
               <ItemMedia
@@ -288,17 +288,24 @@ export default function SettingsModels() {
               >
                 <ProviderMark providerId={item.provider_id} />
               </ItemMedia>
-              <ItemContent>
+              <ItemContent className="min-w-0">
                 <ItemTitle
-                  className={
+                  title={item.name}
+                  className={`block w-full truncate ${
                     selected === item.provider_id
                       ? "font-semibold"
                       : "text-muted-foreground"
-                  }
+                  }`}
                 >
                   {item.name}
                 </ItemTitle>
+                <span className="text-xs font-normal text-muted-foreground">
+                  {t((drafts[item.provider_id]?.is_enabled ?? item.is_enabled) ? "Enabled" : "Disabled")}
+                </span>
               </ItemContent>
+              {selected === item.provider_id && (
+                <ChevronRight aria-hidden="true" className="ml-auto size-3.5 shrink-0" />
+              )}
             </Item>
           ))}
         </ItemGroup>
@@ -429,26 +436,13 @@ export default function SettingsModels() {
           </Item>
 
           {draft.models.length ? (
-            <ItemGroup className="gap-1">
+            <ItemGroup aria-label={t("Configured models")} className="gap-2">
               {draft.models.map((model) => (
-                <Item
+                <SettingsModelOption
                   key={model.model_id}
-                  size="sm"
-                  className="min-h-11 border-0 hover:bg-muted"
-                >
-                  <ItemContent className="min-w-0">
-                    <ItemTitle title={model.model_id}>
-                      {model.model_id}
-                    </ItemTitle>
-                  </ItemContent>
-                  <ItemActions className="ml-auto flex-wrap justify-end">
-                    {model.capabilities.map((capability) => (
-                      <Badge key={capability} variant="secondary">
-                        {capability}
-                      </Badge>
-                    ))}
-                  </ItemActions>
-                </Item>
+                  model={model}
+                  isDisabled={blocked}
+                />
               ))}
             </ItemGroup>
           ) : (
@@ -510,29 +504,21 @@ export default function SettingsModels() {
           </InputGroup>
           <ScrollArea className="h-80">
             {filteredCandidates.length ? (
-              <ItemGroup className="gap-1 pr-3">
+              <ItemGroup aria-label={t("Available models")} className="gap-2 pr-3">
                 {filteredCandidates.map((model) => (
-                  <Item
-                    render={<Label htmlFor={`model-${model.model_id}`} />}
+                  <SettingsModelOption
                     key={model.model_id}
-                    size="sm"
-                    className="cursor-pointer border-0 hover:bg-muted"
-                  >
-                    <Checkbox
-                      id={`model-${model.model_id}`}
-                      checked={chosen.includes(model.model_id)}
-                      onCheckedChange={(checked) =>
-                        setChosen((previous) =>
-                          checked === true
-                            ? [...previous, model.model_id]
-                            : previous.filter((id) => id !== model.model_id),
-                        )
-                      }
-                    />
-                    <ItemContent>
-                      <ItemTitle>{model.model_id}</ItemTitle>
-                    </ItemContent>
-                  </Item>
+                    model={model}
+                    isSelected={chosen.includes(model.model_id)}
+                    isDisabled={busy !== null}
+                    onSelectedChange={(isSelected) =>
+                      setChosen((previous) =>
+                        isSelected
+                          ? [...previous, model.model_id]
+                          : previous.filter((id) => id !== model.model_id),
+                      )
+                    }
+                  />
                 ))}
               </ItemGroup>
             ) : (

@@ -1,141 +1,121 @@
-import { useEffect, useRef, useState } from "react";
-import { Layers3, MapPinned, MessageSquareText, Search } from "lucide-react";
-import Map from "ol/Map.js";
-import View from "ol/View.js";
-import TileLayer from "ol/layer/Tile.js";
-import { unByKey } from "ol/Observable.js";
-import { fromLonLat } from "ol/proj.js";
-import ImageTile from "ol/source/ImageTile.js";
-import "ol/ol.css";
+import { useCallback, useMemo, useRef, useState, type FormEvent } from "react"
+import { ArrowDownLeft, ArrowUp, ArrowUpRight, Check, ChevronDown, Compass, Layers2, MapPin, MapPinned, Minus, Plus, RotateCcw, Search, X } from "lucide-react"
 
-import { useTranslation } from "@/i18n";
-
-type MapStatus = "unconfigured" | "loading" | "ready" | "error";
-
-function tileUrl(layer: "img" | "cia", key: string) {
-  return (
-    "https://t0.tianditu.gov.cn/" +
-    layer +
-    "_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=" +
-    layer +
-    "&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=" +
-    encodeURIComponent(key)
-  );
-}
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
+import { useTranslation } from "@/i18n"
+import { cn } from "@/lib/utils"
+import { MapCanvas, type MapCanvasHandle, type MapStatus } from "./components/MapCanvas"
+import { examplePlaces, formatCoordinate, parseCoordinate, type MapPlace } from "./map-places"
+import "./map-page.css"
 
 export default function MapPage() {
-  const { t } = useTranslation();
-  const tiandituKey = import.meta.env.VITE_TIANDITU_TK?.trim();
-  const mapElement = useRef<HTMLDivElement>(null);
-  const [status, setStatus] = useState<MapStatus>(
-    tiandituKey ? "loading" : "unconfigured",
-  );
+  const { t } = useTranslation()
+  const apiKey = import.meta.env.VITE_TIANDITU_TK?.trim()
+  const canvas = useRef<MapCanvasHandle>(null)
+  const search = useRef<HTMLInputElement>(null)
+  const [status, setStatus] = useState<MapStatus>(apiKey ? "loading" : "unconfigured")
+  const [isExample, setIsExample] = useState(false)
+  const [query, setQuery] = useState("")
+  const [submittedQuery, setSubmittedQuery] = useState("")
+  const [filter, setFilter] = useState<"all" | "Waterfront" | "Landscape">("all")
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [coordinatePlace, setCoordinatePlace] = useState<MapPlace | null>(null)
+  const [queryError, setQueryError] = useState("")
+  const [layer, setLayer] = useState<"vec" | "img">("vec")
+  const [showLabels, setShowLabels] = useState(true)
+  const [layersOpen, setLayersOpen] = useState(false)
+  const [reload, setReload] = useState(0)
+  const [panelOpen, setPanelOpen] = useState(true)
+  const onStatus = useCallback((value: MapStatus) => setStatus(value), [])
+  const places = useMemo(() => {
+    if (coordinatePlace) return [coordinatePlace]
+    if (!isExample) return []
+    const keyword = submittedQuery.trim().toLocaleLowerCase()
+    return examplePlaces.filter((place) => (filter === "all" || place.category === filter) && (!keyword || `${t(place.name)} ${t(place.category)} ${t(place.description)}`.toLocaleLowerCase().includes(keyword)))
+  }, [coordinatePlace, isExample, submittedQuery, filter, t])
+  const selectedPlace = places.find((place) => place.id === selectedId)
+  const canUseMap = isExample || Boolean(apiKey)
 
-  useEffect(() => {
-    if (!tiandituKey || !mapElement.current) return;
-
-    const imagery = new ImageTile({
-      url: tileUrl("img", tiandituKey),
-      attributions: '<a href="https://www.tianditu.gov.cn/">© 天地图</a>',
-    });
-    const map = new Map({
-      target: mapElement.current,
-      layers: [
-        new TileLayer({ source: imagery }),
-        new TileLayer({
-          source: new ImageTile({ url: tileUrl("cia", tiandituKey) }),
-        }),
-      ],
-      view: new View({
-        center: fromLonLat([113.58, 22.95]),
-        zoom: 9,
-        minZoom: 3,
-        maxZoom: 18,
-      }),
-    });
-    let hasLoadedTile = false;
-    const loadKey = imagery.on("tileloadend", () => {
-      hasLoadedTile = true;
-      setStatus("ready");
-    });
-    const errorKey = imagery.on("tileloaderror", () => {
-      if (!hasLoadedTile) setStatus("error");
-    });
-
-    return () => {
-      unByKey([loadKey, errorKey]);
-      map.setTarget(undefined);
-      map.dispose();
-    };
-  }, [tiandituKey]);
-
-  const mapMessage =
-    status === "unconfigured"
-      ? t("TianDiTu key is not configured")
-      : status === "error"
-        ? t("Map tiles could not be loaded")
-        : t("Loading map");
+  function selectPlace(id: string | null) {
+    setSelectedId(id)
+    const place = places.find((item) => item.id === id)
+    if (place) canvas.current?.focus(place.coordinate)
+  }
+  function reset() {
+    setQuery(""); setSubmittedQuery(""); setQueryError(""); setCoordinatePlace(null); setSelectedId(null); setFilter("all")
+    canvas.current?.reset()
+  }
+  function startExample() {
+    reset(); setIsExample(true); setLayer("vec"); setLayersOpen(false)
+  }
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    if (!query.trim()) return
+    setSelectedId(null); setQueryError("")
+    const coordinate = parseCoordinate(query)
+    if (coordinate) {
+      if (!apiKey || isExample) { setQueryError(t("Coordinate search is unavailable in this view")); return }
+      const place: MapPlace = { id: "coordinate", name: "Coordinate location", description: "Location entered by you", category: "Coordinates", coordinate }
+      setCoordinatePlace(place); setSubmittedQuery(query.trim()); setSelectedId(place.id)
+      canvas.current?.focus(coordinate)
+    } else if (isExample) {
+      setCoordinatePlace(null); setSubmittedQuery(query.trim()); setFilter("all")
+    } else { setQueryError(t("Enter longitude, latitude. Place search is unavailable.")) }
+  }
 
   return (
-    <main
-      className="flex h-full min-h-0 flex-row overflow-hidden bg-background text-foreground"
-      aria-label={t("Map")}
-    >
-      <section
-        className="relative min-h-0 flex-1 overflow-hidden bg-background"
-        aria-label={t("Map canvas")}
-      >
-        <div ref={mapElement} className="absolute inset-0" />
-        {status !== "ready" && (
-          <div className="absolute inset-0 z-10 grid place-items-center bg-background px-6 text-center">
-            <div className="grid justify-items-center gap-3">
-              <MapPinned className="size-9 text-muted-foreground" aria-hidden />
-              <p role={status === "error" ? "alert" : "status"} className="m-0 text-sm font-medium">
-                {mapMessage}
-              </p>
-              {status === "error" && (
-                <p className="m-0 text-sm text-muted-foreground">
-                  {t("Check the key and allowed origin, then reload")}
-                </p>
-              )}
-              {status === "unconfigured" && (
-                <p className="m-0 text-sm text-muted-foreground">
-                  {t("Set VITE_TIANDITU_TK in web/.env.local")}
-                </p>
-              )}
-            </div>
+    <main className="map-workspace flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground" aria-label={t("Map")}>
+      <header className="flex h-[68px] shrink-0 items-center justify-end border-b border-border px-7">
+        <Button variant="ghost" size="sm" className="gap-2" onClick={() => { reset(); setPanelOpen(true) }}><RotateCcw className="size-3.5" />{t("New exploration")}</Button>
+      </header>
+      <div className="relative flex min-h-0 flex-1">
+        {panelOpen && <aside className="map-explorer relative z-20 flex w-[356px] shrink-0 flex-col border-r border-border bg-card">
+          <div className="flex items-center justify-between px-6 pt-6 pb-4"><div className="flex items-center gap-2 text-xs font-medium text-muted-foreground"><Compass className="size-3.5" />{t("Explore")}</div><Button variant="ghost" size="icon-xs" aria-label={t("Collapse exploration panel")} onClick={() => setPanelOpen(false)}><ArrowDownLeft className="size-4" /></Button></div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-5">
+            <h2 className="max-w-64 text-[28px] leading-[1.35] font-semibold tracking-[-0.04em]">{t("A new perspective,")}<br /><span className="text-primary">{t("one place at a time.")}</span></h2>
+            {isExample && <p className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-selection px-2 py-1 text-[11px] text-selection-foreground"><span className="size-1.5 rounded-full bg-primary" />{t("Local example · No live results")}</p>}
+            {submittedQuery && <div className="mt-6 flex justify-end"><p className="max-w-full rounded-xl rounded-tr-sm bg-secondary px-3 py-2 text-sm break-words">{submittedQuery}</p></div>}
+            {canUseMap && (isExample || places.length > 0) ? <>
+              <div className="mt-7 flex items-center justify-between text-xs text-muted-foreground"><span>{t("Locations in view")}</span><span className="tabular-nums">{places.length.toString().padStart(2, "0")}</span></div>
+              {isExample && <div className="mt-3 flex gap-1.5" aria-label={t("Filter locations")}>{(["all", "Waterfront", "Landscape"] as const).map((value) => <Button key={value} variant={filter === value ? "secondary" : "ghost"} size="sm" className="rounded-full px-3" aria-pressed={filter === value} onClick={() => { setFilter(value); setSelectedId(null) }}>{t(value === "all" ? "All locations" : value)}</Button>)}</div>}
+              <ol className="mt-4 grid gap-2" aria-label={t("Location results")}>{places.map((place, index) => <li key={place.id}>
+                <Button variant="ghost" className={cn("map-place h-auto w-full items-start justify-start gap-3 rounded-xl border px-3 py-4 text-left whitespace-normal", selectedId === place.id ? "border-primary/30 bg-selection" : "border-transparent")} onClick={() => selectPlace(place.id)} aria-pressed={selectedId === place.id} aria-label={t("Select {{name}}", { name: t(place.name) })}>
+                  <span className={cn("mt-0.5 grid size-7 shrink-0 place-items-center rounded-full text-xs font-semibold", selectedId === place.id ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground")}>{index + 1}</span>
+                  <span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{t(place.name)}</span><span className="mt-1 block text-xs text-muted-foreground">{t(place.category)} · {t(isExample ? "Example location" : "Coordinates")}</span><span className="mt-2.5 block font-mono text-[10px] tracking-tight text-muted-foreground">{formatCoordinate(place.coordinate)}</span></span><ArrowUpRight className="mt-1 size-3.5 text-muted-foreground" />
+                </Button>
+              </li>)}</ol>
+              {places.length === 0 && <div className="py-10 text-center"><Search className="mx-auto size-6 text-muted-foreground" /><p className="mt-3 text-sm">{t("No matching locations")}</p><Button variant="link" className="mt-2" onClick={reset}>{t("Clear search")}</Button></div>}
+              {selectedPlace && <div className="mt-5 border-t border-border pt-5" aria-live="polite"><div className="mb-3 flex items-center justify-between"><span className="text-xs font-medium text-muted-foreground">{t("About this location")}</span><Button size="icon-xs" variant="ghost" aria-label={t("Close location details")} onClick={() => setSelectedId(null)}><X className="size-3.5" /></Button></div><p className="text-sm leading-6">{t(selectedPlace.description)}</p></div>}
+            </> : <div className="mt-9 space-y-4">
+              <div className="rounded-xl bg-muted p-4"><MapPin className="mb-3 size-5 text-primary" /><h3 className="text-sm font-medium">{t("Start with a location")}</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">{t("Use longitude, latitude to focus your map.")}</p><Button variant="ghost" className="mt-3 h-7 p-0 text-xs" onClick={() => { setQuery("120.148, 30.247"); search.current?.focus() }}>120.148, 30.247 <ArrowUpRight className="size-3" /></Button></div>
+              <Button variant="outline" className="h-auto w-full justify-between rounded-xl px-4 py-3 text-sm" onClick={startExample}><span className="flex items-center gap-2"><Compass className="size-4" />{t("Explore a local example")}</span><ArrowUpRight className="size-4" /></Button>
+            </div>}
           </div>
-        )}
-        {status === "ready" && (
-          <div className="pointer-events-none absolute top-4 left-4 z-10 inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-2 text-sm font-medium shadow-sm">
-            <Layers3 className="size-4" aria-hidden />
-            {t("Map")}
-          </div>
-        )}
-      </section>
-
-      <aside className="flex min-h-0 w-[22rem] shrink-0 flex-col border-l border-border bg-card">
-        <div className="border-b border-border px-5 py-4">
-          <h1 className="m-0 text-base font-semibold">{t("Image search")}</h1>
-        </div>
-        <div className="grid flex-1 place-items-center p-6 text-center">
-          <div className="grid justify-items-center gap-3">
-            <Search className="size-7 text-muted-foreground" aria-hidden />
-            <p className="m-0 text-sm text-muted-foreground">
-              {t("Catalog search is not connected")}
-            </p>
-          </div>
-        </div>
-        <div className="border-t border-border p-5">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <MessageSquareText className="size-4" aria-hidden />
-            {t("Map conversation")}
-          </div>
-          <p className="m-0 mt-3 text-sm text-muted-foreground">
-            {t("Map conversation is not connected")}
-          </p>
-        </div>
-      </aside>
+          <div className="border-t border-border p-4"><form onSubmit={submit} className="rounded-xl border border-input bg-background p-2">
+            <Input ref={search} value={query} onChange={(event) => setQuery(event.target.value)} aria-label={t("Search map")} placeholder={t(isExample ? "Search example locations…" : "Enter longitude, latitude…")} className="h-10 border-0 bg-transparent px-2 shadow-none focus-visible:ring-0" />
+            <div className="flex items-center justify-between px-1 pb-1 pt-2"><span className="flex items-center gap-1.5 text-[10px] text-muted-foreground"><MapPin className="size-3" />{t(isExample ? "Local examples" : "Coordinate search")}</span><Button type="submit" size="icon-sm" disabled={!query.trim()} aria-label={t("Search map")} className="rounded-full"><ArrowUp className="size-4" /></Button></div>
+          </form>{queryError && <p role="alert" className="mt-2 px-1 text-xs text-destructive">{queryError}</p>}</div>
+        </aside>}
+        <section className="map-stage relative min-w-0 flex-1 overflow-hidden" aria-label={t("Map canvas")}>
+          <MapCanvas ref={canvas} apiKey={apiKey} isExample={isExample} layer={layer} showLabels={showLabels} places={places} selectedId={selectedId} reload={reload} onSelect={selectPlace} onStatus={onStatus} />
+          <div className="absolute top-5 right-5 left-5 z-10 flex items-start justify-between gap-3"><div className="flex items-center gap-2">
+            {!panelOpen && <Button variant="outline" size="icon-lg" className="map-float" aria-label={t("Open exploration panel")} onClick={() => setPanelOpen(true)}><Search /></Button>}
+            <div className="map-float flex h-10 items-center gap-2 rounded-lg px-3.5 text-xs"><MapPin className="size-3.5 text-primary" /><span className="font-medium">{isExample ? t("Hangzhou · West Lake") : t("Map workspace")}</span><span className="ml-1 text-muted-foreground">{isExample ? t("Example") : "TianDiTu"}</span></div>
+          </div>{isExample && <Button variant="outline" className="map-float h-10 text-xs" onClick={() => { reset(); setIsExample(false); setLayersOpen(false) }}><X className="size-3.5" />{t("Exit example")}</Button>}</div>
+          {status !== "ready" && <div className="pointer-events-none absolute inset-0 z-[5] grid place-items-center p-8"><div className="pointer-events-auto max-w-sm rounded-2xl bg-card/95 px-8 py-9 text-center shadow-sm">
+            <span className="mx-auto mb-5 grid size-14 place-items-center rounded-2xl bg-selection text-primary"><MapPinned className="size-7" /></span><h2 className="text-lg font-semibold">{t(status === "unconfigured" ? "Your next perspective starts here" : status === "loading" ? "Loading map" : "Map tiles could not be loaded")}</h2>
+            <p role={status === "error" ? "alert" : "status"} className="mt-3 text-sm text-muted-foreground">{t(status === "unconfigured" ? "Map unavailable" : status === "error" ? "Map could not load. Please retry." : "Preparing your map canvas…")}</p>
+            {status === "unconfigured" && <Button className="mt-6" onClick={startExample}>{t("Explore a local example")}<ArrowUpRight /></Button>}
+            {status === "error" && <Button variant="outline" className="mt-5" onClick={() => setReload((value) => value + 1)}><RotateCcw />{t("Retry")}</Button>}
+          </div></div>}
+          {selectedPlace && status === "ready" && <div className="map-float absolute right-16 bottom-20 left-5 z-10 mx-auto flex max-w-[360px] items-center gap-3 rounded-xl p-4"><span className="grid size-10 shrink-0 place-items-center rounded-lg bg-selection text-primary"><MapPin className="size-5" /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{t(selectedPlace.name)}</p><p className="mt-0.5 text-xs text-muted-foreground">{t(selectedPlace.category)} · {t(isExample ? "Example location" : "Coordinates")}</p></div><Button variant="ghost" size="icon-sm" aria-label={t("Dismiss map selection")} onClick={() => setSelectedId(null)}><X className="size-4" /></Button></div>}
+          <div className="absolute right-5 bottom-12 z-10 flex flex-col gap-2"><Button variant="outline" size="icon-lg" className="map-float" aria-label={t("Reset map view")} disabled={!canUseMap} onClick={() => canvas.current?.reset()}><Compass className="size-4" /></Button><div className="map-float overflow-hidden rounded-lg"><Button variant="ghost" size="icon-lg" className="block rounded-none" aria-label={t("Zoom in")} disabled={!canUseMap} onClick={() => canvas.current?.zoom(1)}><Plus className="mx-auto size-4" /></Button><div className="mx-2 border-t border-border" /><Button variant="ghost" size="icon-lg" className="block rounded-none" aria-label={t("Zoom out")} disabled={!canUseMap} onClick={() => canvas.current?.zoom(-1)}><Minus className="mx-auto size-4" /></Button></div></div>
+          <div className="absolute bottom-12 left-5 z-20">{layersOpen && <div className="map-float mb-2 w-60 rounded-xl p-4"><div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-medium">{t("Map layers")}</h3><Button variant="ghost" size="icon-xs" aria-label={t("Close map layers")} onClick={() => setLayersOpen(false)}><X className="size-3.5" /></Button></div><div className="grid grid-cols-2 gap-2">{(["vec", "img"] as const).map((value) => <Button key={value} variant="outline" disabled={isExample && value === "img"} className={cn("h-auto flex-col gap-2 p-3 text-xs", layer === value && "bg-selection")} aria-pressed={layer === value} onClick={() => setLayer(value)}>{value === "vec" ? <MapPinned /> : <Layers2 />}{t(value === "vec" ? "Street map" : "Satellite map")}{layer === value && <Check className="size-3" />}</Button>)}</div><div className="mt-4 flex items-center justify-between text-xs"><span>{t("Place labels")}</span><Switch checked={showLabels} onCheckedChange={setShowLabels} disabled={isExample} aria-label={t("Place labels")} /></div>{isExample && <p className="mt-3 text-[10px] leading-4 text-muted-foreground">{t("Example map uses a fixed illustrative basemap.")}</p>}</div>}<Button variant="outline" className="map-float h-10" aria-expanded={layersOpen} onClick={() => setLayersOpen(!layersOpen)}><Layers2 className="size-4" />{t("Layers")}<ChevronDown className={cn("size-3 transition-transform", layersOpen && "rotate-180")} /></Button></div>
+          <div className="pointer-events-none absolute right-0 bottom-0 left-0 flex items-center justify-between gap-4 px-5 py-2.5 text-[10px] text-muted-foreground">{isExample ? <span className="rounded bg-background/85 px-1.5 py-0.5">{t("Illustrative basemap · Not for navigation")}</span> : <a className="pointer-events-auto ml-auto rounded bg-background/85 px-1.5 py-0.5" href="https://www.tianditu.gov.cn/" target="_blank" rel="noreferrer">© 天地图</a>}</div>
+        </section>
+      </div>
     </main>
-  );
+  )
 }

@@ -364,3 +364,13 @@ it("rejects a whitespace-only name and lets a disabled agent be enabled and save
   expect(within(screen.getByRole("article", { name: "DB offline" })).queryByText("Disabled"))
     .toBeNull()
 })
+
+it("keeps refresh and content headings without a page corner title", async () => {
+  render(<AgentPage />)
+  await screen.findByRole("article", { name: "DB coordinator" })
+  expect(screen.queryByRole("heading", { name: "Agent" })).toBeNull()
+  expect(screen.getByRole("main", { name: "Agent" })).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Refresh agents" }))
+  await waitFor(() => expect(getAgentCatalog).toHaveBeenCalledTimes(2))
+  expect(await screen.findByRole("heading", { name: "Main agent" })).toBeTruthy()
+})
