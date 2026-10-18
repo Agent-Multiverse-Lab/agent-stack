@@ -88,23 +88,17 @@ export default function KnowledgePage() {
   if (sortByName) visibleBases.sort((a, b) => a.name.localeCompare(b.name))
 
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-y-auto bg-background text-foreground">
+    <div role="region" aria-label={t("Knowledge Bases")} className="flex h-full min-w-0 flex-col overflow-y-auto bg-background text-foreground">
       <div className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col px-6 pb-6 pt-10 lg:px-12 lg:pt-14">
-        <header className="mb-10 flex flex-wrap items-end justify-between gap-6">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight lg:text-[38px] lg:leading-tight">{t("Knowledge Bases")}</h1>
-          </div>
-          <Button type="button" className="h-10 gap-2" onClick={() => setCreateOpen(true)}>
-            <Plus className="size-4" />{t("Create knowledge base")}
-          </Button>
-        </header>
-
         <div className="mb-7 flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
           <div className="flex items-center gap-2.5">
             <h2 className="text-sm font-medium">{t("All collections")}</h2>
             {!loading && !error && <Badge variant="secondary" className="rounded-md tabular-nums">{bases.length}</Badge>}
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Button type="button" className="h-9 gap-2" onClick={() => setCreateOpen(true)}>
+              <Plus className="size-4" />{t("Create knowledge base")}
+            </Button>
             <div role="search" className="relative w-56 max-w-full">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("Search knowledge bases")} aria-label={t("Search knowledge bases")} className="h-9 pl-9 pr-8" />

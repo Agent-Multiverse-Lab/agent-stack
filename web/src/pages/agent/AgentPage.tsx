@@ -50,8 +50,7 @@ export default function AgentPage() {
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col bg-background text-foreground" aria-label={t("Agent")}>
-      <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-(--page-padding)">
-        <h1 className="text-[16px] font-semibold">{t("Agent")}</h1>
+      <header className="flex h-12 shrink-0 items-center justify-end border-b border-border px-(--page-padding)">
         <Button variant="ghost" size="icon" onClick={refresh} disabled={loading} aria-label={t("Refresh agents")}>
           <RefreshCw className="size-4" aria-hidden />
         </Button>

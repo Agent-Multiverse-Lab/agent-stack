@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { Link, useParams } from "react-router"
-import { ArrowLeft, BookOpen, ChevronRight, Files, MessagesSquare, Network } from "lucide-react"
+import { ArrowLeft, BookOpen, Files, MessagesSquare, Network } from "lucide-react"
 
 import { getKnowledgeBase } from "@/api/knowledge"
 import { Badge } from "@/components/ui/badge"
@@ -48,7 +48,6 @@ export default function KnowledgeBaseDetailPage() {
       <header className="shrink-0 px-6 pt-6 lg:px-10">
         <nav aria-label={t("Knowledge base navigation")} className="mb-6 flex items-center gap-2 text-xs text-muted-foreground">
           <Link to="/knowledge" className="inline-flex items-center gap-2 rounded-sm transition-colors hover:text-foreground"><ArrowLeft className="size-3.5" />{t("Knowledge Bases")}</Link>
-          <ChevronRight className="size-3" /><span className="max-w-72 truncate">{base.name}</span>
         </nav>
         <div className="mb-7 flex items-start gap-4">
           <div className="grid size-14 shrink-0 place-items-center rounded-xl bg-selection text-selection-foreground"><BookOpen className="size-7" strokeWidth={1.4} /></div>

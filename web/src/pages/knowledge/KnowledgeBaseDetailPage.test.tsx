@@ -266,3 +266,13 @@ it.each(["resolve", "reject"])("ignores a cleared graph search that later %ss wi
   expect(screen.getByText("0 matching entities")).toBeTruthy()
   expect(screen.getByRole("button", { name: "Search" })).toHaveProperty("disabled", false)
 })
+
+it("keeps the collection identity and back link without repeating its name in navigation", async () => {
+  renderPage()
+  expect(await screen.findByRole("heading", { name: "Docs" })).toBeTruthy()
+  const navigation = screen.getByRole("navigation", { name: "Knowledge base navigation" })
+  expect(within(navigation).queryByText("Docs")).toBeNull()
+  expect(within(navigation).getByRole("link", { name: "Knowledge Bases" }).getAttribute("href")).toBe("/knowledge")
+  expect(screen.getAllByText("Docs")).toHaveLength(1)
+  expect(await screen.findByRole("tab", { name: "Documents" })).toBeTruthy()
+})

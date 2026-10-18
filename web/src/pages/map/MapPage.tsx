@@ -67,8 +67,7 @@ export default function MapPage() {
 
   return (
     <main className="map-workspace flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground" aria-label={t("Map")}>
-      <header className="flex h-[68px] shrink-0 items-center justify-between border-b border-border px-7">
-        <div className="flex items-center gap-3"><MapPinned className="size-5 text-primary" aria-hidden /><h1 className="text-lg font-semibold tracking-tight">{t("Map")}</h1></div>
+      <header className="flex h-[68px] shrink-0 items-center justify-end border-b border-border px-7">
         <Button variant="ghost" size="sm" className="gap-2" onClick={() => { reset(); setPanelOpen(true) }}><RotateCcw className="size-3.5" />{t("New exploration")}</Button>
       </header>
       <div className="relative flex min-h-0 flex-1">

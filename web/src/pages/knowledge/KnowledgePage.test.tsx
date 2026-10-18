@@ -86,3 +86,14 @@ it("keeps the create form accessible without repeating promotional helper copy",
   expect(screen.queryByText("Bring your documents together in a collection.")).toBeNull()
   expect(screen.getByRole("textbox", { name: "Knowledge base name" })).toBeTruthy()
 })
+
+it("uses the collection toolbar without a separate page title row", async () => {
+  const { container } = renderPage()
+  await screen.findByRole("link", { name: /Docs/ })
+  expect(screen.queryByRole("heading", { name: "Knowledge Bases" })).toBeNull()
+  expect(screen.getByRole("region", { name: "Knowledge Bases" })).toBeTruthy()
+  expect(container.querySelector("header")).toBeNull()
+  expect(screen.getByRole("heading", { name: "All collections" })).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Create knowledge base" }))
+  expect(await screen.findByRole("dialog")).toBeTruthy()
+})
