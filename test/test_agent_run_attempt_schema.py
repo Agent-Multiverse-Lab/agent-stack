@@ -75,71 +75,47 @@ class RunAttemptSchemaTest(DatabaseTestCase):
             for run_id in ("run-1", "run-2")
         ])
 
-    def insert_attempt(self, attempt_id="attempt-1", run_id="run-1", **changes):
+    def insert_attempt(self, attempt_id="attempt-1", run_id="run-1", attempt_no=1, **changes):
         self.db.execute(self.attempt.insert().values(
-            id=attempt_id, run_id=run_id, worker_id="worker-1", status="running", **changes,
+            id=attempt_id, run_id=run_id, attempt_no=attempt_no, worker_id="worker-1", status="running", **changes,
         ))
 
-    def set_current(self, attempt_id="attempt-1", run_id="run-1"):
-        return self.run.update().where(self.run.c.id == run_id).values(
-            current_attempt_id=attempt_id, owner_worker_id="worker-1",
-        )
-
-    def test_old_run_insert_leaves_new_fields_null_and_no_history(self):
-        rows = self.db.execute(sa.select(
-            self.run.c.current_attempt_id, self.run.c.owner_worker_id,
-        )).all()
-        self.assertEqual(rows, [(None, None), (None, None)])
+    def test_old_run_insert_leaves_worker_null_and_no_history(self):
+        self.assertNotIn("current_attempt_id", self.run.c)
+        self.assertNotIn("owner_worker_id", self.run.c)
+        self.assertEqual(self.db.execute(sa.select(self.run.c.worker_id)).all(), [(None,), (None,)])
         self.assertEqual(self.db.scalar(sa.select(sa.func.count()).select_from(self.attempt)), 0)
-        for field in ("current_attempt_id", "owner_worker_id"):
-            self.assertTrue(self.run.c[field].nullable)
-            self.assertIsNone(self.run.c[field].default)
-            self.assertIsNone(self.run.c[field].server_default)
 
-    def test_multiple_attempts_can_share_worker_and_pointer_can_advance(self):
-        self.insert_attempt(error="temporary", error_type="RetryableWorkerError")
-        self.db.execute(self.set_current())
-        self.insert_attempt("attempt-2")
-        self.db.execute(self.set_current("attempt-2"))
+    def test_attempt_numbers_are_unique_within_each_run(self):
+        self.insert_attempt()
+        self.assert_integrity_error(self.attempt.insert().values(
+            id="duplicate", run_id="run-1", attempt_no=1, worker_id="worker-1", status="running",
+        ))
+        self.insert_attempt("attempt-2", attempt_no=2)
+        self.insert_attempt("attempt-3", run_id="run-2")
         rows = self.db.execute(sa.select(self.attempt).order_by(self.attempt.c.id)).mappings().all()
-        self.assertEqual(len(rows), 2)
+        self.assertEqual([row["attempt_no"] for row in rows], [1, 2, 1])
         self.assertEqual({row["worker_id"] for row in rows}, {"worker-1"})
         self.assertTrue(all(row["started_at"] is not None for row in rows))
-        self.assertEqual(rows[0]["error"], "temporary")
-        self.assertEqual(rows[0]["error_type"], "RetryableWorkerError")
-        self.assertIsNone(rows[0]["finished_at"])
-
-    def test_current_pointer_rejects_missing_or_other_run_attempt(self):
-        self.assert_integrity_error(self.set_current("missing"))
-        self.insert_attempt(run_id="run-2")
-        self.assert_integrity_error(self.set_current())
-        self.db.execute(self.set_current(run_id="run-2"))
 
     def test_attempt_requires_existing_run_and_required_fields(self):
         self.assert_integrity_error(self.attempt.insert().values(
-            id="orphan", run_id="missing", worker_id="worker-1", status="running",
+            id="orphan", run_id="missing", attempt_no=1, worker_id="worker-1", status="running",
         ))
-        for field in ("run_id", "worker_id", "status", "started_at"):
-            values = dict(id="invalid", run_id="run-1", worker_id="worker-1", status="running")
+        for field in ("run_id", "attempt_no", "worker_id", "status", "started_at"):
+            values = dict(id="invalid", run_id="run-1", attempt_no=1, worker_id="worker-1", status="running")
             values[field] = None
             with self.subTest(field=field):
                 self.assert_integrity_error(self.attempt.insert().values(**values))
 
-    def test_current_attempt_delete_requires_clearing_pointer(self):
+    def test_attempt_can_be_deleted_without_updating_run(self):
         self.insert_attempt()
-        self.db.execute(self.set_current())
-        delete = self.attempt.delete().where(self.attempt.c.id == "attempt-1")
-        self.assert_integrity_error(delete)
-        self.db.execute(self.run.update().where(self.run.c.id == "run-1").values(
-            current_attempt_id=None, owner_worker_id=None,
-        ))
-        self.db.execute(delete)
+        self.db.execute(self.attempt.delete().where(self.attempt.c.id == "attempt-1"))
+        self.assertEqual(self.db.scalar(sa.select(sa.func.count()).select_from(self.run)), 2)
 
-    def test_run_delete_cascades_own_history_with_current_pointer(self):
+    def test_run_delete_cascades_own_history(self):
         self.insert_attempt()
         self.insert_attempt("attempt-2", "run-2")
-        self.db.execute(self.set_current())
-        self.db.execute(self.set_current("attempt-2", "run-2"))
         self.db.execute(self.run.delete().where(self.run.c.id == "run-1"))
         self.assertEqual(self.db.execute(sa.select(self.attempt.c.id)).scalars().all(), ["attempt-2"])
         self.db.execute(Conversation.__table__.delete().where(Conversation.__table__.c.id == 1))
@@ -197,8 +173,10 @@ class RunAttemptMigrationTest(DatabaseTestCase):
         self.assert_legacy_unchanged()
         inspector = sa.inspect(self.db)
         columns = {item["name"]: item for item in inspector.get_columns("agent_run_attempt")}
-        self.assertEqual(set(columns), set(AgentRunAttempt.__table__.c.keys()))
+        self.assertEqual(set(columns), set(AgentRunAttempt.__table__.c.keys()) - {"attempt_no"})
         for column in AgentRunAttempt.__table__.c:
+            if column.name == "attempt_no":
+                continue
             with self.subTest(column=column.name):
                 self.assertEqual(columns[column.name]["nullable"], column.nullable)
                 self.assertEqual(
@@ -272,6 +250,84 @@ class RunAttemptPostgresDDLTest(unittest.TestCase):
         self.assertNotIn("UPDATE ", sql)
         self.assertNotIn("INSERT INTO ", sql)
         self.assertEqual(migration.down_revision, "0016_qwen_provider_id")
+
+
+number_spec = importlib.util.spec_from_file_location(
+    "agent_run_attempt_no_migration", MIGRATION_PATH.with_name("0018_agent_run_attempt_no.py"),
+)
+number_migration = importlib.util.module_from_spec(number_spec)
+number_spec.loader.exec_module(number_migration)
+
+
+class RunAttemptNumberPostgresDDLTest(unittest.TestCase):
+    def test_upgrade_and_downgrade_order(self):
+        buffer = io.StringIO()
+        operations = Operations(MigrationContext.configure(
+            dialect_name="postgresql", opts={"as_sql": True, "output_buffer": buffer},
+        ))
+        with patch.object(number_migration, "op", operations):
+            number_migration.upgrade()
+            number_migration.downgrade()
+        sql = buffer.getvalue()
+        self.assertLess(sql.index("DROP CONSTRAINT fk_agent_run_current_attempt"),
+                        sql.index("DROP CONSTRAINT uq_agent_run_attempt_run_id_id"))
+        self.assertLess(sql.index("UPDATE agent_run_attempt"),
+                        sql.index("ALTER COLUMN attempt_no SET NOT NULL"))
+        self.assertLess(sql.index("ADD CONSTRAINT uq_agent_run_attempt_run_id_id"),
+                        sql.index("ADD CONSTRAINT fk_agent_run_current_attempt"))
+        self.assertIn("UNIQUE (run_id, attempt_no)", sql)
+
+
+class RunAttemptNumberMigrationTest(RunAttemptMigrationTest):
+    def migrate_number(self, direction="upgrade"):
+        with patch.object(number_migration, "op", self.operations):
+            getattr(number_migration, direction)()
+
+    def test_number_backfill_and_roundtrip_preserve_history(self):
+        self.migrate()
+        self.db.execute(sa.text("""
+            INSERT INTO agent_run_attempt (id, run_id, worker_id, status, started_at)
+            VALUES ('b', 'run-0', 'worker-1', 'completed', '2026-01-01 00:00:00'),
+                   ('a', 'run-0', 'worker-1', 'failed', '2026-01-01 00:00:00'),
+                   ('c', 'run-1', 'worker-2', 'running', '2026-01-02 00:00:00')
+        """))
+        self.db.execute(sa.text("UPDATE agent_run SET current_attempt_id='b', owner_worker_id='worker-1' WHERE id='run-0'"))
+        self.migrate_number()
+        self.assert_legacy_unchanged()
+        inspector = sa.inspect(self.db)
+        self.assertNotIn("current_attempt_id", {c["name"] for c in inspector.get_columns("agent_run")})
+        self.assertNotIn("owner_worker_id", {c["name"] for c in inspector.get_columns("agent_run")})
+        self.assertEqual(self.db.scalar(sa.text("SELECT worker_id FROM agent_run WHERE id='run-0'")), "worker-1")
+        self.assertEqual(self.db.execute(sa.text(
+            "SELECT id, worker_id FROM agent_run_attempt ORDER BY id"
+        )).all(), [("a", "worker-1"), ("b", "worker-1"), ("c", "worker-2")])
+        self.assertFalse(any(fk["referred_table"] == "agent_run_attempt"
+                             for fk in inspector.get_foreign_keys("agent_run")))
+        self.assertEqual(self.db.execute(sa.text(
+            "SELECT id, attempt_no FROM agent_run_attempt ORDER BY id"
+        )).all(), [("a", 1), ("b", 2), ("c", 1)])
+        uniques = [c["column_names"] for c in inspector.get_unique_constraints("agent_run_attempt")]
+        self.assertIn(["run_id", "attempt_no"], uniques)
+        self.assertNotIn(["run_id", "id"], uniques)
+        self.assertFalse(next(c for c in inspector.get_columns("agent_run_attempt")
+                              if c["name"] == "attempt_no")["nullable"])
+        self.migrate_number("downgrade")
+        self.assertEqual(self.db.scalar(sa.text("SELECT COUNT(*) FROM agent_run_attempt")), 3)
+        self.assertIsNone(self.db.scalar(sa.text("SELECT current_attempt_id FROM agent_run WHERE id='run-0'")))
+        self.assertEqual(self.db.scalar(sa.text("SELECT owner_worker_id FROM agent_run WHERE id='run-0'")), "worker-1")
+        self.migrate_number()
+        self.assert_legacy_unchanged()
+
+    def test_empty_upgrade(self):
+        self.migrate()
+        self.migrate_number()
+        self.assert_legacy_unchanged()
+        self.assertEqual(self.db.scalar(sa.text("SELECT COUNT(*) FROM agent_run_attempt")), 0)
+
+
+@unittest.skipUnless(POSTGRES_URL, "未配置独立 PostgreSQL 结构测试数据库")
+class PostgresRunAttemptNumberMigrationTest(RunAttemptNumberMigrationTest):
+    database_url = POSTGRES_URL
 
 
 if __name__ == "__main__":
