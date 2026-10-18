@@ -59,6 +59,29 @@ it("shows the approved Settings sections without unrelated controls", () => {
   }
 });
 
+it("uses distinct sidebar surfaces with full-width hover and selected fills", () => {
+  installBrowserStubs();
+  render(<Settings open close={() => {}} user={null} />);
+
+  const sidebar = screen.getByLabelText("Settings sections");
+  expect(sidebar.classList.contains("bg-sidebar")).toBe(true);
+  expect(sidebar.classList.contains("bg-secondary")).toBe(false);
+
+  for (const button of within(sidebar).getAllByRole("button")) {
+    expect(button.classList.contains("w-full")).toBe(true);
+    expect(button.classList.contains("hover:bg-sidebar-accent")).toBe(true);
+    expect(button.classList.contains("data-active:hover:bg-sidebar-primary")).toBe(true);
+    expect(button.classList.contains("focus-visible:ring-2")).toBe(true);
+  }
+
+  const general = within(sidebar).getByRole("button", { name: "General" });
+  const account = within(sidebar).getByRole("button", { name: "Account" });
+  expect(general.getAttribute("aria-current")).toBe("page");
+  fireEvent.click(account);
+  expect(general.hasAttribute("aria-current")).toBe(false);
+  expect(account.getAttribute("aria-current")).toBe("page");
+});
+
 it("uses sidebar navigation and preserves the signed-out account state", () => {
   installBrowserStubs();
   render(<Settings open close={() => {}} user={null} />);

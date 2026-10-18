@@ -112,7 +112,7 @@ export function Settings({ open, close, user }: SettingsProps) {
           <Sidebar
             collapsible="none"
             aria-label={t("Settings sections")}
-            className="border-r border-border bg-secondary"
+            className="border-r border-border"
           >
             <SidebarContent>
               <SidebarGroup className="px-2.5 pt-[52px] pb-3">
