@@ -50,11 +50,13 @@ it("creates a collection with trimmed input and opens it", async () => {
   expect(await screen.findByRole("heading", { name: "Collection detail" })).toBeTruthy()
 })
 
-it("keeps the whole card as the only collection entry without numbers or action menus", async () => {
+it("keeps the whole card as the only collection entry without numbers, statuses or action menus", async () => {
   renderPage()
   const link = await screen.findByRole("link", { name: /Docs/ })
   const card = link.closest("li")!
   expect(within(card).queryByText("01")).toBeNull()
+  expect(within(card).queryByText("Active")).toBeNull()
+  expect(card.querySelector(".bg-success")).toBeNull()
   expect(within(card).queryByRole("button")).toBeNull()
   expect(within(card).getAllByRole("link")).toEqual([link])
   expect(link.getAttribute("href")).toBe("/knowledge/kb-1")
@@ -63,6 +65,8 @@ it("keeps the whole card as the only collection entry without numbers or action 
 
   fireEvent.click(screen.getByRole("button", { name: "List view" }))
   const listLink = screen.getByRole("link", { name: /Docs/ })
+  expect(within(listLink).queryByText("Active")).toBeNull()
+  expect(listLink.querySelector(".bg-success")).toBeNull()
   expect(within(listLink.closest("li")!).queryByRole("button")).toBeNull()
   fireEvent.click(listLink)
   expect(screen.getByRole("heading", { name: "Collection detail" })).toBeTruthy()

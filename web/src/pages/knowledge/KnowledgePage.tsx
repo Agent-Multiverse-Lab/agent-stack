@@ -114,13 +114,12 @@ export default function KnowledgePage() {
                       </> : <FolderOpen className="size-6 text-primary" strokeWidth={1.5} />}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <h3 className="truncate text-sm font-medium tracking-tight">{base.name}</h3>
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="truncate text-sm font-medium tracking-tight">{base.name}</h3>
+                        {view === "grid" && <ArrowUpRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />}
+                      </div>
                       {base.description && <p className={`mt-1 text-[13px] leading-5 text-muted-foreground ${view === "grid" ? "line-clamp-2 min-h-10" : "truncate"}`}>{base.description}</p>}
                       {view === "grid" && !base.description && <div className="h-11" />}
-                      <div className={`flex items-center justify-between gap-2 ${view === "grid" ? "mt-3 border-t border-border/70 pt-2" : "mt-2"}`}>
-                        <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><span className={`size-1.5 rounded-full ${base.status === "active" ? "bg-success" : "bg-muted-foreground"}`} />{base.status === "active" ? t("Active") : base.status}</span>
-                        {view === "grid" && <ArrowUpRight className="size-4 text-muted-foreground" />}
-                      </div>
                     </div>
                     {view === "list" && <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />}
                   </Link>
