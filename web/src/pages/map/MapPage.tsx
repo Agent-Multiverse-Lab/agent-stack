@@ -56,19 +56,19 @@ export default function MapPage() {
     setSelectedId(null); setQueryError("")
     const coordinate = parseCoordinate(query)
     if (coordinate) {
-      if (!apiKey || isExample) { setQueryError(t("Coordinate search needs a configured live map")); return }
+      if (!apiKey || isExample) { setQueryError(t("Coordinate search is unavailable in this view")); return }
       const place: MapPlace = { id: "coordinate", name: "Coordinate location", description: "Location entered by you", category: "Coordinates", coordinate }
       setCoordinatePlace(place); setSubmittedQuery(query.trim()); setSelectedId(place.id)
       canvas.current?.focus(coordinate)
     } else if (isExample) {
       setCoordinatePlace(null); setSubmittedQuery(query.trim()); setFilter("all")
-    } else { setQueryError(t("Enter longitude, latitude. Place search is not connected yet.")) }
+    } else { setQueryError(t("Enter longitude, latitude. Place search is unavailable.")) }
   }
 
   return (
     <main className="map-workspace flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground" aria-label={t("Map")}>
       <header className="flex h-[68px] shrink-0 items-center justify-between border-b border-border px-7">
-        <div className="flex items-center gap-3"><MapPinned className="size-5 text-primary" aria-hidden /><h1 className="text-lg font-semibold tracking-tight">{t("Map")}</h1><span className="ml-2 border-l border-border pl-4 text-xs text-muted-foreground">{t("Spatial workspace")}</span></div>
+        <div className="flex items-center gap-3"><MapPinned className="size-5 text-primary" aria-hidden /><h1 className="text-lg font-semibold tracking-tight">{t("Map")}</h1></div>
         <Button variant="ghost" size="sm" className="gap-2" onClick={() => { reset(); setPanelOpen(true) }}><RotateCcw className="size-3.5" />{t("New exploration")}</Button>
       </header>
       <div className="relative flex min-h-0 flex-1">
@@ -76,7 +76,6 @@ export default function MapPage() {
           <div className="flex items-center justify-between px-6 pt-6 pb-4"><div className="flex items-center gap-2 text-xs font-medium text-muted-foreground"><Compass className="size-3.5" />{t("Explore")}</div><Button variant="ghost" size="icon-xs" aria-label={t("Collapse exploration panel")} onClick={() => setPanelOpen(false)}><ArrowDownLeft className="size-4" /></Button></div>
           <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-5">
             <h2 className="max-w-64 text-[28px] leading-[1.35] font-semibold tracking-[-0.04em]">{t("A new perspective,")}<br /><span className="text-primary">{t("one place at a time.")}</span></h2>
-            <p className="mt-3 text-sm leading-6 text-muted-foreground">{isExample ? t("Explore three local example locations around West Lake.") : t("Bring your research into view.")}</p>
             {isExample && <p className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-selection px-2 py-1 text-[11px] text-selection-foreground"><span className="size-1.5 rounded-full bg-primary" />{t("Local example · No live results")}</p>}
             {submittedQuery && <div className="mt-6 flex justify-end"><p className="max-w-full rounded-xl rounded-tr-sm bg-secondary px-3 py-2 text-sm break-words">{submittedQuery}</p></div>}
             {canUseMap && (isExample || places.length > 0) ? <>
@@ -98,7 +97,7 @@ export default function MapPage() {
           <div className="border-t border-border p-4"><form onSubmit={submit} className="rounded-xl border border-input bg-background p-2">
             <Input ref={search} value={query} onChange={(event) => setQuery(event.target.value)} aria-label={t("Search map")} placeholder={t(isExample ? "Search example locations…" : "Enter longitude, latitude…")} className="h-10 border-0 bg-transparent px-2 shadow-none focus-visible:ring-0" />
             <div className="flex items-center justify-between px-1 pb-1 pt-2"><span className="flex items-center gap-1.5 text-[10px] text-muted-foreground"><MapPin className="size-3" />{t(isExample ? "Local examples" : "Coordinate search")}</span><Button type="submit" size="icon-sm" disabled={!query.trim()} aria-label={t("Search map")} className="rounded-full"><ArrowUp className="size-4" /></Button></div>
-          </form>{queryError && <p role="alert" className="mt-2 px-1 text-xs text-destructive">{queryError}</p>}<p className="mt-2.5 text-center text-[10px] text-muted-foreground">{t("Map conversation is not connected")}</p></div>
+          </form>{queryError && <p role="alert" className="mt-2 px-1 text-xs text-destructive">{queryError}</p>}</div>
         </aside>}
         <section className="map-stage relative min-w-0 flex-1 overflow-hidden" aria-label={t("Map canvas")}>
           <MapCanvas ref={canvas} apiKey={apiKey} isExample={isExample} layer={layer} showLabels={showLabels} places={places} selectedId={selectedId} reload={reload} onSelect={selectPlace} onStatus={onStatus} />
@@ -108,14 +107,14 @@ export default function MapPage() {
           </div>{isExample && <Button variant="outline" className="map-float h-10 text-xs" onClick={() => { reset(); setIsExample(false); setLayersOpen(false) }}><X className="size-3.5" />{t("Exit example")}</Button>}</div>
           {status !== "ready" && <div className="pointer-events-none absolute inset-0 z-[5] grid place-items-center p-8"><div className="pointer-events-auto max-w-sm rounded-2xl bg-card/95 px-8 py-9 text-center shadow-sm">
             <span className="mx-auto mb-5 grid size-14 place-items-center rounded-2xl bg-selection text-primary"><MapPinned className="size-7" /></span><h2 className="text-lg font-semibold">{t(status === "unconfigured" ? "Your next perspective starts here" : status === "loading" ? "Loading map" : "Map tiles could not be loaded")}</h2>
-            <p role={status === "error" ? "alert" : "status"} className="mt-3 text-sm text-muted-foreground">{t(status === "unconfigured" ? "TianDiTu key is not configured" : status === "error" ? "Check the key and allowed origin, then reload" : "Preparing your map canvas…")}</p>
-            {status === "unconfigured" && <><p className="mt-2 text-xs leading-5 text-muted-foreground">{t("Set VITE_TIANDITU_TK in web/.env.local")}</p><Button className="mt-6" onClick={startExample}>{t("Explore a local example")}<ArrowUpRight /></Button></>}
+            <p role={status === "error" ? "alert" : "status"} className="mt-3 text-sm text-muted-foreground">{t(status === "unconfigured" ? "Map unavailable" : status === "error" ? "Map could not load. Please retry." : "Preparing your map canvas…")}</p>
+            {status === "unconfigured" && <Button className="mt-6" onClick={startExample}>{t("Explore a local example")}<ArrowUpRight /></Button>}
             {status === "error" && <Button variant="outline" className="mt-5" onClick={() => setReload((value) => value + 1)}><RotateCcw />{t("Retry")}</Button>}
           </div></div>}
           {selectedPlace && status === "ready" && <div className="map-float absolute right-16 bottom-20 left-5 z-10 mx-auto flex max-w-[360px] items-center gap-3 rounded-xl p-4"><span className="grid size-10 shrink-0 place-items-center rounded-lg bg-selection text-primary"><MapPin className="size-5" /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{t(selectedPlace.name)}</p><p className="mt-0.5 text-xs text-muted-foreground">{t(selectedPlace.category)} · {t(isExample ? "Example location" : "Coordinates")}</p></div><Button variant="ghost" size="icon-sm" aria-label={t("Dismiss map selection")} onClick={() => setSelectedId(null)}><X className="size-4" /></Button></div>}
           <div className="absolute right-5 bottom-12 z-10 flex flex-col gap-2"><Button variant="outline" size="icon-lg" className="map-float" aria-label={t("Reset map view")} disabled={!canUseMap} onClick={() => canvas.current?.reset()}><Compass className="size-4" /></Button><div className="map-float overflow-hidden rounded-lg"><Button variant="ghost" size="icon-lg" className="block rounded-none" aria-label={t("Zoom in")} disabled={!canUseMap} onClick={() => canvas.current?.zoom(1)}><Plus className="mx-auto size-4" /></Button><div className="mx-2 border-t border-border" /><Button variant="ghost" size="icon-lg" className="block rounded-none" aria-label={t("Zoom out")} disabled={!canUseMap} onClick={() => canvas.current?.zoom(-1)}><Minus className="mx-auto size-4" /></Button></div></div>
           <div className="absolute bottom-12 left-5 z-20">{layersOpen && <div className="map-float mb-2 w-60 rounded-xl p-4"><div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-medium">{t("Map layers")}</h3><Button variant="ghost" size="icon-xs" aria-label={t("Close map layers")} onClick={() => setLayersOpen(false)}><X className="size-3.5" /></Button></div><div className="grid grid-cols-2 gap-2">{(["vec", "img"] as const).map((value) => <Button key={value} variant="outline" disabled={isExample && value === "img"} className={cn("h-auto flex-col gap-2 p-3 text-xs", layer === value && "bg-selection")} aria-pressed={layer === value} onClick={() => setLayer(value)}>{value === "vec" ? <MapPinned /> : <Layers2 />}{t(value === "vec" ? "Street map" : "Satellite map")}{layer === value && <Check className="size-3" />}</Button>)}</div><div className="mt-4 flex items-center justify-between text-xs"><span>{t("Place labels")}</span><Switch checked={showLabels} onCheckedChange={setShowLabels} disabled={isExample} aria-label={t("Place labels")} /></div>{isExample && <p className="mt-3 text-[10px] leading-4 text-muted-foreground">{t("Example map uses a fixed illustrative basemap.")}</p>}</div>}<Button variant="outline" className="map-float h-10" aria-expanded={layersOpen} onClick={() => setLayersOpen(!layersOpen)}><Layers2 className="size-4" />{t("Layers")}<ChevronDown className={cn("size-3 transition-transform", layersOpen && "rotate-180")} /></Button></div>
-          <div className="pointer-events-none absolute right-0 bottom-0 left-0 flex items-center justify-between gap-4 px-5 py-2.5 text-[10px] text-muted-foreground"><span className="rounded bg-background/85 px-1.5 py-0.5">{isExample ? t("Illustrative basemap · Not for navigation") : t("Catalog search is not connected")}</span><span className="pointer-events-auto rounded bg-background/85 px-1.5 py-0.5">{isExample ? t("Local design preview") : <a href="https://www.tianditu.gov.cn/" target="_blank" rel="noreferrer">© 天地图</a>}</span></div>
+          <div className="pointer-events-none absolute right-0 bottom-0 left-0 flex items-center justify-between gap-4 px-5 py-2.5 text-[10px] text-muted-foreground">{isExample ? <span className="rounded bg-background/85 px-1.5 py-0.5">{t("Illustrative basemap · Not for navigation")}</span> : <a className="pointer-events-auto ml-auto rounded bg-background/85 px-1.5 py-0.5" href="https://www.tianditu.gov.cn/" target="_blank" rel="noreferrer">© 天地图</a>}</div>
         </section>
       </div>
     </main>

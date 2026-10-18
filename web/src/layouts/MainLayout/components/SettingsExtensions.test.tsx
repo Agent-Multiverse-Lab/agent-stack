@@ -55,7 +55,7 @@ async function finishClosing(name: string) {
 
 it.each(["skills", "mcp"] as const)("keeps %s server-managed with no fabricated installed list", (kind) => {
   render(<Harness kind={kind} />);
-  expect(screen.getByText("Web management API unavailable")).toBeTruthy();
+  expect(screen.getByText("Management unavailable")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Explore local preview" })).toBeTruthy();
   expect(screen.queryByRole("list")).toBeNull();
   expect(screen.queryByRole("textbox")).toBeNull();
@@ -206,7 +206,7 @@ it("adds only local examples, validates a name, and clears additions on exit", a
   await waitFor(() => expect(document.activeElement).toBe(add));
   expect(within(screen.getByRole("list", { name: "Example skills" })).getAllByRole("listitem")).toHaveLength(4);
   fireEvent.click(screen.getByRole("button", { name: "Exit preview" }));
-  expect(screen.getByText("Web management API unavailable")).toBeTruthy();
+  expect(screen.getByText("Management unavailable")).toBeTruthy();
   enterPreview();
   expect(within(screen.getByRole("list", { name: "Example skills" })).getAllByRole("listitem")).toHaveLength(3);
   expect(screen.queryByText("New local skill")).toBeNull();
@@ -241,7 +241,7 @@ it("resets preview across kinds and remounts without sharing records", async () 
   enterPreview();
   fireEvent.change(screen.getByRole("textbox", { name: "Search example skills" }), { target: { value: "missing" } });
   rerender(<SettingsExtensions kind="mcp" />);
-  expect(screen.getByText("Web management API unavailable")).toBeTruthy();
+  expect(screen.getByText("Management unavailable")).toBeTruthy();
   enterPreview();
   expect(within(screen.getByRole("list", { name: "Example MCP services" })).getAllByRole("listitem")).toHaveLength(3);
   expect(screen.queryByText("Research brief")).toBeNull();
@@ -249,7 +249,7 @@ it("resets preview across kinds and remounts without sharing records", async () 
   unmount();
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   render(<SettingsExtensions kind="mcp" />);
-  expect(screen.getByText("Web management API unavailable")).toBeTruthy();
+  expect(screen.getByText("Management unavailable")).toBeTruthy();
   expect(screen.queryByText("Document service")).toBeNull();
 });
 
@@ -342,7 +342,7 @@ it("preserves edits on both MCP tabs and reveals the tab containing an invalid f
 
 it.each(["skills", "mcp"] as const)("provides the %s section through its named list component", (kind) => {
   render(kind === "skills" ? <Skill /> : <Mcp />);
-  expect(screen.getByText("Web management API unavailable")).toBeTruthy();
+  expect(screen.getByText("Management unavailable")).toBeTruthy();
   enterPreview();
   expect(within(screen.getByRole("list", { name: kind === "skills" ? "Example skills" : "Example MCP services" })).getAllByRole("listitem")).toHaveLength(3);
 });

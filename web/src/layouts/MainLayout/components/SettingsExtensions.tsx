@@ -54,7 +54,7 @@ function ExtensionSettings({ kind }: { kind: ExtensionKind }) {
       <Empty className="min-h-[390px] justify-center border-0">
         <EmptyHeader>
           <EmptyMedia variant="icon"><Icon aria-hidden="true" /></EmptyMedia>
-          <EmptyTitle>{t("Web management API unavailable")}</EmptyTitle>
+          <EmptyTitle>{t("Management unavailable")}</EmptyTitle>
         </EmptyHeader>
         <Button ref={previewButtonRef} variant="outline" onClick={() => {
           resetPreview();

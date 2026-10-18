@@ -76,3 +76,13 @@ it("offers retry after a failed collection request", async () => {
   expect(await screen.findByText("Docs")).toBeTruthy()
   expect(listKnowledgeBases).toHaveBeenCalledTimes(2)
 })
+
+it("keeps the create form accessible without repeating promotional helper copy", async () => {
+  render(<MemoryRouter><KnowledgePage /></MemoryRouter>)
+  await screen.findByText("Docs")
+  expect(screen.queryByText("Your workspace")).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Create knowledge base" }))
+  expect(screen.getByRole("dialog", { name: "Create knowledge base" })).toBeTruthy()
+  expect(screen.queryByText("Bring your documents together in a collection.")).toBeNull()
+  expect(screen.getByRole("textbox", { name: "Knowledge base name" })).toBeTruthy()
+})

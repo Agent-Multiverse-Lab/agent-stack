@@ -18,22 +18,12 @@ export default function Satellite() {
           strokeWidth={1.35}
           aria-hidden
         />
-        <p className="m-0 mb-3 inline-flex items-center gap-2 font-mono text-[0.66rem] uppercase tracking-[0.04em] text-muted-foreground">
-          <span
-            className="h-[5px] w-[5px] rounded-full bg-muted-foreground"
-            aria-hidden
-          />
-          <span>{t("Backend not connected")}</span>
-        </p>
         <h2
           id="satellite-heading"
           className="m-0 text-[clamp(1.6rem,4vw,2rem)] font-[550] leading-[1.25] tracking-[-0.035em]"
         >
-          {t("Satellite is not connected")}
+          {t("Satellite unavailable")}
         </h2>
-        <p className="m-0 mt-3 max-w-[27rem] text-sm leading-[1.625] text-muted-foreground">
-          {t("Satellite content will be available here after the backend is connected.")}
-        </p>
       </section>
     </main>
   );

@@ -72,7 +72,6 @@ export function ChatPanel({ kbId }: { kbId: string }) {
           <div className="mx-auto flex h-full min-h-72 max-w-2xl flex-col items-center justify-center px-6 py-8 text-center">
             <div className="mb-6 grid size-16 place-items-center rounded-2xl bg-selection text-selection-foreground"><MessagesSquare className="size-7" strokeWidth={1.4} /></div>
             <h2 className="text-2xl font-medium tracking-tight">{t("Ask your collection")}</h2>
-            <p className="mt-3 max-w-sm text-sm leading-6 text-muted-foreground">{t("Find answers grounded in your indexed documents, with sources to follow.")}</p>
             <div className="mt-7 flex flex-wrap justify-center gap-2">
               {["Summarize the main topics", "Find the key connections"].map((prompt) => <Button key={prompt} variant="outline" className="h-auto gap-3 py-2.5 text-xs" onClick={() => { setDraft(t(prompt)); inputRef.current?.focus() }}>{t(prompt)}<ArrowUpRight className="size-3.5" /></Button>)}
             </div>

@@ -383,9 +383,6 @@ export default function ChatPage() {
               <h1 className="text-2xl font-semibold">
                 {t("Welcome to AM")}
               </h1>
-              <p className="mt-2 text-base text-muted-foreground">
-                {t("What would you like to explore or build today?")}
-              </p>
             </div>
           )}
           {displayedError && (

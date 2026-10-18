@@ -92,9 +92,6 @@ export default function KnowledgePage() {
       <div className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col px-6 pb-6 pt-10 lg:px-12 lg:pt-14">
         <header className="mb-10 flex flex-wrap items-end justify-between gap-6">
           <div>
-            <div className="mb-3 flex items-center gap-2 text-[11px] font-medium tracking-[0.16em] text-muted-foreground uppercase">
-              <BookOpen className="size-3.5" />{t("Your workspace")}
-            </div>
             <h1 className="text-3xl font-semibold tracking-tight lg:text-[38px] lg:leading-tight">{t("Knowledge Bases")}</h1>
           </div>
           <Button type="button" className="h-10 gap-2" onClick={() => setCreateOpen(true)}>
@@ -167,7 +164,7 @@ export default function KnowledgePage() {
           <Empty className="min-h-80">
             <EmptyMedia className="mb-2 grid size-16 place-items-center rounded-2xl bg-muted text-primary">{search ? <Search className="size-7" /> : <BookOpen className="size-7" strokeWidth={1.4} />}</EmptyMedia>
             <EmptyTitle>{search ? t("No matching knowledge bases") : t("No knowledge bases yet")}</EmptyTitle>
-            <EmptyDescription>{search ? t("Try a different name or keyword.") : t("Bring your documents together in a collection.")}</EmptyDescription>
+            {search && <EmptyDescription>{t("Try a different name or keyword.")}</EmptyDescription>}
             <Button variant="outline" onClick={() => search ? setQuery("") : setCreateOpen(true)}>{search ? t("Clear search") : t("Create your first collection")}</Button>
           </Empty>
         )}
@@ -177,7 +174,7 @@ export default function KnowledgePage() {
       <Dialog open={createOpen} onOpenChange={(open) => { if (!creating) setCreateOpen(open) }}>
         <DialogContent>
           <form onSubmit={handleCreate}>
-            <DialogHeader><DialogTitle>{t("Create knowledge base")}</DialogTitle><DialogDescription>{t("Bring your documents together in a collection.")}</DialogDescription></DialogHeader>
+            <DialogHeader><DialogTitle>{t("Create knowledge base")}</DialogTitle><DialogDescription className="sr-only">{t("Create knowledge base")}</DialogDescription></DialogHeader>
             <div className="grid gap-4 py-5">
               <div className="grid gap-2"><Label htmlFor="knowledge-name">{t("Knowledge base name")}</Label><Input id="knowledge-name" value={name} onChange={(event) => setName(event.target.value)} placeholder={t("Knowledge base name")} autoFocus disabled={creating} /></div>
               <div className="grid gap-2"><Label htmlFor="knowledge-description">{t("Description (optional)")}</Label><Textarea id="knowledge-description" value={description} onChange={(event) => setDescription(event.target.value)} rows={3} disabled={creating} /></div>
