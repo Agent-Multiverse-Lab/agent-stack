@@ -797,6 +797,7 @@ async def save_interrupt_message(
     error: str,
     error_type: str,
     agent_run_id: str | None,
+    worker_id: str,
     request_id: str | None = None,
 ):
     agent_run_repo = AgentRunRepository(db)
@@ -827,10 +828,9 @@ async def save_interrupt_message(
 
         # save msg 到 database
         if agent_run_id:
-            agent_run = await agent_run_repo.lock_for_output_update(agent_run_id)
-
-            if agent_run is None:
-                raise ValueError(f"当前agent_run_id不存在：{agent_run_id}")
+            await agent_run_repo.lock_for_output_update(
+                agent_run_id, worker_id=worker_id
+            )
 
         message = await conv_repo.add_message_by_thread_id(
             thread_id=thread_id,
@@ -845,6 +845,7 @@ async def save_interrupt_message(
             await agent_run_repo.set_output_message(
                 run_id=agent_run_id,
                 output_message_id=int(message.id),
+                worker_id=worker_id,
             )
             await db.commit()
         return message
@@ -984,6 +985,7 @@ async def save_message_from_langgraph_state(
     *,
     thread_id: str,
     run_id: str,
+    worker_id: str,
     context,
     agent_instance: BaseAgent,
     db: AsyncSession,
@@ -1000,6 +1002,9 @@ async def save_message_from_langgraph_state(
             }
         }
     )
+
+    agent_run_repo = AgentRunRepository(db)
+    await agent_run_repo.lock_for_output_update(run_id, worker_id=worker_id)
 
     saved_ai_message: Message | None = None
     for message in checkpoint.values.get("messages", []):
@@ -1020,12 +1025,11 @@ async def save_message_from_langgraph_state(
         elif message.type == "tool":
             await save_tool_message(db=db, message=message)
 
-    agent_run_repo = AgentRunRepository(db)
-    current_run = await agent_run_repo.get_by_id(run_id)
-    if current_run is not None and saved_ai_message is not None:
+    if saved_ai_message is not None:
         await agent_run_repo.set_output_message(
             run_id=run_id,
             output_message_id=int(saved_ai_message.id),
+            worker_id=worker_id,
         )
 
     await db.commit()
@@ -1361,6 +1365,7 @@ async def stream_agent_response(
             await save_message_from_langgraph_state(
                 thread_id=thread_id,
                 run_id=runtime_metadata.get("run_id"),
+                worker_id=runtime_metadata["worker_id"],
                 context=agent_context,
                 agent_instance=agent_instance,
                 db=db,
@@ -1399,6 +1404,7 @@ async def stream_agent_response(
                 error_type=type(e).__name__,
                 agent_run_id=run_id,
                 request_id=runtime_metadata.get("request_id"),
+                worker_id=runtime_metadata["worker_id"],
             )
 
         yield make_agent_stream_event(
@@ -1512,6 +1518,7 @@ async def resume_agent_response(
         await save_message_from_langgraph_state(
             thread_id=thread_id,
             run_id=run_id,
+            worker_id=runtime_metadata["worker_id"],
             context=agent_context,
             agent_instance=agent_instance,
             db=db,
@@ -1543,6 +1550,7 @@ async def resume_agent_response(
                         error_type=type(exc).__name__,
                         agent_run_id=run_id,
                         request_id=runtime_metadata.get("request_id"),
+                        worker_id=runtime_metadata["worker_id"],
                     )
             except Exception:
                 logger.exception("保存 Resume 累计输出失败")
