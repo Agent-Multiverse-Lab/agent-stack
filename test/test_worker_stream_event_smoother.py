@@ -3,7 +3,7 @@ import json
 import unittest
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 from server.service.arq_queue_servcie import RUN_REDIS_TTL_SECONDS
 from server.worker import (
@@ -313,7 +313,7 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
             patch("server.worker.write_end_stream_event", side_effect=write_end),
         ):
             result = await _finalize_run(
-                "parent-run",
+                "parent-run", worker_id="owner-1",
                 status="interrupted",
                 thread_id="thread-1",
                 payload=payload,
@@ -349,7 +349,7 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
             ) as clear_cancel,
         ):
             result = await _finalize_run(
-                "run-1",
+                "run-1", worker_id="owner-1",
                 status="failed",
                 thread_id="thread-1",
                 error="boom",
@@ -358,7 +358,7 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, ("failed", True))
         set_terminal.assert_awaited_once_with(
-            "run-1",
+            "run-1", worker_id=ANY,
             status="failed",
             error="boom",
             error_type="RuntimeError",
@@ -390,14 +390,14 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
             ) as clear_cancel,
         ):
             result = await _finalize_run(
-                "run-1",
+                "run-1", worker_id="owner-1",
                 status="cancelled",
                 thread_id="thread-1",
             )
 
         self.assertEqual(result, ("cancelled", True))
         set_terminal.assert_awaited_once_with(
-            "run-1",
+            "run-1", worker_id=ANY,
             status="cancelled",
             error=None,
             error_type=None,
@@ -422,7 +422,7 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
             ) as write_end_event,
         ):
             result = await _finalize_run(
-                "run-1",
+                "run-1", worker_id="owner-1",
                 status="completed",
                 thread_id="thread-1",
             )
@@ -433,6 +433,15 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
 
 # FIXEME: Agent Stream 前的退出只写 Repository 终态，不通过 finalizer 发布 end。
 class AgentRunPreStreamFailureTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        claim = patch(
+            "server.worker.set_run_running",
+            new_callable=AsyncMock,
+            return_value=SimpleNamespace(agent_status="running"),
+        )
+        claim.start()
+        self.addCleanup(claim.stop)
+
     @staticmethod
     def _agent_run(**overrides):
         values = {
@@ -480,11 +489,11 @@ class AgentRunPreStreamFailureTest(unittest.IsolatedAsyncioTestCase):
                 new_callable=AsyncMock,
             ) as write_end,
         ):
-            result = await process_agent_run({}, "run-1")
+            result = await process_agent_run({"worker_id": "worker-test"}, "run-1")
 
         self.assertIsNone(result)
         set_terminal.assert_awaited_once_with(
-            "run-1",
+            "run-1", worker_id=ANY,
             status="failed",
             error="Input message not found: 101",
             error_type="LookupError",
@@ -517,11 +526,11 @@ class AgentRunPreStreamFailureTest(unittest.IsolatedAsyncioTestCase):
                 new_callable=AsyncMock,
             ) as write_end,
         ):
-            result = await process_agent_run({}, "run-1")
+            result = await process_agent_run({"worker_id": "worker-test"}, "run-1")
 
         self.assertIsNone(result)
         set_terminal.assert_awaited_once_with(
-            "run-1",
+            "run-1", worker_id=ANY,
             status="failed",
             error="User not found: user-1",
             error_type="LookupError",
@@ -563,10 +572,10 @@ class AgentRunPreStreamFailureTest(unittest.IsolatedAsyncioTestCase):
                 new_callable=AsyncMock,
             ) as write_end,
         ):
-            result = await process_agent_run({}, "run-1")
+            result = await process_agent_run({"worker_id": "worker-test"}, "run-1")
 
         self.assertIsNone(result)
-        set_terminal.assert_awaited_once_with("run-1", status="cancelled")
+        set_terminal.assert_awaited_once_with("run-1", worker_id=ANY, status="cancelled")
         clear_cancel.assert_awaited_once_with("run-1")
         finalizer.assert_not_awaited()
         write_end.assert_not_awaited()
@@ -678,7 +687,7 @@ class AgentRunProcessTest(unittest.IsolatedAsyncioTestCase):
                 new_callable=AsyncMock,
             ),
         ):
-            result = await process_agent_run({}, "run-1")
+            result = await process_agent_run({"worker_id": "worker-test"}, "run-1")
 
         return result, finalizer, events
 

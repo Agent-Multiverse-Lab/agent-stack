@@ -21,15 +21,29 @@
 ```python
 run = await set_run_terminal(
     run_id,
+    worker_id=owner_token,
     status="completed",
 )
 ```
 
-`set_run_terminal` 只接收 Run 终态字段 `status/error/error_type`，不得接收或持久化
+`set_run_terminal` 接收执行归属凭证 `worker_id` 和 Run 终态字段 `status/error/error_type`，不得接收或持久化
 `conversation_id/content`。输出消息持久化不属于 Run 终态写入职责。
 
 ### RUN-LC-003 终态回写并发保护
 `set_agent_terminal` 必须拒绝非法回退；并发场景下仅允许一处成功写入终态。
+
+Worker 在 `startup(ctx)` 中生成进程身份，每次 Job 执行再追加 UUID，组成独立的
+owner token。`AgentRun.worker_id` 保存该 token；Repository 不依赖 Worker 全局变量。
+
+- `set_running` 在同一事务和行锁内检查状态与归属，只认领无 owner 的
+  `pending/queued/cancel_requested` Run；认领取消中的 Run 时保留取消状态。
+- Worker 在读取输入和执行准备前完成认领；已有执行者时退出，不执行 Agent。
+- Worker 的终态和输出写入必须携带相同 token，在数据库行锁内核对当前归属。
+- 无 token 的终态调用仅允许将尚未认领的 `pending/queued` Run 标记为入队失败，
+  不能修改正在执行的 Run。用户取消通过 `request_cancel` 提交意图，不替换 owner。
+- 允许重试的准备阶段异常，在交还 ARQ 前由当前 owner 释放归属；`running` 回到
+  `pending`，`cancel_requested` 保持不变。下一次尝试生成新 token 并重新认领，旧 token
+  不能写入终态、输出或再次释放归属。
 
 ### RUN-LC-004 `cancellation` 与终态一致
 `cancel_requested` 不能直接变回 `running`；若终态已变更为 `completed`/`failed`/`cancelled`，后续 finalize 只读返回原状态。

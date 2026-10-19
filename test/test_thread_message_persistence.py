@@ -1,17 +1,40 @@
+import ast
+import json
 import unittest
-from types import SimpleNamespace
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, Mock, call, patch
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import configure_mappers
 
-from server.service import thread_service
 from src.database.models import AgentRun, AgentRunAttempt, Conversation, Message, ToolCall, User
 from src.database.repositories.agent_run_repository import AgentRunRepository
 from src.database.repositories.conversation_repository import (
     ConversationRepository,
 )
+
+
+def load_message_persistence():
+    """直接加载消息保存函数，隔离 Agent 注册和基础设施启动。"""
+    path = Path(__file__).resolve().parents[1] / "server/service/thread_service.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    module = ModuleType("isolated_message_persistence")
+    module.__dict__.update(
+        AsyncSession=Any, BaseAgent=Any, Message=Message,
+        AIMessage=AIMessage, ToolMessage=ToolMessage, json=json, logger=Mock(),
+        AgentRunRepository=AgentRunRepository, ConversationRepository=ConversationRepository,
+    )
+    nodes = [node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name in {
+        "save_ai_message", "save_tool_message", "save_message_from_langgraph_state", "save_interrupt_message",
+    }]
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), "exec"), module.__dict__)
+    return module
+
+
+thread_service = load_message_persistence()
 
 
 class FakeContext:
@@ -25,6 +48,49 @@ class FakeContext:
 
 
 class ThreadMessagePersistenceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_foreign_owner_is_rejected_before_saving_any_checkpoint_messages(self):
+        graph = SimpleNamespace(aget_state=AsyncMock(return_value=SimpleNamespace(
+            values={"messages": [AIMessage(content="foreign output")]},
+        )))
+        repository = SimpleNamespace(lock_for_output_update=AsyncMock(
+            side_effect=RuntimeError("owner mismatch"),
+        ))
+        db = SimpleNamespace(commit=AsyncMock())
+        with (
+            patch.object(thread_service, "AgentRunRepository", return_value=repository),
+            patch.object(thread_service, "save_ai_message", new_callable=AsyncMock) as save_ai,
+            patch.object(thread_service, "save_tool_message", new_callable=AsyncMock) as save_tool,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "owner mismatch"):
+                await thread_service.save_message_from_langgraph_state(
+                    thread_id="thread-1", run_id="run-1", worker_id="foreign-owner",
+                    context=SimpleNamespace(uid="user-1"),
+                    agent_instance=SimpleNamespace(get_agent=AsyncMock(return_value=graph)), db=db,
+                )
+        save_ai.assert_not_awaited()
+        save_tool.assert_not_awaited()
+        db.commit.assert_not_awaited()
+
+    async def test_foreign_owner_interrupt_output_rolls_back_without_creating_message(self):
+        repository = SimpleNamespace(lock_for_output_update=AsyncMock(
+            side_effect=RuntimeError("owner mismatch"),
+        ))
+        conversations = SimpleNamespace(add_message_by_thread_id=AsyncMock())
+        db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+        with (
+            patch.object(thread_service, "AgentRunRepository", return_value=repository),
+            patch.object(thread_service, "ConversationRepository", return_value=conversations),
+        ):
+            result = await thread_service.save_interrupt_message(
+                db=db, thread_id="thread-1", uid="user-1", accumulated_msg="",
+                error="failed", error_type="RuntimeError", agent_run_id="run-1",
+                worker_id="foreign-owner",
+            )
+        self.assertIsNone(result)
+        conversations.add_message_by_thread_id.assert_not_awaited()
+        db.commit.assert_not_awaited()
+        db.rollback.assert_awaited_once()
+
     async def test_checkpoint_messages_are_saved_in_state_order(self) -> None:
         messages = [
             HumanMessage(content="调用 add_numbers 计算 17 + 25"),
@@ -72,7 +138,7 @@ class ThreadMessagePersistenceTest(unittest.IsolatedAsyncioTestCase):
             update_tool_call=AsyncMock(),
         )
         runs = SimpleNamespace(
-            get_by_id=AsyncMock(return_value=SimpleNamespace(id="run-1")),
+            lock_for_output_update=AsyncMock(return_value=SimpleNamespace(id="run-1")),
             set_output_message=AsyncMock(),
         )
         db = SimpleNamespace(commit=AsyncMock())
@@ -97,6 +163,7 @@ class ThreadMessagePersistenceTest(unittest.IsolatedAsyncioTestCase):
                 context=context,
                 thread_id="thread-1",
                 run_id="run-1",
+                worker_id="owner-1",
                 db=db,
             )
 
@@ -128,10 +195,11 @@ class ThreadMessagePersistenceTest(unittest.IsolatedAsyncioTestCase):
                 ),
             ]
         )
-        runs.get_by_id.assert_awaited_once_with("run-1")
+        runs.lock_for_output_update.assert_awaited_once_with("run-1", worker_id="owner-1")
         runs.set_output_message.assert_awaited_once_with(
             run_id="run-1",
             output_message_id=2,
+            worker_id="owner-1",
         )
         conversations.add_tool_call.assert_awaited_once_with(
             message_id=1,
@@ -173,10 +241,10 @@ class ThreadMessagePersistenceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("42", tool_call.tool_result)
         self.assertEqual("success", tool_call.status)
 
-        run = SimpleNamespace(id="run-1", output_message_id=None)
+        run = SimpleNamespace(id="run-1", output_message_id=None, worker_id="owner-1", agent_status="running")
         runs = AgentRunRepository(session)
-        runs.get_by_id = AsyncMock(return_value=run)
-        await runs.set_output_message(run_id="run-1", output_message_id=9)
+        runs._lock_update = AsyncMock(return_value=run)
+        await runs.set_output_message(run_id="run-1", output_message_id=9, worker_id="owner-1")
         self.assertEqual(9, run.output_message_id)
 
         output_session = SimpleNamespace(

@@ -6,7 +6,7 @@ import json
 import unittest
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
@@ -189,7 +189,7 @@ class ResumeStreamTest(unittest.IsolatedAsyncioTestCase):
 
     async def consume(self, agent, **overrides):
         values = dict(resume_input=ANSWERS, thread_id="thread-1",
-                      runtime_metadata={"run_id": "resume-run", "request_id": "request-1"},
+                      runtime_metadata={"worker_id": "owner-1", "run_id": "resume-run", "request_id": "request-1"},
                       current_user=SimpleNamespace(uid="user-1"), db=SimpleNamespace())
         values.update(overrides)
         with patch.object(thread_service, "_build_agent_runtime", AsyncMock(return_value=(SimpleNamespace(slug="LeaderAgent", agent_config={}), agent, "dashscope/qwen3.8-max"))) as get_agent:
@@ -275,7 +275,7 @@ class NormalStreamFinalizationTest(unittest.IsolatedAsyncioTestCase):
             chunks = []
             async for chunk in thread_service.stream_agent_response(
                 agent_slug="LeaderAgent", thread_id="thread-1",
-                runtime_metadata={"run_id": "parent-run", "request_id": "request-1"},
+                runtime_metadata={"worker_id": "owner-1", "run_id": "parent-run", "request_id": "request-1"},
                 thread_input_message=SimpleNamespace(
                     content="开始",
                     image_content=None,
@@ -334,14 +334,14 @@ class ResumeWorkerTest(unittest.IsolatedAsyncioTestCase):
             "_finalize_run": finalize, "write_stream_event": AsyncMock(), "write_end_stream_event": AsyncMock(),
         }
         with patch.multiple(worker, **patches), patch.object(worker.postgres_manager, "get_async_session_context", session):
-            await worker.process_agent_run({}, "resume-run")
+            await worker.process_agent_run({"worker_id": "worker-test"}, "resume-run")
         controller.close.assert_awaited_once()
         return finalize, patches["write_end_stream_event"]
 
     async def test_handler_chunk_routes_to_existing_terminal(self):
         payload = {"kind": "ask_user", "questions": QUESTIONS}
         finalize, end = await self.run_stream([{"status": "ask_human", "pending_interrupt": payload}])
-        finalize.assert_awaited_once_with("resume-run", thread_id="thread-1", status="interrupted", payload=payload)
+        finalize.assert_awaited_once_with("resume-run", worker_id=ANY, thread_id="thread-1", status="interrupted", payload=payload)
         self.assertEqual(end.await_args.args[1]["status"], "interrupted")
 
     async def test_empty_stream_is_failed_and_cancellation_is_awaited(self):
