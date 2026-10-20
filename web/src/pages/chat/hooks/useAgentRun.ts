@@ -18,6 +18,7 @@ import type {
 interface RunState {
   runId: string | null;
   runStatus: string | null;
+  startedAt: number | null;
   streamUrl: string | null;
   pendingInteraction: InteractionRequired | null;
   cancelling: boolean;
@@ -35,6 +36,7 @@ interface AgentRunCreateRequest {
 const initialState = (): RunState => ({
   runId: null,
   runStatus: null,
+  startedAt: null,
   streamUrl: null,
   pendingInteraction: null,
   cancelling: false,
@@ -44,6 +46,11 @@ const initialState = (): RunState => ({
 const activeStatuses = new Set(["pending", "running", "cancel_requested"]);
 const isActiveStatus = (status: string | null) =>
   Boolean(status && activeStatuses.has(status));
+
+const parseStartedAt = (value: unknown): number | null => {
+  const timestamp = typeof value === "string" ? Date.parse(value) : NaN;
+  return Number.isFinite(timestamp) ? timestamp : null;
+};
 
 export function useAgentRun() {
   const [state, setState] = useState<RunState>(initialState);
@@ -74,6 +81,7 @@ export function useAgentRun() {
       update({
         runId: run.run_id,
         runStatus: run.status,
+        startedAt: null,
         streamUrl: run.stream_url,
         cancelling: false,
         pendingInteraction: null,
@@ -94,6 +102,7 @@ export function useAgentRun() {
         update({
           runId: run.run_id,
           runStatus: run.status,
+          startedAt: null,
           streamUrl: run.stream_url,
           pendingInteraction: null,
           cancelling: false,
@@ -118,6 +127,9 @@ export function useAgentRun() {
       pendingInteraction: detail.pending_interaction,
       runId: restored?.run_id ?? null,
       runStatus: restored?.status ?? null,
+      startedAt:
+        parseStartedAt(restored?.started_at) ??
+        (getState().runId === restored?.run_id ? getState().startedAt : null),
       streamUrl: activeRun
         ? buildAgentRunStreamUrl(activeRun.run_id, detail.thread.thread_id)
         : null,
@@ -139,7 +151,13 @@ export function useAgentRun() {
       async (event) => {
         if (getState().runId !== runId) return;
         if (event.type === "status" && typeof event.status === "string") {
-          update({ runStatus: event.status });
+          // Pending runs may not have a persisted start yet; replay must not reset it.
+          update({
+            runStatus: event.status,
+            startedAt:
+              getState().startedAt ??
+              (event.status === "running" ? parseStartedAt(event.created_at) : null),
+          });
           return;
         }
         if (

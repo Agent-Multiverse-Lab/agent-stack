@@ -9,25 +9,36 @@ import type { ReactNode } from "react";
 import { ChevronDown, LoaderCircle } from "lucide-react";
 import { useTranslation } from "@/i18n";
 
+function ElapsedTime({ startedAt }: { startedAt: number }) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 100);
+    return () => window.clearInterval(timer);
+  }, []);
+  const seconds = Math.max(0, now - startedAt) / 1000;
+  return (
+    <span
+      className="font-mono text-xs tabular-nums text-muted-foreground"
+      aria-hidden="true"
+    >
+      {seconds < 60
+        ? `${seconds.toFixed(1)}s`
+        : `${Math.floor(seconds / 60)}m ${(seconds % 60).toFixed(1)}s`}
+    </span>
+  );
+}
+
 export function Thinking({
   label = "Thinking",
   children,
+  startedAt,
 }: {
   label?: string;
   children?: ReactNode;
+  startedAt?: number | null;
 }) {
   const { t } = useTranslation();
-  const [elapsed, setElapsed] = useState(0);
   const [expanded, setExpanded] = useState(true);
-  useEffect(() => {
-    const started = performance.now();
-    const timer = window.setInterval(
-      () => setElapsed(performance.now() - started),
-      100,
-    );
-    return () => clearInterval(timer);
-  }, []);
-  const seconds = elapsed / 1000;
   return (
     <Collapsible
       open={expanded}
@@ -41,14 +52,9 @@ export function Thinking({
       >
         <LoaderCircle size={16} className="animate-spin text-muted-foreground" />
         <span className="text-[13px] font-medium">{t(label)}</span>
-        <span
-          className="font-mono text-xs tabular-nums text-muted-foreground"
-          aria-hidden="true"
-        >
-          {seconds < 60
-            ? `${seconds.toFixed(1)}s`
-            : `${Math.floor(seconds / 60)}m ${(seconds % 60).toFixed(1)}s`}
-        </span>
+        {typeof startedAt === "number" && Number.isFinite(startedAt) && (
+          <ElapsedTime key={startedAt} startedAt={startedAt} />
+        )}
         {children && (
           <CollapsibleTrigger
             render={<Button variant="ghost" size="icon-sm" />}
