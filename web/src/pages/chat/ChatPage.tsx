@@ -27,7 +27,8 @@ const messageRunId = (message: ChatMessageType) =>
   isRecord(message.payload.event) ? message.payload.event.run_id : undefined;
 const messageKey = (message: ChatMessageType, index: number) => {
   const event = isRecord(message.payload.event) ? message.payload.event : null;
-  return `${message.type}:${message.payload.type}:${event?.message_id ?? event?.id ?? index}`;
+  const identity = event?.tool_call_id ?? event?.message_id ?? event?.name ?? event?.id ?? index;
+  return `${message.type}:${message.payload.type}:${event?.run_id ?? ""}:${event?.thread_id ?? ""}:${identity}`;
 };
 
 export default function ChatPage() {

@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from "vitest"
 import { act, cleanup, renderHook } from "@testing-library/react"
 
 import { useChatMessages } from "@/pages/chat/hooks/useChatMessages"
-import type { AgentRunStreamEvent } from "@/types/chat"
+import type { AgentRunStreamEvent, ThreadMessageResponse } from "@/types/chat"
 
 afterEach(() => { cleanup(); vi.useRealTimers() })
 
@@ -114,6 +114,37 @@ it("merges tool_call messages with their matching execution events", () => {
   })
 })
 
+it("flushes preceding text at a tool boundary and preserves the order inside one messages batch", () => {
+  vi.useFakeTimers()
+  const { result } = renderHook(() => useChatMessages())
+  act(() => result.current.applyRunMessageEvent(streamEvent("messages", { items: [{ stream_event: [
+    { type: "message_delta", message_id: "before", content_delta: "Before the tool" },
+    { type: "tool_call", message_id: "before", tool_call_id: "call-1", name: "calculator", args: { a: 1, b: 2 } },
+    { type: "message_delta", message_id: "after", content_delta: "After the tool" },
+  ] }] }), "run-1"))
+  expect(result.current.messages.map((message) => message.payload.event)).toMatchObject([
+    { message_id: "before", content: "Before the tool" },
+    { tool_call_id: "call-1", name: "calculator", status: "pending" },
+    { message_id: "after", content: "" },
+  ])
+  act(() => result.current.flushStream("thread-1"))
+  expect(result.current.messages[2].payload.event).toMatchObject({ content: "After the tool" })
+})
+
+it("also flushes text before an execution event when no tool_call message was emitted", () => {
+  vi.useFakeTimers()
+  const { result } = renderHook(() => useChatMessages())
+  act(() => {
+    result.current.applyRunMessageEvent(streamEvent("messages", { items: [{ stream_event: [
+      { type: "message_delta", message_id: "before", content_delta: "Checking now" },
+    ] }] }), "run-1")
+    result.current.applyRunMessageEvent(toolEvent("tool-started", { tool_name: "web_search" }), "run-1")
+  })
+  expect(result.current.messages.map((message) => message.payload.event)).toMatchObject([
+    { content: "Checking now" }, { name: "web_search", status: "running" },
+  ])
+})
+
 it.each([
   ["tool-error", { message: "Command failed" }, "Command failed"],
   ["tool-finished", { output: { status: "error", content: "Permission denied" } }, undefined],
@@ -140,6 +171,78 @@ it("keeps reasoning separate from body text without duplicating the additional_k
   expect(result.current.messages.map((message) => message.payload.event)).toMatchObject([
     { type: "reasoning", content: "Let me check." }, { content: "The answer is 3." },
   ])
+})
+
+it("isolates identical tool ids by Run and thread and ignores events from an unrelated Run", () => {
+  const { result } = renderHook(() => useChatMessages())
+  act(() => {
+    result.current.applyRunMessageEvent(toolEvent("tool-started", { tool_name: "root" }), "run-1")
+    result.current.applyRunMessageEvent(toolEvent("tool-started", { tool_name: "child" }, "child-1"), "run-1")
+    result.current.applyRunMessageEvent(toolEvent("tool-finished", { output: "root result" }), "run-1")
+    result.current.applyRunMessageEvent({ ...toolEvent("tool-started", { tool_name: "other" }), run_id: "run-2" }, "run-2")
+    result.current.applyRunMessageEvent({ ...toolEvent("tool-error", { message: "wrong Run" }), run_id: "run-3" }, "run-1")
+  })
+  expect(result.current.messages.map((message) => message.payload.event)).toMatchObject([
+    { name: "root", status: "completed", thread_id: "thread-1" },
+    { name: "child", status: "running", thread_id: "child-1" },
+    { name: "other", status: "running", run_id: "run-2" },
+  ])
+})
+
+it.each([
+  ["completed", "stopped"], ["failed", "stopped"],
+  ["cancelled", "cancelled"], ["interrupted", "interrupted"],
+])("flushes only the ending Run and settles unfinished tools on %s", (status, toolStatus) => {
+  vi.useFakeTimers()
+  const { result } = renderHook(() => useChatMessages())
+  act(() => {
+    result.current.applyRunMessageEvent(toolEvent("tool-started", { tool_name: "execute" }), "run-1")
+    for (const runId of ["run-1", "run-2"]) {
+      result.current.applyRunMessageEvent(streamEvent("messages", { run_id: runId, items: [{ stream_event: [
+        { type: "message_delta", message_id: `assistant-${runId}`, content_delta: runId },
+      ] }] }), runId)
+    }
+    result.current.applyRunMessageEvent(streamEvent("end", { status }), "run-1")
+  })
+  expect(result.current.messages.map((message) => message.payload.event)).toMatchObject([
+    { status: toolStatus }, { run_id: "run-1", content: "run-1" }, { run_id: "run-2", content: "" },
+  ])
+})
+
+it("retains tool results and reasoning after reloading persisted messages", () => {
+  const { result } = renderHook(() => useChatMessages())
+  act(() => {
+    result.current.applyRunMessageEvent(toolEvent("tool-started", { tool_name: "calculator" }), "run-1")
+    result.current.applyRunMessageEvent(toolEvent("tool-finished", { output: "3" }), "run-1")
+    result.current.applyRunMessageEvent(streamEvent("messages", { items: [{ stream_event: [
+      { type: "message_delta", message_id: "assistant-1", reasoning_content_delta: "Checked." },
+    ] }] }), "run-1")
+    result.current.applyHistory([
+      { message_id: 10, role: "assistant", content: "3", run: { run_id: "run-1" } },
+    ] as ThreadMessageResponse[])
+  })
+  expect(result.current.messages.map((message) => message.payload.event)).toMatchObject([
+    { type: "tool_call", status: "completed", output: "3" },
+    { type: "reasoning", content: "Checked." },
+    { message_id: 10, content: "3" },
+  ])
+})
+
+it("updates Todo per thread and tolerates unknown custom events without adding empty cards", () => {
+  const { result } = renderHook(() => useChatMessages())
+  const todo = (threadId: string, todos: unknown[]) => streamEvent("custom", {
+    thread_id: threadId, name: "agent_state", agent_state: { agent_todo: todos },
+  })
+  act(() => {
+    result.current.applyRunMessageEvent(todo("thread-1", [{ content: "Search", status: "pending" }]), "run-1")
+    result.current.applyRunMessageEvent(todo("child-1", [{ content: "Read", status: "in_progress" }]), "run-1")
+    result.current.applyRunMessageEvent(todo("thread-1", []), "run-1")
+    result.current.applyRunMessageEvent(streamEvent("custom", { name: "unknown" }), "run-1")
+  })
+  expect(result.current.messages).toHaveLength(1)
+  expect(result.current.messages[0].payload.event).toMatchObject({
+    thread_id: "child-1", agent_state: { agent_todo: [{ content: "Read" }] },
+  })
 })
 
 it("clears buffered text and interaction routing before reusing a call id", () => {

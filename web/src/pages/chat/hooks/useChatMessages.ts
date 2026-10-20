@@ -69,7 +69,7 @@ export function useChatMessages() {
     const retained = getMessages().filter(
       (message) => message.type === "ai" && message.payload.type === "tool",
     );
-    for (const activity of [...retained].reverse()) {
+    for (const activity of retained) {
       const activityRunId = chatMessageRunId(activity);
       const insertAt = history.findIndex(
         (message) =>
@@ -121,7 +121,9 @@ export function useChatMessages() {
             (message) =>
               message.type === "ai" &&
               message.payload.type === "text" &&
-              chatMessageId(message) === chunk.messageId,
+              chatMessageId(message) === chunk.messageId &&
+              chatMessageRunId(message) === chunk.runId &&
+              chatMessageEvent(message)?.thread_id === chunk.threadId,
           );
           if (index === -1) {
             messages.push({
@@ -205,6 +207,7 @@ export function useChatMessages() {
     toolCallId: string,
     patch: Record<string, unknown>,
   ) {
+    streamSmoother.flushThread(threadId);
     const matchesToolCall = (message: ChatMessage) => {
       const item = chatMessageEvent(message);
       return message.type === "ai" && message.payload.type === "tool" &&
@@ -255,6 +258,32 @@ export function useChatMessages() {
   }
 
   function applyRunMessageEvent(event: AgentRunStreamEvent, runId: string) {
+    if (event.run_id !== runId) return;
+    if (event.type === "end" || event.type === "interrupt") {
+      streamSmoother.flushRun(runId);
+      if (event.type === "end") {
+        updateMessages((messages) =>
+          messages.map((message) => {
+            const item = chatMessageEvent(message);
+            if (message.payload.type !== "tool" || item?.type !== "tool_call" ||
+                item.run_id !== runId || !["pending", "running"].includes(String(item.status)))
+              return message;
+            return {
+              ...message,
+              payload: {
+                ...message.payload,
+                event: {
+                  ...item,
+                  status: event.status === "cancelled" || event.status === "interrupted"
+                    ? event.status : "stopped",
+                },
+              },
+            };
+          }),
+        );
+      }
+      return;
+    }
     if (event.type === "messages") {
       if (!Array.isArray(event.items)) return;
       for (const item of event.items) {
@@ -325,6 +354,7 @@ export function useChatMessages() {
         message.type === "ai" &&
         message.payload.type === "tool" &&
         item?.run_id === runId &&
+        item?.thread_id === event.thread_id &&
         item?.name === "agent_state"
       );
     });

@@ -657,12 +657,15 @@ React 前端由 `web/src/pages/chat/hooks/useChatMessages.ts` 消费真实事件
 - `tool_call` 立即生成待执行卡片；`custom(name=agent_execute_event)` 从
   `event.stream_data` 读取 `tool-started/tool-output-delta/tool-finished/tool-error`，更新工具
   名称、参数、进度、结果及错误。归并键为 `run_id + thread_id + tool_call_id`。
-- 工具卡片显示名称和状态，展开后查看参数及输出。
+- 工具卡片显示名称和状态，展开后查看参数及输出；工具事件到来前先刷出对应线程的前端
+  文本缓存，保持正文与工具卡片的展示顺序。
 - `ask_user` 使用独立的 `interrupt(name=ask_user)` 交互事件，由 `useAgentRun`
   保存待回答问题并交给输入区的 `AskUser` 展示；其工具调用、执行输出和结束事件不重复生成
   普通工具卡片。无名称的后续工具事件按 Run、线程和调用 ID 识别同一交互调用。
-- `custom(name=agent_state)` 按 Run 更新 Todo，空列表移除对应 Todo。
+- `custom(name=agent_state)` 按 Run 和线程更新 Todo，空列表只移除对应 Todo。
 - `useAgentRun` 继续拥有运行状态和待回答问题，同时把交互及终态事件交给消息消费函数。
+  收到交互或终态时刷出当前 Run 的文本缓存；终态使尚未结束的工具显示已停止、已取消或
+  已打断，不将 Run 完成推断成工具执行成功。
 - 终态刷新 Thread Detail 后保留当前页面已收到的工具及推理卡片。未知事件不生成空卡片。
 
 工具和推理通过现有 `ChatMessage` 的活动消息载体展示，不引入第二套 Run 生命周期状态。
