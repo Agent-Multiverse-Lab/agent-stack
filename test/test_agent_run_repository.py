@@ -32,7 +32,7 @@ class AgentRunTerminalTest(unittest.IsolatedAsyncioTestCase):
         repository = AgentRunRepository(session)  # type: ignore[arg-type]
         repository._lock_update = AsyncMock(return_value=run)
         payload = {
-            "kind": "ask_user",
+            "name": "ask_user",
             "question": "请选择数据库",
             "options": ["PostgreSQL", "MySQL"],
         }

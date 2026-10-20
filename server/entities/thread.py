@@ -56,7 +56,7 @@ class ThreadRunMetadataResponse(BaseModel):
 class InteractionRequired(BaseModel):
     """等待当前用户回答的 ask_user 问题。"""
 
-    kind: str
+    name: str = "ask_user"
     parent_run_id: str
     questions: list[dict[str, Any]]
 

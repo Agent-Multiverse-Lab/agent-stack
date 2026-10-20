@@ -140,11 +140,10 @@ export function useAgentRun() {
         if (getState().runId !== runId) return;
         if (event.type === "status" && typeof event.status === "string") {
           update({ runStatus: event.status });
-          return;
         }
         if (
-          event.type === "interaction_required" &&
-          event.kind === "ask_user" &&
+          event.type === "interrupt" &&
+          event.name === "ask_user" &&
           typeof event.parent_run_id === "string" &&
           Array.isArray(event.questions) &&
           event.questions.length > 0 &&
@@ -167,18 +166,20 @@ export function useAgentRun() {
         ) {
           update({
             pendingInteraction: {
-              kind: "ask_user",
+              name: event.name,
               parent_run_id: event.parent_run_id,
               questions: event.questions,
             },
           });
-          return;
         }
         await onMessageEvent(event);
       },
     );
     if (getState().runId === runId) {
-      update({ runStatus: endEvent.status, streamUrl: null });
+      await onMessageEvent(endEvent);
+      if (getState().runId === runId) {
+        update({ runStatus: endEvent.status, streamUrl: null });
+      }
     }
     return endEvent;
   }

@@ -4,7 +4,7 @@ import json
 import uuid
 from collections.abc import AsyncIterator, Callable
 from copy import deepcopy
-from dataclasses import asdict, fields
+from dataclasses import fields
 from datetime import datetime
 from typing import Any
 
@@ -1054,7 +1054,12 @@ def _build_ask_human_interrupt(
             }
         ]
 
-    return AskHumanPayload(thread_id=thread_id, run_id=run_id, questions=questions)
+    return AskHumanPayload(
+        thread_id=thread_id,
+        run_id=run_id,
+        questions=questions,
+        name=interrupt_payload.get("name", "ask_user"),
+    )
 
 
 def _format_interrupt_payload(interrupt_value: Any) -> dict[str, Any]:
@@ -1066,8 +1071,7 @@ def _format_interrupt_payload(interrupt_value: Any) -> dict[str, Any]:
 
     interrupt_payload = getattr(interrupt_value, "value", None)
     # value={
-    #                     "kind": "ask_user",
-    #                     "tool": "choose_environment",
+    #                     "name": "choose_environment",
     #                     "question": "请选择部署环境",
     #                     "options": ["本地", "云端"],
     # },
@@ -1115,7 +1119,7 @@ def build_agent_interrupt_message(
     ask_human = _build_ask_human_interrupt(
         interrupt_payload, thread_id=thread_id, run_id=run_id
     )
-    return {"status": "ask_human", **asdict(ask_human)}
+    return {"status": "ask_human", **ask_human.to_dict()}
 
 
 def _reslove_agent_interrupt(agent_state) -> Any | None:

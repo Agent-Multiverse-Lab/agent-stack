@@ -320,7 +320,7 @@ async def _finalize_run(
     terminal_error_type = error_type
     if status == "interrupted" and payload is not None:
         terminal_error = json.dumps(payload, ensure_ascii=False)
-        terminal_error_type = str(payload.get("kind") or "interrupted")
+        terminal_error_type = str(payload.get("name") or "interrupted")
 
     agent_status, changed = await set_run_terminal(
         run_id,
@@ -338,13 +338,16 @@ async def _finalize_run(
     try:
         if changed and agent_status:
             if agent_status == "interrupted":
-                interaction_payload = {
-                    **(payload or {}),
-                    "parent_run_id": run_id,
-                }
+                event_type, interaction_payload = map_stream_event(
+                    {
+                        "status": "ask_human",
+                        "run_id": run_id,
+                        "pending_interrupt": payload or {},
+                    }
+                )
                 await write_stream_event(
                     run_id,
-                    "interaction_required",
+                    event_type,
                     interaction_payload,
                     thread_id,
                 )
@@ -387,6 +390,12 @@ def map_stream_event(chunk: dict[str, Any]) -> tuple[str, Any]:
             "name": "agent_execute_event",
             "chunk": chunk,
             "event": chunk.get("event"),
+        }
+    if status == "ask_human":
+        pending_interrupt = chunk["pending_interrupt"]
+        return "interrupt", {
+            **pending_interrupt,
+            "parent_run_id": chunk.get("run_id") or pending_interrupt["run_id"],
         }
     if status == "finished":
         return "end", {"status": "completed", "chunk": chunk}

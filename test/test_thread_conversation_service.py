@@ -371,7 +371,7 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
             thread_id="thread-1",
             run_metadata={
                 "interrupt": {
-                    "kind": "ask_user",
+                    "name": "ask_user",
                     "questions": [{
                         "question_id": "database",
                         "question": "请选择数据库",
@@ -393,7 +393,7 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
                 "status": "ask_human",
                 "thread_id": "thread-1",
                 "run_id": "parent-run",
-                "kind": "ask_user",
+                "name": "ask_user",
                 "parent_run_id": "parent-run",
                 "questions": [{
                     "question_id": "database",

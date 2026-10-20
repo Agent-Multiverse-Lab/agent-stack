@@ -289,7 +289,7 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
         # FIXEME: finalizer 统一保证 interrupt 落库和事件发布顺序。
         events = []
         payload = {
-            "kind": "ask_user",
+            "name": "ask_user",
             "question": "请选择数据库",
             "options": ["PostgreSQL", "MySQL"],
         }
@@ -321,7 +321,7 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(("interrupted", True), result)
         self.assertEqual(
-            ["persist", "interaction_required", "end"],
+            ["persist", "interrupt", "end"],
             [event[0] for event in events],
         )
         self.assertEqual("interrupted", events[0][2]["status"])
@@ -693,7 +693,7 @@ class AgentRunProcessTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_interrupted_status_uses_finalizer(self) -> None:
         interrupt = {
-            "kind": "ask_user",
+            "name": "ask_user",
             "question": "请选择数据库",
             "options": ["PostgreSQL", "MySQL"],
         }
@@ -705,7 +705,7 @@ class AgentRunProcessTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(result)
         self.assertEqual(
-            ["status", "finalize", "interaction_required", "end", "end"],
+            ["status", "finalize", "interrupt", "end", "end"],
             [event[0] for event in events],
         )
         self.assertEqual(
@@ -722,7 +722,7 @@ class AgentRunProcessTest(unittest.IsolatedAsyncioTestCase):
                 {
                     "status": "interrupted",
                     "interrupt": {
-                        "kind": "ask_user",
+                        "name": "ask_user",
                         "question": "请选择数据库",
                         "options": ["PostgreSQL"],
                     },

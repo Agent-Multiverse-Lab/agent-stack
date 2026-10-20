@@ -13,7 +13,7 @@ afterEach(() => {
 it("requires an answer, aligns full width with composer, and keeps changed answers when navigating", () => {
   const submit = vi.fn()
   const interaction: InteractionRequired = {
-    kind: "ask_user",
+    name: "ask_user",
     parent_run_id: "run-1",
     questions: [
       {

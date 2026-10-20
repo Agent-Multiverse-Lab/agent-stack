@@ -76,7 +76,7 @@ export interface HumanQuestion {
 }
 
 export interface InteractionRequired {
-  kind: "ask_user"
+  name: "ask_user"
   parent_run_id: string
   questions: HumanQuestion[]
 }

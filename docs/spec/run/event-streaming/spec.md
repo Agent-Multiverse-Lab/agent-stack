@@ -168,18 +168,22 @@ Frontend
 
 ## 5. Worker write contract
 
-Stream Key 为 `run:events:{run_id}`。当前四条真实写入路径为：
+Stream Key 为 `run:events:{run_id}`。当前真实写入路径为：
 
 | `event_type` | payload 形成位置 | payload |
 | --- | --- | --- |
 | `status` | `process_agent_run()` | `status=running` |
 | `messages` | `StreamEventSmoother.release()` | `items` 为完整 loading chunk 数组 |
 | `custom` | `map_stream_event()` | `name=agent_state`、完整 `chunk` 和 `agent_state` |
+| `interrupt` | `map_stream_event()` 映射，`_finalize_run()` 发布 | AskHuman 的问题、选项和来源 Run |
 | `end` | `_finalize_run()` 或执行中取消分支 | PostgreSQL 实际终态及可选错误信息 |
 
 `loading` chunk 在主循环中先进入 `StreamEventSmoother`，释放时以 `messages` 写入。
 `agent_state` 由 `map_stream_event()` 映射为 `custom`。`finished` 的映射返回值不会
 直接写入；最终 `end` 由持久化终态形成。
+`ask_human` 由 `map_stream_event()` 映射为独立的 `interrupt`，保留
+`pending_interrupt` 的问题并补入 `parent_run_id`；`_finalize_run()` 在写入 interrupted
+终态后复用该映射发布交互事件，再发布 `end`。
 
 Redis entry 只包含两个 field：
 
