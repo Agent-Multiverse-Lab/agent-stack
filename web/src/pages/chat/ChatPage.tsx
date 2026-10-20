@@ -147,9 +147,9 @@ export default function ChatPage() {
     uploadGeneration.current++;
     abortStream();
     run.clearRun();
+    chat.clearMessages();
     chat.update({
       thread: null,
-      messages: [],
       draft: "",
       attachments: [],
       uploadingCount: 0,
@@ -163,7 +163,8 @@ export default function ChatPage() {
       if (activeRun && run.isActive()) void monitorRun(id, expected);
     } catch (caught) {
       if (operation.current === expected && !isAbortError(caught)) {
-        chat.update({ thread: null, messages: [], error: errorText(caught) });
+        chat.clearMessages();
+        chat.update({ thread: null, error: errorText(caught) });
       }
     } finally {
       if (operation.current === expected) chat.update({ loading: false });

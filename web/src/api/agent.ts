@@ -1,10 +1,10 @@
 import { apiClient } from "@/api/client"
 import i18n from "@/i18n"
+import type { Agent, AgentSummary } from "@/types/agent"
 import type { UploadedAttachmentResponse } from "@/types/attachment"
 import type {
   AgentCatalogResponse,
   AgentContextConfiguration,
-  AgentCatalogEntry,
   AgentUpdateRequest,
   AgentRunCancelResponse,
   AgentRunCreateResponse,
@@ -12,7 +12,6 @@ import type {
   AgentRunResumeRequest,
   AgentRunResumeResponse,
   AgentRunStreamEvent,
-  AgentSummary,
   JsonObject,
   ThreadDetailResponse,
   ThreadListResponse,
@@ -40,7 +39,7 @@ export const getAgentContext = (agentId: string, signal?: AbortSignal) =>
 export const updateAgent = async (
   agentId: string,
   request: AgentUpdateRequest
-): Promise<AgentCatalogEntry> => {
+): Promise<Agent> => {
   const response = await apiClient.apiFetch(`/api/agent/${encodeURIComponent(agentId)}`, {
     method: "PATCH",
     requiresAuth: true,

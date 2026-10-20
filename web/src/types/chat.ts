@@ -1,22 +1,12 @@
+import type { Agent } from "@/types/agent"
 import type { ThreadMessageAttachmentResponse } from "@/types/attachment"
 
 export type JsonObject = Record<string, unknown>
 export type IsoDateTime = string
 
-export interface AgentSummary {
-  id: string
-  name: string
-  description: string
-}
-
-export interface AgentCatalogEntry extends AgentSummary {
-  is_subagent: boolean
-  enabled: boolean
-}
-
 export interface AgentCatalogResponse {
-  agents: AgentCatalogEntry[]
-  subagents: AgentCatalogEntry[]
+  agents: Agent[]
+  subagents: Agent[]
 }
 
 export interface AgentContextConfiguration {

@@ -8,7 +8,8 @@ import { Empty, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
 import { useTranslation } from "@/i18n"
 import { AgentCard } from "@/pages/agent/components/AgentCard"
-import type { AgentCatalogEntry, AgentCatalogResponse } from "@/types/chat"
+import type { Agent } from "@/types/agent"
+import type { AgentCatalogResponse } from "@/types/chat"
 
 export default function AgentPage() {
   const { t } = useTranslation()
@@ -41,7 +42,7 @@ export default function AgentPage() {
   const hasAgents = catalog.agents.length + catalog.subagents.length > 0
   const refresh = () => setRefreshVersion((version) => version + 1)
 
-  const handleAgentUpdated = (updated: AgentCatalogEntry) => {
+  const handleAgentUpdated = (updated: Agent) => {
     setCatalog((current) => ({
       agents: current.agents.map((agent) => agent.id === updated.id ? updated : agent),
       subagents: current.subagents.map((agent) => agent.id === updated.id ? updated : agent),

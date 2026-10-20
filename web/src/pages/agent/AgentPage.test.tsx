@@ -4,7 +4,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { getAgentCatalog, getAgentContext, updateAgent } from "@/api/agent"
 import AgentPage from "@/pages/agent/AgentPage"
 import { installBrowserStubs } from "@/test/browserStubs"
-import type { AgentCatalogEntry, AgentCatalogResponse } from "@/types/chat"
+import type { Agent } from "@/types/agent"
+import type { AgentCatalogResponse } from "@/types/chat"
 
 vi.mock("@/api/agent", () => ({ getAgentCatalog: vi.fn(), getAgentContext: vi.fn(), updateAgent: vi.fn() }))
 
@@ -212,13 +213,13 @@ it("allows inspecting disabled agents and separately opens subagent details", as
 })
 
 it("saves edited fields, prevents closing while saving, and reopens the updated main agent", async () => {
-  const updated: AgentCatalogEntry = {
+  const updated: Agent = {
     ...catalog.agents[1]!,
     name: "Saved coordinator",
     description: "Updated description from the database",
     enabled: false,
   }
-  let resolveUpdate!: (agent: AgentCatalogEntry) => void
+  let resolveUpdate!: (agent: Agent) => void
   vi.mocked(updateAgent).mockReturnValue(new Promise((resolve) => { resolveUpdate = resolve }))
   render(<AgentPage />)
 
@@ -296,7 +297,7 @@ it.each(["Cancel", "Close", "Escape"])("discards the unsaved draft when closing 
 })
 
 it("keeps the draft after a failed save and retries it successfully", async () => {
-  const updated: AgentCatalogEntry = {
+  const updated: Agent = {
     ...catalog.subagents[0]!,
     name: "Updated specialist",
     description: "A draft worth keeping",
@@ -336,7 +337,7 @@ it("keeps the draft after a failed save and retries it successfully", async () =
 })
 
 it("rejects a whitespace-only name and lets a disabled agent be enabled and saved", async () => {
-  const updated: AgentCatalogEntry = { ...catalog.agents[2]!, enabled: true }
+  const updated: Agent = { ...catalog.agents[2]!, enabled: true }
   vi.mocked(updateAgent).mockResolvedValue(updated)
   render(<AgentPage />)
 
