@@ -6,6 +6,14 @@ const supportedLanguages = ["en", "zh-CN"] as const;
 type Language = (typeof supportedLanguages)[number];
 
 const translations = {
+  "Tool": "工具",
+  "Arguments": "参数",
+  "Progress": "执行进度",
+  "Output": "输出",
+  "Error": "错误",
+  "Cancelled": "已取消",
+  "Interrupted": "已打断",
+  "Stopped": "已停止",
   "Back to tools": "返回工具列表",
   "Example metadata": "示例工具信息",
   "Description unavailable": "暂无用途说明",

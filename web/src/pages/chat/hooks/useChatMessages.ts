@@ -52,6 +52,7 @@ export function useChatMessages() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const current = useRef(messages);
   const nextOptimisticId = useRef(-1);
+  const interactionToolCalls = useRef(new Map<string, Set<string>>());
 
   const getMessages = useCallback(() => current.current, []);
   const updateMessages = useCallback(
@@ -97,6 +98,7 @@ export function useChatMessages() {
   }
 
   function clearRunStreamMessages(runId: string) {
+    interactionToolCalls.current.delete(runId);
     updateMessages((messages) =>
       messages.filter((message) => {
         if (message.type !== "ai") return true;
@@ -162,29 +164,120 @@ export function useChatMessages() {
   );
   const streamSmoother = useStreamSmoother(appendAiText);
 
+  function appendReasoning(
+    event: AgentRunStreamEvent,
+    messageId: string,
+    threadId: string | null,
+    content: string,
+  ) {
+    updateMessages((previous) => {
+      const messages = [...previous];
+      const index = messages.findIndex((message) => {
+        const item = chatMessageEvent(message);
+        return message.type === "ai" && message.payload.type === "tool" &&
+          item?.type === "reasoning" && item.message_id === messageId &&
+          item.run_id === event.run_id && item.thread_id === threadId;
+      });
+      const currentEvent = index === -1 ? null : chatMessageEvent(messages[index]);
+      const message: ChatMessage = {
+        type: "ai",
+        payload: {
+          type: "tool",
+          event: {
+            type: "reasoning",
+            message_id: messageId,
+            run_id: event.run_id,
+            thread_id: threadId,
+            created_at: currentEvent?.created_at ?? event.created_at,
+            content: String(currentEvent?.content ?? "") + content,
+          },
+        },
+      };
+      if (index === -1) messages.push(message);
+      else messages[index] = message;
+      return messages;
+    });
+  }
+
+  function upsertToolCall(
+    event: AgentRunStreamEvent,
+    threadId: string | null,
+    toolCallId: string,
+    patch: Record<string, unknown>,
+  ) {
+    const matchesToolCall = (message: ChatMessage) => {
+      const item = chatMessageEvent(message);
+      return message.type === "ai" && message.payload.type === "tool" &&
+        item?.type === "tool_call" && item.tool_call_id === toolCallId &&
+        item.run_id === event.run_id && item.thread_id === threadId;
+    };
+    const callKey = JSON.stringify([threadId, toolCallId]);
+    if (patch.name === "ask_user") {
+      // 后续工具输出和结束事件不含名称，记录调用 ID 以便继续走独立交互通道。
+      const calls = interactionToolCalls.current.get(event.run_id) ?? new Set<string>();
+      calls.add(callKey);
+      interactionToolCalls.current.set(event.run_id, calls);
+    }
+    if (interactionToolCalls.current.get(event.run_id)?.has(callKey)) {
+      const messages = getMessages();
+      const remaining = messages.filter((message) => !matchesToolCall(message));
+      if (remaining.length !== messages.length) updateMessages(remaining);
+      return;
+    }
+    updateMessages((previous) => {
+      const messages = [...previous];
+      const index = messages.findIndex(matchesToolCall);
+      const currentEvent = index === -1 ? null : chatMessageEvent(messages[index]);
+      const nextEvent: Record<string, unknown> = {
+        ...currentEvent,
+        ...patch,
+        type: "tool_call",
+        tool_call_id: toolCallId,
+        run_id: event.run_id,
+        thread_id: threadId,
+        created_at: currentEvent?.created_at ?? event.created_at,
+        status: patch.status ?? currentEvent?.status ?? "pending",
+      };
+      if (Array.isArray(patch.output_deltas)) {
+        nextEvent.output_deltas = [
+          ...(Array.isArray(currentEvent?.output_deltas) ? currentEvent.output_deltas : []),
+          ...patch.output_deltas,
+        ];
+      }
+      const message: ChatMessage = {
+        type: "ai",
+        payload: { type: "tool", event: nextEvent },
+      };
+      if (index === -1) messages.push(message);
+      else messages[index] = message;
+      return messages;
+    });
+  }
+
   function applyRunMessageEvent(event: AgentRunStreamEvent, runId: string) {
     if (event.type === "messages") {
       if (!Array.isArray(event.items)) return;
-      const chunks = new Map<string, StreamTextChunk>();
       for (const item of event.items) {
         if (!isRecord(item) || !Array.isArray(item.stream_event)) continue;
         for (const delta of item.stream_event) {
-          if (
-            !isRecord(delta) ||
-            delta.type !== "message_delta" ||
-            typeof delta.message_id !== "string" ||
-            typeof delta.content_delta !== "string"
-          )
-            continue;
+          if (!isRecord(delta)) continue;
           const threadId =
             typeof delta.thread_id === "string"
               ? delta.thread_id
               : event.thread_id;
-          const key = `${threadId ?? ""}\u0000${delta.message_id}`;
-          const current = chunks.get(key);
-          if (current) current.content += delta.content_delta;
-          else {
-            chunks.set(key, {
+          if (delta.type === "tool_call" && typeof delta.tool_call_id === "string") {
+            const patch: Record<string, unknown> = {};
+            if (typeof delta.name === "string" && delta.name) patch.name = delta.name;
+            if (delta.args !== undefined) patch.args = delta.args;
+            upsertToolCall(event, threadId, delta.tool_call_id, patch);
+            continue;
+          }
+          if (delta.type !== "message_delta" || typeof delta.message_id !== "string") continue;
+          const reasoning = [delta.reasoning_content_delta, delta.additional_kwargs_reasoning_content]
+            .find((value): value is string => typeof value === "string" && value.length > 0);
+          if (reasoning) appendReasoning(event, delta.message_id, threadId, reasoning);
+          if (typeof delta.content_delta === "string" && delta.content_delta) {
+            streamSmoother.pushChunk({
               messageId: delta.message_id,
               content: delta.content_delta,
               threadId,
@@ -194,7 +287,34 @@ export function useChatMessages() {
           }
         }
       }
-      for (const chunk of chunks.values()) streamSmoother.pushChunk(chunk);
+      return;
+    }
+    if (event.type === "custom" && event.name === "agent_execute_event") {
+      const execution = isRecord(event.event) ? event.event : null;
+      const data = isRecord(execution?.stream_data) ? execution.stream_data : null;
+      if (!data || typeof data.tool_call_id !== "string") return;
+      const patch: Record<string, unknown> = {};
+      switch (data.event) {
+        case "tool-started":
+          patch.status = "running";
+          if (typeof data.tool_name === "string" && data.tool_name) patch.name = data.tool_name;
+          if (data.input !== undefined) patch.args = data.input;
+          break;
+        case "tool-output-delta":
+          patch.output_deltas = [data.delta];
+          break;
+        case "tool-finished":
+          patch.status = isRecord(data.output) && data.output.status === "error" ? "error" : "completed";
+          patch.output = data.output;
+          break;
+        case "tool-error":
+          patch.status = "error";
+          patch.error = data.message;
+          break;
+        default:
+          return;
+      }
+      upsertToolCall(event, event.thread_id, data.tool_call_id, patch);
       return;
     }
     if (event.type !== "custom" || event.name !== "agent_state") return;
@@ -227,6 +347,7 @@ export function useChatMessages() {
 
   function clearMessages() {
     streamSmoother.reset();
+    interactionToolCalls.current.clear();
     updateMessages([]);
   }
 

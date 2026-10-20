@@ -1,6 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChevronRight } from "lucide-react";
+import { Brain, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -10,6 +10,7 @@ import {
 import type { ThreadMessageAttachmentResponse } from "@/types/attachment";
 import type { ChatMessage as ChatMessageType } from "@/types/chat";
 import { Attachment } from "@/pages/chat/components/Attachment";
+import { ToolCall } from "@/pages/chat/components/ToolCall";
 import { useTranslation } from "@/i18n";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -119,7 +120,11 @@ export function ChatMessage({ message }: { message: ChatMessageType }) {
         </div>
       </article>
     );
-  if (message.payload.type === "tool") return <AgentTasks event={event} />;
+  if (message.payload.type === "tool") {
+    if (event.type === "tool_call") return <ToolCall event={event} />;
+    if (event.type === "reasoning") return <Reasoning content={content} />;
+    return <AgentTasks event={event} />;
+  }
   return (
     <article className="min-w-0 max-w-full text-sm leading-6 tracking-[0.25px] text-foreground">
       {content && (
@@ -135,5 +140,27 @@ export function ChatMessage({ message }: { message: ChatMessageType }) {
         </ul>
       )}
     </article>
+  );
+}
+
+function Reasoning({ content }: { content: string }) {
+  const { t } = useTranslation();
+  if (!content) return null;
+  const preview = content.trim().split(/\r?\n/).at(-1) ?? "";
+  return (
+    <Collapsible className="group/reasoning w-full max-w-2xl min-w-0 text-sm">
+      <CollapsibleTrigger aria-label={`${t("Reasoning")} ${preview}`} render={
+        <Button type="button" variant="ghost" size="sm"
+          className="h-auto max-w-full justify-start px-1 py-1 text-xs text-muted-foreground" />
+      }>
+        <ChevronRight className="shrink-0 transition-transform group-data-open/reasoning:rotate-90" />
+        <Brain className="shrink-0" />
+        <span className="shrink-0">{t("Reasoning")}</span>
+        <span className="truncate">{preview}</span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-1.5 ml-3 max-h-72 overflow-auto whitespace-pre-wrap break-words border-l border-border py-1 pl-3 text-xs leading-5 text-muted-foreground">
+        {content}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

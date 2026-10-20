@@ -174,7 +174,7 @@ Stream Key 为 `run:events:{run_id}`。当前真实写入路径为：
 | --- | --- | --- |
 | `status` | `process_agent_run()` | `status=running` |
 | `messages` | `StreamEventSmoother.release()` | `items` 为完整 loading chunk 数组 |
-| `custom` | `map_stream_event()` | `name=agent_state`、完整 `chunk` 和 `agent_state` |
+| `custom` | `map_stream_event()` | `name=agent_state` 的 Todo，或 `name=agent_execute_event` 的工具执行事件 |
 | `interrupt` | `map_stream_event()` 映射，`_finalize_run()` 发布 | AskHuman 的问题、选项和来源 Run |
 | `end` | `_finalize_run()` 或执行中取消分支 | PostgreSQL 实际终态及可选错误信息 |
 
@@ -650,8 +650,22 @@ const applyRunStreamEvent = (
 }
 ```
 
-当前只渲染真实 `message_delta.content_delta`。`tool_call` 仍可被通用事件读取，但本次
-不新增工具调用 UI。
+React 前端由 `web/src/pages/chat/hooks/useChatMessages.ts` 消费真实事件：
+
+- `message_delta.content_delta` 继续平滑显示为正文；`reasoning_content_delta` 或
+  `additional_kwargs_reasoning_content` 累加到独立的可折叠推理区域，同一分片优先使用前者。
+- `tool_call` 立即生成待执行卡片；`custom(name=agent_execute_event)` 从
+  `event.stream_data` 读取 `tool-started/tool-output-delta/tool-finished/tool-error`，更新工具
+  名称、参数、进度、结果及错误。归并键为 `run_id + thread_id + tool_call_id`。
+- 工具卡片显示名称和状态，展开后查看参数及输出。
+- `ask_user` 使用独立的 `interrupt(name=ask_user)` 交互事件，由 `useAgentRun`
+  保存待回答问题并交给输入区的 `AskUser` 展示；其工具调用、执行输出和结束事件不重复生成
+  普通工具卡片。无名称的后续工具事件按 Run、线程和调用 ID 识别同一交互调用。
+- `custom(name=agent_state)` 按 Run 更新 Todo，空列表移除对应 Todo。
+- `useAgentRun` 继续拥有运行状态和待回答问题，同时把交互及终态事件交给消息消费函数。
+- 终态刷新 Thread Detail 后保留当前页面已收到的工具及推理卡片。未知事件不生成空卡片。
+
+工具和推理通过现有 `ChatMessage` 的活动消息载体展示，不引入第二套 Run 生命周期状态。
 
 ### 10.5 Stream orchestration and reconnect
 
