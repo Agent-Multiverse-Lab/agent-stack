@@ -10,7 +10,7 @@ afterEach(() => {
   void i18n.changeLanguage("en")
 })
 
-it("requires an answer and keeps changed answers when navigating", () => {
+it("requires an answer, aligns full width with composer, and keeps changed answers when navigating", () => {
   const submit = vi.fn()
   const interaction: InteractionRequired = {
     kind: "ask_user",
@@ -35,6 +35,15 @@ it("requires an answer and keeps changed answers when navigating", () => {
     ],
   }
   render(<AskUser interaction={interaction} disabled={false} submit={submit} />)
+
+  const card = screen.getByRole("article", { name: "Agent questions" })
+  expect(card.className).toContain("w-full")
+  expect(card.className).not.toContain("max-w-[36rem]")
+  expect(screen.queryByText("Input required")).toBeNull()
+  expect(screen.queryByText("Agent needs your choice")).toBeNull()
+  expect(
+    screen.queryByText("Choose an option, then continue. You can go back to change it."),
+  ).toBeNull()
 
   fireEvent.click(screen.getByRole("button", { name: "Next" }))
   expect(screen.getByText("First question")).toBeTruthy()

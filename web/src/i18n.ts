@@ -236,10 +236,6 @@ const translations = {
   "Audio": "音频",
   "Video": "视频",
   "Agent questions": "代理提问",
-  "Input required": "需要输入",
-  "Agent needs your choice": "代理需要你做出选择",
-  "Choose an option, then continue. You can go back to change it.":
-    "请选择一个选项，然后进入下一题；可返回修改。",
   "Choose an answer to continue.": "请选择一个答案后继续。",
   "Questionnaire progress": "答题进度",
   "Question {{current}} of {{total}}": "第 {{current}} 题，共 {{total}} 题",
