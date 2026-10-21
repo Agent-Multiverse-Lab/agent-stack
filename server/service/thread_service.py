@@ -703,12 +703,12 @@ def _lc_message_v3_dispather(
     if event_type == "content-block-finish":
         # 专门处理工具的调用完成的事件， 这个时候，event里面会有一个content字段，里面包含了工具调用的结果
         content = (
-            event.get("content") if isinstance(event.get("content"), str) else None
+            event.get("content") if isinstance(event.get("content"), dict) else None
         )
         if (
-            event.get("type") != "tool_call"
-            or not event.get("id")
-            and content.get("name")
+            content is None
+            or content.get("type") != "tool_call"
+            or not content.get("id")
         ):
             return None
 
@@ -718,8 +718,8 @@ def _lc_message_v3_dispather(
             "thread_id": thread_id,
             "tool_call_id": content.get("id"),
             "name": content.get("name"),
-            "args": content.get("args") if content.get("args") else {},
-            "index": event.get("index") if event.get("index") is not None else 0,
+            "args": content.get("args") if "args" in content else {},
+            "index": event.get("index") if isinstance(event.get("index"), int) else 0,
         }
 
 

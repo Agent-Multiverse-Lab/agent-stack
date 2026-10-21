@@ -232,8 +232,10 @@ loading chunk：
 | `thread_id` | string | 所属线程 |
 
 当前文本 item 使用 `type=message_delta` 和 `content_delta`。当前工具调用 item 使用
-`type=tool_call`，并携带 `tool_call_id/name/args/index`。这些只是同一数组中的不同
-消息内容，不要求分别建立 TypeScript 实体。
+`type=tool_call`，并携带 `tool_call_id/name/args/index`。LC v2 的 dispatcher 和 loading
+wrapper 保持不变；LC v3 工具 item 到达前端后收窄为单一的 `AIMessageChunk`，不为文本
+`message_delta` 另建 TypeScript subtype。v2 的字符串参数分片在前端按 Run、线程、消息
+位置和工具调用 ID 累积并解析，v3 的结构化 JSON 参数保持原值。
 
 流式字符串 `message_id` 不是 PostgreSQL 数字型 `ThreadMessageResponse.message_id`。
 
