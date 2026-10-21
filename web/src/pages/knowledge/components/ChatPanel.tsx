@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { useTranslation } from "@/i18n"
-import type { KnowledgeCitation } from "@/types/knowledge"
+import type { KnowledgeCitation } from "@/api/knowledge"
 
 interface ChatMessage {
   role: "user" | "assistant"

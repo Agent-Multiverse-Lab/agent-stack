@@ -1,55 +1,51 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
-import { getAgentCatalog, getAgentContext, updateAgent } from "@/api/agent"
+import { listAgents, getAgentContext, updateAgent } from "@/api/agent"
 import AgentPage from "@/pages/agent/AgentPage"
 import { installBrowserStubs } from "@/test/browserStubs"
-import type { AgentCatalogEntry, AgentCatalogResponse } from "@/types/chat"
+import type { Agent } from "@/types/agent"
 
-vi.mock("@/api/agent", () => ({ getAgentCatalog: vi.fn(), getAgentContext: vi.fn(), updateAgent: vi.fn() }))
+vi.mock("@/api/agent", () => ({ listAgents: vi.fn(), getAgentContext: vi.fn(), updateAgent: vi.fn() }))
 
-const catalog: AgentCatalogResponse = {
-  agents: [
-    {
-      id: "research-agent",
-      name: "DB research",
-      description: "Research description from the database",
-      is_subagent: false,
-      enabled: true,
-    },
-    {
-      id: "LeaderAgent",
-      name: "DB coordinator",
-      description: "Coordinator description from the database",
-      is_subagent: false,
-      enabled: true,
-    },
-    {
-      id: "offline-agent",
-      name: "DB offline",
-      description: "Disabled description from the database",
-      is_subagent: false,
-      enabled: false,
-    },
-  ],
-  subagents: [
-    {
-      id: "specialist-agent",
-      name: "DB specialist",
-      description: "Specialist description from the database",
-      is_subagent: true,
-      enabled: true,
-    },
-  ],
-}
+const agentList: Agent[] = [
+  {
+    id: "research-agent",
+    name: "DB research",
+    description: "Research description from the database",
+    is_subagent: false,
+    enabled: true,
+  },
+  {
+    id: "LeaderAgent",
+    name: "DB coordinator",
+    description: "Coordinator description from the database",
+    is_subagent: false,
+    enabled: true,
+  },
+  {
+    id: "offline-agent",
+    name: "DB offline",
+    description: "Disabled description from the database",
+    is_subagent: false,
+    enabled: false,
+  },
+  {
+    id: "specialist-agent",
+    name: "DB specialist",
+    description: "Specialist description from the database",
+    is_subagent: true,
+    enabled: true,
+  },
+]
 
 beforeEach(() => {
   installBrowserStubs()
-  vi.mocked(getAgentCatalog).mockResolvedValue(catalog)
+  vi.mocked(listAgents).mockResolvedValue(agentList)
   vi.mocked(getAgentContext).mockResolvedValue({
     model: "provider/model", system_prompt: "Persisted system prompt", summary_threshold: 64,
     summary_keep_messages: 8, summary_tool_result_token_limit: 250, summary_prompt: "Summarize findings",
-    tools: ["search"], mcps: ["documents"], skill_root: "/skills", style_profolio: { tone: "concise" },
+    tools: ["search"], mcps: ["documents"], skill_root: "/skills",
   })
 })
 
@@ -88,23 +84,23 @@ it("shows database names and descriptions with the leader before separate agent 
   expect(subagents.getByText("Specialist description from the database")).toBeTruthy()
 })
 
-it("shows a failed request and retries to load the catalog", async () => {
-  vi.mocked(getAgentCatalog)
-    .mockRejectedValueOnce(new Error("Catalog service unavailable"))
-    .mockResolvedValueOnce(catalog)
+it("shows a failed request and retries to load the agents", async () => {
+  vi.mocked(listAgents)
+    .mockRejectedValueOnce(new Error("Agent service unavailable"))
+    .mockResolvedValueOnce(agentList)
   render(<AgentPage />)
 
   const alert = await screen.findByRole("alert")
-  expect(within(alert).getByText("Catalog service unavailable")).toBeTruthy()
+  expect(within(alert).getByText("Agent service unavailable")).toBeTruthy()
   fireEvent.click(within(alert).getByRole("button", { name: "Retry" }))
 
   expect(await screen.findByRole("article", { name: "DB coordinator" })).toBeTruthy()
-  await waitFor(() => expect(getAgentCatalog).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(listAgents).toHaveBeenCalledTimes(2))
   expect(screen.queryByRole("alert")).toBeNull()
 })
 
-it("shows the empty catalog without agent cards or group headings", async () => {
-  vi.mocked(getAgentCatalog).mockResolvedValue({ agents: [], subagents: [] })
+it("shows the empty state without agent cards or group headings", async () => {
+  vi.mocked(listAgents).mockResolvedValue([])
   render(<AgentPage />)
 
   expect(await screen.findByText("No agents yet")).toBeTruthy()
@@ -112,8 +108,8 @@ it("shows the empty catalog without agent cards or group headings", async () => 
   expect(screen.queryByRole("region")).toBeNull()
 })
 
-it("shows a subagent-only catalog without inventing a leader or ordinary agents", async () => {
-  vi.mocked(getAgentCatalog).mockResolvedValue({ agents: [], subagents: catalog.subagents })
+it("shows a subagent-only list without inventing a leader or ordinary agents", async () => {
+  vi.mocked(listAgents).mockResolvedValue(agentList.filter((agent) => agent.is_subagent))
   render(<AgentPage />)
 
   expect(await screen.findByRole("article", { name: "DB specialist" })).toBeTruthy()
@@ -125,10 +121,9 @@ it("shows a subagent-only catalog without inventing a leader or ordinary agents"
 })
 
 it("shows an empty subagent group when only a main agent exists", async () => {
-  vi.mocked(getAgentCatalog).mockResolvedValue({
-    agents: catalog.agents.filter((agent) => agent.id === "LeaderAgent"),
-    subagents: [],
-  })
+  vi.mocked(listAgents).mockResolvedValue(
+    agentList.filter((agent) => agent.id === "LeaderAgent")
+  )
   render(<AgentPage />)
 
   expect(await screen.findByRole("article", { name: "DB coordinator" })).toBeTruthy()
@@ -159,7 +154,6 @@ it("opens the main agent details, closes with Escape, and opens a different agen
   expect(prompt.readOnly).toBe(true)
   expect(mainDetails.getByText("64 K tokens")).toBeTruthy()
   expect(mainDetails.getByText("documents")).toBeTruthy()
-  expect(mainDetails.getByRole("region", { name: "Style assets" }).textContent).toContain("concise")
   expect(getAgentContext).toHaveBeenCalledWith("LeaderAgent", expect.any(AbortSignal))
 
   fireEvent.keyDown(mainDialog, { key: "Escape", code: "Escape" })
@@ -212,13 +206,13 @@ it("allows inspecting disabled agents and separately opens subagent details", as
 })
 
 it("saves edited fields, prevents closing while saving, and reopens the updated main agent", async () => {
-  const updated: AgentCatalogEntry = {
-    ...catalog.agents[1]!,
+  const updated: Agent = {
+    ...agentList[1]!,
     name: "Saved coordinator",
     description: "Updated description from the database",
     enabled: false,
   }
-  let resolveUpdate!: (agent: AgentCatalogEntry) => void
+  let resolveUpdate!: (agent: Agent) => void
   vi.mocked(updateAgent).mockReturnValue(new Promise((resolve) => { resolveUpdate = resolve }))
   render(<AgentPage />)
 
@@ -296,8 +290,8 @@ it.each(["Cancel", "Close", "Escape"])("discards the unsaved draft when closing 
 })
 
 it("keeps the draft after a failed save and retries it successfully", async () => {
-  const updated: AgentCatalogEntry = {
-    ...catalog.subagents[0]!,
+  const updated: Agent = {
+    ...agentList[3]!,
     name: "Updated specialist",
     description: "A draft worth keeping",
   }
@@ -336,7 +330,7 @@ it("keeps the draft after a failed save and retries it successfully", async () =
 })
 
 it("rejects a whitespace-only name and lets a disabled agent be enabled and saved", async () => {
-  const updated: AgentCatalogEntry = { ...catalog.agents[2]!, enabled: true }
+  const updated: Agent = { ...agentList[2]!, enabled: true }
   vi.mocked(updateAgent).mockResolvedValue(updated)
   render(<AgentPage />)
 
@@ -371,6 +365,6 @@ it("keeps refresh and content headings without a page corner title", async () =>
   expect(screen.queryByRole("heading", { name: "Agent" })).toBeNull()
   expect(screen.getByRole("main", { name: "Agent" })).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Refresh agents" }))
-  await waitFor(() => expect(getAgentCatalog).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(listAgents).toHaveBeenCalledTimes(2))
   expect(await screen.findByRole("heading", { name: "Main agent" })).toBeTruthy()
 })

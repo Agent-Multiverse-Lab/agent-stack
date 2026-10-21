@@ -6,7 +6,8 @@ import unittest
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import ANY, AsyncMock, Mock
+from uuid import uuid4
 
 from arq.connections import RedisSettings
 from arq.worker import RetryJob
@@ -49,14 +50,16 @@ class WorkerRetryTest(unittest.IsolatedAsyncioTestCase):
         self.namespace = {
             "RetryJob": RetryJob, "RedisSettings": RedisSettings,
             "asyncio": asyncio, "logger": Mock(),
+            "uuid4": uuid4, "WORKER_ID": "worker-test",
             "config": SimpleNamespace(arq_queue_name="test-runs", arq_max_jobs=1, redis_url="redis://localhost:6379/0"),
-            "startup": AsyncMock(), "shutdown": AsyncMock(),
+            "worker_startup": AsyncMock(), "worker_shutdown": AsyncMock(),
             "AGENT_RUN_TERMINAL_STATUSES": frozenset({"completed", "failed", "cancelled", "interrupted"}),
             "_get_agent_run": AsyncMock(return_value=self.run),
             "_get_agent_input_msg": AsyncMock(return_value=SimpleNamespace(content="hello", message_type="human", image_content=None, msg_metadata={})),
             "_get_user": AsyncMock(return_value=SimpleNamespace(uid="user-1")),
             "build_agent_input_msg": Mock(return_value="input"),
             "set_run_running": AsyncMock(return_value=self.run),
+            "release_run_for_retry": AsyncMock(return_value=True),
             "set_run_terminal": AsyncMock(return_value=("failed", True)),
             "clear_agent_run_cancel_signal": AsyncMock(),
             "write_stream_event": AsyncMock(), "write_end_stream_event": AsyncMock(),
@@ -75,9 +78,10 @@ class WorkerRetryTest(unittest.IsolatedAsyncioTestCase):
         source = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         nodes = [
             node for node in source.body
-            if isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef))
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
             and node.name in {
-                "RetryableWorkerError", "process_agent_run", "_process_agent_run", "WorkerSettings",
+                "init_worker_id", "create_run_owner",
+                "RetryableWorkerError", "process_agent_run", "WorkerSettings",
             }
         ]
         exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), "exec"), self.namespace)
@@ -94,7 +98,7 @@ class WorkerRetryTest(unittest.IsolatedAsyncioTestCase):
                 with self.subTest(job_try=job_try, error=type(error).__name__):
                     self.namespace["_get_agent_run"].side_effect = error
                     with self.assertRaises(RetryJob) as raised:
-                        await self.process({"job_try": job_try}, "run-1")
+                        await self.process({"worker_id": "worker-test", "job_try": job_try}, "run-1")
                     self.assertIs(raised.exception, error)
         self.namespace["set_run_terminal"].assert_not_awaited()
         self.namespace["write_stream_event"].assert_not_awaited()
@@ -116,19 +120,19 @@ class WorkerRetryTest(unittest.IsolatedAsyncioTestCase):
                     self.namespace["set_run_terminal"].reset_mock()
                     self.namespace["_get_user"].side_effect = error
                     with self.assertRaises(type(error)) as raised:
-                        await self.process({"job_try": job_try}, "run-1")
+                        await self.process({"worker_id": "worker-test", "job_try": job_try}, "run-1")
                     self.assertIs(raised.exception, error)
                     self.assertNotIsInstance(raised.exception, RetryJob)
                     self.namespace["set_run_terminal"].assert_awaited_once_with(
-                        "run-1", status="failed", error=str(error), error_type=type(error).__name__,
+                        "run-1", worker_id=ANY, status="failed", error=str(error), error_type=type(error).__name__,
                     )
         self.namespace["_finalize_run"].assert_not_awaited()
 
     async def test_retry_reloads_run_and_executes_agent_once_after_recovery(self):
         self.namespace["_get_agent_run"].side_effect = [self.retryable_error("retryable"), self.run]
         with self.assertRaises(RetryJob):
-            await self.process({"job_try": 1}, "run-1")
-        await self.process({"job_try": 2}, "run-1")
+            await self.process({"worker_id": "worker-test", "job_try": 1}, "run-1")
+        await self.process({"worker_id": "worker-test", "job_try": 2}, "run-1")
         self.assertEqual(self.namespace["_get_agent_run"].await_count, 2)
         self.namespace["set_run_terminal"].assert_not_awaited()
         self.namespace["AgentRunController"].assert_called_once_with("run-1")
@@ -138,11 +142,11 @@ class WorkerRetryTest(unittest.IsolatedAsyncioTestCase):
     async def test_initial_stream_publication_failure_is_not_retried_and_closes_listener(self):
         self.namespace["write_stream_event"].side_effect = RedisConnectionError("offline")
         with self.assertRaises(RedisConnectionError):
-            await self.process({"job_try": 1}, "run-1")
+            await self.process({"worker_id": "worker-test", "job_try": 1}, "run-1")
         self.controller.close.assert_awaited_once()
         self.namespace["_finalize_run"].assert_not_awaited()
         self.namespace["set_run_terminal"].assert_awaited_once_with(
-            "run-1", status="failed", error="offline", error_type="ConnectionError",
+            "run-1", worker_id=ANY, status="failed", error="offline", error_type="ConnectionError",
         )
 
     async def test_session_connection_failure_is_not_retried_before_stream_starts(self):
@@ -153,17 +157,17 @@ class WorkerRetryTest(unittest.IsolatedAsyncioTestCase):
 
         self.namespace["postgres_manager"].get_async_session_context = failed_session
         with self.assertRaises(ConnectionError):
-            await self.process({"job_try": 1}, "run-1")
+            await self.process({"worker_id": "worker-test", "job_try": 1}, "run-1")
         self.namespace["_finalize_run"].assert_not_awaited()
         self.controller.close.assert_awaited_once()
         self.namespace["set_run_terminal"].assert_awaited_once_with(
-            "run-1", status="failed", error="offline", error_type="ConnectionError",
+            "run-1", worker_id=ANY, status="failed", error="offline", error_type="ConnectionError",
         )
 
     async def test_stream_connection_failure_is_finalized_without_replaying_agent(self):
         self.stream_error = ConnectionError("offline")
         with self.assertRaises(ConnectionError):
-            await self.process({"job_try": 1}, "run-1")
+            await self.process({"worker_id": "worker-test", "job_try": 1}, "run-1")
         self.assertEqual(self.run.agent_status, "failed")
         self.namespace["_finalize_run"].assert_awaited_once()
         self.controller.close.assert_awaited_once()
@@ -174,17 +178,17 @@ class WorkerRetryTest(unittest.IsolatedAsyncioTestCase):
                 self.namespace["set_run_terminal"].reset_mock()
                 self.namespace["_get_user"].side_effect = error
                 with self.assertRaises(RuntimeError) as raised:
-                    await self.process({"job_try": 3}, "run-1")
+                    await self.process({"worker_id": "worker-test", "job_try": 3}, "run-1")
                 self.assertNotIsInstance(raised.exception, RetryJob)
                 self.assertIs(raised.exception.__cause__, error)
                 self.namespace["set_run_terminal"].assert_awaited_once_with(
-                    "run-1", status="failed", error="retryable", error_type=type(error).__name__,
+                    "run-1", worker_id=ANY, status="failed", error="retryable", error_type=type(error).__name__,
                 )
 
     async def test_retry_job_after_stream_start_is_finalized_without_retry(self):
         self.stream_error = RetryJob("retryable")
         with self.assertRaises(RuntimeError) as raised:
-            await self.process({"job_try": 1}, "run-1")
+            await self.process({"worker_id": "worker-test", "job_try": 1}, "run-1")
         self.assertNotIsInstance(raised.exception, RetryJob)
         self.assertIs(raised.exception.__cause__, self.stream_error)
         self.assertEqual(self.run.agent_status, "failed")
@@ -193,8 +197,8 @@ class WorkerRetryTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancellation_on_retry_keeps_existing_pre_stream_flow(self):
         self.run.agent_status = "cancel_requested"
-        await self.process({"job_try": 2}, "run-1")
-        self.namespace["set_run_terminal"].assert_awaited_once_with("run-1", status="cancelled")
+        await self.process({"worker_id": "worker-test", "job_try": 2}, "run-1")
+        self.namespace["set_run_terminal"].assert_awaited_once_with("run-1", worker_id=ANY, status="cancelled")
         self.namespace["clear_agent_run_cancel_signal"].assert_awaited_once_with("run-1")
         self.namespace["AgentRunController"].assert_not_called()
 
@@ -202,36 +206,101 @@ class WorkerRetryTest(unittest.IsolatedAsyncioTestCase):
         for status in ("completed", "failed", "cancelled", "interrupted"):
             with self.subTest(status=status):
                 self.run.agent_status = status
-                result = await self.process({"job_try": 2}, "run-1")
+                result = await self.process({"worker_id": "worker-test", "job_try": 2}, "run-1")
                 self.assertEqual(result, {"run_id": "run-1", "status": status})
         self.namespace["set_run_running"].assert_not_awaited()
 
     async def test_missing_input_is_a_permanent_failure(self):
         self.namespace["_get_agent_input_msg"].return_value = None
-        await self.process({"job_try": 1}, "run-1")
+        await self.process({"worker_id": "worker-test", "job_try": 1}, "run-1")
         self.namespace["set_run_terminal"].assert_awaited_once_with(
-            "run-1", status="failed", error="Input message not found: 1", error_type="LookupError",
+            "run-1", worker_id=ANY, status="failed", error="Input message not found: 1", error_type="LookupError",
         )
 
     async def test_business_error_chunk_is_not_retried(self):
         self.chunks = [{"status": "error", "error": "invalid", "error_type": "ValueError"}]
-        await self.process({"job_try": 1}, "run-1")
+        await self.process({"worker_id": "worker-test", "job_try": 1}, "run-1")
         self.assertEqual(self.run.agent_status, "failed")
         self.namespace["_finalize_run"].assert_awaited_once()
 
     async def test_user_cancellation_during_stream_is_not_retried(self):
         self.stream_error = asyncio.CancelledError()
-        result = await self.process({"job_try": 1}, "run-1")
+        result = await self.process({"worker_id": "worker-test", "job_try": 1}, "run-1")
         self.assertEqual(result, ("cancelled", True))
         self.controller.close.assert_awaited_once()
 
     async def test_value_error_during_preparation_is_not_retried(self):
         self.namespace["_get_user"].side_effect = ValueError("invalid")
         with self.assertRaises(ValueError):
-            await self.process({"job_try": 1}, "run-1")
+            await self.process({"worker_id": "worker-test", "job_try": 1}, "run-1")
         self.namespace["set_run_terminal"].assert_awaited_once_with(
-            "run-1", status="failed", error="invalid", error_type="ValueError",
+            "run-1", worker_id=ANY, status="failed", error="invalid", error_type="ValueError",
         )
+
+    async def test_duplicate_claim_exits_before_loading_input_or_executing(self):
+        self.namespace["set_run_running"].return_value = None
+        await self.process({"worker_id": "worker-test"}, "run-1")
+        for name in ("_get_agent_input_msg", "_get_user", "set_run_terminal", "_finalize_run"):
+            self.namespace[name].assert_not_awaited()
+        self.namespace["AgentRunController"].assert_not_called()
+
+    async def test_retry_releases_claim_and_generates_new_owner_token(self):
+        self.namespace["_get_user"].side_effect = [
+            self.retryable_error("retryable"), SimpleNamespace(uid="user-1"),
+        ]
+        first = {"worker_id": "worker-test", "job_try": 1}
+        second = {"worker_id": "worker-test", "job_try": 2}
+        with self.assertRaises(RetryJob):
+            await self.process(first, "run-1")
+        first_owner = self.namespace["set_run_running"].await_args.kwargs["worker_id"]
+        self.namespace["release_run_for_retry"].assert_awaited_once_with(
+            "run-1", worker_id=first_owner,
+        )
+        await self.process(second, "run-1")
+        second_owner = self.namespace["set_run_running"].await_args.kwargs["worker_id"]
+        self.assertNotEqual(first_owner, second_owner)
+        self.assertTrue(first_owner.startswith("worker-test:"))
+        self.assertEqual(
+            self.namespace["_finalize_run"].await_args.kwargs["worker_id"],
+            second_owner,
+        )
+        self.assertEqual(first, {"worker_id": "worker-test", "job_try": 1})
+        self.assertEqual(second, {"worker_id": "worker-test", "job_try": 2})
+
+    async def test_shared_context_keeps_concurrent_run_owners_independent(self):
+        loaded_count = 0
+        both_loaded = asyncio.Event()
+
+        async def load_run(run_id):
+            nonlocal loaded_count
+            run = SimpleNamespace(**{**vars(self.run), "id": run_id})
+            loaded_count += 1
+            if loaded_count == 2:
+                both_loaded.set()
+            await both_loaded.wait()
+            return run
+
+        self.namespace["_get_agent_run"].side_effect = load_run
+        self.namespace["set_run_running"].return_value = SimpleNamespace(agent_status="running")
+        context = {"worker_id": "worker-test", "job_try": 1}
+        await asyncio.wait_for(
+            asyncio.gather(
+                self.process(context, "run-1"),
+                self.process(context, "run-2"),
+            ),
+            timeout=5,
+        )
+
+        owners = {
+            call.args[0]: call.kwargs["worker_id"]
+            for call in self.namespace["set_run_running"].await_args_list
+        }
+        self.assertEqual(set(owners), {"run-1", "run-2"})
+        self.assertEqual(len(set(owners.values())), 2)
+        self.assertEqual(self.namespace["_finalize_run"].await_count, 2)
+        for call in self.namespace["_finalize_run"].await_args_list:
+            self.assertEqual(call.kwargs["worker_id"], owners[call.args[0]])
+        self.assertEqual(context, {"worker_id": "worker-test", "job_try": 1})
 
 
 if __name__ == "__main__":

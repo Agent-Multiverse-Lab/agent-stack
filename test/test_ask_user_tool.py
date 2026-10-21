@@ -35,7 +35,7 @@ class AskUserToolTest(unittest.IsolatedAsyncioTestCase):
                     }
                     if 1 <= count <= 3:
                         self.assertEqual(ask_user.invoke({"questions": [question]}), {"choice": "v0"})
-                        interrupt_mock.assert_called_once_with({"kind": "ask_user", "questions": [question]})
+                        interrupt_mock.assert_called_once_with({"name": "ask_user", "questions": [question]})
                     else:
                         with self.assertRaises(ValidationError):
                             ask_user.invoke({"questions": [question]})
@@ -89,7 +89,7 @@ class AskUserToolTest(unittest.IsolatedAsyncioTestCase):
         )
         state = await graph.aget_state(config)
         self.assertEqual(len(state.interrupts), 1)
-        self.assertEqual(state.interrupts[0].value, {"kind": "ask_user", "questions": questions})
+        self.assertEqual(state.interrupts[0].value, {"name": "ask_user", "questions": questions})
         self.assertFalse(any(isinstance(message, ToolMessage) for message in state.values["messages"]))
 
         answers = {"database": "postgresql", "environment": "local"}

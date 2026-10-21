@@ -5,7 +5,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { ChatAttachment } from "@/types/attachment";
+import type { ChatAttachment } from "@/pages/chat/types";
 import { useTranslation } from "@/i18n";
 
 export function Attachment({

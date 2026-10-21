@@ -11,7 +11,7 @@ from fastapi import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.entities.agent import AgentSummary
+from server.entities.agent import AgentResponse
 from server.entities.thread import (
     ThreadDetailResponse,
     ThreadListResponse,
@@ -116,6 +116,11 @@ async def create_thread(
         uid=str(conversation.uid),
         agent_id=str(conversation.agent_id),
         title=str(conversation.title),
+        summary=(
+            str(conversation.summary)
+            if conversation.summary is not None
+            else None
+        ),
         metadata=dict(conversation.conversation_metadata or {}),
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
@@ -233,14 +238,23 @@ async def delete_thread(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/agents", response_model=list[AgentSummary])
-async def list_agent_summaries(
+@router.get("/agents", response_model=list[AgentResponse], response_model_exclude_none=True)
+async def list_chat_agents(
     current_user: AuthenticatedUser,
     db: AsyncSession = Depends(get_db),
-) -> list[AgentSummary]:
+) -> list[AgentResponse]:
     """列出当前公开顶层 Agent。"""
     agents = await AgentRepository(db).list_agents(role="orchestrator", internal_only=False)
-    return [AgentSummary(id=agent.slug, name=agent.name, description=agent.description) for agent in agents]
+    return [
+        AgentResponse(
+            id=agent.slug,
+            name=agent.name,
+            description=agent.description,
+            is_subagent=agent.is_subagent,
+            enabled=agent.enabled,
+        )
+        for agent in agents
+    ]
 
 
 @router.post(

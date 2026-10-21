@@ -52,8 +52,6 @@ class BaseContext:
         metadata={"description": "本次运行启用的 MCP Server 名称；为空时使用全部已配置服务"},
     )
 
-    style_profolio: dict = field(default_factory=dict, metadata={"description": "素材，算是吧"})
-
     def update_context(self, context: dict):
         "更新前端覆盖的参数"
         for k, v in context.items():

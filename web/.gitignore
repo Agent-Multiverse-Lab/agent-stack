@@ -24,3 +24,12 @@ dist-ssr
 *.sln
 *.sw?
 *.agents/*
+
+# Local browser tooling and generated artifacts
+/.cache/ms-playwright/
+/scripts/screenshot.mjs
+/playwright.config.*
+/playwright/
+/playwright-report/
+/test-results/
+/screenshots/

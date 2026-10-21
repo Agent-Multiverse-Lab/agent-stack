@@ -4,7 +4,8 @@ import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import ChatPage from "./ChatPage";
-import type { AgentRunStreamEvent, ThreadDetailResponse } from "@/types/chat";
+import type { AgentRunStreamEvent } from "@/api/agent-run";
+import type { ThreadDetailResponse } from "@/api/thread";
 
 const mocks = vi.hoisted(() => ({
   getThreadDetail: vi.fn(),
@@ -20,15 +21,19 @@ vi.mock("@/context/ModelContext", () => ({
 vi.mock("@/pages/chat/components/AgentMessageComposer", () => ({ AgentMessageComposer: () => null }));
 vi.mock("@/pages/chat/components/ChatMessage", () => ({ ChatMessage: () => <span>Activity</span> }));
 vi.mock("@/pages/chat/components/AskUser", () => ({ AskUser: () => null }));
-vi.mock("@/api/agent", () => ({
-  getThreadDetail: mocks.getThreadDetail,
+vi.mock("@/api/agent-run", () => ({
   consumeAgentRunStream: mocks.consume,
   createAgentRun: mocks.create,
   resumeAgentRun: mocks.resume,
   cancelAgentRun: mocks.cancel,
   buildAgentRunStreamUrl: (runId: string, threadId: string) => `/runs/${runId}/events?thread=${threadId}`,
+}));
+vi.mock("@/api/thread", () => ({
+  getThreadDetail: mocks.getThreadDetail,
   createThread: vi.fn(),
   listChatAgents: vi.fn(),
+}));
+vi.mock("@/api/attachment", () => ({
   uploadChatAttachments: vi.fn(),
 }));
 
@@ -38,7 +43,7 @@ const streams: { signal: AbortSignal; finish: () => void; emit: (event: AgentRun
 
 function detail(id: string, startedAt: string | null = start): ThreadDetailResponse {
   return {
-    thread: { thread_id: id, title: id, summary: null, agent_id: "LeaderAgent", metadata: {}, created_at: start, updated_at: start, last_message_at: null },
+    thread: { thread_id: id, title: id, summary: null, agent_id: "LeaderAgent", metadata: {}, created_at: start, updated_at: start },
     messages: [],
     active_run: { run_id: `run-${id}`, run_type: "chat", status: startedAt ? "running" : "pending", started_at: startedAt, finished_at: null, parent_run_id: null, metadata: {} },
     pending_interaction: null,

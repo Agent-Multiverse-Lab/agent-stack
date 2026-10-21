@@ -46,13 +46,13 @@ import {
   saveModelProvider,
   testProviderConnection,
 } from "@/api/model";
+import type { ModelSettingsRequest } from "@/api/model";
 import { useAuth } from "@/context/AuthContext";
 import { useTranslation } from "@/i18n";
 import type {
   ModelProvider,
   ModelProviderId,
-  ModelProviderSummary,
-  ModelSettingsRequest,
+  ModelProviderMetadata,
   SettingsModel,
 } from "@/types/model";
 import { SettingsModelOption } from "./SettingsModelOption";
@@ -98,7 +98,7 @@ const providerDraft = (value: ModelProvider): Draft => ({
 export default function SettingsModels() {
   const { t, i18n } = useTranslation();
   const { accessToken } = useAuth();
-  const [providers, setProviders] = useState<ModelProviderSummary[]>([]);
+  const [providers, setProviders] = useState<ModelProviderMetadata[]>([]);
   const [selected, setSelected] = useState<ModelProviderId>("");
   const [drafts, setDrafts] = useState<Partial<Record<string, Draft>>>(
     {},

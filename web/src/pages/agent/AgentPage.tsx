@@ -1,18 +1,18 @@
 import { useEffect, useState } from "react"
 import { Bot, RefreshCw } from "lucide-react"
 
-import { getAgentCatalog } from "@/api/agent"
+import { listAgents } from "@/api/agent"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
 import { useTranslation } from "@/i18n"
 import { AgentCard } from "@/pages/agent/components/AgentCard"
-import type { AgentCatalogEntry, AgentCatalogResponse } from "@/types/chat"
+import type { Agent } from "@/types/agent"
 
 export default function AgentPage() {
   const { t } = useTranslation()
-  const [catalog, setCatalog] = useState<AgentCatalogResponse>({ agents: [], subagents: [] })
+  const [allAgents, setAllAgents] = useState<Agent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [refreshVersion, setRefreshVersion] = useState(0)
@@ -21,9 +21,9 @@ export default function AgentPage() {
     const controller = new AbortController()
     setLoading(true)
     setError("")
-    void getAgentCatalog(controller.signal)
+    void listAgents(controller.signal)
       .then((data) => {
-        if (!controller.signal.aborted) setCatalog(data)
+        if (!controller.signal.aborted) setAllAgents(data)
       })
       .catch((caught: unknown) => {
         if (!controller.signal.aborted) {
@@ -36,16 +36,16 @@ export default function AgentPage() {
     return () => controller.abort()
   }, [refreshVersion, t])
 
-  const leader = catalog.agents.find((agent) => agent.id === "LeaderAgent")
-  const agents = catalog.agents.filter((agent) => agent.id !== "LeaderAgent")
-  const hasAgents = catalog.agents.length + catalog.subagents.length > 0
+  const leader = allAgents.find((agent) => !agent.is_subagent && agent.id === "LeaderAgent")
+  const agents = allAgents.filter((agent) => !agent.is_subagent && agent.id !== "LeaderAgent")
+  const subagents = allAgents.filter((agent) => agent.is_subagent)
+  const hasAgents = allAgents.length > 0
   const refresh = () => setRefreshVersion((version) => version + 1)
 
-  const handleAgentUpdated = (updated: AgentCatalogEntry) => {
-    setCatalog((current) => ({
-      agents: current.agents.map((agent) => agent.id === updated.id ? updated : agent),
-      subagents: current.subagents.map((agent) => agent.id === updated.id ? updated : agent),
-    }))
+  const handleAgentUpdated = (updated: Agent) => {
+    setAllAgents((current) =>
+      current.map((agent) => (agent.id === updated.id ? updated : agent))
+    )
   }
 
   return (
@@ -97,11 +97,11 @@ export default function AgentPage() {
 
             <section className="space-y-3" aria-labelledby="subagents-heading">
               <h2 id="subagents-heading" className="flex items-center gap-2 text-sm font-medium">
-                {t("Sub agents")} <Badge>{catalog.subagents.length}</Badge>
+                {t("Sub agents")} <Badge>{subagents.length}</Badge>
               </h2>
-              {catalog.subagents.length > 0 ? (
+              {subagents.length > 0 ? (
                 <ul className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr))]">
-                  {catalog.subagents.map((agent) => <li key={agent.id}><AgentCard agent={agent} onUpdated={handleAgentUpdated} /></li>)}
+                  {subagents.map((agent) => <li key={agent.id}><AgentCard agent={agent} onUpdated={handleAgentUpdated} /></li>)}
                 </ul>
               ) : (
                 <p className="py-4 text-sm text-muted-foreground">{t("No subagents yet")}</p>

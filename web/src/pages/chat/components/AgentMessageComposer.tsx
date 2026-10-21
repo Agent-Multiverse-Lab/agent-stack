@@ -43,7 +43,7 @@ import {
 import { useTranslation } from "@/i18n";
 import { Attachment } from "@/pages/chat/components/Attachment";
 import ModelSelector from "@/pages/chat/components/ModelSelector";
-import type { UploadedAttachmentResponse } from "@/types/attachment";
+import type { UploadedAttachmentResponse } from "@/api/attachment";
 import type { ChatModelOption } from "@/types/model";
 
 type AgentMessageComposerProps = {

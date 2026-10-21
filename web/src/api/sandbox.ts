@@ -1,8 +1,28 @@
 import { apiClient } from "@/api/client"
-import type {
-  SandboxFileContentResponse,
-  SandboxWorkspaceResponse,
-} from "@/pages/sandbox/types"
+
+export interface SandboxWorkspaceResponse {
+  thread_id: string
+  sandbox_id: string
+  status: string
+  path: string
+  entries: Array<{
+    name: string
+    path: string
+    kind: "directory" | "file"
+    size: number | null
+    modified_at: string
+    file_type?: "code" | "data" | "document" | "image" | null
+  }>
+}
+
+export interface SandboxFileContentResponse {
+  thread_id: string
+  sandbox_id: string
+  path: string
+  content: string
+  encoding: string
+  truncated: boolean
+}
 
 export const listSandboxWorkspace = (threadId: string, path = "/workspace") => {
   const params = new URLSearchParams({ thread_id: threadId, path })

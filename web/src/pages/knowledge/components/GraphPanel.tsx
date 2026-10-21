@@ -17,7 +17,7 @@ import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { useTranslation } from "@/i18n"
-import type { KnowledgeGraphResponse } from "@/types/knowledge"
+import type { KnowledgeGraphResponse } from "@/api/knowledge"
 
 const DEFAULT_SIZE = { width: 800, height: 600 }
 
