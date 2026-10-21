@@ -22,7 +22,7 @@ class ConversationRepository:
         query: str | None = None,
         before_activity_at: datetime | None = None,
         before_id: int | None = None,
-    ) -> list[tuple[Conversation, datetime | None, datetime]]:
+    ) -> list[tuple[Conversation, datetime]]:
         """按最近活动时间倒序列出当前用户的顶层对话。"""
         if limit <= 0:
             raise ValueError("对话列表 limit 必须大于 0")
@@ -32,19 +32,18 @@ class ConversationRepository:
         message_activity = (
             select(
                 Message.conversation_id,
-                func.max(Message.created_at).label("last_message_at"),
+                func.max(Message.created_at).label("last_activity_at"),
             )
             .group_by(Message.conversation_id)
             .subquery()
         )
         last_activity_at = func.coalesce(
-            message_activity.c.last_message_at,
+            message_activity.c.last_activity_at,
             Conversation.updated_at,
         ).label("last_activity_at")
         statement = (
             select(
                 Conversation,
-                message_activity.c.last_message_at,
                 last_activity_at,
             )
             .outerjoin(
@@ -84,7 +83,7 @@ class ConversationRepository:
             ).limit(limit)
         )
         return [
-            (row[0], row[1], row[2])
+            (row[0], row[1])
             for row in result.all()
         ]
 
@@ -136,18 +135,6 @@ class ConversationRepository:
             )
         )
         return result.scalar_one_or_none()
-
-    async def get_last_message_at(
-        self,
-        *,
-        conversation_id: int,
-    ) -> datetime | None:
-        """读取指定对话最后一条消息的创建时间。"""
-        return await self.session.scalar(
-            select(func.max(Message.created_at)).where(
-                Message.conversation_id == conversation_id
-            )
-        )
 
     async def list_messages(
         self,

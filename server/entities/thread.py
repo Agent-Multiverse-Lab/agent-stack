@@ -15,18 +15,6 @@ class ThreadRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
-class ThreadResponse(BaseModel):
-    """创建成功后的对话信息。"""
-
-    uid: str
-    title: str
-    thread_id: str
-    agent_id: str
-    created_at: datetime
-    updated_at: datetime
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
 class ThreadSummaryResponse(BaseModel):
     """对话列表与详情共用的基础信息。"""
 
@@ -37,7 +25,12 @@ class ThreadSummaryResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
-    last_message_at: datetime | None
+
+
+class ThreadResponse(ThreadSummaryResponse):
+    """创建成功后的对话信息。"""
+
+    uid: str
 
 
 class ThreadRunMetadataResponse(BaseModel):

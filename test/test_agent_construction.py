@@ -212,16 +212,16 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(fresh._subagents[custom.slug]["description"], custom.description)
 
     async def test_context_defaults_survive_missing_model_and_do_not_share_nested_values(self):
-        defaults = {"model": "preset/model", "mcps": ["configured-server"], "style_profolio": {"a": [1]}}
+        defaults = {"model": "preset/model", "mcps": ["configured-server"], "tools": [["a"]]}
         values = dict(uid="user-1", run_id="run-1", thread_id="thread-1", request_id="request-1", defaults=defaults)
         first = await thread_service._build_agent_runtime_context(**values, model="")
         second = await thread_service._build_agent_runtime_context(**values, model="chosen/model")
         first["mcps"].append("local")
-        first["style_profolio"]["a"].append(2)
+        first["tools"][0].append("b")
         self.assertEqual(first["model"], "preset/model")
         self.assertEqual(second["model"], "chosen/model")
         self.assertEqual(second["mcps"], ["configured-server"])
-        self.assertEqual(defaults["style_profolio"], {"a": [1]})
+        self.assertEqual(defaults["tools"], [["a"]])
 
     async def test_runtime_context_freezes_default_model_and_overrides_run_identity(self):
         values = dict(uid="user-1", run_id="run-1", thread_id="thread-1", request_id="request-1")

@@ -5,9 +5,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.entities.agent import (
-    AgentCatalogEntry,
-    AgentCatalogResponse,
-    AgentContextResponse,
+    AgentContext,
+    AgentResponse,
     AgentRunCreateRequest,
     AgentRunResumeRequest,
     AgentUpdateRequest,
@@ -28,50 +27,33 @@ from src.database.repositories import AgentRepository, AgentRunRepository
 agent_router = APIRouter(prefix="/agent", tags=["agent_router"])
 
 
-@agent_router.post("")
-def create_agent():
-    """预留用户自定义 Agent 入口。"""
-
-
-@agent_router.get("/catalog", response_model=AgentCatalogResponse)
-async def list_agent_catalog(
+@agent_router.get("", response_model=list[AgentResponse], response_model_exclude_none=True)
+async def list_agents(
     current_user: AuthenticatedUser,
     db: AsyncSession = Depends(get_db),
-) -> AgentCatalogResponse:
-    """读取已认证用户可查看的数据库 Agent 目录。"""
+) -> list[AgentResponse]:
+    """读取已认证用户可查看的数据库 Agent 列表。"""
     repository = AgentRepository(db)
     agents = await repository.list_main_agents()
     subagents = await repository.list_subagents()
-    return AgentCatalogResponse(
-        agents=[
-            AgentCatalogEntry(
-                id=agent.slug,
-                name=agent.name,
-                description=agent.description,
-                is_subagent=agent.is_subagent,
-                enabled=agent.enabled,
-            )
-            for agent in agents
-        ],
-        subagents=[
-            AgentCatalogEntry(
-                id=agent.slug,
-                name=agent.name,
-                description=agent.description,
-                is_subagent=agent.is_subagent,
-                enabled=agent.enabled,
-            )
-            for agent in subagents
-        ],
-    )
+    return [
+        AgentResponse(
+            id=agent.slug,
+            name=agent.name,
+            description=agent.description,
+            is_subagent=agent.is_subagent,
+            enabled=agent.enabled,
+        )
+        for agent in (*agents, *subagents)
+    ]
 
 
-@agent_router.get("/{agent_id}/context", response_model=AgentContextResponse)
+@agent_router.get("/{agent_id}/context", response_model=AgentContext)
 async def read_agent_context(
     agent_id: str,
     current_user: AuthenticatedUser,
     db: AsyncSession = Depends(get_db),
-) -> AgentContextResponse:
+) -> AgentContext:
     """读取已认证用户查看的 Agent 基础配置。"""
     context = await get_agent_context(db, agent_id)
     if context is None:
@@ -79,13 +61,13 @@ async def read_agent_context(
     return context
 
 
-@agent_router.patch("/{agent_id}", response_model=AgentCatalogEntry)
+@agent_router.patch("/{agent_id}", response_model=AgentResponse, response_model_exclude_none=True)
 async def update_agent(
     agent_id: str,
     payload: AgentUpdateRequest,
     current_user: AuthenticatedUser,
     db: AsyncSession = Depends(get_db),
-) -> AgentCatalogEntry:
+) -> AgentResponse:
     """保存已认证用户对 Agent 基础字段的修改。"""
     agent = await AgentRepository(db).update_agent(
         agent_id,
@@ -95,7 +77,7 @@ async def update_agent(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent 不存在")
     await db.commit()
     await db.refresh(agent)
-    return AgentCatalogEntry(
+    return AgentResponse(
         id=agent.slug,
         name=agent.name,
         description=agent.description,

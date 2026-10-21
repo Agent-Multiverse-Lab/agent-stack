@@ -124,7 +124,7 @@ async def list_threads(
     page = rows[:limit]
     next_cursor = None
     if has_more and page:
-        conversation, _, last_activity_at = page[-1]
+        conversation, last_activity_at = page[-1]
         next_cursor = _encode_cursor(
             last_activity_at,
             int(conversation.id),
@@ -132,8 +132,8 @@ async def list_threads(
 
     return {
         "items": [
-            _thread_summary(conversation, last_message_at)
-            for conversation, last_message_at, _ in page
+            _thread_summary(conversation)
+            for conversation, _ in page
         ],
         "next_cursor": next_cursor,
     }
@@ -197,12 +197,8 @@ async def get_thread_detail(
         db
     ).list_attachments_by_message_ids([int(message.id) for message in page_desc])
     message_attachments = await _message_attachment_payloads(attachment_rows)
-    last_message_at = await conversations.get_last_message_at(
-        conversation_id=int(conversation.id)
-    )
-
     return {
-        "thread": _thread_summary(conversation, last_message_at),
+        "thread": _thread_summary(conversation),
         "messages": [
             _message_response(
                 message,
@@ -270,10 +266,7 @@ async def update_thread(
         summary=summary_text,
         conversation_metadata=thread_metadata,
     )
-    last_message_at = await conversations.get_last_message_at(
-        conversation_id=int(conversation.id)
-    )
-    return _thread_summary(conversation, last_message_at)
+    return _thread_summary(conversation)
 
 
 async def delete_thread(
@@ -319,7 +312,6 @@ async def _require_thread(
 
 def _thread_summary(
     conversation: Conversation,
-    last_message_at: datetime | None,
 ) -> dict[str, Any]:
     """构建对话列表和详情共用字段。"""
     return {
@@ -332,7 +324,6 @@ def _thread_summary(
         "metadata": dict(conversation.conversation_metadata or {}),
         "created_at": conversation.created_at,
         "updated_at": conversation.updated_at,
-        "last_message_at": last_message_at,
     }
 
 

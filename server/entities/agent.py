@@ -13,8 +13,29 @@ from pydantic import (
 )
 
 
-class AgentCreateRequest(BaseModel):
-    """创建自定义 Agent 的预留请求。"""
+class AgentContext(BaseModel):
+    """Agent 运行上下文配置。"""
+
+    system_prompt: str
+    model: str
+    summary_threshold: int
+    summary_keep_messages: int
+    summary_prompt: str
+    summary_tool_result_token_limit: int
+    tools: list[Any]
+    mcps: list[str]
+    skill_root: str | None
+
+
+class AgentResponse(BaseModel):
+    """Agent 领域实体响应。"""
+
+    id: str
+    name: str
+    description: str
+    is_subagent: bool
+    enabled: bool
+    context: AgentContext | None = None
 
 
 class AgentRunCreateRequest(BaseModel):
@@ -62,43 +83,6 @@ class AgentRunResumeRequest(BaseModel):
             raise ValueError("thread_metadata.resume.answers 必须是非空回答字典")
         normalized["resume"] = {"answers": answers}
         return normalized
-
-
-class AgentSummary(BaseModel):
-    """公开顶层 Agent 的摘要。"""
-
-    id: str
-    name: str
-    description: str
-
-
-class AgentCatalogEntry(AgentSummary):
-    """已认证目录中的 Agent 摘要，不包含运行配置。"""
-
-    is_subagent: bool
-    enabled: bool
-
-
-class AgentCatalogResponse(BaseModel):
-    """数据库 Agent 目录，按顶层和子 Agent 分组。"""
-
-    agents: list[AgentCatalogEntry]
-    subagents: list[AgentCatalogEntry]
-
-
-class AgentContextResponse(BaseModel):
-    """详情抽屉展示的基础配置。"""
-
-    system_prompt: str
-    model: str
-    summary_threshold: int
-    summary_keep_messages: int
-    summary_prompt: str
-    summary_tool_result_token_limit: int
-    tools: list[Any]
-    mcps: list[str]
-    skill_root: str | None
-    style_profolio: dict[str, Any]
 
 
 class AgentUpdateRequest(BaseModel):

@@ -23,7 +23,6 @@ class FakeConversationRepository:
         self.conversation = conversation
         self.rows = []
         self.messages = []
-        self.last_message_at = None
         self.tree = []
         self.list_arguments = None
         self.deleted_ids = []
@@ -56,10 +55,6 @@ class FakeConversationRepository:
     async def list_messages(self, **values):
         """返回预设消息页。"""
         return self.messages[: values["limit"]]
-
-    async def get_last_message_at(self, **values):
-        """返回预设最后消息时间。"""
-        return self.last_message_at
 
     async def update_conversation(
         self,
@@ -299,8 +294,8 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
         first = make_conversation(2)
         second = make_conversation(1)
         self.conversations.rows = [
-            (first, NOW + timedelta(minutes=2), NOW + timedelta(minutes=2)),
-            (second, NOW + timedelta(minutes=1), NOW + timedelta(minutes=1)),
+            (first, NOW + timedelta(minutes=2)),
+            (second, NOW + timedelta(minutes=1)),
         ]
 
         result = await thread_service.list_threads(
@@ -332,7 +327,6 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
             make_message(2, role="user", run_id="run-1"),
             make_message(1, role="user", run_id=None),
         ]
-        self.conversations.last_message_at = NOW + timedelta(minutes=3)
         self.runs.runs["run-1"] = SimpleNamespace(
             id="run-1",
             run_type="chat",
