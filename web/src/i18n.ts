@@ -6,6 +6,14 @@ const supportedLanguages = ["en", "zh-CN"] as const;
 type Language = (typeof supportedLanguages)[number];
 
 const translations = {
+  "Tool": "工具",
+  "Arguments": "参数",
+  "Progress": "执行进度",
+  "Output": "输出",
+  "Error": "错误",
+  "Cancelled": "已取消",
+  "Interrupted": "已打断",
+  "Stopped": "已停止",
   "Back to tools": "返回工具列表",
   "Example metadata": "示例工具信息",
   "Description unavailable": "暂无用途说明",
@@ -236,10 +244,6 @@ const translations = {
   "Audio": "音频",
   "Video": "视频",
   "Agent questions": "代理提问",
-  "Input required": "需要输入",
-  "Agent needs your choice": "代理需要你做出选择",
-  "Choose an option, then continue. You can go back to change it.":
-    "请选择一个选项，然后进入下一题；可返回修改。",
   "Choose an answer to continue.": "请选择一个答案后继续。",
   "Questionnaire progress": "答题进度",
   "Question {{current}} of {{total}}": "第 {{current}} 题，共 {{total}} 题",
@@ -268,7 +272,6 @@ const translations = {
   "Skill directory": "技能目录",
   "MCP servers": "MCP 服务",
   "All configured servers": "全部已配置服务",
-  "Style assets": "素材配置",
   "Not configured": "未配置",
   "Agent name": "智能体名称",
   "View details": "查看详情",

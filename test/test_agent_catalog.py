@@ -1,4 +1,4 @@
-"""数据库 Agent 目录的分组、认证和摘要边界。"""
+"""数据库 Agent 列表的查询、认证和更新边界。"""
 
 import unittest
 from types import SimpleNamespace
@@ -31,7 +31,7 @@ class SessionAdapter:
         self.session.refresh(instance)
 
 
-class AgentCatalogTest(unittest.IsolatedAsyncioTestCase):
+class AgentListTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         engine = create_engine("sqlite://")
         self.addCleanup(engine.dispose)
@@ -79,7 +79,7 @@ class AgentCatalogTest(unittest.IsolatedAsyncioTestCase):
             app.dependency_overrides[get_current_user] = override_user
         return app
 
-    async def test_sql_catalog_groups_all_records_without_changing_run_filters(self):
+    async def test_sql_groups_all_records_without_changing_run_filters(self):
         agents = await self.repository.list_main_agents()
         subagents = await self.repository.list_subagents()
         self.assertEqual([row.slug for row in agents], ["A_database_main", "LeaderAgent", "Z_disabled_main"])
@@ -97,38 +97,61 @@ class AgentCatalogTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self.repository.get_by_slug_for_run_type("m_internal_child", "chat"))
         self.assertIsNotNone(await self.repository.get_by_slug_for_run_type("m_internal_child", "subagent"))
 
-    async def test_catalog_requires_authentication_and_returns_database_summaries(self):
+    async def test_list_agents_requires_authentication_and_returns_database_entities(self):
         app = self.create_app()
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
-            self.assertEqual((await client.get("/api/agent/catalog")).status_code, 401)
+            self.assertEqual((await client.get("/api/agent")).status_code, 401)
         app = self.create_app(authenticated=True)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
-            response = await client.get("/api/agent/catalog")
+            response = await client.get("/api/agent")
         self.assertEqual(response.status_code, 200)
-        catalog = response.json()
-        self.assertEqual(set(catalog), {"agents", "subagents"})
-        self.assertEqual([row["id"] for row in catalog["agents"]], ["A_database_main", "LeaderAgent", "Z_disabled_main"])
-        self.assertEqual([row["id"] for row in catalog["subagents"]], ["a_public_child", "m_internal_child", "z_disabled_child"])
-        for group, is_subagent in (("agents", False), ("subagents", True)):
-            for row in catalog[group]:
-                self.assertEqual(set(row), {"id", "name", "description", "is_subagent", "enabled"})
-                self.assertEqual(row["name"], f"数据库名称 {row['id']}")
-                self.assertEqual(row["description"], f"数据库描述 {row['id']}")
-                self.assertEqual(row["is_subagent"], is_subagent)
-        self.assertFalse(catalog["agents"][-1]["enabled"])
-        self.assertFalse(catalog["subagents"][-1]["enabled"])
+        items = response.json()
+        main_items = [row for row in items if not row["is_subagent"]]
+        sub_items = [row for row in items if row["is_subagent"]]
+        self.assertEqual([row["id"] for row in main_items], ["A_database_main", "LeaderAgent", "Z_disabled_main"])
+        self.assertEqual([row["id"] for row in sub_items], ["a_public_child", "m_internal_child", "z_disabled_child"])
+        for row in items:
+            self.assertEqual(set(row), {"id", "name", "description", "is_subagent", "enabled"})
+            self.assertEqual(row["name"], f"数据库名称 {row['id']}")
+            self.assertEqual(row["description"], f"数据库描述 {row['id']}")
+        self.assertFalse(main_items[-1]["enabled"])
+        self.assertFalse(sub_items[-1]["enabled"])
         self.assertNotIn("private-system-prompt", response.text)
         self.assertNotIn("agent_config", response.text)
         self.assertNotIn("backend_id", response.text)
 
-    async def test_empty_database_returns_empty_catalog_groups(self):
+    async def test_empty_database_returns_empty_list(self):
         self.db.session.query(Agent).delete()
         self.db.session.flush()
         app = self.create_app(authenticated=True)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
-            response = await client.get("/api/agent/catalog")
+            response = await client.get("/api/agent")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"agents": [], "subagents": []})
+        self.assertEqual(response.json(), [])
+
+    async def test_context_returns_stored_configuration_and_base_defaults(self):
+        row = await self.repository._get_by_slug("z_disabled_child")
+        row.agent_config = {
+            "system_prompt": "Stored prompt", "model": "provider/custom",
+            "summary_threshold": 64, "mcps": ["documents"],
+        }
+        self.db.session.flush()
+        app = self.create_app(authenticated=True)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+            response = await client.get("/api/agent/z_disabled_child/context")
+            self.assertEqual((await client.get("/api/agent/missing/context")).status_code, 404)
+        self.assertEqual(response.status_code, 200)
+        context = response.json()
+        self.assertEqual(context["system_prompt"], "Stored prompt")
+        self.assertEqual(context["model"], "provider/custom")
+        self.assertEqual(context["summary_threshold"], 64)
+        self.assertEqual(context["summary_keep_messages"], 10)
+        self.assertEqual(context["summary_tool_result_token_limit"], 300)
+        self.assertEqual(context["mcps"], ["documents"])
+        self.assertTrue({"uid", "thread_id", "run_id", "request_id"}.isdisjoint(context))
+        app = self.create_app()
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+            self.assertEqual((await client.get("/api/agent/z_disabled_child/context")).status_code, 401)
 
     async def test_partial_update_persists_and_preserves_role_and_configuration(self):
         row = await self.repository._get_by_slug("z_disabled_child")
@@ -150,8 +173,8 @@ class AgentCatalogTest(unittest.IsolatedAsyncioTestCase):
                     "enabled": False,
                 },
             )
-            catalog = (await client.get("/api/agent/catalog")).json()
-            saved = next(item for item in catalog["subagents"] if item["id"] == "z_disabled_child")
+            items = (await client.get("/api/agent")).json()
+            saved = next(item for item in items if item["id"] == "z_disabled_child")
             self.assertEqual(saved, response.json())
             response = await client.patch("/api/agent/z_disabled_child", json={"description": "", "enabled": True})
             self.assertEqual(response.status_code, 200)

@@ -172,6 +172,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                         "run_id": "run-1",
                         "request_id": "request-1",
                         "thread_id": "thread-1",
+                        "worker_id": "worker-1",
                     },
                     thread_input_message=input_message,
                     current_user=current_user,
@@ -221,6 +222,57 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
         self.save_messages.assert_awaited_once()
         self.assertEqual("run-1", self.save_messages.await_args.kwargs["run_id"])
 
+    async def test_v3_tool_call_populates_loading_stream_event(self) -> None:
+        metadata = {"run_id": "model-run-1"}
+        events = await self.collect_events(
+            FakeAgent(
+                events=(
+                    (
+                        "messages",
+                        (
+                            {
+                                "event": "message-start",
+                                "role": "ai",
+                                "id": "message-1",
+                            },
+                            metadata,
+                        ),
+                    ),
+                    (
+                        "messages",
+                        (
+                            {
+                                "event": "content-block-finish",
+                                "index": 0,
+                                "content": {
+                                    "type": "tool_call",
+                                    "id": "call-1",
+                                    "name": "search",
+                                    "args": {"query": "agent events"},
+                                },
+                            },
+                            metadata,
+                        ),
+                    ),
+                )
+            )
+        )
+
+        loading = [event for event in events if event["status"] == "loading"]
+        self.assertEqual(1, len(loading))
+        self.assertEqual(
+            {
+                "type": "tool_call",
+                "message_id": "message-1",
+                "thread_id": "thread-1",
+                "tool_call_id": "call-1",
+                "name": "search",
+                "args": {"query": "agent events"},
+                "index": 0,
+            },
+            loading[0]["stream_event"][0],
+        )
+
     async def test_v2_messages_and_empty_chunks_do_not_abort_stream(self):
         for message in (AIMessage(content="OK"), AIMessageChunk(content="OK"), AIMessageChunk(content="")):
             with self.subTest(message=message):
@@ -228,7 +280,6 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(events[-1]["status"], "finished")
                 loading = [event for event in events if event["status"] == "loading"]
                 self.assertEqual([event["response"] for event in loading], ["OK"] if message.content else [])
-
     async def test_invalid_values_payload_yields_error_chunk(self) -> None:
         # FIXEME: Thread Service 将内部解析异常转换为统一 error chunk。
         events = await self.collect_events(FakeAgent(events=(("values", None),)))
@@ -303,6 +354,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                         "run_id": "resume-run",
                         "request_id": "resume-request",
                         "model": "dashscope/qwen3.8-max",
+                        "worker_id": "worker-1",
                         "run_type": "resume",
                         "resume": {"answer": "PostgreSQL"},
                     },
@@ -344,6 +396,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                     runtime_metadata={
                         "run_id": "resume-run",
                         "request_id": "resume-request",
+                        "worker_id": "worker-1",
                         "run_type": "resume",
                         "resume": {"answer": "PostgreSQL"},
                     },

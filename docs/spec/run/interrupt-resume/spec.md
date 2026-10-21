@@ -329,10 +329,9 @@ PostgreSQL 继续拥有 Run 状态和 interrupt metadata。
 `useAgentRun` 保存 `pendingInteraction`，提交
 `resumeRun(parentRunId, request)`，其中请求按上述 `thread_metadata` 结构构造；成功后切换到
 响应中的新 Run ID 和 Stream URL。
-`ChatView` 组合 `ChatAskUserComponent`；问题、选项和回答不伪造成普通聊天消息，也不写入
-`localStorage`。现有 `ChatHumanaApproveComponent` 本轮不接线。
-交互卡片只挂载在 ChatView 底部输入区内，紧邻文字输入框上方，不挂载在 messageScroller
-或消息列表内，不随历史消息滚动。存在 pendingInteraction 时，即使尚无历史消息，输入区
+`ChatPage` 组合 `AskUser`；问题、选项和回答不伪造成普通聊天消息，也不写入
+`localStorage`。
+交互卡片只挂载在 `ChatPage` 底部输入区（`max-w-[800px]`）内，紧邻 `AgentMessageComposer` 上方并与之 100% 等宽对齐（`w-full`），复用统一的卡片圆角、边框与轻量阴影，不展示开发性状态顶栏或操作说明微文案，不挂载在消息滚动区内，不随历史消息滚动。存在 pendingInteraction 时，即使尚无历史消息，输入区
 也保持底部停靠。低高度视口中允许输入区自身滚动，确保问题和输入框可达。
 组件在同一个卡片容器内按 questions 分页，一页显示一道问题及其全部单选项，选项各自呈现为
 可点击的小卡片；不把多道问题纵向展开成长列表。选项展示 label、提交 value。

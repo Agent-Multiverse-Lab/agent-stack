@@ -23,15 +23,15 @@ import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useTranslation } from "@/i18n"
-import type { AgentCatalogEntry } from "@/types/chat"
+import type { Agent } from "@/types/agent"
 import { AgentConfiguration } from "@/pages/agent/components/AgentConfiguration"
 
 export function AgentCard({
   agent,
   onUpdated,
 }: {
-  agent: AgentCatalogEntry
-  onUpdated: (updated: AgentCatalogEntry) => void
+  agent: Agent
+  onUpdated: (updated: Agent) => void
 }) {
   const { t } = useTranslation()
   const formId = useId()

@@ -1,11 +1,28 @@
-import type {
-  LoginRequest,
-  RegisterRequest,
-  TokenResponse,
-  UserResponse
-} from "@/types/auth"
-
 import { apiClient } from "@/api/client"
+
+export interface RegisterRequest {
+  email: string
+  password: string
+}
+
+export interface LoginRequest {
+  email: string
+  password: string
+}
+
+export interface UserResponse {
+  id: number
+  uid: string
+  email: string
+  is_active: boolean
+  is_admin: boolean
+}
+
+export interface TokenResponse {
+  access_token: string
+  token_type: string
+  user: UserResponse
+}
 
 export const registerUser = (payload: RegisterRequest) =>
   apiClient.apiPost<UserResponse, RegisterRequest>(

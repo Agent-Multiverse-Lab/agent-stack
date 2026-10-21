@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, MessageSquare, Search, X } from "lucide-react";
 import { useNavigate } from "react-router";
-import { listThreads } from "@/api/agent";
-import type { ThreadSummaryResponse } from "@/types/chat";
-import type { UserResponse } from "@/types/auth";
+import { listThreads } from "@/api/thread";
+import type { ThreadMetadataResponse } from "@/api/thread";
+import type { UserResponse } from "@/api/auth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,7 +27,7 @@ export function SearchChat({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
-  const [threads, setThreads] = useState<ThreadSummaryResponse[]>([]);
+  const [threads, setThreads] = useState<ThreadMetadataResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);

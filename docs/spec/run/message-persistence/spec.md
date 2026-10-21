@@ -105,12 +105,15 @@ messages = checkpoint.values.get("messages", [])
 - `human` 已由 Run 创建流程保存为 Trigger Message，本方法不重复保存；
 - 其他类型不属于本次范围。
 
+父方法显式接收当前执行的 `worker_id` owner token，在创建或更新任何 Message/ToolCall
+前通过 `AgentRunRepository.lock_for_output_update` 锁定 Run 并核对归属和执行状态，
+持有该锁直到消息事务提交。异常累计输出使用相同的归属校验。
+
 父方法按 `checkpoint.values["messages"]` 的原始顺序逐条处理。工具调用 AI Message
 之后出现的 Tool Message 会在后续循环中自然进入 `tool` 分支，不增加额外的工具顺序
 处理。保存 AI Message、查询 Run 和设置 output 都使用显式传入的 `run_id`，不从
-Agent Context 读取。遍历结束后，父方法通过 `AgentRunRepository.get_by_id` 判断当前
-Run 是否存在；仅当 Run 和最后保存的 AI Message 都存在时调用一次
-`set_output_message`。
+Agent Context 读取。遍历结束后，若存在最后保存的 AI Message，调用一次携带 owner token
+的 `set_output_message` 更新结果指针。
 
 ### RUN-MP-005 Save AI Message
 

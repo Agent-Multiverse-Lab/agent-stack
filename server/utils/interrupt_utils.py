@@ -11,7 +11,15 @@ class AskHumanPayload:
     thread_id: str
     run_id: str
     questions: list[Any]
-    kind: str = "ask_user"
+    name: str = "ask_user"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "thread_id": self.thread_id,
+            "run_id": self.run_id,
+            "questions": self.questions,
+            "name": self.name,
+        }
 
 
 def parse_interrupt_questions(questions: Any) -> list[Any]:

@@ -530,7 +530,7 @@ async def stream_agent_run_events(
                         after_id,
                         build_agent_chunk_envolope(
                             run_id=run_id,
-                            event_type="interaction_required",
+                            event_type="interrupt",
                             thread_id=thread_id,
                             payload={
                                 **interrupt_payload,

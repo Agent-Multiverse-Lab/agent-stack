@@ -6,12 +6,12 @@ import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { useTranslation } from "@/i18n"
-import type { AgentContextConfiguration } from "@/types/chat"
+import type { AgentContext } from "@/types/agent"
 
 export function AgentConfiguration({ agentId }: { agentId: string }) {
   const { t } = useTranslation()
   const id = useId()
-  const [configuration, setConfiguration] = useState<AgentContextConfiguration | null>(null)
+  const [configuration, setConfiguration] = useState<AgentContext | null>(null)
   const [error, setError] = useState("")
 
   useEffect(() => {
@@ -81,13 +81,6 @@ export function AgentConfiguration({ agentId }: { agentId: string }) {
             {configuration.mcps.length ? configuration.mcps.map((server, index) => <Badge key={`${server}-${index}`} variant="outline" className="h-auto max-w-full whitespace-normal break-all">{server}</Badge>) : <p className="text-sm">{t("All configured servers")}</p>}
           </div>
         </div>
-      </section>
-
-      <section className={sectionClass} aria-labelledby={`${id}-assets-heading`}>
-        <h3 id={`${id}-assets-heading`} className="text-sm font-semibold">{t("Style assets")}</h3>
-        <pre tabIndex={0} className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-input bg-card p-3 text-xs">
-          {Object.keys(configuration.style_profolio).length ? JSON.stringify(configuration.style_profolio, null, 2) : empty}
-        </pre>
       </section>
     </>
   )

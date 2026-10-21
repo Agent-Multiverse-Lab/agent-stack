@@ -9,6 +9,7 @@
 - [Run Lifecycle Spec](../spec/run/lifecycle/spec.md)
 - [Run Cancellation Spec](../spec/run/cancellation/spec.md)
 - [Agent Run Event Streaming Spec](../spec/run/event-streaming/spec.md)
+- [Run 执行尝试表结构](run-attempt-schema.md)：仅数据库预留结构，尚未接入运行流程
 
 ## 2. Core Components
 

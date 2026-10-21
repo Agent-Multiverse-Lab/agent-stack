@@ -45,7 +45,7 @@ def ask_user(
     """
     return interrupt(
         {
-            "kind": "ask_user",
+            "name": "ask_user",
             "questions": [question.model_dump() for question in questions],
         }
     )

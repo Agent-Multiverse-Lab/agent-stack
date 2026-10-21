@@ -168,18 +168,22 @@ Frontend
 
 ## 5. Worker write contract
 
-Stream Key 为 `run:events:{run_id}`。当前四条真实写入路径为：
+Stream Key 为 `run:events:{run_id}`。当前真实写入路径为：
 
 | `event_type` | payload 形成位置 | payload |
 | --- | --- | --- |
 | `status` | `process_agent_run()` | `status=running` |
 | `messages` | `StreamEventSmoother.release()` | `items` 为完整 loading chunk 数组 |
-| `custom` | `map_stream_event()` | `name=agent_state`、完整 `chunk` 和 `agent_state` |
+| `custom` | `map_stream_event()` | `name=agent_state` 的 Todo，或 `name=agent_execute_event` 的工具执行事件 |
+| `interrupt` | `map_stream_event()` 映射，`_finalize_run()` 发布 | AskHuman 的问题、选项和来源 Run |
 | `end` | `_finalize_run()` 或执行中取消分支 | PostgreSQL 实际终态及可选错误信息 |
 
 `loading` chunk 在主循环中先进入 `StreamEventSmoother`，释放时以 `messages` 写入。
 `agent_state` 由 `map_stream_event()` 映射为 `custom`。`finished` 的映射返回值不会
 直接写入；最终 `end` 由持久化终态形成。
+`ask_human` 由 `map_stream_event()` 映射为独立的 `interrupt`，保留
+`pending_interrupt` 的问题并补入 `parent_run_id`；`_finalize_run()` 在写入 interrupted
+终态后复用该映射发布交互事件，再发布 `end`。
 
 Redis entry 只包含两个 field：
 
@@ -228,8 +232,10 @@ loading chunk：
 | `thread_id` | string | 所属线程 |
 
 当前文本 item 使用 `type=message_delta` 和 `content_delta`。当前工具调用 item 使用
-`type=tool_call`，并携带 `tool_call_id/name/args/index`。这些只是同一数组中的不同
-消息内容，不要求分别建立 TypeScript 实体。
+`type=tool_call`，并携带 `tool_call_id/name/args/index`。LC v2 的 dispatcher 和 loading
+wrapper 保持不变；LC v3 工具 item 到达前端后收窄为单一的 `AIMessageChunk`，不为文本
+`message_delta` 另建 TypeScript subtype。v2 的字符串参数分片在前端按 Run、线程、消息
+位置和工具调用 ID 累积并解析，v3 的结构化 JSON 参数保持原值。
 
 流式字符串 `message_id` 不是 PostgreSQL 数字型 `ThreadMessageResponse.message_id`。
 
@@ -646,8 +652,27 @@ const applyRunStreamEvent = (
 }
 ```
 
-当前只渲染真实 `message_delta.content_delta`。`tool_call` 仍可被通用事件读取，但本次
-不新增工具调用 UI。
+React 前端由 `web/src/pages/chat/hooks/useThread.ts` 消费真实事件：
+
+- `message_delta.content_delta` 继续平滑显示为正文；`reasoning_content_delta` 或
+  `additional_kwargs_reasoning_content` 累加到独立的可折叠推理区域，同一分片优先使用前者。
+- `tool_call` 立即生成待执行卡片；`custom(name=agent_execute_event)` 从
+  `event.stream_data` 读取 `tool-started/tool-output-delta/tool-finished/tool-error`，更新工具
+  名称、参数、进度、结果及错误。归并键优先使用 `run_id + thread_id + tool_call_id`，
+  参数分片缺少调用 ID 时回退到 `message_id + index`；活动创建后保持稳定 UI ID。
+- 工具卡片显示名称和状态，展开后查看参数及输出；工具事件到来前先刷出对应线程的前端
+  文本缓存，保持正文与工具卡片的展示顺序。运行中使用 reduced-motion 安全的旋转状态，
+  完成和失败使用一次性入场反馈，取消、中断和停止使用静态暂停状态。
+- `ask_user` 使用独立的 `interrupt(name=ask_user)` 交互事件，由 `useAgentRun`
+  保存待回答问题并交给输入区的 `AskUser` 展示；其工具调用、执行输出和结束事件不重复生成
+  普通工具卡片。无名称的后续工具事件按 Run、线程和调用 ID 识别同一交互调用。
+- `custom(name=agent_state)` 按 Run 和线程更新 Todo，空列表只移除对应 Todo。
+- `useAgentRun` 继续拥有运行状态和待回答问题，同时把交互及终态事件交给消息消费函数。
+  收到交互或终态时刷出当前 Run 的文本缓存；终态使尚未结束的工具显示已停止、已取消或
+  已打断，不将 Run 完成推断成工具执行成功。
+- 终态刷新 Thread Detail 后保留当前页面已收到的工具及推理卡片。未知事件不生成空卡片。
+
+工具和推理通过现有 `ChatMessage` 的活动消息载体展示，不引入第二套 Run 生命周期状态。
 
 ### 10.5 Stream orchestration and reconnect
 
@@ -830,7 +855,7 @@ const { assistantContent } = storeToRefs(chatStore)
 Store 字段或后端事件。同一 Run 的 Agent state 事件按 `run_id + name` 覆盖；没有有效
 Todo 时不创建 Tool 组件，并移除该 Run 先前的 Agent state 组件。
 
-Run 终态重新读取 Thread Detail 时，`useChat.applyThreadDetail` 保留当前页面已经收到的
+Run 终态重新读取 Thread Detail 时，`useThread.setMessages` 保留当前页面已经收到的
 流式 Tool 消息，并按关联 Run 放回持久化 Assistant 消息之前。整页刷新后的 Tool 历史恢复
 不属于本次事件流展示范围。
 

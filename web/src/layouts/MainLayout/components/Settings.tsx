@@ -41,7 +41,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from "@/components/ui/sidebar";
-import type { UserResponse } from "@/types/auth";
+import type { UserResponse } from "@/api/auth";
 import { useTranslation } from "@/i18n";
 import SettingsModels from "@/layouts/MainLayout/components/SettingsModels";
 import { Skill } from "./settings-extensions/Skill";

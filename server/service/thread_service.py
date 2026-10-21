@@ -4,7 +4,7 @@ import json
 import uuid
 from collections.abc import AsyncIterator, Callable
 from copy import deepcopy
-from dataclasses import asdict, fields
+from dataclasses import fields
 from datetime import datetime
 from typing import Any
 
@@ -124,7 +124,7 @@ async def list_threads(
     page = rows[:limit]
     next_cursor = None
     if has_more and page:
-        conversation, _, last_activity_at = page[-1]
+        conversation, last_activity_at = page[-1]
         next_cursor = _encode_cursor(
             last_activity_at,
             int(conversation.id),
@@ -132,8 +132,8 @@ async def list_threads(
 
     return {
         "items": [
-            _thread_summary(conversation, last_message_at)
-            for conversation, last_message_at, _ in page
+            _thread_summary(conversation)
+            for conversation, _ in page
         ],
         "next_cursor": next_cursor,
     }
@@ -197,12 +197,8 @@ async def get_thread_detail(
         db
     ).list_attachments_by_message_ids([int(message.id) for message in page_desc])
     message_attachments = await _message_attachment_payloads(attachment_rows)
-    last_message_at = await conversations.get_last_message_at(
-        conversation_id=int(conversation.id)
-    )
-
     return {
-        "thread": _thread_summary(conversation, last_message_at),
+        "thread": _thread_summary(conversation),
         "messages": [
             _message_response(
                 message,
@@ -270,10 +266,7 @@ async def update_thread(
         summary=summary_text,
         conversation_metadata=thread_metadata,
     )
-    last_message_at = await conversations.get_last_message_at(
-        conversation_id=int(conversation.id)
-    )
-    return _thread_summary(conversation, last_message_at)
+    return _thread_summary(conversation)
 
 
 async def delete_thread(
@@ -319,7 +312,6 @@ async def _require_thread(
 
 def _thread_summary(
     conversation: Conversation,
-    last_message_at: datetime | None,
 ) -> dict[str, Any]:
     """构建对话列表和详情共用字段。"""
     return {
@@ -332,7 +324,6 @@ def _thread_summary(
         "metadata": dict(conversation.conversation_metadata or {}),
         "created_at": conversation.created_at,
         "updated_at": conversation.updated_at,
-        "last_message_at": last_message_at,
     }
 
 
@@ -712,12 +703,12 @@ def _lc_message_v3_dispather(
     if event_type == "content-block-finish":
         # 专门处理工具的调用完成的事件， 这个时候，event里面会有一个content字段，里面包含了工具调用的结果
         content = (
-            event.get("content") if isinstance(event.get("content"), str) else None
+            event.get("content") if isinstance(event.get("content"), dict) else None
         )
         if (
-            event.get("type") != "tool_call"
-            or not event.get("id")
-            and content.get("name")
+            content is None
+            or content.get("type") != "tool_call"
+            or not content.get("id")
         ):
             return None
 
@@ -727,8 +718,8 @@ def _lc_message_v3_dispather(
             "thread_id": thread_id,
             "tool_call_id": content.get("id"),
             "name": content.get("name"),
-            "args": content.get("args") if content.get("args") else {},
-            "index": event.get("index") if event.get("index") is not None else 0,
+            "args": content.get("args") if "args" in content else {},
+            "index": event.get("index") if isinstance(event.get("index"), int) else 0,
         }
 
 
@@ -797,6 +788,7 @@ async def save_interrupt_message(
     error: str,
     error_type: str,
     agent_run_id: str | None,
+    worker_id: str,
     request_id: str | None = None,
 ):
     agent_run_repo = AgentRunRepository(db)
@@ -827,10 +819,9 @@ async def save_interrupt_message(
 
         # save msg 到 database
         if agent_run_id:
-            agent_run = await agent_run_repo.lock_for_output_update(agent_run_id)
-
-            if agent_run is None:
-                raise ValueError(f"当前agent_run_id不存在：{agent_run_id}")
+            await agent_run_repo.lock_for_output_update(
+                agent_run_id, worker_id=worker_id
+            )
 
         message = await conv_repo.add_message_by_thread_id(
             thread_id=thread_id,
@@ -845,6 +836,7 @@ async def save_interrupt_message(
             await agent_run_repo.set_output_message(
                 run_id=agent_run_id,
                 output_message_id=int(message.id),
+                worker_id=worker_id,
             )
             await db.commit()
         return message
@@ -984,6 +976,7 @@ async def save_message_from_langgraph_state(
     *,
     thread_id: str,
     run_id: str,
+    worker_id: str,
     context,
     agent_instance: BaseAgent,
     db: AsyncSession,
@@ -1000,6 +993,9 @@ async def save_message_from_langgraph_state(
             }
         }
     )
+
+    agent_run_repo = AgentRunRepository(db)
+    await agent_run_repo.lock_for_output_update(run_id, worker_id=worker_id)
 
     saved_ai_message: Message | None = None
     for message in checkpoint.values.get("messages", []):
@@ -1020,12 +1016,11 @@ async def save_message_from_langgraph_state(
         elif message.type == "tool":
             await save_tool_message(db=db, message=message)
 
-    agent_run_repo = AgentRunRepository(db)
-    current_run = await agent_run_repo.get_by_id(run_id)
-    if current_run is not None and saved_ai_message is not None:
+    if saved_ai_message is not None:
         await agent_run_repo.set_output_message(
             run_id=run_id,
             output_message_id=int(saved_ai_message.id),
+            worker_id=worker_id,
         )
 
     await db.commit()
@@ -1050,7 +1045,12 @@ def _build_ask_human_interrupt(
             }
         ]
 
-    return AskHumanPayload(thread_id=thread_id, run_id=run_id, questions=questions)
+    return AskHumanPayload(
+        thread_id=thread_id,
+        run_id=run_id,
+        questions=questions,
+        name=interrupt_payload.get("name", "ask_user"),
+    )
 
 
 def _format_interrupt_payload(interrupt_value: Any) -> dict[str, Any]:
@@ -1062,8 +1062,7 @@ def _format_interrupt_payload(interrupt_value: Any) -> dict[str, Any]:
 
     interrupt_payload = getattr(interrupt_value, "value", None)
     # value={
-    #                     "kind": "ask_user",
-    #                     "tool": "choose_environment",
+    #                     "name": "choose_environment",
     #                     "question": "请选择部署环境",
     #                     "options": ["本地", "云端"],
     # },
@@ -1111,7 +1110,7 @@ def build_agent_interrupt_message(
     ask_human = _build_ask_human_interrupt(
         interrupt_payload, thread_id=thread_id, run_id=run_id
     )
-    return {"status": "ask_human", **asdict(ask_human)}
+    return {"status": "ask_human", **ask_human.to_dict()}
 
 
 def _reslove_agent_interrupt(agent_state) -> Any | None:
@@ -1361,6 +1360,7 @@ async def stream_agent_response(
             await save_message_from_langgraph_state(
                 thread_id=thread_id,
                 run_id=runtime_metadata.get("run_id"),
+                worker_id=runtime_metadata["worker_id"],
                 context=agent_context,
                 agent_instance=agent_instance,
                 db=db,
@@ -1399,6 +1399,7 @@ async def stream_agent_response(
                 error_type=type(e).__name__,
                 agent_run_id=run_id,
                 request_id=runtime_metadata.get("request_id"),
+                worker_id=runtime_metadata["worker_id"],
             )
 
         yield make_agent_stream_event(
@@ -1512,6 +1513,7 @@ async def resume_agent_response(
         await save_message_from_langgraph_state(
             thread_id=thread_id,
             run_id=run_id,
+            worker_id=runtime_metadata["worker_id"],
             context=agent_context,
             agent_instance=agent_instance,
             db=db,
@@ -1543,6 +1545,7 @@ async def resume_agent_response(
                         error_type=type(exc).__name__,
                         agent_run_id=run_id,
                         request_id=runtime_metadata.get("request_id"),
+                        worker_id=runtime_metadata["worker_id"],
                     )
             except Exception:
                 logger.exception("保存 Resume 累计输出失败")

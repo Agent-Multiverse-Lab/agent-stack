@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, RefreshCw, Search, X } from "lucide-react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 
-import { listThreads } from "@/api/agent";
+import { listThreads } from "@/api/thread";
 import { listSandboxWorkspace } from "@/api/sandbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +15,7 @@ import WorkspaceFileDialog from "@/pages/sandbox/components/WorkspaceFileDialog"
 import WorkspacePreview from "@/pages/sandbox/components/WorkspacePreview";
 import WorkspaceTree from "@/pages/sandbox/components/WorkspaceTree";
 import type { WorkspaceEntry, WorkspaceTreeNode } from "@/pages/sandbox/types";
-import type { ThreadSummaryResponse } from "@/types/chat";
+import type { ThreadMetadataResponse } from "@/api/thread";
 
 function buildTree(entriesByPath: Record<string, WorkspaceEntry[]>): WorkspaceTreeNode[] {
   const buildNode = (name: string, path: string): WorkspaceTreeNode => ({
@@ -30,7 +30,7 @@ function buildTree(entriesByPath: Record<string, WorkspaceEntry[]>): WorkspaceTr
 
 export default function SandboxPage() {
   const { t } = useTranslation();
-  const [threads, setThreads] = useState<ThreadSummaryResponse[]>([]);
+  const [threads, setThreads] = useState<ThreadMetadataResponse[]>([]);
   const [threadId, setThreadId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -62,7 +62,7 @@ export default function SandboxPage() {
 
 function SandboxWorkspace({ threadId, threads, onThreadChange }: {
   threadId: string;
-  threads: ThreadSummaryResponse[];
+  threads: ThreadMetadataResponse[];
   onThreadChange: (threadId: string) => void;
 }) {
   const { t } = useTranslation();

@@ -3,6 +3,7 @@ from .manger import PostgreManger, postgres_manager
 from .models import (
     Agent,
     AgentRun,
+    AgentRunAttempt,
     Attachment,
     Conversation,
     Knowledge,
@@ -21,6 +22,7 @@ from .session import get_db, get_engine, get_session_maker, session_context
 
 __all__ = [
     "AgentRun",
+    "AgentRunAttempt",
     "Agent",
     "Attachment",
     "Base",

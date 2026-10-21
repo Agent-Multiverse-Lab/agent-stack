@@ -14,7 +14,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTranslation } from "@/i18n"
-import type { KnowledgeFile, KnowledgeFileStatus } from "@/types/knowledge"
+import type { KnowledgeFile, KnowledgeFileStatus } from "@/api/knowledge"
 
 const supported = new Set(["pdf", "doc", "docx", "txt", "md", "markdown", "csv", "xls", "xlsx", "ppt", "pptx", "png", "jpg", "jpeg", "webp"])
 const PROCESSING: KnowledgeFileStatus[] = ["parsing", "indexing", "extracting"]

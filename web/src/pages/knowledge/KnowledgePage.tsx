@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { useTranslation } from "@/i18n"
-import type { KnowledgeBase } from "@/types/knowledge"
+import type { KnowledgeBase } from "@/api/knowledge"
 
 export default function KnowledgePage() {
   const { t } = useTranslation()

@@ -12,6 +12,7 @@
 - shadcn/ui 的生成方式和路径别名以 [`web/components.json`](../../web/components.json) 为准。
 - 主题变量和全局样式以 [`web/src/styles/index.css`](../../web/src/styles/index.css) 为准。
 - 共享组件的变体和状态以 `web/src/components/ui/` 内对应组件实现为准。
+- 视觉基准由本文档定义，通过现有 React/shadcn 组件承载。
 
 文档与实现不一致时，先确认当前产品要求，再同步修正文档和实际拥有该规则的源码，不在页面中
 增加临时覆盖来绕过共享规则。
@@ -103,10 +104,43 @@ web/
 - 静态图片、标志和字体放在 `web/src/assets/`；只有无需构建处理、需要按原路径直接提供的资源才放
   在 `web/public/`。
 
-## 7. 颜色与主题 token
+## 7. 颜色、间距与主题 token
 
 `index.css` 中的 `:root` 定义浅色主题，`.dark` 定义深色主题，`@theme inline` 将 CSS 变量映射为
 Tailwind 颜色。页面使用语义类名，不依赖具体色值。
+
+主色为 `#046a82`，hover 为 `#24839a`，active 为 `#035065`；白色画布搭配
+`#1e1f1f` 正文和 `#697070` 次要文字，边框使用 `#eef0f0` / `#e4e6e6`。
+浅色、深色的 `--main-*` 与 `--gray-*` 只在主题层定义，组件继续消费现有语义 token。
+状态背景与边框使用 `success-muted` / `success-border`、`warning-muted` / `warning-border`、
+`destructive-muted` / `destructive-border`，不自行混合浅色背景。
+
+间距以 4px / 8px 为基础：图标与文字间隔 6px / 8px，表单字段内部 6px，字段组之间 16px，
+卡片内边距 16px、内部间隔 10px，弹窗内容内边距 24px，主要区块间隔 24px / 32px。
+管理页面复用 `--page-padding`（18px）；默认按钮与输入框高 32px，大按钮高 40px。
+普通按钮、输入框、选择器和卡片圆角为 8px；小控件为 4px / 6px，弹窗为 12px。
+聊天输入区圆角为 22.4px，发送按钮为 32px 圆形。
+
+实际组件尺寸优先于通用间距建议：
+
+| 对应来源 | 尺寸与布局 |
+| --- | --- |
+| `AppLayout.vue` | 主侧栏 230px，收起 52px；品牌行 32px、顶部 6px；导航行 32px、横向内边距 6px、行距 2px |
+| `ConversationNavItem.vue` | 会话行 32px、文字 13px、横向内边距 8px |
+| `PageHeader.vue` | 管理页标题栏 48px、横向 18px、标题 16px / 600 |
+| `SettingsModal.vue` | 宽 90%、最大 980px、顶部 5vh、高 min(84vh,840px)；侧栏 176px、内边距 52px 10px 12px；内容内边距 16px |
+| `AgentChatComponent.vue` | 消息区与输入区最大 800px；消息区内边距 16px 32px；欢迎区位于 45% 高度 |
+| `MessageInputComponent.vue` | 固定文本行和工具行；内边距 12.8px 12px 9.6px；文本区 44–200px、15px / 1.5 |
+| `ActionTrigger.vue` | 聊天工具按钮 30px、文字 13px、圆角 8px；模型触发器最大 168px |
+| `AgentMessageComponent.vue` | 用户气泡最大 95%、圆角 8px、内边距 8px 16px、文字 14px / 24px |
+| `InfoCard.vue` | 卡片内边距 16px、间隔 10px、图标 32px、标题 14px / 600、描述 13px / 1.4 |
+| `LoginView.vue` | 登录卡片 900px、最小高 560px、圆角 16px；图片/表单比例 1.4:1；表单内边距 40px、输入与提交按钮高 44px |
+
+工作区采用 `WorkspaceView.vue` 的 168px 侧栏与 `WorkspaceSidebar.vue` 的 32px 导航行。
+
+全局正文为 15px / 1.6，常规控件与列表使用 14px，辅助文字与标签使用 12px，标题使用
+18px / 20px / 24px 和 600 字重。字体使用系统字体栈，不使用负字距。
+主题通过 `next-themes` 写入根节点 `.dark`，由 Settings 切换浅色、深色和系统主题，选择保存在 `am-theme`。
 
 | 用途 | 背景 | 文本和图标 |
 | --- | --- | --- |
@@ -126,10 +160,10 @@ Tailwind 颜色。页面使用语义类名，不依赖具体色值。
 
 主按钮的默认、悬停和按下状态分别使用 `primary`、`primary-hover`、`primary-active`。普通控件悬停
 使用 `accent`，当前选中项使用 `selection`，两者不混用。侧栏的悬停和选中状态分别使用
-`sidebar-accent` 与 `sidebar-primary`。未选中项悬停时使用比侧栏底色略深的同色系背景；选中项使用
-卡片背景，浅色主题中为白色，悬停时保留选中配色。侧栏选项在悬停和选中状态下显示由
-`sidebar-border` 提供的 1px 灰色完整外轮廓。聚焦时保持组件原有边框颜色，不增加 focus ring
-或额外外框；Dialog 和 Sheet 的遮罩使用 `overlay`。
+`sidebar-accent` 与 `sidebar-primary`。未选中项悬停时使用中性灰背景；选中项使用
+`--gray-150` 背景与 `--main-700` 文字，悬停时保留选中配色。
+输入框聚焦时使用主色边框和轻量 focus ring，键盘焦点始终可见；Dialog 和 Sheet 的遮罩使用 `overlay`。
+普通管理卡片不使用阴影。聊天输入区、新建会话入口和登录容器使用轻量阴影。
 
 按钮外观通过共享 `Button` variant 选择：
 
@@ -147,11 +181,11 @@ Tailwind 颜色。页面使用语义类名，不依赖具体色值。
 ## 8. 交互与可访问性
 
 - 图标按钮必须有可访问名称，通常使用 `aria-label`；Tooltip 只补充提示，不代替可访问名称。
-- 共享组件聚焦时保持原有边框，不使用 focus ring；菜单高亮、选中态和禁用态按各自状态样式呈现。
+- 共享组件提供可见的键盘焦点；菜单高亮、选中态和禁用态按各自状态样式呈现。
 - 加载、空状态、错误和禁用状态应在原位置呈现，避免因状态切换造成主要布局跳动。
 - 动画只用于表达状态变化，并遵守 `prefers-reduced-motion`。
-- 共享控件的 hover 使用 `--hover-transition-duration`（300ms）和 `ease-in-out`，背景、文字、
-  描边与外轮廓应平缓过渡；按钮点击按下反馈使用 150ms。减少动态效果时 hover 过渡时长为 0ms。
+- 共享控件的 hover 使用 `--hover-transition-duration`（150ms）和 `ease-in-out`，仅改变背景、文字或
+  描边，不位移或缩放。减少动态效果时 hover 过渡时长为 0ms。
 - 删除、覆盖等不可逆操作使用明确的危险样式，并按产品能力要求提供确认流程。
 
 ## 9. 修改与验证

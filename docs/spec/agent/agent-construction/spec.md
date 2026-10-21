@@ -74,16 +74,16 @@ Service 和 Worker 均通过它取得 `BaseAgent` 子类；调用方不再维护
 函数仅按 Backend ID 精确匹配实体类名，未知值报错；角色 slug、`is_subagent` 和
 `AgentLibrary` 不参与类解析。`is_subagent` 用于角色标记、数据一致性校验和构造参数选择。
 替换完成后删除 `AgentManager`、实例缓存和其导出与调用，不新增承担相同职责的管理器。
-公开 Agent 列表只包含启用且公开的 orchestrator，响应结构保持不变。
+公开 Agent 列表只包含启用且公开的 orchestrator，响应结构统一为 `AgentResponse`。
 
-### AG-CON-006：已认证 Agent 目录
+### AG-CON-006：已认证 Agent 列表
 
-智能体页面通过 `GET /api/agent/catalog` 读取共享的数据库角色目录，必须通过现有用户认证。
-仓储分别按 `is_subagent=false` 和 `is_subagent=true` 查询，响应分为 `agents`、`subagents`，
-各组按 slug 稳定排序。目录包含内部角色和禁用记录，摘要仅提供 `id`（slug）、`name`、
-`description`、`is_subagent`、`enabled`，不提供 Prompt 或 `agent_config` 等运行配置。
-目录展示不改变公开聊天列表的可见性筛选，也不改变普通 Run 和子 Run 的启用、角色检查。
-页面从主内容区左侧排列矩形 Agent 条目，主 Agent 置顶，其余顶层 Agent 与子 Agent 分区。
+智能体页面通过 `GET /api/agent` 读取共享的数据库角色列表，必须通过现有用户认证。
+响应为 `list[AgentResponse]`，按顶层 Agent 和子 Agent 分组及 slug 稳定排序。
+列表包含内部角色和禁用记录，返回 `id`（slug）、`name`、`description`、`is_subagent`、`enabled`，
+不提供 Prompt 或 `agent_config` 等运行配置。
+列表展示不改变公开聊天列表的可见性筛选，也不改变普通 Run 和子 Run 的启用、角色检查。
+页面从主内容区左侧排列矩形 Agent 条目，主 Agent 置顶，其余顶层 Agent 与子 Agent 按 `is_subagent` 分区。
 每个条目提供查看详情按钮，从右侧打开详情抽屉，展示该记录的名称、ID、类型、启用状态和完整描述。
 
 ### AG-CON-007：基础字段编辑
@@ -92,9 +92,18 @@ Service 和 Worker 均通过它取得 `BaseAgent` 子类；调用方不再维护
 `agent_id` 是数据库 slug。请求只接受 `name`、`description`、`enabled`，至少提供其中一个字段；
 名称先移除首尾空白再校验 1–128 字符，描述允许空字符串，启用状态必须是布尔值。
 显式 null、空请求以及额外字段返回 422，不存在的角色返回 404。
-保存提交数据库事务并刷新后返回同一 `AgentCatalogEntry` 摘要；禁用角色和内部子角色均可编辑。
+保存提交数据库事务并刷新后返回同一 `AgentResponse` 实体；禁用角色和内部子角色均可编辑。
 未提供的基础字段以及 slug、角色、backend、内部可见性、Prompt 和 Context 配置保持不变；
 这些结构与运行配置字段不在当前编辑接口中暴露或接受。
+
+### AG-CON-008：基础配置展示
+
+详情抽屉打开时通过认证 `GET /api/agent/{agent_id}/context` 读取基础配置（`AgentContext`）；不存在的角色返回 404。
+响应从 `BaseContext` 默认值和数据库 `agent_config` 覆盖值构成，包含 `system_prompt`、`model`、
+`summary_threshold`、`summary_keep_messages`、`summary_prompt`、`summary_tool_result_token_limit`、
+`tools`、`mcps`、`skill_root`。运行身份字段不在该响应中。
+界面按模型与提示词、上下文摘要、工具与技能分区，只读展示这些配置。
+描述与提示词文本框使用固定高度，禁止手动 resize，超出内容通过内部纵向滚动查看。
 
 ## 3. 验收
 
@@ -104,8 +113,8 @@ Service 和 Worker 均通过它取得 `BaseAgent` 子类；调用方不再维护
 - 重复启动保留已有记录的全部字段，包括手动修改的属性及禁用状态；不自动修正旧 backend。
 - 新增 Agent 时正确保存 `is_subagent`；迁移覆盖启用和禁用角色，字段不接受 NULL。
 - 普通执行和 Resume 都通过 SQL 选择实现，每次创建实例；公开列表保持内部角色不可见。
-- 认证目录按数据库角色标记分组，保留禁用项和数据库新增角色，不泄露运行配置；未认证请求被拒绝。
-- 基础字段修改保存到数据库，后续目录读取可见；非法更新被拒绝且不改变角色结构或运行配置。
+- 认证列表按数据库角色标记返回 `AgentResponse`，保留禁用项和数据库新增角色，不泄露运行配置；未认证请求被拒绝。
+- 基础字段修改保存到数据库，后续列表读取可见；非法更新被拒绝且不改变角色结构或运行配置。
 - 仅存在于数据库中的角色可以运行；Leader 名称、描述和可用子角色以 SQL 为准，不构造 AgentLibrary。
 - 委派仍走已有子 Run/ARQ 路径，保留 `run_type=subagent` 与 `parent_run_id`。
 - 实施后的业务代码和测试没有 AgentManager 或已删除专业 Agent class 的引用。

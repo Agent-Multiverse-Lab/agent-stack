@@ -30,9 +30,10 @@ class AgentRunRepository:
         *,
         run_id: str,
         output_message_id: int,
+        worker_id: str,
     ) -> AgentRun:
         """记录当前 Run 最新保存的输出 Message。"""
-        run = await self.get_by_id(run_id)
+        run = await self.lock_for_output_update(run_id, worker_id=worker_id)
         run.output_message_id = output_message_id
         await self.session.flush()
         return run
@@ -208,11 +209,17 @@ class AgentRunRepository:
         )
         return result.scalar_one_or_none()
 
-    async def lock_for_output_update(self, run_id: str) -> AgentRun | None:
-        """锁定当前 Run 以便更新输出 Message ID。"""
+    async def lock_for_output_update(
+        self, run_id: str, *, worker_id: str
+    ) -> AgentRun:
+        """在消息事务内锁定 Run，仅允许当前执行尝试保存输出。"""
         run = await self._lock_update(run_id)
         if run is None:
-            return None
+            raise LookupError(f"Agent Run 不存在：{run_id}")
+        if run.worker_id != worker_id or str(run.agent_status) not in {
+            "running", "cancel_requested"
+        }:
+            raise RuntimeError(f"Agent Run 当前执行归属不匹配：{run_id}")
         return run
         
     # FIXEME: 锁定父 Run 后，Resume 创建与重复请求判断必须处于同一事务。
@@ -306,20 +313,41 @@ class AgentRunRepository:
         )
         return result.scalar_one_or_none()
 
-    async def set_running(self, run_id: str) -> AgentRun | None:
+    async def set_running(
+        self, run_id: str, *, worker_id: str
+    ) -> AgentRun | None:
+        """在行锁内认领尚未执行的 Run；已有执行者时拒绝重复领取。"""
         run = await self._lock_update(run_id)
         if run is None:
             return None
-        if str(run.agent_status) in AGENT_RUN_TERMINAL_STATUSES | {
-            "cancel_requested"
-        }:
+        current_status = str(run.agent_status)
+        if current_status in AGENT_RUN_TERMINAL_STATUSES:
             return run
+        if run.worker_id is not None or current_status not in {
+            "pending", "queued", "cancel_requested"
+        }:
+            return None
 
-        run.agent_status = "running"
+        run.worker_id = worker_id
+        if current_status != "cancel_requested":
+            run.agent_status = "running"
         run.started_at = run.started_at or datetime.now(UTC)
         run.error = None
         await self.session.flush()
         return run
+
+    async def release_for_retry(self, run_id: str, *, worker_id: str) -> bool:
+        """仅当前执行尝试可以释放归属，供 ARQ 下一次重试重新领取。"""
+        run = await self._lock_update(run_id)
+        if run is None or run.worker_id != worker_id:
+            return False
+        if str(run.agent_status) not in {"running", "cancel_requested"}:
+            return False
+        if str(run.agent_status) == "running":
+            run.agent_status = "pending"
+        run.worker_id = None
+        await self.session.flush()
+        return True
 
     async def set_agent_terminal(
         self,
@@ -328,6 +356,7 @@ class AgentRunRepository:
         status: str,
         error: str | None = None,
         error_type: str | None = None,
+        worker_id: str | None = None,
     ) -> tuple[AgentRun | None, bool]:
         if status not in AGENT_RUN_TERMINAL_STATUSES:
             raise ValueError(f"不支持的 Agent Run 终态：{status}")
@@ -337,6 +366,13 @@ class AgentRunRepository:
             return None, False
         current_status = str(run.agent_status)
         if current_status in AGENT_RUN_TERMINAL_STATUSES:
+            return run, False
+        if run.worker_id != worker_id:
+            return run, False
+        # 未认领的 Run 仅允许由入队失败路径写入失败终态。
+        if worker_id is None and (
+            current_status not in {"pending", "queued"} or status != "failed"
+        ):
             return run, False
 
         # FIXEME: interrupted 复用现有 error/error_type 终态消息字段，不增加专用参数。

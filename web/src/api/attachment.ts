@@ -1,3 +1,5 @@
+import { apiClient } from "@/api/client"
+
 export interface UploadedAttachmentResponse {
   file_id: string
   file_name: string
@@ -17,6 +19,12 @@ export interface ThreadMessageAttachmentResponse {
   access_url: string | null
 }
 
-export type ChatAttachment =
-  | UploadedAttachmentResponse
-  | ThreadMessageAttachmentResponse
+export const uploadChatAttachments = (files: File[]) => {
+  const body = new FormData()
+  files.forEach((file) => body.append("files", file, file.name))
+  return apiClient.apiPost<UploadedAttachmentResponse[], FormData>(
+    "/api/chat/attachment/upload",
+    body,
+    { requiresAuth: true }
+  )
+}

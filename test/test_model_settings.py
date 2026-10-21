@@ -9,6 +9,9 @@ from pydantic import ValidationError
 from server.entities.model import ModelSettingsRequest
 from server.router.model_router import router
 from server.service import model_service as service
+from server.utils.auth import get_current_user, is_admin_user
+from src.configs import config
+from src.database import User, get_db
 from test.test_model_repository import SQLiteModelTestCase
 
 
@@ -133,6 +136,11 @@ class ModelSettingsTest(SQLiteModelTestCase):
     async def test_model_routes_are_connected_and_require_authentication(self):
         app = FastAPI()
         app.include_router(router, prefix="/api")
+
+        async def get_test_db():
+            return self.db
+
+        app.dependency_overrides[get_db] = get_test_db
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
             for method, path in (
                 ("GET", "/api/models/providers"),
@@ -147,6 +155,56 @@ class ModelSettingsTest(SQLiteModelTestCase):
                     remote.assert_not_called()
             response = await client.get("/api/models")
             self.assertEqual(response.status_code, 401)
+
+    async def test_non_admin_can_read_save_discover_and_test_providers(self):
+        await service.ensure_builtin_model_providers(self.db)
+        user = self.session.get(User, self.user_id)
+        app = FastAPI()
+        app.include_router(router, prefix="/api")
+
+        async def get_test_user():
+            return user
+
+        async def get_test_db():
+            return self.db
+
+        app.dependency_overrides[get_current_user] = get_test_user
+        app.dependency_overrides[get_db] = get_test_db
+        payload = {
+            "base_url": "https://api.deepseek.com/v1",
+            "api_key": "test-key",
+            "is_enabled": True,
+            "models": [{"model_id": "deepseek-v4-pro", "capabilities": []}],
+        }
+        with patch.object(config, "admin_emails", ""), patch.object(
+            service,
+            "_request_json",
+            new_callable=AsyncMock,
+            return_value={"data": [{"id": "deepseek-v4-pro"}]},
+        ):
+            self.assertFalse(is_admin_user(user))
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app), base_url="http://test",
+            ) as client:
+                response = await client.get("/api/models/providers")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(len(response.json()), 2)
+
+                response = await client.get("/api/models/providers/deepseek")
+                self.assertEqual(response.status_code, 200)
+                self.assertNotIn("api_key", response.json())
+
+                response = await client.post("/api/models/providers/deepseek", json=payload)
+                self.assertEqual(response.status_code, 200)
+                self.assertTrue((await self.repository.get_provider_by_id("deepseek")).is_enabled)
+
+                response = await client.post("/api/models/providers/deepseek/discover", json=payload)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()[0]["model_id"], "deepseek-v4-pro")
+
+                response = await client.post("/api/models/providers/deepseek/test", json=payload)
+                self.assertEqual(response.status_code, 200)
+                self.assertTrue(response.json()["success"])
 
     async def test_null_key_rejected(self):
         with self.assertRaises(ValidationError):

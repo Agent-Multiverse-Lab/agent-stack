@@ -5,6 +5,7 @@ import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
+from uuid import uuid4
 
 from arq.connections import RedisSettings
 from arq.worker import RetryJob
@@ -43,6 +44,22 @@ class RetryableWorkerError(RetryJob):
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+WORKER_ID = f"worker-{uuid4().hex}"
+
+def init_worker_id(ctx) -> str:
+    "初始化id"
+    if isinstance(ctx, dict):
+        worker_id = ctx.get("worker_id")
+        if isinstance(worker_id, str) and worker_id:
+            return worker_id
+    return WORKER_ID
+
+def create_run_owner(ctx) -> str:
+    "为当前的run创建woker归属"
+    return f"{init_worker_id(ctx)}:{uuid4().hex}"
+
+
 
 
 @dataclass
@@ -151,7 +168,7 @@ async def ensure_agents_exist() -> None:
     )
 
 
-async def startup(ctx) -> None:
+async def worker_startup(ctx) -> None:
     """初始化 worker 数据库资源，并单点确保表和固定 Agent 注册。"""
 
     init_sandbox_provider()
@@ -167,24 +184,32 @@ async def startup(ctx) -> None:
         raise
 
 
-async def shutdown(ctx) -> None:
+async def worker_shutdown(ctx) -> None:
     """释放 Worker 自己持有的 PostgreSQL 和 Sandbox 资源。"""
 
     await shutdown_sandbox_provider()
     await postgres_manager.dispose()
 
 
-async def set_run_running(run_id: str) -> AgentRun | None:
+async def set_run_running(run_id: str, *, worker_id: str) -> AgentRun | None:
     # FIXME: Worker 开始执行时单独设置 running 状态。
     async with postgres_manager.get_async_session_context() as db:
         agent_run_repo = AgentRunRepository(db)
-        return await agent_run_repo.set_running(run_id)
+        return await agent_run_repo.set_running(run_id, worker_id=worker_id)
+
+
+async def release_run_for_retry(run_id: str, *, worker_id: str) -> bool:
+    async with postgres_manager.get_async_session_context() as db:
+        return await AgentRunRepository(db).release_for_retry(
+            run_id, worker_id=worker_id
+        )
 
 
 async def set_run_terminal(
     run_id: str,
     *,
     status: str,
+    worker_id: str,
     error: str | None = None,
     error_type: str | None = None,
 ) -> tuple[str | None, bool]:
@@ -194,6 +219,7 @@ async def set_run_terminal(
         run, changed = await agent_run_repo.set_agent_terminal(
             run_id,
             status=status,
+            worker_id=worker_id,
             error=error,
             error_type=error_type,
         )
@@ -229,26 +255,27 @@ async def _cancellable_stream(
     while True:
         cancel_task = asyncio.create_task(run_controller.wait_cancel_signal())
         stream_task = asyncio.create_task(anext(stream))
-        done, _ = await asyncio.wait(
-            {stream_task, cancel_task},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if cancel_task in done:
-            stream_task.cancel()
-            try:
-                await stream_task
-            except asyncio.CancelledError:
-                pass
-            await cancel_task
-            raise asyncio.CancelledError()
-        cancel_task.cancel()
-        await asyncio.gather(cancel_task, return_exceptions=True)
-
         try:
-            yield stream_task.result()
+            done, _ = await asyncio.wait(
+                {stream_task, cancel_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if cancel_task in done:
+                await cancel_task
+                raise asyncio.CancelledError()
+            try:
+                chunk = stream_task.result()
+            except StopAsyncIteration:
+                return
+        finally:
+            # asyncio.wait 不会随外层取消自动取消它等待的独立任务。
+            # 先回收两个子任务，再传播原始异常或向调用方交付 chunk。
+            for task in (stream_task, cancel_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(stream_task, cancel_task, return_exceptions=True)
 
-        except StopAsyncIteration:
-            return
+        yield chunk
 
 
 async def write_stream_event(
@@ -282,6 +309,7 @@ async def _finalize_run(
     run_id: str,
     *,
     status: str,
+    worker_id: str,
     thread_id: str,
     payload: dict[str, Any] | None = None,
     error: str | None = None,
@@ -292,11 +320,12 @@ async def _finalize_run(
     terminal_error_type = error_type
     if status == "interrupted" and payload is not None:
         terminal_error = json.dumps(payload, ensure_ascii=False)
-        terminal_error_type = str(payload.get("kind") or "interrupted")
+        terminal_error_type = str(payload.get("name") or "interrupted")
 
     agent_status, changed = await set_run_terminal(
         run_id,
         status=status,
+        worker_id=worker_id,
         error=terminal_error,
         error_type=terminal_error_type,
     )
@@ -309,13 +338,16 @@ async def _finalize_run(
     try:
         if changed and agent_status:
             if agent_status == "interrupted":
-                interaction_payload = {
-                    **(payload or {}),
-                    "parent_run_id": run_id,
-                }
+                event_type, interaction_payload = map_stream_event(
+                    {
+                        "status": "ask_human",
+                        "run_id": run_id,
+                        "pending_interrupt": payload or {},
+                    }
+                )
                 await write_stream_event(
                     run_id,
-                    "interaction_required",
+                    event_type,
                     interaction_payload,
                     thread_id,
                 )
@@ -325,7 +357,7 @@ async def _finalize_run(
             raise
         logger.exception(f"Agent run 错误事件发布失败：{run_id}")
     finally:
-        if agent_status == "cancelled":
+        if changed and agent_status == "cancelled":
             await clear_agent_run_cancel_signal(run_id)
 
     return agent_status, changed
@@ -358,6 +390,12 @@ def map_stream_event(chunk: dict[str, Any]) -> tuple[str, Any]:
             "name": "agent_execute_event",
             "chunk": chunk,
             "event": chunk.get("event"),
+        }
+    if status == "ask_human":
+        pending_interrupt = chunk["pending_interrupt"]
+        return "interrupt", {
+            **pending_interrupt,
+            "parent_run_id": chunk.get("run_id") or pending_interrupt["run_id"],
         }
     if status == "finished":
         return "end", {"status": "completed", "chunk": chunk}
@@ -496,15 +534,327 @@ async def _pending_run_cancel(run_id: str) -> bool:
 
 
 async def process_agent_run(ctx, run_id: str):
-    """仅重试 Agent 启动前的 RetryJob，其他异常保存失败终态。"""
-    ctx["_agent_stream_started"] = False
+    """领取并执行 Run，仅重试 Agent Stream 启动前的 RetryJob。"""
+    worker_id = create_run_owner(ctx)
+    run_claimed = False
+    agent_stream_started = False
     try:
-        return await _process_agent_run(ctx, run_id)
+        agent_run_event: AgentRun | None = await _get_agent_run(run_id)
+        if agent_run_event is None:
+            logger.error(f"当前agent运行id：{run_id} 不存在")
+            return
+
+        # agent_status 是当前 Run 生命周期的唯一状态字段。
+        initial_status = str(agent_run_event.agent_status)
+        # FIXEME: Worker 与 Repository 共用同一组已停止执行状态。
+        if initial_status in AGENT_RUN_TERMINAL_STATUSES:
+            return {"run_id": run_id, "status": initial_status}
+
+        running_run = await set_run_running(run_id, worker_id=worker_id)
+        if running_run is None:
+            logger.info("Agent Run 未领取，跳过执行：run_id=%s", run_id)
+            return
+        running_status = str(running_run.agent_status)
+        if running_status in AGENT_RUN_TERMINAL_STATUSES:
+            return {"run_id": run_id, "status": running_status}
+        run_claimed = True
+        if running_status == "cancel_requested":
+            await set_run_terminal(run_id, worker_id=worker_id, status="cancelled")
+            await clear_agent_run_cancel_signal(run_id)
+            return
+
+        # 构建agent内部的参数
+        uid = agent_run_event.uid
+        agent_slug = agent_run_event.agent_id
+        request_id = agent_run_event.request_id
+        thread_id = agent_run_event.thread_id
+
+        run_type = str(agent_run_event.run_type)
+        agent_input_message_formatted = None
+        # FIXEME: Resume Run 没有 trigger_message_id，必须先按 run_type 分支。
+        if run_type != "resume":
+            agent_input_message = await _get_agent_input_msg(
+                message_id=agent_run_event.trigger_message_id
+            )
+            if agent_input_message is None:
+                error = f"Input message not found: {agent_run_event.trigger_message_id}"
+                logger.error(
+                    f"当前agent运行id：{run_id} 的输入消息不存在："
+                    f"{agent_run_event.trigger_message_id}"
+                )
+                # FIXEME: Agent Stream 前的准备失败只写数据库终态，不发布 end。
+                await set_run_terminal(
+                    run_id,
+                    worker_id=worker_id,
+                    status="failed",
+                    error=error,
+                    error_type="LookupError",
+                )
+                return
+
+            agent_input_message_formatted = build_agent_input_msg(
+                query=agent_input_message.content,
+                # FIXME: 恢复数据库里记录的输入消息类型，而不是传空字符串。
+                msg_type=agent_input_message.message_type,
+                image_content=agent_input_message.image_content,
+                msg_metadata=dict(agent_input_message.msg_metadata or {}),
+            )
+
+        # 配置整体metadata
+        user = await _get_user(uid=uid)  # ty:ignore[invalid-argument-type]
+
+        if not user:
+            error = f"User not found: {uid}"
+            # FIXEME: Agent Stream 前的用户校验失败只写数据库终态，不发布 end。
+            await set_run_terminal(
+                run_id,
+                worker_id=worker_id,
+                status="failed",
+                error=error,
+                error_type="LookupError",
+            )
+            return
+
+        # Run 类型由创建入口显式落库；parent_run_id 只保留运行间的关联关系。
+        metadata = {
+            **dict(agent_run_event.run_metadata or {}),
+            "run_id": run_id,
+            "worker_id": worker_id,
+            "request_id": request_id,
+            "trigger_message_id": (
+                str(agent_run_event.trigger_message_id)
+                if agent_run_event.trigger_message_id is not None
+                else None
+            ),
+            "agent_slug": agent_slug,
+            "thread_id": thread_id,
+            "uid": user.uid,  # ty:ignore[unresolved-attribute]
+            "run_type": run_type,
+            "parent_run_id": agent_run_event.parent_run_id,
+        }
+
+        run_controller = AgentRunController(run_id)
+        run_controller.start()
+        try:
+            await write_stream_event(
+                run_id,
+                "status",
+                {"status": "running"},
+                str(thread_id),
+            )
+            terminal_flag = False
+            stream_event_smoother = StreamEventSmoother(
+                run_id=run_id,
+                character_limit=512,
+                interval_ms=100,
+            )
+            try:
+                async with postgres_manager.get_async_session_context() as db:
+                    # FIXEME: 两个入口参数不同，显式分支便于核验 Resume 不读取普通消息。
+                    if run_type == "resume":
+                        stream_thread_events: AsyncIterator = resume_agent_response(
+                            resume_input=metadata["resume"]["answers"],
+                            thread_id=thread_id,  # ty:ignore[invalid-argument-type]
+                            runtime_metadata=metadata,
+                            current_user=user,
+                            db=db,
+                        )
+                    else:
+                        if agent_input_message_formatted is None:
+                            raise RuntimeError("普通 Agent Run 缺少输入消息")
+                        stream_thread_events = stream_agent_response(
+                            agent_slug=agent_slug,  # ty:ignore[invalid-argument-type]
+                            thread_id=thread_id,  # ty:ignore[invalid-argument-type]
+                            runtime_metadata=metadata,
+                            thread_input_message=agent_input_message_formatted,
+                            current_user=user,
+                            db=db,
+                        )
+
+                    agent_stream_started = True
+                    async for steam_agent_chunk in _cancellable_stream(
+                        stream_thread_events,
+                        run_controller=run_controller,
+                    ):
+                        for strem_agent_chunk in _normalize_steam_agent_chunk(
+                            steam_agent_chunk  # ty: ignore[invalid-argument-type]
+                        ):  # ty: ignore[invalid-argument-type]
+                            current_thread_id = reslove_thread_id(
+                                strem_agent_chunk,
+                                str(thread_id),
+                            ) or str(thread_id)
+                            logger.info(
+                                "worker stream content | run_id=%s thread_id=%s chunk=%s",
+                                run_id,
+                                current_thread_id,
+                                strem_agent_chunk,
+                            )
+
+                            status = strem_agent_chunk.get("status") or "some_event"
+
+
+                            # FIXEME: 循环内只按 Thread Service 产出的 status 处理 chunk。
+                            if status == "loading":
+                                await stream_event_smoother.append(
+                                    strem_agent_chunk,
+                                    current_thread_id,
+                                )
+                            else:
+                                await stream_event_smoother.release(
+                                    thread_id=current_thread_id
+                                )
+
+                                # FIXEME: 子 Agent 事件只转发，不改变父 Run 状态。
+                                if current_thread_id != str(thread_id):
+                                    event_type, payload = map_stream_event(
+                                        strem_agent_chunk
+                                    )
+                                    if event_type != "end":
+                                        await write_stream_event(
+                                            run_id,
+                                            event_type,
+                                            payload,
+                                            current_thread_id,
+                                        )
+
+                                # 这里判断是否已经暂停了
+                                if await run_controller.is_cancelled():
+                                    raise asyncio.CancelledError(f"当前 Agent run： {run_id}已取消")
+
+
+                                elif status == "ask_human":
+                                    interrupt_payload = strem_agent_chunk.get("pending_interrupt")
+                                    if not isinstance(interrupt_payload, dict):
+                                        raise ValueError(
+                                            "ask_human chunk 缺少 pending_interrupt payload"
+                                        )
+                                    await stream_event_smoother.release()
+                                    agent_status, changed = await _finalize_run(
+                                        run_id,
+                                        worker_id=worker_id,
+                                        thread_id=str(thread_id),
+                                        status="interrupted",
+                                        payload=interrupt_payload,
+                                    )
+                                    if changed:
+                                        await write_end_stream_event(
+                                            run_id,
+                                            {
+                                                "status": agent_status,
+                                                "chunk": strem_agent_chunk,
+                                            },
+                                            current_thread_id,
+                                        )
+                                    terminal_flag = (
+                                        agent_status in AGENT_RUN_TERMINAL_STATUSES
+                                    )
+                                elif status == "error":
+                                    agent_status, changed = await _finalize_run(
+                                        run_id,
+                                        worker_id=worker_id,
+                                        status="failed",
+                                        thread_id=str(thread_id),
+                                        error=strem_agent_chunk.get("error"),
+                                        error_type=strem_agent_chunk.get("error_type"),
+                                    )
+                                    if changed:
+                                        await write_end_stream_event(
+                                            run_id,
+                                            {
+                                                "status": agent_status,
+                                                "chunk": strem_agent_chunk,
+                                            },
+                                            current_thread_id,
+                                        )
+                                    terminal_flag = (
+                                        agent_status in AGENT_RUN_TERMINAL_STATUSES
+                                    )
+                                elif status == "finished":
+                                    agent_status, changed = await _finalize_run(
+                                        run_id,
+                                        worker_id=worker_id,
+                                        status="completed",
+                                        thread_id=str(thread_id),
+                                        payload=strem_agent_chunk,
+                                    )
+                                    if changed:
+                                        await write_end_stream_event(
+                                            run_id,
+                                            {
+                                                "status": agent_status,
+                                                "chunk": strem_agent_chunk,
+                                            },
+                                            current_thread_id,
+                                        )
+                                    terminal_flag = (
+                                        agent_status in AGENT_RUN_TERMINAL_STATUSES
+                                    )
+                                else:
+                                    event_type, payload = map_stream_event(
+                                        strem_agent_chunk
+                                    )
+                                    if event_type != "end":
+                                        await write_stream_event(
+                                            run_id,
+                                            event_type,
+                                            payload,
+                                            current_thread_id,
+                                        )
+                await stream_event_smoother.release()
+                if terminal_flag:
+                    return
+
+                # FIXEME: 无终态 status 时先由 Run Context 判定是否为取消。
+                if not terminal_flag:
+                    if await run_controller.is_cancelled():
+                        raise asyncio.CancelledError(f"run {run_id} cancelled")
+
+
+                # FIXEME: 未取消且没有终态 status 才属于流协议错误。
+                protocol_error = "Agent stream ended without terminal status"
+                logger.error("%s: run_id=%s", protocol_error, run_id)
+                return await _finalize_run(
+                    run_id,
+                    worker_id=worker_id,
+                    status="failed",
+                    thread_id=str(thread_id),
+                    error=protocol_error,
+                    error_type="RuntimeError",
+                )
+            except asyncio.CancelledError:
+                logger.info(f"Agent run 收到取消请求：{run_id}")
+                await stream_event_smoother.release()
+                return await _finalize_run(
+                    run_id,
+                    worker_id=worker_id,
+                    status="cancelled",
+                    thread_id=str(thread_id),
+                )
+            except Exception as exc:
+                if not agent_stream_started:
+                    raise
+                await _finalize_run(
+                    run_id,
+                    worker_id=worker_id,
+                    status="failed",
+                    thread_id=str(thread_id),
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                )
+
+                logger.exception(f"Agent run 执行失败：{run_id}")
+                raise
+        finally:
+            await run_controller.close()
     except RetryJob as exc:
-        if ctx["_agent_stream_started"]:
+        if agent_stream_started:
             raise RuntimeError(str(exc)) from exc
         job_try = ctx.get("job_try", 1)
         if job_try < WorkerSettings.max_tries:
+            if run_claimed and not await release_run_for_retry(
+                run_id, worker_id=worker_id
+            ):
+                return
             logger.warning(
                 "Agent Run 执行准备失败，交由 ARQ 重试：run_id=%s attempt=%s/%s error_type=%s",
                 run_id, job_try, WorkerSettings.max_tries, type(exc).__name__,
@@ -512,6 +862,7 @@ async def process_agent_run(ctx, run_id: str):
             raise
         await set_run_terminal(
             run_id,
+            worker_id=worker_id,
             status="failed",
             error=str(exc),
             error_type=type(exc).__name__,
@@ -519,317 +870,15 @@ async def process_agent_run(ctx, run_id: str):
         # 已写入失败终态，使用普通异常让 ARQ 结束 Job。
         raise RuntimeError(str(exc)) from exc
     except Exception as exc:
-        if not ctx["_agent_stream_started"]:
+        if not agent_stream_started:
             await set_run_terminal(
                 run_id,
+                worker_id=worker_id,
                 status="failed",
                 error=str(exc),
                 error_type=type(exc).__name__,
             )
         raise
-
-
-async def _process_agent_run(ctx, run_id: str):
-    """从持久化 Run 和消息组装入口参数；SQL 身份覆盖 metadata 中同名值。"""
-    agent_run_event: AgentRun | None = await _get_agent_run(run_id)
-    if agent_run_event is None:
-        logger.error(f"当前agent运行id：{run_id} 不存在")
-        return
-
-    # agent_status 是当前 Run 生命周期的唯一状态字段。
-    initial_status = str(agent_run_event.agent_status)
-    # FIXEME: Worker 与 Repository 共用同一组已停止执行状态。
-    if initial_status in AGENT_RUN_TERMINAL_STATUSES:
-        return {"run_id": run_id, "status": initial_status}
-
-    # 构建agent内部的参数
-    uid = agent_run_event.uid
-    agent_slug = agent_run_event.agent_id
-    request_id = agent_run_event.request_id
-    thread_id = agent_run_event.thread_id
-
-    run_type = str(agent_run_event.run_type)
-    agent_input_message_formatted = None
-    # FIXEME: Resume Run 没有 trigger_message_id，必须先按 run_type 分支。
-    if run_type != "resume":
-        agent_input_message = await _get_agent_input_msg(
-            message_id=agent_run_event.trigger_message_id
-        )
-        if agent_input_message is None:
-            error = f"Input message not found: {agent_run_event.trigger_message_id}"
-            logger.error(
-                f"当前agent运行id：{run_id} 的输入消息不存在："
-                f"{agent_run_event.trigger_message_id}"
-            )
-            # FIXEME: Agent Stream 前的准备失败只写数据库终态，不发布 end。
-            await set_run_terminal(
-                run_id,
-                status="failed",
-                error=error,
-                error_type="LookupError",
-            )
-            return
-
-        agent_input_message_formatted = build_agent_input_msg(
-            query=agent_input_message.content,
-            # FIXME: 恢复数据库里记录的输入消息类型，而不是传空字符串。
-            msg_type=agent_input_message.message_type,
-            image_content=agent_input_message.image_content,
-            msg_metadata=dict(agent_input_message.msg_metadata or {}),
-        )
-
-    # 配置整体metadata
-    user = await _get_user(uid=uid)  # ty:ignore[invalid-argument-type]
-
-    if not user:
-        error = f"User not found: {uid}"
-        # FIXEME: Agent Stream 前的用户校验失败只写数据库终态，不发布 end。
-        await set_run_terminal(
-            run_id,
-            status="failed",
-            error=error,
-            error_type="LookupError",
-        )
-        return
-
-    # Run 类型由创建入口显式落库；parent_run_id 只保留运行间的关联关系。
-    metadata = {
-        **dict(agent_run_event.run_metadata or {}),
-        "run_id": run_id,
-        "request_id": request_id,
-        "trigger_message_id": (
-            str(agent_run_event.trigger_message_id)
-            if agent_run_event.trigger_message_id is not None
-            else None
-        ),
-        "agent_slug": agent_slug,
-        "thread_id": thread_id,
-        "uid": user.uid,  # ty:ignore[unresolved-attribute]
-        "run_type": run_type,
-        "parent_run_id": agent_run_event.parent_run_id,
-    }
-
-    running_run = await set_run_running(run_id)
-    if running_run is None:
-        raise ValueError(f"Agent Run 不存在：{run_id}")
-    running_status = str(running_run.agent_status)
-    if running_status == "cancel_requested":
-        await set_run_terminal(
-            run_id,
-            status="cancelled",
-        )
-        await clear_agent_run_cancel_signal(run_id)
-        return
-    if running_status in AGENT_RUN_TERMINAL_STATUSES:
-        return {"run_id": run_id, "status": running_status}
-
-    run_controller = AgentRunController(run_id)
-    run_controller.start()
-    try:
-        await write_stream_event(
-            run_id,
-            "status",
-            {"status": "running"},
-            str(thread_id),
-        )
-        terminal_flag = False
-        stream_event_smoother = StreamEventSmoother(
-            run_id=run_id,
-            character_limit=512,
-            interval_ms=100,
-        )
-        try:
-            async with postgres_manager.get_async_session_context() as db:
-                # FIXEME: 两个入口参数不同，显式分支便于核验 Resume 不读取普通消息。
-                if run_type == "resume":
-                    stream_thread_events: AsyncIterator = resume_agent_response(
-                        resume_input=metadata["resume"]["answers"],
-                        thread_id=thread_id,  # ty:ignore[invalid-argument-type]
-                        runtime_metadata=metadata,
-                        current_user=user,
-                        db=db,
-                    )
-                else:
-                    if agent_input_message_formatted is None:
-                        raise RuntimeError("普通 Agent Run 缺少输入消息")
-                    stream_thread_events = stream_agent_response(
-                        agent_slug=agent_slug,  # ty:ignore[invalid-argument-type]
-                        thread_id=thread_id,  # ty:ignore[invalid-argument-type]
-                        runtime_metadata=metadata,
-                        thread_input_message=agent_input_message_formatted,
-                        current_user=user,
-                        db=db,
-                    )
-
-                ctx["_agent_stream_started"] = True
-                async for steam_agent_chunk in _cancellable_stream(
-                    stream_thread_events,
-                    run_controller=run_controller,
-                ):
-                    for strem_agent_chunk in _normalize_steam_agent_chunk(
-                        steam_agent_chunk  # ty: ignore[invalid-argument-type]
-                    ):  # ty: ignore[invalid-argument-type]
-                        current_thread_id = reslove_thread_id(
-                            strem_agent_chunk,
-                            str(thread_id),
-                        ) or str(thread_id)
-                        logger.info(
-                            "worker stream content | run_id=%s thread_id=%s chunk=%s",
-                            run_id,
-                            current_thread_id,
-                            strem_agent_chunk,
-                        )
-
-                        status = strem_agent_chunk.get("status") or "some_event"
-
-
-                        # FIXEME: 循环内只按 Thread Service 产出的 status 处理 chunk。
-                        if status == "loading":
-                            await stream_event_smoother.append(
-                                strem_agent_chunk,
-                                current_thread_id,
-                            )
-                        else:
-                            await stream_event_smoother.release(
-                                thread_id=current_thread_id
-                            )
-
-                            # FIXEME: 子 Agent 事件只转发，不改变父 Run 状态。
-                            if current_thread_id != str(thread_id):
-                                event_type, payload = map_stream_event(
-                                    strem_agent_chunk
-                                )
-                                if event_type != "end":
-                                    await write_stream_event(
-                                        run_id,
-                                        event_type,
-                                        payload,
-                                        current_thread_id,
-                                    )
-
-                            # 这里判断是否已经暂停了
-                            if await run_controller.is_cancelled():
-                                raise asyncio.CancelledError(f"当前 Agent run： {run_id}已取消")
-                                
-
-                            elif status == "ask_human":
-                                interrupt_payload = strem_agent_chunk.get("pending_interrupt")
-                                if not isinstance(interrupt_payload, dict):
-                                    raise ValueError(
-                                        "ask_human chunk 缺少 pending_interrupt payload"
-                                    )
-                                await stream_event_smoother.release()
-                                agent_status, changed = await _finalize_run(
-                                    run_id,
-                                    thread_id=str(thread_id),
-                                    status="interrupted",
-                                    payload=interrupt_payload,
-                                )
-                                if changed:
-                                    await write_end_stream_event(
-                                        run_id,
-                                        {
-                                            "status": agent_status,
-                                            "chunk": strem_agent_chunk,
-                                        },
-                                        current_thread_id,
-                                    )
-                                terminal_flag = (
-                                    agent_status in AGENT_RUN_TERMINAL_STATUSES
-                                )
-                            elif status == "error":
-                                agent_status, changed = await _finalize_run(
-                                    run_id,
-                                    status="failed",
-                                    thread_id=str(thread_id),
-                                    error=strem_agent_chunk.get("error"),
-                                    error_type=strem_agent_chunk.get("error_type"),
-                                )
-                                if changed:
-                                    await write_end_stream_event(
-                                        run_id,
-                                        {
-                                            "status": agent_status,
-                                            "chunk": strem_agent_chunk,
-                                        },
-                                        current_thread_id,
-                                    )
-                                terminal_flag = (
-                                    agent_status in AGENT_RUN_TERMINAL_STATUSES
-                                )
-                            elif status == "finished":
-                                agent_status, changed = await _finalize_run(
-                                    run_id,
-                                    status="completed",
-                                    thread_id=str(thread_id),
-                                    payload=strem_agent_chunk,
-                                )
-                                if changed:
-                                    await write_end_stream_event(
-                                        run_id,
-                                        {
-                                            "status": agent_status,
-                                            "chunk": strem_agent_chunk,
-                                        },
-                                        current_thread_id,
-                                    )
-                                terminal_flag = (
-                                    agent_status in AGENT_RUN_TERMINAL_STATUSES
-                                )
-                            else:
-                                event_type, payload = map_stream_event(
-                                    strem_agent_chunk
-                                )
-                                if event_type != "end":
-                                    await write_stream_event(
-                                        run_id,
-                                        event_type,
-                                        payload,
-                                        current_thread_id,
-                                    )
-            await stream_event_smoother.release()
-            if terminal_flag:
-                return
-
-            # FIXEME: 无终态 status 时先由 Run Context 判定是否为取消。
-            if not terminal_flag:
-                if await run_controller.is_cancelled():
-                    raise asyncio.CancelledError(f"run {run_id} cancelled")
-
-
-            # FIXEME: 未取消且没有终态 status 才属于流协议错误。
-            protocol_error = "Agent stream ended without terminal status"
-            logger.error("%s: run_id=%s", protocol_error, run_id)
-            return await _finalize_run(
-                run_id,
-                status="failed",
-                thread_id=str(thread_id),
-                error=protocol_error,
-                error_type="RuntimeError",
-            )
-        except asyncio.CancelledError:
-            logger.info(f"Agent run 收到取消请求：{run_id}")
-            await stream_event_smoother.release()
-            return await _finalize_run(
-                run_id,
-                status="cancelled",
-                thread_id=str(thread_id),
-            )
-        except Exception as exc:
-            if not ctx["_agent_stream_started"]:
-                raise
-            await _finalize_run(
-                run_id,
-                status="failed",
-                thread_id=str(thread_id),
-                error=str(exc),
-                error_type=type(exc).__name__,
-            )
-
-            logger.exception(f"Agent run 执行失败：{run_id}")
-            raise
-    finally:
-        await run_controller.close()
 
 
 
@@ -840,5 +889,5 @@ class WorkerSettings:
     max_jobs = config.arq_max_jobs
     retry_jobs = True
     max_tries = 3  # 包含首次执行，最多再重试两次。
-    on_startup = startup
-    on_shutdown = shutdown
+    on_startup = worker_startup
+    on_shutdown = worker_shutdown
