@@ -14,7 +14,7 @@ import {
   QuestionnaireSubmit,
   QuestionnaireTitle,
 } from "@/components/ui/questionnaire";
-import type { InteractionRequired } from "@/types/chat";
+import type { InteractionRequired } from "@/pages/chat/types";
 
 interface AskUserProps {
   interaction: InteractionRequired;

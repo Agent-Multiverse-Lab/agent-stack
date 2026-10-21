@@ -9,12 +9,12 @@ import {
 import type { ReactNode } from "react";
 
 import { getCurrentUser, loginUser, registerUser } from "@/api/auth";
+import type { LoginRequest, RegisterRequest, UserResponse } from "@/api/auth";
 import {
   clearAccessToken,
   getAccessToken,
   saveAccessToken,
 } from "@/api/session";
-import type { LoginRequest, RegisterRequest, UserResponse } from "@/types/auth";
 
 interface AuthState {
   accessToken: string | null;

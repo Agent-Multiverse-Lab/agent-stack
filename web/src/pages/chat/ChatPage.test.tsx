@@ -6,6 +6,7 @@ import { ModelProvider } from "@/context/ModelContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import ChatPage from "@/pages/chat/ChatPage";
+import type { UploadedAttachmentResponse } from "@/api/attachment";
 import type { ChatModelOption } from "@/types/model";
 
 const mocks = vi.hoisted(() => ({
@@ -14,15 +15,18 @@ const mocks = vi.hoisted(() => ({
   createThread: vi.fn(),
   listChatAgents: vi.fn(),
   createRun: vi.fn(),
+  uploadAttachments: vi.fn(),
 }));
 
 vi.mock("@/context/AuthContext", () => ({ useAuth: () => ({ accessToken: "token" }) }));
 vi.mock("@/api/model", () => ({ listModels: mocks.listModels }));
-vi.mock("@/api/agent", () => ({
+vi.mock("@/api/thread", () => ({
   createThread: mocks.createThread,
   getThreadDetail: mocks.getThreadDetail,
   listChatAgents: mocks.listChatAgents,
-  uploadChatAttachments: vi.fn(),
+}));
+vi.mock("@/api/attachment", () => ({
+  uploadChatAttachments: mocks.uploadAttachments,
 }));
 vi.mock("@/i18n", () => ({ useTranslation: () => ({ t: (value: string) => value }) }));
 vi.mock("@/pages/chat/hooks/useAgentRun", () => ({
@@ -43,6 +47,8 @@ vi.mock("@/pages/chat/components/AgentMessageComposer", () => ({
     modelId: string;
     models: ChatModelOption[];
     selectModel: (model: string) => void;
+    attachments: UploadedAttachmentResponse[];
+    upload: (files: File[]) => void;
     submit: () => void;
     disabled: boolean;
   }) => (
@@ -52,6 +58,13 @@ vi.mock("@/pages/chat/components/AgentMessageComposer", () => ({
       {props.models.map((model) => (
         <Button key={model.id} onClick={() => props.selectModel(model.id)}>{model.name}</Button>
       ))}
+      <output aria-label="Attachments">{props.attachments.map((item) => item.file_name).join(",")}</output>
+      <Button
+        type="button"
+        onClick={() => props.upload([new File(["draft"], "draft.txt", { type: "text/plain" })])}
+      >
+        Upload
+      </Button>
       <Button type="button" disabled={props.disabled} onClick={props.submit}>Submit</Button>
     </div>
   ),
@@ -72,7 +85,7 @@ const catalog = {
 
 const thread = {
   uid: "user-1", thread_id: "thread-1", title: "Conversation", summary: null, agent_id: "LeaderAgent",
-  metadata: { model: deepseek }, created_at: "2026-10-14T00:00:00Z", updated_at: "2026-10-14T00:00:00Z", last_message_at: null,
+  metadata: { model: deepseek }, created_at: "2026-10-14T00:00:00Z", updated_at: "2026-10-14T00:00:00Z",
 };
 
 beforeEach(() => {
@@ -82,6 +95,15 @@ beforeEach(() => {
   mocks.listChatAgents.mockResolvedValue([{ id: "LeaderAgent", name: "Leader", description: "" }]);
   mocks.createThread.mockResolvedValue(thread);
   mocks.createRun.mockResolvedValue({ run_id: "run-1", status: "pending" });
+  mocks.uploadAttachments.mockResolvedValue([{
+    file_id: "file-1",
+    file_name: "draft.txt",
+    content_type: "text/plain",
+    file_size: 5,
+    bucket_name: "attachments",
+    object_name: "draft.txt",
+    access_url: "/files/file-1",
+  }]);
   mocks.getThreadDetail.mockResolvedValue({
     thread, messages: [], active_run: null, pending_interaction: null, next_before_message_id: null,
   });
@@ -128,4 +150,28 @@ it("restores the binding when the model catalog arrives after the conversation",
   await waitFor(() => expect(mocks.getThreadDetail).toHaveBeenCalledWith("thread-1"));
   resolveCatalog(catalog);
   await waitFor(() => expect(screen.getByLabelText("Model").textContent).toBe(deepseek));
+});
+
+it("restores the draft and attachments when creating the first conversation fails", async () => {
+  mocks.createThread.mockRejectedValueOnce(new Error("Thread creation failed"));
+  renderChat("/");
+  await waitFor(() => expect(screen.getByLabelText("Model").textContent).toBe(qwen));
+
+  fireEvent.change(screen.getByLabelText("Question"), {
+    target: { value: "Keep this draft" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Attachments").textContent).toBe("draft.txt"),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+
+  await waitFor(() =>
+    expect(screen.getByRole("alert").textContent).toBe("Thread creation failed"),
+  );
+  expect((screen.getByLabelText("Question") as HTMLInputElement).value).toBe(
+    "Keep this draft",
+  );
+  expect(screen.getByLabelText("Attachments").textContent).toBe("draft.txt");
+  expect(mocks.createRun).not.toHaveBeenCalled();
 });

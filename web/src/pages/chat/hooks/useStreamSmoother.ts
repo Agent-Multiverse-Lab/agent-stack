@@ -212,6 +212,19 @@ export function useStreamSmoother(appendChunks: AppendChunks) {
     if (chunks.length) appendRef.current(chunks);
   }
 
+  function resetRun(runId: string) {
+    for (const [threadId, controllers] of controllersByThreadRef.current) {
+      for (const [messageId, controller] of controllers) {
+        if (controller.metadata.runId !== runId) continue;
+        if (controller.frameId !== null) cancelFrame(controller.frameId);
+        controllers.delete(messageId);
+      }
+      if (controllers.size === 0) {
+        controllersByThreadRef.current.delete(threadId);
+      }
+    }
+  }
+
   function reset(threadId?: string | null) {
     for (const [id, threadControllers] of controllersByThreadRef.current) {
       if (threadId !== undefined && id !== threadId) continue;
@@ -226,5 +239,5 @@ export function useStreamSmoother(appendChunks: AppendChunks) {
 
   useEffect(() => () => reset(), []);
 
-  return { pushChunk, flushThread, flushRun, reset };
+  return { pushChunk, flushThread, flushRun, resetRun, reset };
 }

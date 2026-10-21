@@ -10,7 +10,7 @@ import {
 } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router"
 
-import { deleteThread, listThreads, renameThread } from "@/api/agent"
+import { deleteThread, listThreads, renameThread } from "@/api/thread"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -37,17 +37,17 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { useTranslation } from "@/i18n"
-import type { ThreadSummaryResponse } from "@/types/chat"
+import type { ThreadMetadataResponse } from "@/api/thread"
 
 export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; query?: string }) {
   const { t } = useTranslation()
   const { threadId } = useParams()
   const navigate = useNavigate()
-  const [threads, setThreads] = useState<ThreadSummaryResponse[]>([])
+  const [threads, setThreads] = useState<ThreadMetadataResponse[]>([])
   const [cursor, setCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
-  const [selected, setSelected] = useState<ThreadSummaryResponse | null>(null)
+  const [selected, setSelected] = useState<ThreadMetadataResponse | null>(null)
   const [action, setAction] = useState<"rename" | "delete">("rename")
   const [title, setTitle] = useState("")
   const [saving, setSaving] = useState(false)
@@ -110,7 +110,7 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
   }, [threadId])
 
   function openAction(
-    thread: ThreadSummaryResponse,
+    thread: ThreadMetadataResponse,
     nextAction: "rename" | "delete",
   ) {
     setSelected(thread)

@@ -7,17 +7,19 @@ import {
   createThread,
   getThreadDetail,
   listChatAgents,
-  uploadChatAttachments,
-} from "@/api/agent";
+} from "@/api/thread";
+import type { UploadedAttachmentResponse } from "@/api/attachment";
+import type { AgentRunEndEvent } from "@/api/agent-run";
 import { AskUser } from "@/pages/chat/components/AskUser";
 import { AgentMessageComposer } from "@/pages/chat/components/AgentMessageComposer";
 import { ChatMessage } from "@/pages/chat/components/ChatMessage";
 import { Thinking } from "@/pages/chat/components/Thinking";
 import { useAgentRun } from "@/pages/chat/hooks/useAgentRun";
-import { useChat } from "@/pages/chat/hooks/useChat";
+import { useAttachments } from "@/pages/chat/hooks/useAttachments";
+import { useThread } from "@/pages/chat/hooks/useThread";
 import { useModel } from "@/context/ModelContext";
 import { useTranslation } from "@/i18n";
-import type { AgentRunEndEvent, ChatMessage as ChatMessageType } from "@/types/chat";
+import type { ChatMessage as ChatMessageType } from "@/pages/chat/types";
 
 const isAbortError = (caught: unknown) =>
   caught instanceof DOMException && caught.name === "AbortError";
@@ -27,9 +29,18 @@ const messageRunId = (message: ChatMessageType) =>
   isRecord(message.payload.event) ? message.payload.event.run_id : undefined;
 const messageKey = (message: ChatMessageType, index: number) => {
   const event = isRecord(message.payload.event) ? message.payload.event : null;
-  const identity = event?.tool_call_id ?? event?.message_id ?? event?.name ?? event?.id ?? index;
-  return `${message.type}:${message.payload.type}:${event?.run_id ?? ""}:${event?.thread_id ?? ""}:${identity}`;
+  const identity = event?.activity_id ?? (event?.message_id !== undefined
+    ? `${String(event.message_id)}:${String(event.index ?? 0)}`
+    : event?.tool_call_id ?? event?.name ?? event?.id ?? index);
+  return `${message.type}:${message.payload.type}:${event?.type ?? ""}:${event?.run_id ?? ""}:${event?.thread_id ?? ""}:${identity}`;
 };
+
+interface ChatSubmission {
+  query: string;
+  draft: string;
+  attachments: UploadedAttachmentResponse[];
+  optimisticMessageId: number;
+}
 
 export default function ChatPage() {
   const { t } = useTranslation();
@@ -43,12 +54,17 @@ export default function ChatPage() {
     loading: modelsLoading,
     selectModel,
   } = useModel();
-  const chat = useChat();
+  const thread = useThread();
+  const attachments = useAttachments(errorText);
   const run = useAgentRun();
   const scroller = useRef<HTMLDivElement>(null);
   const controller = useRef<AbortController | null>(null);
   const operation = useRef(0);
-  const uploadGeneration = useRef(0);
+  const submissionInFlight = useRef(false);
+  const [draft, setDraft] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
   const [showScroll, setShowScroll] = useState(false);
 
   const abortStream = () => {
@@ -57,15 +73,16 @@ export default function ChatPage() {
   };
   const invalidate = () => {
     operation.current++;
-    uploadGeneration.current++;
-    chat.resetStream();
+    attachments.invalidate();
+    thread.resetStream();
     abortStream();
   };
 
-  async function loadAndApplyThread(id: string, expected: number) {
+  async function loadThreadDetail(id: string, expected: number) {
     const detail = await getThreadDetail(id);
     if (operation.current !== expected) return null;
-    chat.applyThreadDetail(detail);
+    thread.setThread(detail.thread);
+    thread.setMessages(detail.messages);
     return run.restoreRunFromThread(detail);
   }
 
@@ -79,8 +96,8 @@ export default function ChatPage() {
       run.getState().streamUrl &&
       run.isActive()
     ) {
-      chat.resetStream(id);
-      chat.clearRunStreamMessages(monitoredRunId);
+      thread.resetStream(id);
+      thread.clearRunStreamMessages(monitoredRunId);
       const activeController = new AbortController();
       controller.current = activeController;
       let endEvent: AgentRunEndEvent;
@@ -92,19 +109,19 @@ export default function ChatPage() {
               operation.current === expected &&
               run.getState().runId === monitoredRunId
             ) {
-              chat.applyRunMessageEvent(event, monitoredRunId);
+              thread.applyRunMessageEvent(event, monitoredRunId);
             }
           },
         );
         if (!consumed) return;
-        chat.flushStream(id);
+        thread.flushRunStream(monitoredRunId);
         endEvent = consumed;
       } catch (caught) {
         if (operation.current !== expected || isAbortError(caught)) return;
-        chat.flushStream(id);
-        chat.update({ error: errorText(caught) });
+        thread.flushRunStream(monitoredRunId);
+        setError(errorText(caught));
         try {
-          await loadAndApplyThread(id, expected);
+          await loadThreadDetail(id, expected);
         } catch {
           // Keep the known Run state and retry the stream.
         }
@@ -114,10 +131,11 @@ export default function ChatPage() {
         )
           return;
         if (!run.isActive()) {
-          chat.update({
-            error:
-              run.getState().runStatus === "failed" ? t("Agent execution failed") : "",
-          });
+          setError(
+            run.getState().runStatus === "failed"
+              ? t("Agent execution failed")
+              : "",
+          );
           return;
         }
         await new Promise((resolve) => window.setTimeout(resolve, 1000));
@@ -127,17 +145,17 @@ export default function ChatPage() {
       }
 
       if (operation.current !== expected) return;
-      chat.update({ error: "" });
+      setError("");
       try {
-        await loadAndApplyThread(id, expected);
+        await loadThreadDetail(id, expected);
       } catch (caught) {
         if (operation.current === expected && !isAbortError(caught)) {
-          chat.update({ error: errorText(caught) });
+          setError(errorText(caught));
         }
       }
       if (operation.current !== expected) return;
       if (endEvent.status === "failed") {
-        chat.update({ error: endEvent.error || t("Agent execution failed") });
+        setError(endEvent.error || t("Agent execution failed"));
       }
       return;
     }
@@ -145,30 +163,25 @@ export default function ChatPage() {
 
   async function loadThread(id: string) {
     const expected = ++operation.current;
-    uploadGeneration.current++;
+    attachments.reset();
     abortStream();
     run.clearRun();
-    chat.clearMessages();
-    chat.update({
-      thread: null,
-      draft: "",
-      attachments: [],
-      uploadingCount: 0,
-      uploadError: "",
-      submitting: false,
-      loading: true,
-      error: "",
-    });
+    thread.resetThread();
+    setDraft("");
+    submissionInFlight.current = false;
+    setSubmitting(false);
+    setLoading(true);
+    setError("");
     try {
-      const activeRun = await loadAndApplyThread(id, expected);
+      const activeRun = await loadThreadDetail(id, expected);
       if (activeRun && run.isActive()) void monitorRun(id, expected);
     } catch (caught) {
       if (operation.current === expected && !isAbortError(caught)) {
-        chat.clearMessages();
-        chat.update({ thread: null, error: errorText(caught) });
+        thread.resetThread();
+        setError(errorText(caught));
       }
     } finally {
-      if (operation.current === expected) chat.update({ loading: false });
+      if (operation.current === expected) setLoading(false);
     }
   }
 
@@ -176,16 +189,22 @@ export default function ChatPage() {
     if (!id) {
       invalidate();
       run.clearRun();
-      chat.resetThread();
-    } else if (chat.getState().thread?.thread_id !== id) {
+      thread.resetThread();
+      attachments.reset();
+      setDraft("");
+      setLoading(false);
+      submissionInFlight.current = false;
+      setSubmitting(false);
+      setError("");
+    } else if (thread.getState().thread?.thread_id !== id) {
       void loadThread(id);
     }
   });
   const onUnmount = useEffectEvent(() => invalidate());
-  const boundModelId = chat.state.thread?.metadata.model;
+  const boundModelId = thread.state.thread?.metadata.model;
   useEffect(() => {
     if (typeof boundModelId === "string" && boundModelId) selectModel(boundModelId);
-  }, [boundModelId, chat.state.thread?.thread_id, selectModel]);
+  }, [boundModelId, thread.state.thread?.thread_id, selectModel]);
   useEffect(() => {
     onRouteChange(threadId);
   }, [threadId]);
@@ -197,47 +216,80 @@ export default function ChatPage() {
       element.scrollTo({ top: element.scrollHeight, behavior: "auto" });
       setShowScroll(false);
     }
-  }, [chat.state.messages, run.state.pendingInteraction]);
+  }, [thread.state.messages, run.state.pendingInteraction]);
 
-  async function uploadFiles(files: File[]) {
-    if (!files.length) return;
-    const expected = uploadGeneration.current;
-    chat.update((previous) => ({
-      uploadingCount: previous.uploadingCount + files.length,
-      uploadError: "",
-    }));
-    try {
-      const uploaded = await uploadChatAttachments(files);
-      if (uploadGeneration.current === expected)
-        chat.appendUploadedAttachments(uploaded);
-    } catch (caught) {
-      if (uploadGeneration.current === expected)
-        chat.update({ uploadError: errorText(caught) });
-    } finally {
-      if (uploadGeneration.current === expected) {
-        chat.update((previous) => ({
-          uploadingCount: Math.max(0, previous.uploadingCount - files.length),
-        }));
-      }
-    }
+  function beginSubmission(): ChatSubmission | null {
+    const attachmentState = attachments.getState();
+    const query = draft.trim();
+    const selectedAttachments = [...attachmentState.attachments];
+    if (
+      (!query && selectedAttachments.length === 0) ||
+      attachmentState.uploadingCount > 0 ||
+      submissionInFlight.current
+    )
+      return null;
+
+    const createdAt = new Date().toISOString();
+    const optimisticMessageId = thread.addOptimisticMessage({
+      role: "user",
+      content: query,
+      image_content: null,
+      message_type: selectedAttachments.length
+        ? query
+          ? "multimodal"
+          : "attachment"
+        : "text",
+      status: "pending",
+      request_id: null,
+      run: null,
+      attachments: selectedAttachments.map((attachment) => ({
+        file_id: attachment.file_id,
+        file_name: attachment.file_name,
+        content_type: attachment.content_type,
+        file_size: attachment.file_size,
+        available: true,
+        access_url: attachment.access_url,
+      })),
+      created_at: createdAt,
+      updated_at: createdAt,
+    });
+    setDraft("");
+    attachments.clearAttachments();
+    attachments.clearAttachmentError();
+    submissionInFlight.current = true;
+    setSubmitting(true);
+    setError("");
+    return {
+      query,
+      draft,
+      attachments: selectedAttachments,
+      optimisticMessageId,
+    };
+  }
+
+  function rollbackSubmission(submission: ChatSubmission) {
+    thread.removeOptimisticMessage(submission.optimisticMessageId);
+    setDraft(submission.draft);
+    attachments.setAttachments(submission.attachments);
   }
 
   async function submit() {
     if (run.isActive() || run.getState().pendingInteraction) return;
-    const submission = chat.beginSubmission();
+    const submission = beginSubmission();
     if (!submission) return;
     const expected = ++operation.current;
     abortStream();
     let runCreated = false;
     try {
-      let currentThread = chat.getState().thread;
+      let currentThread = thread.getState().thread;
       if (!currentThread) {
         const agents = await listChatAgents();
         const leader = agents.find((agent) => agent.id === "LeaderAgent");
         if (!leader) throw new Error(t("Leader agent is unavailable"));
         const created = await createThread(leader.id, selectedModelId || undefined);
         if (operation.current !== expected) return;
-        currentThread = chat.applyCreatedThread(created);
+        currentThread = created;
+        thread.setThread(currentThread);
         if (threadId !== created.thread_id) {
           navigate(`/c/${encodeURIComponent(created.thread_id)}`, {
             replace: true,
@@ -255,45 +307,46 @@ export default function ChatPage() {
       if (operation.current !== expected) return;
       runCreated = true;
       try {
-        await loadAndApplyThread(currentThread.thread_id, expected);
+        await loadThreadDetail(currentThread.thread_id, expected);
       } catch (caught) {
         if (operation.current === expected && !isAbortError(caught)) {
-          chat.update({ error: errorText(caught) });
+          setError(errorText(caught));
         }
       }
       if (operation.current !== expected) return;
       if (createdRun.status === "failed")
-        chat.update({ error: t("Agent execution failed") });
+        setError(t("Agent execution failed"));
       await monitorRun(currentThread.thread_id, expected);
     } catch (caught) {
       if (operation.current === expected && !isAbortError(caught)) {
-        chat.update({ error: errorText(caught) });
-        if (!runCreated) chat.rollbackSubmission(submission);
+        setError(errorText(caught));
+        if (!runCreated) rollbackSubmission(submission);
       }
     } finally {
       if (operation.current === expected) {
         controller.current = null;
-        chat.update({ submitting: false });
+        submissionInFlight.current = false;
+        setSubmitting(false);
       }
     }
   }
 
   async function cancel() {
-    chat.update({ error: "" });
+    setError("");
     try {
       await run.cancelCurrentRun();
     } catch (caught) {
-      chat.update({ error: errorText(caught) });
+      setError(errorText(caught));
     }
   }
 
   async function submitResume(answers: Record<string, string>) {
     const interaction = run.getState().pendingInteraction;
-    const currentThread = chat.getState().thread;
+    const currentThread = thread.getState().thread;
     if (!interaction || !currentThread || run.getState().resuming) return;
     const expected = ++operation.current;
     abortStream();
-    chat.update({ error: "" });
+    setError("");
     try {
       await run.resumeRun(interaction.parent_run_id, {
         thread_id: currentThread.thread_id,
@@ -307,23 +360,24 @@ export default function ChatPage() {
       }
     } catch (caught) {
       if (operation.current === expected && !isAbortError(caught)) {
-        chat.update({ error: errorText(caught) });
+        setError(errorText(caught));
       }
     }
   }
 
-  const chatState = chat.state;
+  const threadState = thread.state;
+  const attachmentState = attachments.state;
   const runState = run.state;
   const active = run.isActive();
   const pending = runState.pendingInteraction;
   const inputDisabled =
-    chatState.loading ||
+    loading ||
     runState.cancelling ||
     runState.resuming ||
     Boolean(pending) ||
-    (chatState.submitting && !active);
-  const docked = chatState.messages.length > 0 || Boolean(pending);
-  const hasAssistantText = chatState.messages.some((message) => {
+    (submitting && !active);
+  const docked = threadState.messages.length > 0 || Boolean(pending);
+  const hasAssistantText = threadState.messages.some((message) => {
     if (message.type !== "ai" || message.payload.type !== "text") return false;
     const event = isRecord(message.payload.event)
       ? message.payload.event
@@ -335,14 +389,14 @@ export default function ChatPage() {
     );
   });
   const showThinking =
-    !chatState.loading && active && !pending && !hasAssistantText;
-  const firstActivityIndex = chatState.messages.findIndex(
+    !loading && active && !pending && !hasAssistantText;
+  const firstActivityIndex = threadState.messages.findIndex(
     (message) =>
       message.type === "ai" &&
       message.payload.type === "tool" &&
       messageRunId(message) === runState.runId,
   );
-  const displayedError = chatState.uploadError || chatState.error;
+  const displayedError = attachmentState.uploadError || error;
 
   return (
     <section className="relative flex h-full min-h-0 flex-col bg-card text-foreground">
@@ -358,10 +412,10 @@ export default function ChatPage() {
         }}
       >
         <div className="mx-auto grid w-full max-w-[800px] content-start gap-6 px-8 py-4">
-          {chatState.loading ? (
+          {loading ? (
             <Thinking label="Loading conversation" />
           ) : (
-            chatState.messages.map((message, index) => (
+            threadState.messages.map((message, index) => (
               <div key={messageKey(message, index)}>
                 {showThinking && index === firstActivityIndex && <Thinking />}
                 <ChatMessage message={message} />
@@ -380,7 +434,7 @@ export default function ChatPage() {
         } ${pending ? "max-h-full overflow-y-auto overscroll-contain" : ""}`}
       >
         <div className="relative mx-auto grid w-full max-w-[800px] gap-2">
-          {!docked && !chatState.loading && (
+          {!docked && !loading && (
             <div className="mb-4 text-center select-none">
               <h1 className="text-2xl font-semibold">
                 {t("Welcome to AM")}
@@ -412,7 +466,7 @@ export default function ChatPage() {
               <ArrowDown size={17} />
             </Button>
           )}
-          {!chatState.loading && pending && (
+          {!loading && pending && (
             <AskUser
               key={pending.parent_run_id}
               interaction={pending}
@@ -421,10 +475,10 @@ export default function ChatPage() {
             />
           )}
           <AgentMessageComposer
-            draft={chatState.draft}
-            setDraft={(draft) => chat.update({ draft })}
-            attachments={chatState.attachments}
-            uploading={chatState.uploadingCount}
+            draft={draft}
+            setDraft={setDraft}
+            attachments={attachmentState.attachments}
+            uploading={attachmentState.uploadingCount}
             running={active}
             disabled={inputDisabled}
             modelId={selectedModelId}
@@ -432,8 +486,8 @@ export default function ChatPage() {
             modelsLoading={modelsLoading}
             placement={docked ? "top" : "bottom"}
             selectModel={selectModel}
-            upload={(files) => void uploadFiles(files)}
-            removeAttachment={chat.removeAttachment}
+            upload={(files) => void attachments.uploadFiles(files)}
+            removeAttachment={attachments.removeAttachment}
             submit={() => void submit()}
             cancel={() => void cancel()}
           />

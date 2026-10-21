@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import i18n from "@/i18n"
 import { AskUser } from "@/pages/chat/components/AskUser"
-import type { InteractionRequired } from "@/types/chat"
+import type { InteractionRequired } from "@/pages/chat/types"
 
 afterEach(() => {
   cleanup()

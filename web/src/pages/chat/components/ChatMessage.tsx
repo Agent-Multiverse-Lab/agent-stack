@@ -7,8 +7,8 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import type { ThreadMessageAttachmentResponse } from "@/types/attachment";
-import type { ChatMessage as ChatMessageType } from "@/types/chat";
+import type { ThreadMessageAttachmentResponse } from "@/api/attachment";
+import type { ChatMessage as ChatMessageType } from "@/pages/chat/types";
 import { Attachment } from "@/pages/chat/components/Attachment";
 import { ToolCall } from "@/pages/chat/components/ToolCall";
 import { useTranslation } from "@/i18n";

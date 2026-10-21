@@ -652,15 +652,17 @@ const applyRunStreamEvent = (
 }
 ```
 
-React 前端由 `web/src/pages/chat/hooks/useChatMessages.ts` 消费真实事件：
+React 前端由 `web/src/pages/chat/hooks/useThread.ts` 消费真实事件：
 
 - `message_delta.content_delta` 继续平滑显示为正文；`reasoning_content_delta` 或
   `additional_kwargs_reasoning_content` 累加到独立的可折叠推理区域，同一分片优先使用前者。
 - `tool_call` 立即生成待执行卡片；`custom(name=agent_execute_event)` 从
   `event.stream_data` 读取 `tool-started/tool-output-delta/tool-finished/tool-error`，更新工具
-  名称、参数、进度、结果及错误。归并键为 `run_id + thread_id + tool_call_id`。
+  名称、参数、进度、结果及错误。归并键优先使用 `run_id + thread_id + tool_call_id`，
+  参数分片缺少调用 ID 时回退到 `message_id + index`；活动创建后保持稳定 UI ID。
 - 工具卡片显示名称和状态，展开后查看参数及输出；工具事件到来前先刷出对应线程的前端
-  文本缓存，保持正文与工具卡片的展示顺序。
+  文本缓存，保持正文与工具卡片的展示顺序。运行中使用 reduced-motion 安全的旋转状态，
+  完成和失败使用一次性入场反馈，取消、中断和停止使用静态暂停状态。
 - `ask_user` 使用独立的 `interrupt(name=ask_user)` 交互事件，由 `useAgentRun`
   保存待回答问题并交给输入区的 `AskUser` 展示；其工具调用、执行输出和结束事件不重复生成
   普通工具卡片。无名称的后续工具事件按 Run、线程和调用 ID 识别同一交互调用。
@@ -853,7 +855,7 @@ const { assistantContent } = storeToRefs(chatStore)
 Store 字段或后端事件。同一 Run 的 Agent state 事件按 `run_id + name` 覆盖；没有有效
 Todo 时不创建 Tool 组件，并移除该 Run 先前的 Agent state 组件。
 
-Run 终态重新读取 Thread Detail 时，`useChat.applyThreadDetail` 保留当前页面已经收到的
+Run 终态重新读取 Thread Detail 时，`useThread.setMessages` 保留当前页面已经收到的
 流式 Tool 消息，并按关联 Run 放回持久化 Assistant 消息之前。整页刷新后的 Tool 历史恢复
 不属于本次事件流展示范围。
 

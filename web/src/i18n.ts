@@ -272,7 +272,6 @@ const translations = {
   "Skill directory": "技能目录",
   "MCP servers": "MCP 服务",
   "All configured servers": "全部已配置服务",
-  "Style assets": "素材配置",
   "Not configured": "未配置",
   "Agent name": "智能体名称",
   "View details": "查看详情",

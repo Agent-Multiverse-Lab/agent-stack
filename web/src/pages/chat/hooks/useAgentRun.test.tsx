@@ -2,15 +2,19 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { useAgentRun } from "@/pages/chat/hooks/useAgentRun";
-import { useChat } from "@/pages/chat/hooks/useChat";
-import type { AgentRunEndEvent, AgentRunStreamEvent } from "@/types/chat";
+import { useThread } from "@/pages/chat/hooks/useThread";
+import type { AgentRunEndEvent, AgentRunStreamEvent } from "@/api/agent-run";
 
-const mocks = vi.hoisted(() => ({ createRun: vi.fn(), consumeStream: vi.fn() }));
-vi.mock("@/api/agent", () => ({
+const mocks = vi.hoisted(() => ({
+  createRun: vi.fn(),
+  consumeStream: vi.fn(),
+  cancelRun: vi.fn(),
+}));
+vi.mock("@/api/agent-run", () => ({
   createAgentRun: mocks.createRun,
   consumeAgentRunStream: mocks.consumeStream,
   buildAgentRunStreamUrl: vi.fn(),
-  cancelAgentRun: vi.fn(),
+  cancelAgentRun: mocks.cancelRun,
   resumeAgentRun: vi.fn(),
 }));
 
@@ -62,14 +66,74 @@ it("routes ask_user to pending interaction while preserving preceding text witho
     ]) await callback(item);
     return end;
   });
-  const { result } = renderHook(() => ({ run: useAgentRun(), chat: useChat() }));
+  const { result } = renderHook(() => ({ run: useAgentRun(), thread: useThread() }));
   await act(async () => {
     await result.current.run.createRun({ query: "hello", agentId: "leader", threadId: "thread-1", attachmentFileIds: [] });
-    await result.current.run.consumeRunStream(new AbortController().signal, (item) => result.current.chat.applyRunMessageEvent(item, "run-1"));
+    await result.current.run.consumeRunStream(new AbortController().signal, (item) => result.current.thread.applyRunMessageEvent(item, "run-1"));
   });
   expect(result.current.run.state.pendingInteraction).toEqual({ name: "ask_user", parent_run_id: "run-1", questions });
   expect(result.current.run.state.runStatus).toBe("interrupted");
-  expect(result.current.chat.state.messages).toHaveLength(1);
-  expect(result.current.chat.state.messages[0].payload.event).toMatchObject({ content: "Please confirm." });
-  expect(result.current.chat.state.error).toBe("");
+  expect(result.current.thread.state.messages).toHaveLength(1);
+  expect(result.current.thread.state.messages[0].payload.event).toMatchObject({ content: "Please confirm." });
+});
+
+it("does not let a late cancel response overwrite an SSE terminal state", async () => {
+  let resolveCancel!: (value: {
+    run_id: string;
+    thread_id: string;
+    agent_id: string;
+    status: string;
+  }) => void;
+  mocks.createRun.mockResolvedValue({
+    run_id: "run-1",
+    thread_id: "thread-1",
+    status: "running",
+    stream_url: "/events",
+  });
+  mocks.cancelRun.mockReturnValue(new Promise((resolve) => {
+    resolveCancel = resolve;
+  }));
+  mocks.consumeStream.mockResolvedValue({
+    id: "end",
+    scope: "agent_run",
+    type: "end",
+    run_id: "run-1",
+    thread_id: "thread-1",
+    created_at: null,
+    status: "completed",
+  } satisfies AgentRunEndEvent);
+  const { result } = renderHook(() => useAgentRun());
+
+  await act(async () => {
+    await result.current.createRun({
+      query: "hello",
+      agentId: "leader",
+      threadId: "thread-1",
+      attachmentFileIds: [],
+    });
+  });
+  let cancellation!: Promise<void>;
+  act(() => {
+    cancellation = result.current.cancelCurrentRun();
+  });
+  await act(async () => {
+    await result.current.consumeRunStream(
+      new AbortController().signal,
+      vi.fn(),
+    );
+  });
+  expect(result.current.state.runStatus).toBe("completed");
+
+  await act(async () => {
+    resolveCancel({
+      run_id: "run-1",
+      thread_id: "thread-1",
+      agent_id: "leader",
+      status: "cancel_requested",
+    });
+    await cancellation;
+  });
+  expect(result.current.state.runStatus).toBe("completed");
+  expect(result.current.state.streamUrl).toBeNull();
+  expect(result.current.state.cancelling).toBe(false);
 });

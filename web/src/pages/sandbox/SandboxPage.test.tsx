@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
-import { listThreads } from "@/api/agent";
+import { listThreads } from "@/api/thread";
 import { deleteSandboxFile, listSandboxWorkspace, readSandboxFile, renameSandboxFile, updateSandboxFile } from "@/api/sandbox";
 import SandboxPage from "@/pages/sandbox/SandboxPage";
 import { installBrowserStubs } from "@/test/browserStubs";
 
-vi.mock("@/api/agent", () => ({ listThreads: vi.fn() }));
+vi.mock("@/api/thread", () => ({ listThreads: vi.fn() }));
 vi.mock("@/api/sandbox", () => ({
   listSandboxWorkspace: vi.fn(),
   readSandboxFile: vi.fn(),
@@ -48,7 +48,6 @@ beforeEach(() => {
       metadata: {},
       created_at: "2026-09-21T00:00:00Z",
       updated_at: "2026-09-21T00:00:00Z",
-      last_message_at: null,
     }],
     next_cursor: null,
     has_more: false,

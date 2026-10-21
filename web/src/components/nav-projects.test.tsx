@@ -2,14 +2,14 @@ import { afterEach, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
-import { listThreads, renameThread } from "@/api/agent"
+import { listThreads, renameThread } from "@/api/thread"
 import { NavProjects } from "@/components/nav-projects"
 import { AppSidebar } from "@/components/app-sidebar"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { installBrowserStubs } from "@/test/browserStubs"
-import type { ThreadSummaryResponse } from "@/types/chat"
+import type { ThreadMetadataResponse } from "@/api/thread"
 
-vi.mock("@/api/agent", () => ({
+vi.mock("@/api/thread", () => ({
   listThreads: vi.fn(),
   renameThread: vi.fn(),
   deleteThread: vi.fn(),
@@ -25,7 +25,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const thread: ThreadSummaryResponse = {
+const thread: ThreadMetadataResponse = {
   thread_id: "thread-1",
   title: "Old title",
   summary: null,
@@ -33,7 +33,6 @@ const thread: ThreadSummaryResponse = {
   metadata: {},
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
-  last_message_at: null,
 }
 
 function mockThreads() {

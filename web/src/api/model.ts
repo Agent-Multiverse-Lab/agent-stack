@@ -1,14 +1,41 @@
 import { apiClient } from "@/api/client"
-import type { ModelCatalogResponse } from "@/types/model"
-import type { ConnectionTestResult, ModelProvider, ModelProviderSummary, ModelProviderId, ModelSettingsRequest, SettingsModel } from "@/types/model"
+import type {
+  ChatModelOption,
+  ModelProvider,
+  ModelProviderId,
+  ModelProviderMetadata,
+  SettingsModel,
+} from "@/types/model"
+
+export interface ChatModelListResponse {
+  default_model: string
+  fallback_model: string
+  flash_model: string
+  image_model: string
+  models: ChatModelOption[]
+}
+
+export interface ModelSettingsRequest {
+  base_url: string
+  api_key?: string
+  is_enabled: boolean
+  models: SettingsModel[]
+}
+
+export interface ConnectionTestResult {
+  success: boolean
+  elapsed_ms: number
+  error: string | null
+  status_code: number | null
+}
 
 export const listModels = () =>
-  apiClient.apiGet<ModelCatalogResponse>("/api/models", {
+  apiClient.apiGet<ChatModelListResponse>("/api/models", {
     requiresAuth: true
   })
 
 export const listModelProviders = () =>
-  apiClient.apiGet<ModelProviderSummary[]>("/api/models/providers", modelRequestOptions())
+  apiClient.apiGet<ModelProviderMetadata[]>("/api/models/providers", modelRequestOptions())
 
 export const getModelProvider = (id: ModelProviderId) =>
   apiClient.apiGet<ModelProvider>(`/api/models/providers/${id}`, modelRequestOptions())

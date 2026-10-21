@@ -1,4 +1,11 @@
-import { Check, ChevronRight, CircleX, Clock3, LoaderCircle, Pause } from "lucide-react";
+import {
+  ChevronRight,
+  CircleCheck,
+  CircleX,
+  Clock3,
+  LoaderCircle,
+  Pause,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -7,29 +14,71 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { useTranslation } from "@/i18n";
+import { cn } from "@/lib/utils";
+import type { ToolExecutionStatus } from "@/pages/chat/types";
 
-const formatValue = (value: unknown) =>
-  typeof value === "string" ? value : JSON.stringify(value, null, 2);
-
-const statusLabels: Record<string, string> = {
-  pending: "Pending",
-  running: "In progress",
-  completed: "Completed",
-  error: "Failed",
-  cancelled: "Cancelled",
-  interrupted: "Interrupted",
-  stopped: "Stopped",
+const formatValue = (value: unknown) => {
+  if (typeof value === "string") return value;
+  return JSON.stringify(value, null, 2) ?? String(value);
 };
+
+const statusView = {
+  pending: {
+    label: "Pending",
+    icon: Clock3,
+    className: "text-muted-foreground",
+  },
+  running: {
+    label: "In progress",
+    icon: LoaderCircle,
+    className:
+      "text-primary motion-safe:animate-spin motion-safe:[animation-duration:900ms]",
+  },
+  completed: {
+    label: "Completed",
+    icon: CircleCheck,
+    className:
+      "text-success motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75 motion-safe:duration-200",
+  },
+  error: {
+    label: "Failed",
+    icon: CircleX,
+    className:
+      "text-destructive motion-safe:animate-in motion-safe:fade-in motion-safe:spin-in-12 motion-safe:duration-200",
+  },
+  cancelled: {
+    label: "Cancelled",
+    icon: Pause,
+    className: "text-warning",
+  },
+  interrupted: {
+    label: "Interrupted",
+    icon: Pause,
+    className: "text-warning",
+  },
+  stopped: {
+    label: "Stopped",
+    icon: Pause,
+    className: "text-warning",
+  },
+} satisfies Record<
+  ToolExecutionStatus,
+  { label: string; icon: typeof Clock3; className: string }
+>;
+
+const isToolExecutionStatus = (value: string): value is ToolExecutionStatus =>
+  Object.prototype.hasOwnProperty.call(statusView, value);
 
 export function ToolCall({ event }: { event: Record<string, unknown> }) {
   const { t } = useTranslation();
-  const status = String(event.status ?? "pending");
+  const receivedStatus = String(event.status ?? "pending");
+  const status = isToolExecutionStatus(receivedStatus)
+    ? receivedStatus
+    : "pending";
   const name = typeof event.name === "string" ? event.name : t("Tool");
-  const statusLabel = t(statusLabels[status] ?? "Pending");
-  const Icon = status === "running" ? LoaderCircle
-    : status === "completed" ? Check
-      : status === "error" ? CircleX
-        : status === "pending" ? Clock3 : Pause;
+  const view = statusView[status];
+  const statusLabel = t(view.label);
+  const Icon = view.icon;
   const output = typeof event.output === "object" && event.output !== null && "content" in event.output
     ? event.output.content : event.output;
   const progress = Array.isArray(event.output_deltas)
@@ -48,12 +97,20 @@ export function ToolCall({ event }: { event: Record<string, unknown> }) {
           />
         }
       >
-        <ChevronRight className="shrink-0 text-muted-foreground transition-transform group-data-open/tool:rotate-90" />
-        <Icon className={status === "running"
-          ? "shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none"
-          : status === "error" ? "shrink-0 text-destructive" : "shrink-0 text-muted-foreground"} />
+        <ChevronRight className="shrink-0 text-muted-foreground transition-transform group-data-open/tool:rotate-90 motion-reduce:transition-none" />
+        <span
+          className="grid size-4 shrink-0 place-items-center"
+          data-tool-status-icon={status}
+          aria-hidden="true"
+        >
+          <Icon key={status} className={cn("size-4", view.className)} />
+        </span>
         <span className="truncate font-medium">{name}</span>
-        <span className="shrink-0 text-muted-foreground" aria-live="polite">
+        <span
+          className="shrink-0 text-muted-foreground"
+          aria-live="polite"
+          aria-atomic="true"
+        >
           {statusLabel}
         </span>
       </CollapsibleTrigger>
