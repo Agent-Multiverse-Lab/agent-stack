@@ -25,16 +25,18 @@ npm run preview
 
 ## Map page
 
-The `/map` page uses TianDiTu imagery as its basemap. Add a browser-side TianDiTu
-key to `web/.env.local` before starting Vite:
+The `/map` page uses Mapbox GL JS with street and satellite basemaps. Add a
+public Mapbox access token to `web/.env.local` before starting Vite:
 
 ```dotenv
-VITE_TIANDITU_TK=your-browser-key
+VITE_MAPBOX_ACCESS_TOKEN=pk.your-public-token
 ```
 
-The key is exposed to the browser; configure the allowed website origin in the
-TianDiTu console. Satellite catalog search and Map conversation are not connected
-on this initial page.
+The token is exposed to the browser; use a public token and configure its allowed
+URLs in the Mapbox console. Restart Vite after changing the environment file.
+The map supports coordinate lookup, street/satellite switching, labels, and linked
+location markers. Without a token, the local illustrative example remains available.
+Live place search, satellite catalog search, and Map conversation are not connected.
 
 ## Frontend conventions
 

@@ -15,6 +15,7 @@ export default function App() {
       "/knowledge": "Knowledge",
       "/agent": "Agent",
       "/static": "Satellite",
+      "/map": "Map",
       "/sandbox": "Sandbox",
     };
     const page =

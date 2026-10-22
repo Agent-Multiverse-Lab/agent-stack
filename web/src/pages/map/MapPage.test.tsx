@@ -15,7 +15,7 @@ vi.mock("./components/MapCanvas", () => ({
     return <div data-testid="map-canvas" />
   }),
 }))
-beforeEach(async () => { installBrowserStubs(); vi.stubEnv("VITE_TIANDITU_TK", ""); vi.clearAllMocks(); await i18n.changeLanguage("en") })
+beforeEach(async () => { installBrowserStubs(); vi.stubEnv("VITE_MAPBOX_ACCESS_TOKEN", ""); vi.clearAllMocks(); await i18n.changeLanguage("en") })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 function startExample() { fireEvent.click(screen.getAllByRole("button", { name: "Explore a local example" })[0]) }
 it("shows honest live-map and service setup boundaries", () => {
@@ -24,7 +24,7 @@ it("shows honest live-map and service setup boundaries", () => {
   expect(screen.getByText("Map unavailable")).toBeTruthy()
   expect(screen.queryByText("Catalog search is not connected")).toBeNull()
   expect(screen.queryByText("Map conversation is not connected")).toBeNull()
-  expect(screen.queryByText(/VITE_TIANDITU_TK/)).toBeNull()
+  expect(screen.queryByText(/VITE_MAPBOX_ACCESS_TOKEN/)).toBeNull()
   expect(screen.getByRole("button", {name: "Zoom in"}).hasAttribute("disabled")).toBe(true)
 })
 it("selects repeatedly, dismisses and resets local sample locations", () => {

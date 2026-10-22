@@ -295,7 +295,7 @@ const translations = {
   "Map conversation": "地图对话",
   "Map conversation is not connected": "地图对话尚未接入",
   "Map unavailable": "地图暂不可用",
-  "Set VITE_TIANDITU_TK in web/.env.local": "请在 web/.env.local 中配置 VITE_TIANDITU_TK",
+  "Set VITE_MAPBOX_ACCESS_TOKEN in web/.env.local": "请在 web/.env.local 中配置 VITE_MAPBOX_ACCESS_TOKEN",
   "Loading map": "地图加载中",
   "Map tiles could not be loaded": "地图瓦片加载失败",
   "Map could not load. Please retry.": "地图加载失败，请重试",
