@@ -27,7 +27,8 @@ def load_message_persistence():
         AIMessage=AIMessage, ToolMessage=ToolMessage, json=json, logger=Mock(),
         AgentRunRepository=AgentRunRepository, ConversationRepository=ConversationRepository,
     )
-    nodes = [node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name in {
+    nodes = [node for node in tree.body if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)) and node.name in {
+        "_reslove_interrupt_state",
         "save_ai_message", "save_tool_message", "save_message_from_langgraph_state", "save_interrupt_message",
     }]
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), "exec"), module.__dict__)
@@ -48,6 +49,31 @@ class FakeContext:
 
 
 class ThreadMessagePersistenceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_interrupt_terminal_is_saved_before_commit(self):
+        graph = SimpleNamespace(aget_state=AsyncMock(return_value=SimpleNamespace(
+            values={"messages": []},
+        )))
+        repository = SimpleNamespace(
+            lock_for_output_update=AsyncMock(), set_agent_terminal=AsyncMock(),
+        )
+        db = SimpleNamespace(commit=AsyncMock())
+        calls = Mock()
+        calls.attach_mock(repository.set_agent_terminal, "terminal")
+        calls.attach_mock(db.commit, "commit")
+        payload = {"name": "ask_user", "questions": [{"question": "继续？"}]}
+        with patch.object(thread_service, "AgentRunRepository", return_value=repository):
+            await thread_service.save_message_from_langgraph_state(
+                thread_id="thread-1", run_id="run-1", worker_id="owner-1",
+                context=SimpleNamespace(uid="user-1"),
+                agent_instance=SimpleNamespace(get_agent=AsyncMock(return_value=graph)),
+                db=db, interrupt_chunks=[json.dumps({"pending_interrupt": payload}).encode()],
+            )
+        self.assertEqual(calls.mock_calls, [
+            call.terminal("run-1", status="interrupted", worker_id="owner-1",
+                          error=json.dumps(payload, ensure_ascii=False), error_type="ask_user"),
+            call.commit(),
+        ])
+
     async def test_foreign_owner_is_rejected_before_saving_any_checkpoint_messages(self):
         graph = SimpleNamespace(aget_state=AsyncMock(return_value=SimpleNamespace(
             values={"messages": [AIMessage(content="foreign output")]},

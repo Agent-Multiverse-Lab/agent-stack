@@ -3,7 +3,6 @@ import binascii
 import json
 import uuid
 from collections.abc import AsyncIterator, Callable
-from copy import deepcopy
 from dataclasses import fields
 from datetime import datetime
 from typing import Any
@@ -526,7 +525,7 @@ async def _build_agent_runtime_context(
     conversation_model: str | None = None,
 ):
     """复制 SQL 默认配置，注入本次 Run 身份和模型选择，生成运行快照。"""
-    agent_runtime_context = deepcopy(defaults or {})
+    agent_runtime_context = dict(defaults or {})
 
     # 根据当前用户的传递内容填填充上下文
     agent_runtime_context.update(
@@ -590,18 +589,11 @@ def _reslove_agent_state(agent_state: dict):
 
 
 def _reslove_interrupt_state(interrupt_chunk):
-    try:
-        interrupt_payload = json.loads(interrupt_chunk)
-    except (TypeError, ValueError):
-        return "interrupted", "等待交互中"
-    status = interrupt_payload.get("status", "interrupted")
-    questions = interrupt_payload.get("pending_interrupt", {}).get("questions")
-    if questions and isinstance(questions, list) and isinstance(questions[0], dict):
-        question = questions[0].get("question")
-        if isinstance(question, str) and question.strip():
-            return status, question.strip()
-    
-    return status, interrupt_payload.get("message", " 用户需回答")
+    interrupt_payload = json.loads(interrupt_chunk)["pending_interrupt"]
+    return (
+        str(interrupt_payload.get("name") or "interrupted"),
+        json.dumps(interrupt_payload, ensure_ascii=False),
+    )
 
 
 def _lc_message_v2_dispather(
@@ -980,6 +972,7 @@ async def save_message_from_langgraph_state(
     context,
     agent_instance: BaseAgent,
     db: AsyncSession,
+    interrupt_chunks: list[bytes] | None = None,
 ) -> None:
     """读取当前 checkpoint，并按 Message type 持久化运行结果。"""
 
@@ -1020,6 +1013,19 @@ async def save_message_from_langgraph_state(
         await agent_run_repo.set_output_message(
             run_id=run_id,
             output_message_id=int(saved_ai_message.id),
+            worker_id=worker_id,
+        )
+
+    interrupt_message = None
+    interrupt_type = None
+    for interrupt_chunk in interrupt_chunks or []:
+        interrupt_type, interrupt_message = _reslove_interrupt_state(interrupt_chunk)
+    if interrupt_message is not None:
+        await agent_run_repo.set_agent_terminal(
+            run_id,
+            status="interrupted",
+            error=interrupt_message,
+            error_type=interrupt_type,
             worker_id=worker_id,
         )
 
@@ -1339,9 +1345,6 @@ async def stream_agent_response(
             yield chunk
 
         # 打断系统，interrupt 隶属于 正常的异常
-        interrupted = False
-        interrupt_message = None
-        interrupt_type = None
         interrupt_chunks: list[bytes] = []
         async for interrupt_chunk in check_agent_interrupt_handler(
             agent_instance=agent_instance,
@@ -1349,10 +1352,6 @@ async def stream_agent_response(
             chunk_iterator=make_agent_stream_event,
             context=agent_context,
         ):
-            interrupted = True
-            interrupt_type, interrupt_message = _reslove_interrupt_state(
-                interrupt_chunk
-            )
             interrupt_chunks.append(interrupt_chunk)
 
         # finish之前先save所有的的信息
@@ -1364,6 +1363,7 @@ async def stream_agent_response(
                 context=agent_context,
                 agent_instance=agent_instance,
                 db=db,
+                interrupt_chunks=interrupt_chunks,
             )
         except Exception as e:
             logger.exception(f"保存信息出错:{e}")
@@ -1374,7 +1374,7 @@ async def stream_agent_response(
             )
             return
 
-        if interrupted:
+        if interrupt_chunks:
             for interrupt_chunk in interrupt_chunks:
                 yield interrupt_chunk
             return
@@ -1510,6 +1510,15 @@ async def resume_agent_response(
         ):
             yield chunk
 
+        interrupt_chunks = [
+            chunk
+            async for chunk in check_agent_interrupt_handler(
+                agent_instance=agent_instance,
+                runtime_metadata=runtime_metadata,
+                chunk_iterator=make_agent_resume_event,
+                context=agent_context,
+            )
+        ]
         await save_message_from_langgraph_state(
             thread_id=thread_id,
             run_id=run_id,
@@ -1517,14 +1526,11 @@ async def resume_agent_response(
             context=agent_context,
             agent_instance=agent_instance,
             db=db,
+            interrupt_chunks=interrupt_chunks,
         )
-        async for interrupt_chunk in check_agent_interrupt_handler(
-            agent_instance=agent_instance,
-            runtime_metadata=runtime_metadata,
-            chunk_iterator=make_agent_resume_event,
-            context=agent_context,
-        ):
-            yield interrupt_chunk
+        if interrupt_chunks:
+            for interrupt_chunk in interrupt_chunks:
+                yield interrupt_chunk
             return
 
         yield make_agent_resume_event(

@@ -336,7 +336,10 @@ async def _finalize_run(
         end_payload["error"] = error
 
     try:
-        if changed and agent_status:
+        # 中断终态已随 checkpoint 消息提交，仍需发布对应流事件。
+        if (changed and agent_status) or (
+            status == "interrupted" and agent_status == "interrupted"
+        ):
             if agent_status == "interrupted":
                 event_type, interaction_payload = map_stream_event(
                     {

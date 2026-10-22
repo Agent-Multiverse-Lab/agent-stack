@@ -73,15 +73,15 @@ class WorkerInteractionEventTest(unittest.IsolatedAsyncioTestCase):
             "run-1", "interrupt", {**pending, "parent_run_id": "run-1"}, "thread-1",
         )
 
-    async def test_unchanged_terminal_does_not_publish_interaction(self):
+    async def test_previously_saved_interrupt_still_publishes_interaction(self):
         self.namespace["set_run_terminal"].return_value = ("interrupted", False)
         result = await self.finalize(
             "run-1", worker_id="owner-1", thread_id="thread-1",
             status="interrupted", payload={"name": "ask_user", "questions": self.questions},
         )
         self.assertEqual(result, ("interrupted", False))
-        self.namespace["write_stream_event"].assert_not_awaited()
-        self.namespace["write_end_stream_event"].assert_not_awaited()
+        self.namespace["write_stream_event"].assert_awaited_once()
+        self.namespace["write_end_stream_event"].assert_awaited_once()
 
 
 if __name__ == "__main__":

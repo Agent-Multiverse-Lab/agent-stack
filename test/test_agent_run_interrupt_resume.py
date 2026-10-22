@@ -288,7 +288,8 @@ class NormalStreamFinalizationTest(unittest.IsolatedAsyncioTestCase):
                 chunks.append(json.loads(chunk))
                 order.append(chunks[-1]["status"])
         saved.assert_awaited_once()
-        self.assertEqual(resolve.call_count, int(interrupted))
+        self.assertEqual(resolve.call_count, 0)
+        self.assertEqual(len(saved.await_args.kwargs["interrupt_chunks"]), int(interrupted))
         return chunks, order
 
     async def test_interrupt_is_emitted_after_checkpoint_save(self):
