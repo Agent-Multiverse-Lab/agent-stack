@@ -22,6 +22,7 @@ import type {
 interface RunState {
   runId: string | null;
   runStatus: string | null;
+  startedAt: number | null;
   streamUrl: string | null;
   pendingInteraction: InteractionRequired | null;
   cancelling: boolean;
@@ -33,6 +34,7 @@ type RunStateUpdater = (previous: RunState) => RunState;
 const initialState = (): RunState => ({
   runId: null,
   runStatus: null,
+  startedAt: null,
   streamUrl: null,
   pendingInteraction: null,
   cancelling: false,
@@ -42,6 +44,11 @@ const initialState = (): RunState => ({
 const activeStatuses = new Set(["pending", "running", "cancel_requested"]);
 const isActiveStatus = (status: string | null) =>
   Boolean(status && activeStatuses.has(status));
+
+const parseStartedAt = (value: unknown): number | null => {
+  const timestamp = typeof value === "string" ? Date.parse(value) : NaN;
+  return Number.isFinite(timestamp) ? timestamp : null;
+};
 
 const isHumanQuestion = (value: unknown): value is HumanQuestion =>
   typeof value === "object" &&
@@ -102,6 +109,7 @@ export function useAgentRun() {
         ...previous,
         runId: run.run_id,
         runStatus: run.status,
+        startedAt: null,
         streamUrl: run.stream_url,
         cancelling: false,
         pendingInteraction: null,
@@ -123,6 +131,7 @@ export function useAgentRun() {
           ...previous,
           runId: run.run_id,
           runStatus: run.status,
+          startedAt: null,
           streamUrl: run.stream_url,
           pendingInteraction: null,
           cancelling: false,
@@ -149,6 +158,9 @@ export function useAgentRun() {
       pendingInteraction: detail.pending_interaction,
       runId: restored?.run_id ?? null,
       runStatus: restored?.status ?? null,
+      startedAt:
+        parseStartedAt(restored?.started_at) ??
+        (previous.runId === restored?.run_id ? previous.startedAt : null),
       streamUrl: activeRun
         ? buildAgentRunStreamUrl(activeRun.run_id, detail.thread.thread_id)
         : null,
@@ -171,7 +183,16 @@ export function useAgentRun() {
         if (getState().runId !== runId) return;
         if (event.type === "status" && typeof event.status === "string") {
           const runStatus = event.status;
-          update((previous) => ({ ...previous, runStatus }));
+          update((previous) => ({
+            ...previous,
+            runStatus,
+            // Pending runs may not have a persisted start yet; replay must not reset it.
+            startedAt:
+              previous.startedAt ??
+              (runStatus === "running"
+                ? parseStartedAt(event.created_at)
+                : null),
+          }));
         }
         if (isInteractionRequiredEvent(event)) {
           const pendingInteraction: InteractionRequired = {

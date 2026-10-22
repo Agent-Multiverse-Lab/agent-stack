@@ -417,12 +417,16 @@ export default function ChatPage() {
           ) : (
             threadState.messages.map((message, index) => (
               <div key={messageKey(message, index)}>
-                {showThinking && index === firstActivityIndex && <Thinking />}
+                {showThinking && index === firstActivityIndex && (
+                  <Thinking startedAt={runState.startedAt} />
+                )}
                 <ChatMessage message={message} />
               </div>
             ))
           )}
-          {showThinking && firstActivityIndex === -1 && <Thinking />}
+          {showThinking && firstActivityIndex === -1 && (
+            <Thinking startedAt={runState.startedAt} />
+          )}
         </div>
       </div>
 
