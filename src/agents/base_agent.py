@@ -157,51 +157,10 @@ class BaseAgent:
             context=context,
             **kwargs,
         ) as stream_events:  # ty:ignore[no-matching-overload]
-            async for stream_event in stream_events:
-                stream_methods = stream_event.get("method")
-                stream_params = stream_event.get("params")
-                stream_data = stream_params.get("data") #此处根据方法不同，内容也不同, 具体得自己debug看下，随便写个就知道了
-                stream_namesapce = stream_params.get("namespace", []) # 当有旁路子图或者agent执行时，namespace会有东西
-                stream_sequence = stream_event.get("seq") # 直接从流式中
+            async for event in self._stream_agent_events(stream_events):
+                yield event
 
-                if stream_methods == "values":
-                    # 返回直接参数，由于values的特殊性，其返回的时候，只有完全参数提取的时候才出现 value,即是一个完整消息，
-                    # 输出的时候，直接返回就可跳过了，只有values是完整的，其他的都是流式的
-                    yield stream_methods, stream_data
-                    continue
-                
-
-                if stream_methods == "messages":
-                    # 输出的 stream_data 在 messages 执行中分为好几个部分，
-                    # 头一段会生成event事件，其中包含delta的模型产生的流式数据
-                    # 后一部分会生成langchain的初始化数据，包含langraph的执行路径， 等等一堆元数据
-                    stream_msg, stream_agent_run_metadata = stream_data
-                    
-                    # purely 上面二参数
-                    stream_agent_run_metadata = dict(stream_agent_run_metadata or {})
-
-                    # 组合参数
-
-                    
-                    # 添加额外数据,因为会添加子图（子agent）的关系，此处需要保留
-                    stream_agent_run_metadata["namespace"] = stream_namesapce
-                    
-                    # TODO 添加额外的验证以及需要填充的参数
-                    
-                    # 返回的数据可能都会有用
-                    yield stream_methods, (stream_msg, stream_agent_run_metadata)
-                    
-                    
-                if stream_methods == "tools":
-                    # 对 tool 消息进行清洗
-                    agent_execute_data = {
-                        "stream_methods": stream_methods,
-                        "stream_namesapce": stream_namesapce,
-                        "stream_data":stream_data
-                    }
-             
-                    # 构建任务触发时，所要输出内容
-                    yield "agent_execute_event", agent_execute_data
+        yield "agent_checkpoint", await agent.aget_state(input_config)
 
     # FIXEME: Resume 必须把 Command 原样交给 LangGraph，不能包装成 messages。
     async def stream_message_by_resume(
@@ -231,32 +190,39 @@ class BaseAgent:
             version="v3",
             context=context,
             **kwargs,
-        ) as stream_events:  # ty:ignore[no-matching-overload]
-            async for stream_event in stream_events:
-                stream_method = stream_event.get("method")
-                stream_params = stream_event.get("params") or {}
-                stream_data = stream_params.get("data")
-                stream_namespace = stream_params.get("namespace", [])
+        ) as stream_events:
+            async for event in self._stream_agent_events(stream_events):
+                yield event
 
-                if stream_method == "values":
-                    yield stream_method, stream_data
-                    continue
+        yield "agent_checkpoint", await agent.aget_state(input_config)
 
-                if stream_method == "messages":
-                    stream_msg, stream_agent_run_metadata = stream_data
-                    stream_agent_run_metadata = dict(
-                        stream_agent_run_metadata or {}
-                    )
-                    stream_agent_run_metadata["namespace"] = stream_namespace
-                    yield stream_method, (
-                        stream_msg,
-                        stream_agent_run_metadata,
-                    )
-                    continue
+    async def _stream_agent_events(self, stream_events):
+        """统一转换 LangGraph v3 输出事件。"""
+        async for stream_event in stream_events:
+            stream_method = stream_event.get("method")
+            stream_params = stream_event.get("params") or {}
+            stream_data = stream_params.get("data")
+            stream_namespace = stream_params.get("namespace", [])
 
-                if stream_method == "tool":
-                    yield "agent_execute_event", {
-                        "stream_methods": stream_method,
-                        "stream_namesapce": stream_namespace,
-                        "stream_data": stream_data,
-                    }
+            if stream_method == "values":
+                yield stream_method, stream_data
+                continue
+
+            if stream_method == "messages":
+                stream_msg, stream_agent_run_metadata = stream_data
+                stream_agent_run_metadata = dict(
+                    stream_agent_run_metadata or {}
+                )
+                stream_agent_run_metadata["namespace"] = stream_namespace
+                yield stream_method, (
+                    stream_msg,
+                    stream_agent_run_metadata,
+                )
+                continue
+
+            if stream_method == "tools":
+                yield "agent_execute_event", {
+                    "stream_methods": stream_method,
+                    "stream_namesapce": stream_namespace,
+                    "stream_data": stream_data,
+                }
