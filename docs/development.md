@@ -15,6 +15,18 @@ python server/main.py
 uv run --no-sync arq server.worker.WorkerSettings
 ```
 
+## 业务日志
+
+API 和 Worker 的业务日志默认同时输出到控制台和 `logs/s2c-YYYY-MM-DD.log`，例如
+`s2c-2026-10-19.log`。文件按进程本地日期每天分开，跨天自动切换，同一天重启后继续追加；
+使用 UTF-8，包含异常堆栈。日志目录固定为项目根目录下的 `logs/`，自动创建，不受 `SAVE_DIR` 影响。
+
+Compose 将 API 和 Worker 的 `/app/logs` 挂载到项目根目录的 `./logs`，容器重建后日志保留。
+
+```bash
+tail -n 200 -f "logs/s2c-$(date +%F).log"
+```
+
 ## 数据库迁移
 
 ```bash
@@ -60,13 +72,39 @@ docker compose up -d --build api worker
 ```
 
 RustFS 是默认对象存储，在 `9000`（S3 API）和 `9001`（控制台）开放，数据写入
-`save/volume/rustfs/data/`。应用继续通过 `MINIO_*` 环境变量配置 S3 客户端；Linux bind mount
+`/var/lib/agent-stack/volume/rustfs/data/`。应用继续通过 `MINIO_*` 环境变量配置 S3 客户端；Linux bind mount
 目录需允许容器用户 UID/GID `10001:10001` 写入。
 
 Compose 文件位于仓库根目录 `docker-compose.yml`，镜像构建文件仍在 `docker/`。
-应用基础设施数据卷写入 `save/volume/`；Cube 使用 `/data/cube-stack`、`/data/cubelet` 等宿主机
-目录，工作文件位于 `CUBE_HOST_SAVE_DIR`。已有部署若在 `volume/` 或 `docker/volume/`
-保存数据，应在启动新 Compose 配置前把对应数据迁至 `save/volume/`，避免数据库和对象存储以空目录启动。
+应用基础设施数据卷默认写入宿主机 `/var/lib/agent-stack/volume/`，Compose 日志写入
+项目根目录的 `logs/`。通过 `.env`（生产使用 `.env.prod`）中的 `AGENT_STACK_DATA_DIR`
+配置宿主机数据路径；有专用数据盘时可设置 `AGENT_STACK_DATA_DIR=/data/agent-stack`。
+Cube 使用 `/data/cube-stack`、`/data/cubelet`
+等宿主机目录，工作文件位于 `CUBE_HOST_SAVE_DIR`。
+
+已有部署切换目录时，先停止使用旧目录的服务，再保留文件权限和所有权复制数据。
+以下以旧目录 `save/` 和新默认目录为例，在仓库根目录执行：
+
+```bash
+docker compose stop
+sudo mkdir -p /var/lib/agent-stack
+mkdir -p logs
+sudo cp -a save/volume /var/lib/agent-stack/
+# 如果已有业务日志：
+cp -a save/logs/. logs/
+```
+
+生产部署停止服务时使用下方生产启动命令相同的 `--env-file` 和 `-f` 参数。
+完成复制后再使用新配置启动，验证原有数据可读后清理旧目录，避免直接使用空目录启动数据库。
+新部署需提前创建 RustFS 数据目录并赋予容器用户写权限：
+
+```bash
+sudo mkdir -p /var/lib/agent-stack/volume/rustfs/data
+sudo chown 10001:10001 /var/lib/agent-stack/volume/rustfs/data
+```
+
+自定义数据目录时，将上述命令中的数据目标路径一并替换。旧部署若使用 `/var/log/agent-stack`，
+停止 API/Worker 后将其中日志复制到项目的 `logs/`，再重建 API/Worker。
 
 生产环境使用 `docker-compose.prod.yml` 覆盖配置。先从 `.env.template` 准备未提交的 `.env.prod`，
 填写生产凭据，至少设置 `POSTGRES_PASSWORD`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`

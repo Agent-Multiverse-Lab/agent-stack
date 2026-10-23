@@ -104,7 +104,7 @@ npm ci
 npm run dev
 ```
 
-需要固定的卫星目录测试数据时，可在迁移后执行 `uv run --no-sync python scripts/load_satellite_catalog_fixture.py`。Compose 数据卷位于 `save/volume/`，对象存储由 RustFS 提供。更多命令见[开发指南](docs/development.md)。
+需要固定的卫星目录测试数据时，可在迁移后执行 `uv run --no-sync python scripts/load_satellite_catalog_fixture.py`。Compose 数据卷默认位于宿主机 `/var/lib/agent-stack/volume/`（通过 `AGENT_STACK_DATA_DIR` 配置），对象存储由 RustFS 提供。更多命令见[开发指南](docs/development.md)。
 
 ## 界面预览
 

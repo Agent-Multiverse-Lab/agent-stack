@@ -43,3 +43,6 @@ docker/volume/
 
 save/*
 scripts/*
+
+# Application logs
+/logs/

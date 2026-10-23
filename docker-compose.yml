@@ -79,7 +79,7 @@ services:
       - "${MINIO_API_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
-      - ./save/volume/rustfs/data:/data
+      - ${AGENT_STACK_DATA_DIR:-/var/lib/agent-stack}/volume/rustfs/data:/data
     networks:
       - agent-stack-network
     restart: unless-stopped
@@ -94,7 +94,7 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - ./save/volume/postgres/data:/var/lib/postgresql/data
+      - ${AGENT_STACK_DATA_DIR:-/var/lib/agent-stack}/volume/postgres/data:/var/lib/postgresql/data
     networks:
       - agent-stack-network
     healthcheck:
@@ -138,7 +138,7 @@ services:
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
-      - ./save/volume/redis/data:/data
+      - ${AGENT_STACK_DATA_DIR:-/var/lib/agent-stack}/volume/redis/data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -161,6 +161,7 @@ services:
     environment:
       <<: *api-worker-env
     volumes:
+      - ./logs:/app/logs
       - ${CUBE_HOST_SAVE_DIR:-/data/shared/agent-stack}/workspaces:/app/save/workspaces
       - ${CUBE_HOST_SAVE_DIR:-/data/shared/agent-stack}/skills:/app/save/skills:ro
     depends_on:
@@ -197,6 +198,7 @@ services:
     environment:
       <<: *api-worker-env
     volumes:
+      - ./logs:/app/logs
       - ${CUBE_HOST_SAVE_DIR:-/data/shared/agent-stack}/workspaces:/app/save/workspaces
       - ${CUBE_HOST_SAVE_DIR:-/data/shared/agent-stack}/skills:/app/save/skills:ro
     depends_on:
@@ -228,7 +230,7 @@ services:
       - "${MILVUS_PORT:-19530}:19530"
       - "${MILVUS_METRICS_PORT:-9091}:9091"
     volumes:
-      - ./save/volume/milvus/data:/var/lib/milvus
+      - ${AGENT_STACK_DATA_DIR:-/var/lib/agent-stack}/volume/milvus/data:/var/lib/milvus
     networks:
       - agent-stack-network
     restart: unless-stopped
@@ -242,10 +244,10 @@ services:
       - "${NEO4J_HTTP_PORT:-7474}:7474"
       - "${NEO4J_BOLT_PORT:-7687}:7687"
     volumes:
-      - ./save/volume/neo4j/data:/data
-      - ./save/volume/neo4j/logs:/logs
-      - ./save/volume/neo4j/import:/var/lib/neo4j/import
-      - ./save/volume/neo4j/plugins:/plugins
+      - ${AGENT_STACK_DATA_DIR:-/var/lib/agent-stack}/volume/neo4j/data:/data
+      - ${AGENT_STACK_DATA_DIR:-/var/lib/agent-stack}/volume/neo4j/logs:/logs
+      - ${AGENT_STACK_DATA_DIR:-/var/lib/agent-stack}/volume/neo4j/import:/var/lib/neo4j/import
+      - ${AGENT_STACK_DATA_DIR:-/var/lib/agent-stack}/volume/neo4j/plugins:/plugins
     networks:
       - agent-stack-network
     restart: unless-stopped

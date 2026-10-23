@@ -1,5 +1,30 @@
 import logging
+from datetime import datetime
 from pathlib import Path
+
+
+class DailyFileHandler(logging.FileHandler):
+    """按日志发生日期追加文件，跨天时切换到新文件。"""
+
+    def __init__(self, log_path: Path) -> None:
+        self._log_path = log_path.resolve()
+        super().__init__(
+            self._dated_path(datetime.now()), encoding="utf-8", delay=True
+        )
+
+    def _dated_path(self, date: datetime) -> Path:
+        return self._log_path.with_name(
+            f"{self._log_path.stem}-{date:%Y-%m-%d}{self._log_path.suffix}"
+        )
+
+    def emit(self, record: logging.LogRecord) -> None:
+        log_path = self._dated_path(datetime.fromtimestamp(record.created))
+        if str(log_path) != self.baseFilename:
+            if self.stream is not None:
+                self.stream.close()
+                self.stream = None
+            self.baseFilename = str(log_path)
+        super().emit(record)
 
 
 class ColorFormatter(logging.Formatter):
@@ -55,7 +80,7 @@ class Logger:
         if log_file:
             log_path = Path(log_file)
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(log_path, encoding="utf-8")
+            file_handler = DailyFileHandler(log_path)
             file_handler.setLevel(level)
             file_handler.setFormatter(formatter)
             self.logger.addHandler(file_handler)
@@ -88,4 +113,5 @@ class Logger:
 
 
 Log = Logger
-logger = Logger(name="s2c")
+_log_dir = Path(__file__).resolve().parents[2] / "logs"
+logger = Logger(name="s2c", log_file=str(_log_dir / "s2c.log"))
