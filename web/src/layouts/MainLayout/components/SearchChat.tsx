@@ -1,10 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Loader2, MessageSquare, Search, X } from "lucide-react";
 import { useNavigate } from "react-router";
 import { listThreads } from "@/api/thread";
 import type { ThreadMetadataResponse } from "@/api/thread";
-import type { UserResponse } from "@/api/auth";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -49,7 +47,9 @@ export function SearchChat({
       );
       setCursor(result.has_more ? result.next_cursor : null);
     } catch {
-      if (request.current === current && !nextCursor) setThreads([]);
+      if (request.current !== current) return;
+      setThreads([]);
+      setCursor(null);
     } finally {
       if (request.current === current) {
         setLoading(false);
@@ -57,26 +57,7 @@ export function SearchChat({
       }
     }
   }, [query]);
-  useEffect(() => {
-    if (!open) {
-      setQuery("");
-      setThreads([]);
-      setCursor(null);
-      request.current++;
-      return;
-    }
-    input.current?.focus();
-  }, [open]);
-  useEffect(() => {
-    if (!open) return;
-    const timer = setTimeout(
-      () => {
-        void fetchPage();
-      },
-      query ? 250 : 0,
-    );
-    return () => clearTimeout(timer);
-  }, [open, fetchPage, query]);
+
   return (
     <Dialog
       open={open}
@@ -87,20 +68,26 @@ export function SearchChat({
       <DialogContent
         showCloseButton={false}
         overlayClassName="z-[100]"
-        className="top-[10dvh] z-[101] flex h-[min(60vh,620px)] w-[min(84vw,980px)] max-w-[980px] translate-y-0 flex-col gap-0 overflow-hidden rounded-xl bg-popover p-0 text-foreground shadow-lg"
+        className="z-[101] w-[640px] max-w-[90vw] gap-0 overflow-hidden rounded-2xl bg-popover p-0 text-foreground"
       >
-        <DialogTitle className="sr-only">{t("Search conversation threads")}</DialogTitle>
-        <DialogDescription className="sr-only">
-          {t("Search and open a conversation thread.")}
-        </DialogDescription>
-        <div className="flex items-center gap-4 border-b border-border px-6 py-5">
-          <Search className="h-6 w-6 shrink-0 text-muted-foreground" />
+        <DialogHeader className="sr-only">
+          <DialogTitle>{t("Search conversation threads")}</DialogTitle>
+          <DialogDescription>
+            {t("Search and open a conversation thread.")}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex h-14 items-center gap-3 border-b border-border px-4">
+          <Search className="size-5 shrink-0 text-muted-foreground" />
           <Input
             ref={input}
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            className="h-auto w-full border-0 bg-transparent px-0 py-0 text-lg text-foreground placeholder:text-muted-foreground"
-            placeholder={t("Search conversation")}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void fetchPage();
+            }}
+            placeholder={t("Search conversations")}
+            aria-label={t("Search conversation")}
+            className="h-full flex-1 border-0 bg-transparent text-base shadow-none focus-visible:ring-0"
           />
           {query && (
             <Button
@@ -108,15 +95,24 @@ export function SearchChat({
               variant="ghost"
               size="icon-sm"
               aria-label={t("Clear search")}
-              onClick={() => setQuery("")}
+              onClick={() => {
+                setQuery("");
+                input.current?.focus();
+              }}
             >
-              <X size={20} />
+              <X size={16} />
             </Button>
           )}
+          <DialogClose
+            render={<Button variant="ghost" size="icon-sm" />}
+            aria-label={t("Close")}
+          >
+            <X size={18} />
+          </DialogClose>
         </div>
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="max-h-[380px] min-h-[160px] overflow-y-auto overscroll-contain p-2">
           {loading ? (
-            <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
+            <div className="flex h-32 items-center justify-center gap-2 text-muted-foreground">
               <Loader2 className="animate-spin" size={20} />
               {t("Searching conversations...")}
             </div>
@@ -161,74 +157,6 @@ export function SearchChat({
               )}
             </div>
           )}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-export function ProfileDialog({
-  open,
-  close,
-  user,
-}: {
-  open: boolean;
-  close: () => void;
-  user: UserResponse | null;
-}) {
-  const { t } = useTranslation();
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen) close();
-      }}
-    >
-      <DialogContent
-        showCloseButton={false}
-        overlayClassName="z-[100]"
-        className="z-[101] w-[440px] max-w-[440px] gap-0 overflow-hidden rounded-lg bg-popover p-0 text-foreground"
-      >
-        <DialogHeader className="flex min-h-[3.25rem] flex-row items-center justify-between px-5">
-          <DialogTitle id="profile-title" className="text-[0.95rem] font-semibold">
-            {t("Profile")}
-          </DialogTitle>
-          <DialogClose
-            render={<Button variant="ghost" size="icon-sm" />}
-            aria-label={t("Close profile")}
-          >
-            <X size={19} />
-          </DialogClose>
-        </DialogHeader>
-        <DialogDescription className="sr-only">
-          {t("Your account details.")}
-        </DialogDescription>
-        <div className="grid gap-6 px-5 pt-3 pb-6">
-          <div className="grid justify-items-center gap-3 border-b border-border pb-6 text-center">
-            <Avatar className="size-14" aria-hidden="true">
-              <AvatarFallback className="bg-muted font-mono text-lg font-bold text-muted-foreground">
-                A
-              </AvatarFallback>
-            </Avatar>
-            <div>
-              <p className="font-semibold">{t("AM User")}</p>
-              <p className="text-sm text-muted-foreground">
-                {user?.email ?? t("Loading account…")}
-              </p>
-            </div>
-          </div>
-          <dl className="grid text-sm">
-            <div className="flex justify-between border-b border-border py-3">
-              <dt>{t("Email")}</dt>
-              <dd className="text-muted-foreground">{user?.email ?? "—"}</dd>
-            </div>
-            <div className="flex justify-between py-3">
-              <dt>{t("Status")}</dt>
-              <dd className="text-muted-foreground">
-                {user ? (user.is_active ? t("Active") : t("Inactive")) : t("Loading")}
-              </dd>
-            </div>
-          </dl>
         </div>
       </DialogContent>
     </Dialog>

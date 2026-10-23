@@ -8,10 +8,8 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar";
 import { useTranslation } from "@/i18n";
-import {
-  ProfileDialog,
-  SearchChat,
-} from "@/layouts/MainLayout/components/NavigationDialogs";
+import { Profile } from "@/layouts/MainLayout/components/Profile";
+import { SearchChat } from "@/layouts/MainLayout/components/SearchChat";
 import { Settings } from "@/layouts/MainLayout/components/Settings";
 
 export default function MainLayout() {
@@ -60,7 +58,7 @@ export default function MainLayout() {
           </div>
         </SidebarInset>
       </SidebarProvider>
-      <ProfileDialog
+      <Profile
         open={profileOpen}
         close={() => setProfileOpen(false)}
         user={user}
