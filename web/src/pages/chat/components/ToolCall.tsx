@@ -1,18 +1,6 @@
-import {
-  ChevronRight,
-  CircleCheck,
-  CircleX,
-  Clock3,
-  LoaderCircle,
-  Pause,
-} from "lucide-react";
+import { useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { ToolExecutionStatus } from "@/pages/chat/types";
@@ -22,113 +10,336 @@ const formatValue = (value: unknown) => {
   return JSON.stringify(value, null, 2) ?? String(value);
 };
 
-const statusView = {
-  pending: {
-    label: "Pending",
-    icon: Clock3,
-    className: "text-muted-foreground",
-  },
-  running: {
-    label: "In progress",
-    icon: LoaderCircle,
-    className:
-      "text-primary motion-safe:animate-spin motion-safe:[animation-duration:900ms]",
-  },
-  completed: {
-    label: "Completed",
-    icon: CircleCheck,
-    className:
-      "text-success motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75 motion-safe:duration-200",
-  },
-  error: {
-    label: "Failed",
-    icon: CircleX,
-    className:
-      "text-destructive motion-safe:animate-in motion-safe:fade-in motion-safe:spin-in-12 motion-safe:duration-200",
-  },
-  cancelled: {
-    label: "Cancelled",
-    icon: Pause,
-    className: "text-warning",
-  },
-  interrupted: {
-    label: "Interrupted",
-    icon: Pause,
-    className: "text-warning",
-  },
-  stopped: {
-    label: "Stopped",
-    icon: Pause,
-    className: "text-warning",
-  },
-} satisfies Record<
-  ToolExecutionStatus,
-  { label: string; icon: typeof Clock3; className: string }
->;
+export function TaskSpinnerRing({
+  active = false,
+  children,
+}: {
+  active?: boolean;
+  children?: ReactNode;
+}) {
+  const size = 24;
+  const stroke = 2;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  return (
+    <span
+      className="relative inline-flex shrink-0 items-center justify-center"
+      style={{ width: size, height: size }}
+    >
+      <svg
+        width={size}
+        height={size}
+        className={cn(
+          "absolute inset-0",
+          active && "motion-safe:animate-spin motion-safe:[animation-duration:1.1s]",
+        )}
+      >
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke="var(--border)"
+          strokeWidth={stroke}
+        />
+        {active && (
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            fill="none"
+            stroke="var(--primary)"
+            strokeWidth={stroke}
+            strokeLinecap="round"
+            strokeDasharray={`${c * 0.28} ${c * 0.72}`}
+          />
+        )}
+      </svg>
+      <span className="relative text-[10.5px] font-semibold tabular-nums text-foreground">
+        {children}
+      </span>
+    </span>
+  );
+}
+
+export function TaskStatusBadge({
+  tone,
+  children,
+}: {
+  tone: "green" | "red" | "amber";
+  children: ReactNode;
+}) {
+  const toneClass =
+    tone === "green"
+      ? "bg-success text-white motion-safe:zoom-in-75"
+      : tone === "red"
+        ? "bg-destructive text-white motion-safe:spin-in-12"
+        : "bg-warning text-white";
+  return (
+    <span
+      className={cn(
+        "flex size-5.5 shrink-0 items-center justify-center rounded-full motion-safe:animate-[task-pop-in_300ms_cubic-bezier(0.23,1,0.32,1)_both]",
+        toneClass,
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+export const TaskCheckIcon = (
+  <svg
+    width="13"
+    height="13"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="3.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className="motion-safe:zoom-in-75"
+  >
+    <path d="M20 6L9 17l-5-5" />
+  </svg>
+);
+
+export const TaskXIcon = (
+  <svg
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="3.5"
+    strokeLinecap="round"
+    className="motion-safe:spin-in-12"
+  >
+    <path d="M18 6L6 18M6 6l12 12" />
+  </svg>
+);
+
+export const TaskPauseIcon = (
+  <svg
+    width="11"
+    height="11"
+    viewBox="0 0 24 24"
+    fill="currentColor"
+  >
+    <rect x="6" y="5" width="4" height="14" rx="1" />
+    <rect x="14" y="5" width="4" height="14" rx="1" />
+  </svg>
+);
+
+export const TaskRetryIcon = (
+  <svg
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="3"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" />
+  </svg>
+);
+
+export function TaskChevron({ open }: { open: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="-ml-1 flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground"
+    >
+      <svg
+        width="15"
+        height="15"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="transition-transform duration-300 motion-reduce:transition-none"
+        style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}
+      >
+        <path d="M6 9l6 6 6-6" />
+      </svg>
+    </span>
+  );
+}
+
+const statusLabels: Record<ToolExecutionStatus, string> = {
+  pending: "In progress",
+  running: "In progress",
+  completed: "Completed",
+  error: "Failed",
+  cancelled: "Cancelled",
+  interrupted: "Interrupted",
+  stopped: "Stopped",
+};
 
 const isToolExecutionStatus = (value: string): value is ToolExecutionStatus =>
-  Object.prototype.hasOwnProperty.call(statusView, value);
+  Object.prototype.hasOwnProperty.call(statusLabels, value);
 
 export function ToolCall({ event }: { event: Record<string, unknown> }) {
   const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
   const receivedStatus = String(event.status ?? "pending");
   const status = isToolExecutionStatus(receivedStatus)
     ? receivedStatus
     : "pending";
   const name = typeof event.name === "string" ? event.name : t("Tool");
-  const view = statusView[status];
-  const statusLabel = t(view.label);
-  const Icon = view.icon;
-  const output = typeof event.output === "object" && event.output !== null && "content" in event.output
-    ? event.output.content : event.output;
+  const statusLabel = t(statusLabels[status]);
+  const stepIndex =
+    typeof event.index === "number" && Number.isFinite(event.index)
+      ? event.index + 1
+      : undefined;
+
+  const output =
+    typeof event.output === "object" &&
+    event.output !== null &&
+    "content" in event.output
+      ? event.output.content
+      : event.output;
   const progress = Array.isArray(event.output_deltas)
-    ? event.output_deltas.map(formatValue).join("") : "";
+    ? event.output_deltas.map(formatValue).join("")
+    : "";
+
+  const sections = [
+    { label: "Arguments", value: event.args },
+    { label: "Progress", value: progress || undefined },
+    { label: "Output", value: output },
+    { label: "Error", value: event.error },
+  ].filter((item) => item.value !== undefined);
+
+  const renderBadge = () => {
+    if (status === "completed") {
+      return <TaskStatusBadge tone="green">{TaskCheckIcon}</TaskStatusBadge>;
+    }
+    if (status === "error") {
+      return <TaskStatusBadge tone="red">{TaskXIcon}</TaskStatusBadge>;
+    }
+    if (
+      status === "cancelled" ||
+      status === "interrupted" ||
+      status === "stopped"
+    ) {
+      return <TaskStatusBadge tone="amber">{TaskPauseIcon}</TaskStatusBadge>;
+    }
+    return <TaskSpinnerRing active>{stepIndex}</TaskSpinnerRing>;
+  };
+
+  const renderPill = () => {
+    if (status === "completed") {
+      return (
+        <span className="inline-flex h-5.5 items-center gap-1.5 rounded-full border border-success-border bg-success-muted px-2 text-[11.5px] font-medium text-success motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200">
+          {statusLabel}
+        </span>
+      );
+    }
+    if (status === "error") {
+      return (
+        <span className="inline-flex h-5.5 items-center gap-1.5 rounded-full border border-destructive-border bg-destructive-muted px-2 text-[11.5px] font-medium text-destructive motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200">
+          {statusLabel}
+          <span className="flex motion-safe:animate-spin motion-safe:[animation-duration:1.2s]">
+            {TaskRetryIcon}
+          </span>
+        </span>
+      );
+    }
+    if (
+      status === "cancelled" ||
+      status === "interrupted" ||
+      status === "stopped"
+    ) {
+      return (
+        <span className="inline-flex h-5.5 items-center gap-1.5 rounded-full border border-warning-border bg-warning-muted px-2 text-[11.5px] font-medium text-warning">
+          {statusLabel}
+        </span>
+      );
+    }
+    return (
+      <span className="text-[12px] text-muted-foreground">{statusLabel}</span>
+    );
+  };
 
   return (
-    <Collapsible className="group/tool w-full max-w-2xl min-w-0 text-sm">
-      <CollapsibleTrigger
+    <div
+      className="w-full max-w-2xl min-w-0 self-stretch overflow-hidden border border-border bg-card text-card-foreground shadow-sm transition-[border-radius,background-color] duration-300 hover:bg-accent/50 motion-safe:animate-[task-fade-up_450ms_cubic-bezier(0.23,1,0.32,1)_both]"
+      style={{ borderRadius: open ? 14 : 22 }}
+    >
+      <Button
+        type="button"
+        variant="ghost"
         aria-label={`${name} ${statusLabel}`}
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-auto max-w-full justify-start px-1 py-1 text-xs"
-          />
-        }
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="flex h-11 w-full items-center justify-start gap-2.5 rounded-none px-2.5 py-0 text-left font-normal hover:bg-transparent"
       >
-        <ChevronRight className="shrink-0 text-muted-foreground transition-transform group-data-open/tool:rotate-90 motion-reduce:transition-none" />
         <span
-          className="grid size-4 shrink-0 place-items-center"
+          className="flex size-6 shrink-0 items-center justify-center"
           data-tool-status-icon={status}
           aria-hidden="true"
         >
-          <Icon key={status} className={cn("size-4", view.className)} />
+          {renderBadge()}
         </span>
-        <span className="truncate font-medium">{name}</span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
+          {name}
+        </span>
         <span
-          className="shrink-0 text-muted-foreground"
+          className="shrink-0"
           aria-live="polite"
           aria-atomic="true"
         >
-          {statusLabel}
+          {renderPill()}
         </span>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="mt-1.5 ml-3 grid min-w-0 gap-3 border-l border-border py-1 pl-3">
-        {[
-          { label: "Arguments", value: event.args },
-          { label: "Progress", value: progress || undefined },
-          { label: "Output", value: output },
-          { label: "Error", value: event.error },
-        ].filter((item) => item.value !== undefined).map((item) => (
-          <div key={item.label} className="min-w-0">
-            <p className="mb-1 text-xs font-medium text-muted-foreground">{t(item.label)}</p>
-            <pre className={`m-0 max-h-72 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 ${item.label === "Error" ? "text-destructive" : "text-muted-foreground"}`}>
-              {formatValue(item.value)}
-            </pre>
-          </div>
-        ))}
-      </CollapsibleContent>
-    </Collapsible>
+        <TaskChevron open={open} />
+      </Button>
+
+      <div
+        className="grid transition-[grid-template-rows,opacity] duration-300 motion-reduce:transition-none"
+        style={{
+          gridTemplateRows: open && sections.length > 0 ? "1fr" : "0fr",
+          opacity: open && sections.length > 0 ? 1 : 0,
+          transitionTimingFunction: "cubic-bezier(0.23, 1, 0.32, 1)",
+        }}
+      >
+        <div className="overflow-hidden">
+          {open && sections.length > 0 && (
+            <div className="mb-2.5 grid grid-cols-[24px_minmax(0,1fr)] gap-2.5 px-2.5 pt-0.5">
+              <span aria-hidden="true" className="mx-auto h-full w-px bg-border" />
+              <div className="flex min-w-0 flex-col gap-2.5">
+                {sections.map((item, j) => (
+                  <div
+                    key={item.label}
+                    className="min-w-0"
+                    style={{
+                      animation: `task-fade-up 300ms cubic-bezier(0.23,1,0.32,1) ${120 + j * 100}ms both`,
+                    }}
+                  >
+                    <div className="mb-1 flex items-center justify-between">
+                      <span className="text-[12px] font-medium text-muted-foreground">
+                        {t(item.label)}
+                      </span>
+                    </div>
+                    <pre
+                      className={cn(
+                        "m-0 max-h-60 overflow-auto rounded-md border border-border bg-muted/50 px-2.5 py-1.5 font-mono text-[11.5px] leading-5 whitespace-pre-wrap break-words tabular-nums",
+                        item.label === "Error"
+                          ? "border-destructive-border bg-destructive-muted/40 text-destructive"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {formatValue(item.value)}
+                    </pre>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

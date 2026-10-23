@@ -47,5 +47,56 @@ it("falls back safely when the backend sends an unknown status", () => {
     type: "tool_call", name: "search", status: "constructor",
   } } }} />);
 
-  expect(screen.getByRole("button", { name: "search Pending" })).toBeTruthy();
+  const fallback = screen.getByRole("button", { name: "search In progress" });
+  expect(fallback.querySelector('[data-tool-status-icon="pending"] svg')?.getAttribute("class"))
+    .toContain("motion-safe:animate-spin");
+});
+
+it("renders agent tasks in a bordered container with status transitions", () => {
+  const { rerender } = render(
+    <ChatMessage
+      message={{
+        type: "ai",
+        payload: {
+          type: "tool",
+          event: {
+            name: "agent_state",
+            agent_state: {
+              agent_todo: [
+                { content: "Analyze query", status: "in_progress" },
+                { content: "Write report", status: "pending" },
+              ],
+            },
+          },
+        },
+      }}
+    />,
+  );
+
+  expect(document.querySelector('[data-task-group-status="running"]')).toBeTruthy();
+  expect(document.querySelector('[data-task-status="in_progress"]')).toBeTruthy();
+  expect(document.querySelector('[data-task-status="pending"]')).toBeTruthy();
+
+  rerender(
+    <ChatMessage
+      message={{
+        type: "ai",
+        payload: {
+          type: "tool",
+          event: {
+            name: "agent_state",
+            agent_state: {
+              agent_todo: [
+                { content: "Analyze query", status: "completed" },
+                { content: "Write report", status: "completed" },
+              ],
+            },
+          },
+        },
+      }}
+    />,
+  );
+
+  expect(document.querySelector('[data-task-group-status="completed"]')).toBeTruthy();
+  expect(document.querySelectorAll('[data-task-status="completed"]').length).toBe(2);
 });

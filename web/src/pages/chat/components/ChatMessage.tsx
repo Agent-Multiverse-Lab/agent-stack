@@ -1,3 +1,4 @@
+import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Brain, ChevronRight } from "lucide-react";
@@ -10,7 +11,13 @@ import {
 import type { ThreadMessageAttachmentResponse } from "@/api/attachment";
 import type { ChatMessage as ChatMessageType } from "@/pages/chat/types";
 import { Attachment } from "@/pages/chat/components/Attachment";
-import { ToolCall } from "@/pages/chat/components/ToolCall";
+import {
+  TaskCheckIcon,
+  TaskChevron,
+  TaskSpinnerRing,
+  TaskStatusBadge,
+  ToolCall,
+} from "@/pages/chat/components/ToolCall";
 import { useTranslation } from "@/i18n";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -22,6 +29,7 @@ const isAttachment = (
 
 function AgentTasks({ event }: { event: Record<string, unknown> }) {
   const { t } = useTranslation();
+  const [manualOpen, setManualOpen] = useState<Record<string, boolean>>({});
   const state = isRecord(event.agent_state) ? event.agent_state : {};
   const todos = Array.isArray(state.agent_todo)
     ? state.agent_todo.filter(
@@ -32,66 +40,124 @@ function AgentTasks({ event }: { event: Record<string, unknown> }) {
       )
     : [];
   if (!todos.length) return null;
+
+  const completedCount = todos.filter(
+    (item) => item.status === "completed",
+  ).length;
+  const allCompleted = completedCount === todos.length;
+
   return (
-    <Collapsible defaultOpen className="group/task-list w-full max-w-2xl text-sm">
-      <CollapsibleTrigger
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-auto px-1 py-1 text-xs text-muted-foreground"
-          />
-        }
-      >
-        <ChevronRight className="transition-transform group-data-open/task-list:rotate-90" />
-        <span>
+    <div
+      data-task-group-status={allCompleted ? "completed" : "running"}
+      className="flex w-full max-w-2xl min-w-0 flex-col gap-0 self-start overflow-hidden rounded-[14px] border border-border bg-card text-card-foreground shadow-sm"
+    >
+      <div className="flex h-9 items-center justify-between border-b border-border bg-muted/30 px-3 text-xs">
+        <span className="font-medium text-foreground">
           {t(todos.length === 1 ? "{{tasks}} task" : "{{tasks}} tasks", {
             tasks: todos.length,
-          })} {" · "}
-          {t("{{completed}} completed", {
-            completed: todos.filter((item) => item.status === "completed")
-              .length,
           })}
         </span>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="mt-1.5 grid gap-1">
-        {todos.map((todo, index) => (
-          <Collapsible
-            key={`${todo.content}-${index}`}
-            className="group/task"
+        <span className="tabular-nums text-muted-foreground">
+          {t("{{completed}} completed", {
+            completed: completedCount,
+          })}
+        </span>
+      </div>
+
+      {todos.map((todo, i) => {
+        const rowKey = `${todo.content}-${i}`;
+        const open = manualOpen[rowKey] ?? false;
+        const statusLabel =
+          todo.status === "in_progress"
+            ? t("In progress")
+            : todo.status === "completed"
+              ? t("Completed")
+              : t("Pending");
+
+        return (
+          <div
+            key={rowKey}
+            className="self-stretch overflow-hidden border-b border-border transition-colors duration-300 last:border-0 hover:bg-accent/50"
+            style={{
+              animation: `task-fade-up 450ms cubic-bezier(0.23,1,0.32,1) ${i * 80}ms both`,
+            }}
           >
-            <CollapsibleTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-auto w-full justify-start px-1 py-1 text-left text-xs"
-                />
+            <Button
+              type="button"
+              variant="ghost"
+              aria-expanded={open}
+              onClick={() =>
+                setManualOpen((current) => ({ ...current, [rowKey]: !open }))
               }
+              className="flex h-11 w-full items-center justify-start gap-2.5 rounded-none px-2.5 py-0 text-left font-normal hover:bg-transparent"
             >
-              <ChevronRight className="transition-transform group-data-open/task:rotate-90" />
-              <span className="font-medium">
-                {todo.status === "in_progress"
-                  ? t("In progress")
-                  : todo.status === "completed"
-                    ? t("Completed")
-                    : t("Pending")}
+              <span
+                className="flex size-6 shrink-0 items-center justify-center"
+                data-task-status={todo.status}
+                aria-hidden="true"
+              >
+                {todo.status === "completed" ? (
+                  <TaskStatusBadge tone="green">{TaskCheckIcon}</TaskStatusBadge>
+                ) : (
+                  <TaskSpinnerRing active={todo.status === "in_progress"}>
+                    {i + 1}
+                  </TaskSpinnerRing>
+                )}
               </span>
-              <span className="truncate text-muted-foreground">
+              <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
                 {todo.content}
               </span>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <pre className="ml-4 overflow-x-auto border-l border-border py-1 pl-3 text-[11.5px] text-muted-foreground">
-                {JSON.stringify(todo, null, 2)}
-              </pre>
-            </CollapsibleContent>
-          </Collapsible>
-        ))}
-      </CollapsibleContent>
-    </Collapsible>
+              {todo.status === "completed" ? (
+                <span className="inline-flex h-5.5 items-center rounded-full border border-success-border bg-success-muted px-2 text-[11.5px] font-medium text-success">
+                  {statusLabel}
+                </span>
+              ) : (
+                <span className="text-[12px] text-muted-foreground tabular-nums">
+                  {statusLabel}
+                </span>
+              )}
+              <TaskChevron open={open} />
+            </Button>
+
+            <div
+              className="grid transition-[grid-template-rows,opacity] duration-300 motion-reduce:transition-none"
+              style={{
+                gridTemplateRows: open ? "1fr" : "0fr",
+                opacity: open ? 1 : 0,
+                transitionTimingFunction: "cubic-bezier(0.23, 1, 0.32, 1)",
+              }}
+            >
+              <div className="overflow-hidden">
+                {open && (
+                  <div className="mb-2.5 grid grid-cols-[24px_minmax(0,1fr)] gap-2.5 px-2.5 pt-0.5">
+                    <span aria-hidden="true" className="mx-auto h-full w-px bg-border" />
+                    <div
+                      className="flex flex-col gap-1.5"
+                      style={{
+                        animation:
+                          "task-fade-up 300ms cubic-bezier(0.23,1,0.32,1) 120ms both",
+                      }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[12px] text-muted-foreground">
+                          {t("Status")}
+                        </span>
+                        <span className="font-mono text-[11.5px] text-muted-foreground tabular-nums">
+                          {todo.status}
+                        </span>
+                      </div>
+                      <pre className="m-0 overflow-x-auto rounded-md border border-border bg-muted/50 px-2.5 py-1.5 font-mono text-[11.5px] leading-5 text-muted-foreground">
+                        {JSON.stringify(todo, null, 2)}
+                      </pre>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
