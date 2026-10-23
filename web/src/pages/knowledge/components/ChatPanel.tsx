@@ -55,7 +55,7 @@ export function ChatPanel({ kbId }: { kbId: string }) {
     <div className="flex h-full min-h-0 flex-col">
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
         {messages.length ? (
-          <div className="mx-auto max-w-3xl px-6 py-8">
+          <div className="p-(--page-padding)">
             <ul className="grid gap-7" aria-live="polite" aria-busy={sending}>
               {messages.map((message, index) => (
                 <li key={index} className={`grid gap-3 ${message.role === "user" ? "justify-items-end" : ""}`}>
@@ -69,7 +69,7 @@ export function ChatPanel({ kbId }: { kbId: string }) {
             {error && <div role="alert" className="mt-5 flex items-center justify-between gap-4 rounded-lg bg-destructive-muted px-4 py-3 text-sm text-destructive"><span>{error}</span><Button variant="outline" size="sm" onClick={() => handleSend(failedQuery)} disabled={sending}>{t("Retry")}</Button></div>}
           </div>
         ) : (
-          <div className="mx-auto flex h-full min-h-72 max-w-2xl flex-col items-center justify-center px-6 py-8 text-center">
+          <div className="flex h-full min-h-72 flex-col items-center justify-center p-(--page-padding) text-center">
             <div className="mb-6 grid size-16 place-items-center rounded-2xl bg-selection text-selection-foreground"><MessagesSquare className="size-7" strokeWidth={1.4} /></div>
             <h2 className="text-2xl font-medium tracking-tight">{t("Ask your collection")}</h2>
             <div className="mt-7 flex flex-wrap justify-center gap-2">
@@ -78,8 +78,8 @@ export function ChatPanel({ kbId }: { kbId: string }) {
           </div>
         )}
       </div>
-      <form className="shrink-0 px-6 pb-6 pt-3" onSubmit={(event) => { event.preventDefault(); handleSend() }}>
-        <div className="mx-auto max-w-3xl rounded-xl border border-input bg-card px-4 pb-3 pt-4">
+      <form className="shrink-0 px-(--page-padding) pb-(--page-padding) pt-3" onSubmit={(event) => { event.preventDefault(); handleSend() }}>
+        <div className="rounded-xl border border-input bg-card px-4 pb-3 pt-4">
           <Textarea ref={inputRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit() }
           }} placeholder={t("Ask a question about your documents…")} aria-label={t("Ask this knowledge base")} rows={2} className="min-h-12 resize-none border-0 bg-transparent p-0" />

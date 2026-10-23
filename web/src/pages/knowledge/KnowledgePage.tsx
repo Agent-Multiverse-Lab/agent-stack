@@ -68,29 +68,30 @@ export default function KnowledgePage() {
   if (sortByName) visibleBases.sort((a, b) => a.name.localeCompare(b.name))
 
   return (
-    <div role="region" aria-label={t("Knowledge Bases")} className="flex h-full min-w-0 flex-col overflow-y-auto bg-background text-foreground">
-      <div className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col px-6 pb-6 pt-10 lg:px-12 lg:pt-14">
-        <div className="mb-7 flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
-          <div className="flex items-center gap-2.5">
-            <h2 className="text-sm font-medium">{t("All collections")}</h2>
-            {!loading && !error && <Badge variant="secondary" className="rounded-md tabular-nums">{bases.length}</Badge>}
+    <div role="region" aria-label={t("Knowledge Bases")} className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-background text-foreground">
+      <div className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-4 border-b border-border bg-card px-(--page-padding) py-1.5">
+        <div className="flex items-center gap-2.5">
+          <h2 className="text-sm font-medium">{t("All collections")}</h2>
+          {!loading && !error && <Badge variant="secondary" className="rounded-md tabular-nums">{bases.length}</Badge>}
+        </div>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Button type="button" className="h-8 gap-2" onClick={() => setCreateOpen(true)}>
+            <Plus className="size-4" />{t("Create knowledge base")}
+          </Button>
+          <div role="search" className="relative w-56 max-w-full">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("Search knowledge bases")} aria-label={t("Search knowledge bases")} className="h-8 pl-9 pr-8" />
+            {query && <Button variant="ghost" size="icon-xs" aria-label={t("Clear search")} className="absolute right-1.5 top-1/2 -translate-y-1/2" onClick={() => setQuery("")}><X /></Button>}
           </div>
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <Button type="button" className="h-9 gap-2" onClick={() => setCreateOpen(true)}>
-              <Plus className="size-4" />{t("Create knowledge base")}
-            </Button>
-            <div role="search" className="relative w-56 max-w-full">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("Search knowledge bases")} aria-label={t("Search knowledge bases")} className="h-9 pl-9 pr-8" />
-              {query && <Button variant="ghost" size="icon-xs" aria-label={t("Clear search")} className="absolute right-1.5 top-1/2 -translate-y-1/2" onClick={() => setQuery("")}><X /></Button>}
-            </div>
-            <Button variant={sortByName ? "secondary" : "ghost"} size="icon" aria-label={t("Sort by name")} title={t("Sort by name")} aria-pressed={sortByName} onClick={() => setSortByName((value) => !value)}><ArrowDownAZ /></Button>
-            <div className="flex items-center gap-0.5 border-l border-border pl-2" role="group" aria-label={t("Collection view")}>
-              <Button variant={view === "grid" ? "secondary" : "ghost"} size="icon" aria-label={t("Grid view")} title={t("Grid view")} aria-pressed={view === "grid"} onClick={() => setView("grid")}><LayoutGrid /></Button>
-              <Button variant={view === "list" ? "secondary" : "ghost"} size="icon" aria-label={t("List view")} title={t("List view")} aria-pressed={view === "list"} onClick={() => setView("list")}><List /></Button>
-            </div>
+          <Button variant={sortByName ? "secondary" : "ghost"} size="icon" aria-label={t("Sort by name")} title={t("Sort by name")} aria-pressed={sortByName} onClick={() => setSortByName((value) => !value)}><ArrowDownAZ /></Button>
+          <div className="flex items-center gap-0.5 border-l border-border pl-2" role="group" aria-label={t("Collection view")}>
+            <Button variant={view === "grid" ? "secondary" : "ghost"} size="icon" aria-label={t("Grid view")} title={t("Grid view")} aria-pressed={view === "grid"} onClick={() => setView("grid")}><LayoutGrid /></Button>
+            <Button variant={view === "list" ? "secondary" : "ghost"} size="icon" aria-label={t("List view")} title={t("List view")} aria-pressed={view === "list"} onClick={() => setView("list")}><List /></Button>
           </div>
         </div>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-(--page-padding)">
 
         {loading ? (
           <div className="grid min-h-72 place-items-center text-muted-foreground" role="status" aria-label={t("Loading knowledge bases")}><Spinner className="size-6" /></div>

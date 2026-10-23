@@ -49,10 +49,18 @@ export default function AgentPage() {
   }
 
   return (
-    <main className="flex h-full min-h-0 w-full flex-col bg-background text-foreground" aria-label={t("Agent")}>
-      <header className="flex h-12 shrink-0 items-center justify-end border-b border-border px-(--page-padding)">
-        <Button variant="ghost" size="icon" onClick={refresh} disabled={loading} aria-label={t("Refresh agents")}>
-          <RefreshCw className="size-4" aria-hidden />
+    <main className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-background text-foreground" aria-label={t("Agent")}>
+      <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-(--page-padding)">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <h1 className="truncate text-sm font-medium">{t("Agent")}</h1>
+          {!loading && !error && (
+            <Badge variant="secondary" className="rounded-md tabular-nums">
+              {allAgents.length}
+            </Badge>
+          )}
+        </div>
+        <Button variant="ghost" size="icon-sm" className="rounded-md" onClick={refresh} disabled={loading} aria-label={t("Refresh agents")}>
+          <RefreshCw className={loading ? "size-4 animate-spin motion-reduce:animate-none" : "size-4"} aria-hidden />
         </Button>
       </header>
 

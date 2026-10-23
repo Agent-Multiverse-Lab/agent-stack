@@ -359,10 +359,10 @@ it("rejects a whitespace-only name and lets a disabled agent be enabled and save
     .toBeNull()
 })
 
-it("keeps refresh and content headings without a page corner title", async () => {
+it("renders the top header with the Agent title and refresh action", async () => {
   render(<AgentPage />)
   await screen.findByRole("article", { name: "DB coordinator" })
-  expect(screen.queryByRole("heading", { name: "Agent" })).toBeNull()
+  expect(screen.getByRole("heading", { name: "Agent", level: 1 })).toBeTruthy()
   expect(screen.getByRole("main", { name: "Agent" })).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Refresh agents" }))
   await waitFor(() => expect(listAgents).toHaveBeenCalledTimes(2))

@@ -44,24 +44,26 @@ export default function KnowledgeBaseDetailPage() {
   )
 
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-background text-foreground">
-      <header className="shrink-0 px-6 pt-6 lg:px-10">
-        <nav aria-label={t("Knowledge base navigation")} className="mb-6 flex items-center gap-2 text-xs text-muted-foreground">
-          <Link to="/knowledge" className="inline-flex items-center gap-2 rounded-sm transition-colors hover:text-foreground"><ArrowLeft className="size-3.5" />{t("Knowledge Bases")}</Link>
-        </nav>
-        <div className="mb-7 flex items-start gap-4">
-          <div className="grid size-14 shrink-0 place-items-center rounded-xl bg-selection text-selection-foreground"><BookOpen className="size-7" strokeWidth={1.4} /></div>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-3"><h1 className="truncate text-2xl font-semibold tracking-tight lg:text-[28px]">{base.name}</h1><Badge variant="outline" className="font-normal">{t("Collection")}</Badge></div>
-            {base.description && <p className="mt-1.5 line-clamp-2 max-w-3xl text-sm leading-6 text-muted-foreground">{base.description}</p>}
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background text-foreground">
+      <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-(--page-padding)">
+        <div className="flex min-w-0 items-center gap-3">
+          <nav aria-label={t("Knowledge base navigation")} className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+            <Link to="/knowledge" className="inline-flex items-center gap-1.5 rounded-sm transition-colors hover:text-foreground"><ArrowLeft className="size-3.5" />{t("Knowledge Bases")}</Link>
+          </nav>
+          <span aria-hidden="true" className="text-border">/</span>
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="grid size-6 shrink-0 place-items-center rounded-md bg-selection text-selection-foreground"><BookOpen className="size-3.5" strokeWidth={1.5} /></div>
+            <h1 className="truncate text-sm font-semibold tracking-tight">{base.name}</h1>
+            <Badge variant="outline" className="shrink-0 font-normal">{t("Collection")}</Badge>
           </div>
         </div>
+        {base.description && <p className="hidden max-w-md truncate text-xs text-muted-foreground lg:block">{base.description}</p>}
       </header>
       <Tabs key={kbId} defaultValue="documents" className="min-h-0 flex-1 flex-col">
-        <TabsList className="h-12 w-full shrink-0 justify-start gap-7 border-b border-border px-6 lg:px-10">
-          <TabsTrigger value="documents" className="h-12 border-b-2 border-transparent px-0 data-active:border-primary"><Files className="size-4" />{t("Documents")}</TabsTrigger>
-          <TabsTrigger value="graph" className="h-12 border-b-2 border-transparent px-0 data-active:border-primary"><Network className="size-4" />{t("Knowledge Graph")}</TabsTrigger>
-          <TabsTrigger value="chat" className="h-12 border-b-2 border-transparent px-0 data-active:border-primary"><MessagesSquare className="size-4" />{t("Knowledge Chat")}</TabsTrigger>
+        <TabsList className="h-10 w-full shrink-0 justify-start gap-7 border-b border-border px-(--page-padding)">
+          <TabsTrigger value="documents" className="h-10 border-b-2 border-transparent px-0 data-active:border-primary"><Files className="size-4" />{t("Documents")}</TabsTrigger>
+          <TabsTrigger value="graph" className="h-10 border-b-2 border-transparent px-0 data-active:border-primary"><Network className="size-4" />{t("Knowledge Graph")}</TabsTrigger>
+          <TabsTrigger value="chat" className="h-10 border-b-2 border-transparent px-0 data-active:border-primary"><MessagesSquare className="size-4" />{t("Knowledge Chat")}</TabsTrigger>
         </TabsList>
         <TabsContent value="documents" className="min-h-0"><FilesPanel kbId={kbId} /></TabsContent>
         <TabsContent value="graph" className="min-h-0"><GraphPanel kbId={kbId} /></TabsContent>

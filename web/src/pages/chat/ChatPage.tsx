@@ -397,9 +397,48 @@ export default function ChatPage() {
       messageRunId(message) === runState.runId,
   );
   const displayedError = attachmentState.uploadError || error;
+  const conversationTitle =
+    threadState.thread?.title ||
+    (threadId ? t("Untitled Conversation") : t("New chat"));
+  const statusLabel = active
+    ? t("In progress")
+    : pending
+      ? t("Interrupted")
+      : runState.runStatus === "failed" || Boolean(displayedError)
+        ? t("Failed")
+        : runState.runStatus === "cancelled"
+          ? t("Cancelled")
+          : t("Active");
+  const statusDotClass = active
+    ? "bg-primary animate-pulse motion-reduce:animate-none"
+    : pending
+      ? "bg-warning"
+      : runState.runStatus === "failed" || Boolean(displayedError)
+        ? "bg-destructive"
+        : runState.runStatus === "cancelled"
+          ? "bg-muted-foreground"
+          : "bg-success";
 
   return (
     <section className="relative flex h-full min-h-0 flex-col bg-card text-foreground">
+      <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-(--page-padding)">
+        <h2 className="min-w-0 truncate text-sm font-medium">
+          {conversationTitle}
+        </h2>
+        <Button
+          variant="ghost"
+          size="sm"
+          type="button"
+          aria-label={`${t("Status")}: ${statusLabel}`}
+          className="h-7 shrink-0 gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground"
+        >
+          <span
+            aria-hidden="true"
+            className={`size-2 rounded-full ${statusDotClass}`}
+          />
+          <span>{statusLabel}</span>
+        </Button>
+      </header>
       <div
         ref={scroller}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain"

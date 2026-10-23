@@ -138,6 +138,8 @@ it("binds the selected model while creating a conversation and its first Run", a
 it("restores a conversation model without resetting a later explicit selection", async () => {
   renderChat("/c/thread-1");
   await waitFor(() => expect(screen.getByLabelText("Model").textContent).toBe(deepseek));
+  expect(screen.getByRole("heading", { name: "Conversation" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Status: Active" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: qwen }));
   fireEvent.change(screen.getByLabelText("Question"), { target: { value: "New message" } });
   expect(screen.getByLabelText("Model").textContent).toBe(qwen);

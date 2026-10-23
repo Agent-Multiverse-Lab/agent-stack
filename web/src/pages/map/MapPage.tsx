@@ -66,10 +66,14 @@ export default function MapPage() {
   }
 
   return (
-    <main className="map-workspace relative h-full min-h-0 overflow-hidden bg-background text-foreground" aria-label={t("Map")}>
-      <div className="relative h-full min-h-0">
+    <main className="map-workspace flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground" aria-label={t("Map")}>
+      <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-(--page-padding)">
+        <h1 className="truncate text-sm font-medium">{t("Map")}</h1>
+        <Button variant="ghost" size="sm" className="gap-2" onClick={() => { reset(); setPanelOpen(true) }}><RotateCcw className="size-3.5" />{t("New exploration")}</Button>
+      </header>
+      <div className="relative min-h-0 flex-1">
         {panelOpen && <aside className="map-explorer map-float absolute top-5 left-5 z-20 flex max-h-[calc(100%_-_40px)] w-[352px] flex-col overflow-hidden rounded-2xl">
-          <div className="flex items-center justify-between px-5 pt-4 pb-3"><div className="flex items-center gap-2 text-xs font-medium text-muted-foreground"><Compass className="size-3.5" />{t("Explore")}</div><div className="flex items-center gap-1"><Button variant="ghost" size="icon-xs" aria-label={t("New exploration")} onClick={() => { reset(); setPanelOpen(true) }}><RotateCcw className="size-3.5" /></Button><Button variant="ghost" size="icon-xs" aria-label={t("Collapse exploration panel")} onClick={() => setPanelOpen(false)}><ArrowDownLeft className="size-4" /></Button></div></div>
+          <div className="flex items-center justify-between px-5 pt-4 pb-3"><div className="flex items-center gap-2 text-xs font-medium text-muted-foreground"><Compass className="size-3.5" />{t("Explore")}</div><div className="flex items-center gap-1"><Button variant="ghost" size="icon-xs" aria-label={t("Collapse exploration panel")} onClick={() => setPanelOpen(false)}><ArrowDownLeft className="size-4" /></Button></div></div>
           <div className="px-4 pb-3"><form onSubmit={submit} className="rounded-xl border border-input bg-background p-2 focus-within:border-primary focus-within:ring-2 focus-within:ring-ring/30">
             <Input ref={search} value={query} onChange={(event) => setQuery(event.target.value)} aria-label={t("Search map")} placeholder={t(isExample ? "Search example locations…" : "Enter longitude, latitude…")} className="h-10 border-0 bg-transparent px-2 shadow-none focus-visible:ring-0" />
             <div className="flex items-center justify-between px-1 pb-1 pt-2"><span className="flex items-center gap-1.5 text-[10px] text-muted-foreground"><MapPin className="size-3" />{t(isExample ? "Local examples" : "Coordinate search")}</span><Button type="submit" size="icon-sm" disabled={!query.trim()} aria-label={t("Search map")} className="rounded-full"><ArrowUp className="size-4" /></Button></div>

@@ -158,22 +158,22 @@ export function FilesPanel({ kbId }: { kbId: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 px-6 py-5 lg:px-10">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 px-(--page-padding) py-3">
         <div className="flex items-center gap-2.5"><h2 className="text-sm font-medium">{t("All documents")}</h2>{!loading && <Badge variant="secondary" className="rounded-md tabular-nums">{files.length}</Badge>}</div>
         <div className="flex items-center gap-3">
-          <div role="search" className="relative w-48 xl:w-56"><Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("Search files")} aria-label={t("Search files")} className="h-9 pl-9 pr-8" />{query && <Button variant="ghost" size="icon-xs" className="absolute right-1.5 top-1/2 -translate-y-1/2" aria-label={t("Clear search")} onClick={() => setQuery("")}><X /></Button>}</div>
-          <Button className="h-9" onClick={() => fileInput.current?.click()} disabled={uploading || busyId !== null || deleting}>{uploading ? <Spinner /> : <Upload />}{t("Upload files")}</Button>
+          <div role="search" className="relative w-48 xl:w-56"><Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("Search files")} aria-label={t("Search files")} className="h-8 pl-9 pr-8" />{query && <Button variant="ghost" size="icon-xs" className="absolute right-1.5 top-1/2 -translate-y-1/2" aria-label={t("Clear search")} onClick={() => setQuery("")}><X /></Button>}</div>
+          <Button className="h-8" onClick={() => fileInput.current?.click()} disabled={uploading || busyId !== null || deleting}>{uploading ? <Spinner /> : <Upload />}{t("Upload files")}</Button>
           <Input ref={fileInput} type="file" multiple accept=".pdf,.doc,.docx,.txt,.md,.markdown,.csv,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.webp" aria-label={t("Choose files to upload")} className="hidden" onChange={(event) => { handleUpload(Array.from(event.target.files ?? [])); event.target.value = "" }} />
         </div>
       </div>
       {loading ? <div className="grid flex-1 place-items-center text-muted-foreground" role="status" aria-label={t("Loading files")}><Spinner className="size-6" /></div> : error && !files.length ? (
         <Empty className="flex-1"><EmptyTitle>{t("Unable to load files")}</EmptyTitle><EmptyDescription role="alert">{error}</EmptyDescription><Button variant="outline" onClick={() => setReload((value) => value + 1)}>{t("Retry")}</Button></Empty>
       ) : !files.length ? (
-        <Empty className="mx-6 mb-6 flex-1 rounded-xl border border-dashed border-border bg-card lg:mx-10">
+        <Empty className="mx-(--page-padding) mb-(--page-padding) flex-1 rounded-xl border border-dashed border-border bg-card">
           <EmptyMedia className="grid size-16 place-items-center rounded-2xl bg-muted text-primary"><Files className="size-7" strokeWidth={1.4} /></EmptyMedia><EmptyTitle>{t("Add your first documents")}</EmptyTitle><EmptyDescription>{t("Upload documents, then parse and index them to make them searchable.")}</EmptyDescription><Button variant="outline" disabled={uploading} onClick={() => fileInput.current?.click()}><Upload />{t("Choose files")}</Button><p className="mt-2 text-[11px] text-muted-foreground">{t("Documents, spreadsheets, presentations, and images")}</p>
         </Empty>
       ) : (
-        <div className="mx-6 mb-5 grid min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-card lg:mx-10 lg:grid-cols-[minmax(0,1.15fr)_minmax(290px,0.85fr)] lg:overflow-hidden">
+        <div className="mx-(--page-padding) mb-(--page-padding) grid min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-card lg:grid-cols-[minmax(0,1.15fr)_minmax(290px,0.85fr)] lg:overflow-hidden">
           <section className="flex min-h-64 min-w-0 flex-col lg:min-h-0" aria-label={t("Documents")}>
             {error && <div role="alert" className="flex items-center justify-between gap-3 border-b border-border px-4 py-2 text-xs text-destructive"><span>{error}</span><Button variant="ghost" size="sm" onClick={refresh}>{t("Retry")}</Button></div>}
             <div className="min-h-0 flex-1 overflow-auto">

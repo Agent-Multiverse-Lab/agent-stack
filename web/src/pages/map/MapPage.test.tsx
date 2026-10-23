@@ -80,9 +80,9 @@ it("parses valid projected coordinates and rejects malformed/out-of-range input"
   expect(formatCoordinate([-73.9,-40.7])).toBe("40.7000° S · 73.9000° W")
 })
 
-it("keeps exploration actions without a page corner title", () => {
+it("renders the top header with the Map title and exploration actions", () => {
   render(<MapPage />)
-  expect(screen.queryByRole("heading", { name: "Map" })).toBeNull()
+  expect(screen.getByRole("heading", { name: "Map", level: 1 })).toBeTruthy()
   expect(screen.getByRole("main", { name: "Map" })).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "New exploration" }))
   expect(controls.reset).toHaveBeenCalledTimes(1)
