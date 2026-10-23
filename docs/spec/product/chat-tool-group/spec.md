@@ -42,10 +42,10 @@ Todo 时不渲染 Tool Group，也不构造替代数据。
 
 ## 3. Non-goals
 
-- 不修改后端 Agent state、Run/SSE 事件协议或 Todo middleware。
+- Agent state 快照继续沿用现有 Run/SSE 协议。
 - 不从 Agent Todo 推断真实 tool call、文件修改或命令输出。
 - 不聚合 Assistant 文本或 Human approval 消息。
-- 当前事件合同尚未提供多个独立 Tool Call，本能力不预建对应的收纳层。
+- 工具调用只展示真实记录，不生成模拟调用。
 
 ## 4. Acceptance Criteria
 
@@ -55,3 +55,16 @@ Todo 时不渲染 Tool Group，也不构造替代数据。
 - 分组、条目标题和展开详情均只来自当前事件。
 - 旧 Agent Tool 组件和废弃类型被移除。
 - TypeScript、定向 ESLint、构建与 diff 检查通过。
+
+## 5. 工具调用历史与展示
+
+真实工具调用（包括 `write_todos`）由 AI Message 的 `tool_calls` 写入 `tool_call` 表，
+对应 ToolMessage 更新结果与成功/错误状态。取消或异常退出时保存已完成 checkpoint 步骤。
+会话详情加载 Message 时预加载 ToolCall，并按工具记录 ID 排序返回 `tool_calls`。
+前端运行中按流事件更新工具；加载历史时使用持久化调用参数、结果和状态，并按
+“所属 AI 消息正文 → 该消息的工具调用 → 下一条 AI 消息”恢复顺序。
+同一 tool_call_id 的数据库记录替换内存卡片，避免重复；切换会话后不依赖旧组件内存恢复工具。
+
+工具行依次展示状态图标、工具名称和状态标签；展开按钮置于右侧。
+外层使用圆角卡片，展开后呈现参数、执行进度、结果或错误。
+Todo 状态快照与 `write_todos` 工具执行记录属于不同数据，不以快照伪造工具记录。
