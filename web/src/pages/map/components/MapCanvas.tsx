@@ -131,7 +131,7 @@ const LiveMapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function LiveM
     markers.current.forEach((marker, id) => marker.getElement().setAttribute("aria-pressed", String(id === selectedId)))
   }, [selectedId, places, apiKey, reload, t])
 
-  return <div ref={element} className="absolute inset-0" />
+  return <div ref={element} className="h-full w-full" />
 })
 
 export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function MapCanvas(props, ref) {
