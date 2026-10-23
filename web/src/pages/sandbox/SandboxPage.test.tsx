@@ -91,6 +91,8 @@ it("opens a workspace folder from the real sandbox response", async () => {
 it("filters the flat file list", async () => {
   render(<SandboxPage />);
   await screen.findByText("README.md");
+  expect(screen.getByRole("heading", { name: "Workspace" })).toBeTruthy();
+  expect(screen.queryByRole("combobox", { name: "Conversation" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Filter this folder" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Filter this folder" }), { target: { value: "readme" } });
   const files = within(screen.getByRole("list", { name: "Workspace files" }));
