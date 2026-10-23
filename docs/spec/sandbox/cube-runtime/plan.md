@@ -39,7 +39,7 @@ docker/cube/manage.py::build_template 显式提交代码镜像构建任务并等
 
 以 app/uid/thread_id metadata 查找实例。通过标准 Redis Lock 将同会话的查询、connect 和创建
 串行化；进程锁协调本地引用。同一查询出现重复实例立即报错。通过 CubeMaster 的
-`/cube/sandbox/inventory?host_id=<CUBE_NODE_ID>` 严格查询本机节点；仅在 ret_code=0、
+`/cube/sandbox/inventory?host_id=<CUBE_NODE_ID>` 严格查询本机节点；仅在 ret_code=200、
 size=1 且 data 为数组时接受结果。普通 CubeAPI 列表会忽略节点连接失败，不用于发现。
 
 控制流示例（acquire 的实际语义）：

@@ -24,7 +24,7 @@ class CubeClient:
         response = self.http.get(self.inventory_url, params={"host_id": self.node_id})
         response.raise_for_status()
         body = response.json()
-        if not isinstance(body, dict) or not isinstance(body.get("ret"), dict) or body["ret"].get("ret_code") != 0:
+        if not isinstance(body, dict) or not isinstance(body.get("ret"), dict) or body["ret"].get("ret_code") != 200:
             raise RuntimeError("Cube node inventory failed; refusing to create another sandbox")
         rows = body.get("data")
         if body.get("size") != 1 or not isinstance(rows, list):
