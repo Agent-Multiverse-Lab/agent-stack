@@ -48,3 +48,19 @@ it("clamps a future start time to zero and cleans up its timer", () => {
   view.unmount();
   expect(vi.getTimerCount()).toBe(0);
 });
+
+it("renders the 3x3 pixel grid and supports Drive, Dots, Orbit, and Surfer variants", () => {
+  const view = render(<Thinking startedAt={startedAt} />);
+  const pixels = view.container.querySelectorAll(".thinking-pixel");
+  expect(pixels).toHaveLength(9);
+  expect((pixels[0] as HTMLElement).style.animation).toContain("pixel-on 650ms ease-in-out 90ms infinite");
+
+  view.rerender(<Thinking variant="Orbit" startedAt={startedAt} />);
+  const orbitPixels = view.container.querySelectorAll(".thinking-pixel");
+  expect((orbitPixels[4] as HTMLElement).style.animation).toBe("none");
+  expect((orbitPixels[4] as HTMLElement).style.opacity).toBe("0.07");
+
+  view.rerender(<Thinking variant="Surfer" startedAt={startedAt} />);
+  expect(screen.getByText("Subway surfing")).toBeTruthy();
+  expect(view.container.querySelector("video")).toBeTruthy();
+});
