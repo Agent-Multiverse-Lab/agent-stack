@@ -168,12 +168,14 @@ function SandboxWorkspace({ threadId, threads, onThreadChange }: {
 
   return (
     <section aria-label={t("Workspace")} className="flex h-full min-h-0 min-w-0 overflow-hidden">
-      <aside className="flex w-[168px] shrink-0 flex-col border-r border-border bg-card px-2 pt-2 pb-3">
-        <div className="flex min-h-12 shrink-0 flex-col justify-center px-4 py-3">
+      <aside className="flex shrink-0 flex-col border-r border-border bg-card">
+        <div className="flex min-h-12 shrink-0 flex-col justify-center border-b border-border px-4 py-3">
           <h2 className="text-sm font-medium">{t("Files")}</h2>
           {threadSelect}
         </div>
-        {tree}
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {tree}
+        </div>
       </aside>
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
         <ResizablePanel id="sandbox-files" defaultSize="100%" minSize={expanded ? "0%" : "240px"}>

@@ -1,11 +1,9 @@
-import { useEffect, useState } from "react";
-import { ChevronRight, Folder, FolderOpen } from "lucide-react";
-
+import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { FolderFillIcon } from "@/pages/sandbox/components/WorkspaceFileList";
 import type { WorkspaceTreeNode } from "@/pages/sandbox/types";
 
 interface WorkspaceTreeProps {
@@ -14,77 +12,108 @@ interface WorkspaceTreeProps {
   onSelect: (path: string) => void;
 }
 
-interface TreeNodeProps extends Omit<WorkspaceTreeProps, "nodes"> {
-  node: WorkspaceTreeNode;
-  depth: number;
-  expanded: Set<string>;
-  toggle: (path: string, open: boolean) => void;
-}
-
-function TreeNode({ node, depth, currentPath, onSelect, expanded, toggle }: TreeNodeProps) {
+export default function WorkspaceTree({
+  nodes,
+  currentPath,
+  onSelect,
+}: WorkspaceTreeProps) {
   const { t } = useTranslation();
-  const open = expanded.has(node.path);
-  const selected = currentPath === node.path;
-  const Icon = open ? FolderOpen : Folder;
-  return (
-    <Collapsible open={open} onOpenChange={(next) => {
-      toggle(node.path, next);
-      if (next) onSelect(node.path);
-    }}>
-      <div className={cn("flex h-8 items-center rounded-md pr-2", selected && "bg-selection")}
-        style={{ paddingLeft: 8 + depth * 14 }}>
-        <CollapsibleTrigger render={
-          <Button type="button" variant="ghost" size="icon-xs" className="shrink-0 rounded-md"
-            aria-label={t(open ? "Collapse {{name}}" : "Expand {{name}}", { name: node.name })} />
-        }>
-          <ChevronRight className={cn("size-3 transition-transform motion-reduce:transition-none", open && "rotate-90")} />
-        </CollapsibleTrigger>
-        <Button type="button" variant="ghost"
-          className={cn("h-8 min-w-0 flex-1 justify-start gap-[7px] rounded-md px-2 text-[13px] font-medium", selected && "text-selection-foreground hover:bg-selection hover:text-selection-foreground")}
-          aria-current={selected ? "page" : undefined}
-          onClick={() => { toggle(node.path, true); onSelect(node.path); }}>
-          <Icon className="size-4 shrink-0" strokeWidth={1.5} />
-          <span className="truncate">{node.name}</span>
-        </Button>
-      </div>
-      <CollapsibleContent>
-        {node.children?.map((child) => (
-          <TreeNode key={child.path} node={child} depth={depth + 1} currentPath={currentPath}
-            onSelect={onSelect} expanded={expanded} toggle={toggle} />
-        ))}
-      </CollapsibleContent>
-    </Collapsible>
+  const rootNode = nodes[0];
+  const primaryFolders = rootNode?.children ?? [];
+
+  // Determine active primary folder (the first segment after /workspace)
+  const pathParts = currentPath.split("/").filter(Boolean);
+  const activePrimaryPath =
+    pathParts.length > 1 ? `/${pathParts.slice(0, 2).join("/")}` : null;
+
+  // Secondary folders under the active primary folder
+  const activePrimaryNode = primaryFolders.find(
+    (folder) => folder.path === activePrimaryPath,
   );
-}
-
-export default function WorkspaceTree({ nodes, currentPath, onSelect }: WorkspaceTreeProps) {
-  const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(() => new Set(["/workspace"]));
-  useEffect(() => {
-    const parts = currentPath.split("/").filter(Boolean);
-    setExpanded((previous) => {
-      const next = new Set(previous);
-      parts.forEach((_, index) => next.add(`/${parts.slice(0, index + 1).join("/")}`));
-      return next;
-    });
-  }, [currentPath]);
-
-  function toggle(path: string, open: boolean) {
-    setExpanded((previous) => {
-      const next = new Set(previous);
-      if (open) next.add(path); else next.delete(path);
-      return next;
-    });
-  }
+  const secondaryFolders = activePrimaryNode?.children ?? [];
 
   return (
-    <ScrollArea className="min-h-0 flex-1 pb-3">
-      <nav aria-label={t("Workspace folders")}>
-        {nodes.map((node) => (
-          <TreeNode key={node.path} node={node} depth={0} currentPath={currentPath}
-            onSelect={onSelect} expanded={expanded} toggle={toggle} />
-        ))}
-      </nav>
-    </ScrollArea>
+    <div className="flex h-full min-h-0 flex-1 divide-x divide-border overflow-hidden">
+      {/* Primary Column */}
+      <ScrollArea className="h-full w-[170px] shrink-0">
+        <nav aria-label={t("Workspace folders")} className="flex flex-col gap-0.5 p-2">
+          {/* Workspace Root Button */}
+          <Button
+            type="button"
+            variant="ghost"
+            className={cn(
+              "h-8 w-full justify-start gap-2 rounded-md px-2 text-[13px] font-medium",
+              currentPath === "/workspace" &&
+                "bg-selection text-selection-foreground hover:bg-selection",
+            )}
+            aria-current={currentPath === "/workspace" ? "page" : undefined}
+            onClick={() => onSelect("/workspace")}
+          >
+            <FolderFillIcon className="size-4" />
+            <span className="truncate">workspace</span>
+          </Button>
+
+          {/* Primary Directories */}
+          {primaryFolders.map((folder) => {
+            const isSelected =
+              currentPath === folder.path || activePrimaryPath === folder.path;
+            const hasChildren = (folder.children?.length ?? 0) > 0;
+            return (
+              <Button
+                key={folder.path}
+                type="button"
+                variant="ghost"
+                className={cn(
+                  "h-8 w-full justify-between rounded-md px-2 text-[13px] font-medium",
+                  isSelected &&
+                    "bg-selection text-selection-foreground hover:bg-selection",
+                )}
+                aria-current={currentPath === folder.path ? "page" : undefined}
+                onClick={() => onSelect(folder.path)}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <FolderFillIcon className="size-4" />
+                  <span className="truncate">{folder.name}</span>
+                </span>
+                {hasChildren && (
+                  <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
+                )}
+              </Button>
+            );
+          })}
+        </nav>
+      </ScrollArea>
+
+      {/* Secondary Column: only shown when an active primary folder has subfolders or is active */}
+      {secondaryFolders.length > 0 && (
+        <ScrollArea className="h-full w-[170px] shrink-0 bg-muted/20">
+          <nav aria-label={t("Sub-folders")} className="flex flex-col gap-0.5 p-2">
+            <div className="px-2 py-1 text-[11px] font-semibold text-muted-foreground uppercase">
+              {activePrimaryNode?.name}
+            </div>
+            {secondaryFolders.map((folder) => {
+              const isSelected = currentPath === folder.path;
+              return (
+                <Button
+                  key={folder.path}
+                  type="button"
+                  variant="ghost"
+                  className={cn(
+                    "h-8 w-full justify-start gap-2 rounded-md px-2 text-[13px] font-medium",
+                    isSelected &&
+                      "bg-selection text-selection-foreground hover:bg-selection",
+                  )}
+                  aria-current={isSelected ? "page" : undefined}
+                  onClick={() => onSelect(folder.path)}
+                >
+                  <FolderFillIcon className="size-4" />
+                  <span className="truncate">{folder.name}</span>
+                </Button>
+              );
+            })}
+          </nav>
+        </ScrollArea>
+      )}
+    </div>
   );
 }
