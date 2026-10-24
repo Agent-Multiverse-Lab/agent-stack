@@ -64,6 +64,15 @@ Provider 在排队后被停用、删除或移除模型时，Worker 按当前 Pos
 模型绑定持久化在已有 Conversation metadata JSON 中；打开或刷新对话时从详情 metadata 恢复选择，
 新对话使用输入区当前选择。认证 token 变化时先清空目录与选择，旧账号的迟到响应不得写入新账号 Context。
 
+### CHAT-MODEL-006 首条消息自动命名
+
+前端在空会话的首条文本消息成功创建 Run 后，异步调用
+`POST /api/chat/thread/{thread_id}/title-suggestion`，不等待 Agent 回答完成。
+服务验证会话归属后，使用公开模型目录中的 `flash_model`，未配置时使用 `default_model`，
+只概括用户问题的前 2000 字符，返回最多 30 字符的标题。模型调用失败或结果为空时使用问题前 30 字符。
+前端通过已有 `PATCH /api/chat/thread/{thread_id}` 保存标题并刷新侧栏；后续消息、Resume 和纯附件消息
+不触发自动命名。标题调用独立于 Run，不改变会话所选模型或 Run 模型快照。
+
 ## 3. Acceptance Criteria
 
 - `/api/models` 返回全局已启用模型及可直接渲染的名称、版本和 icon 标识。

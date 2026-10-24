@@ -92,6 +92,13 @@ export const renameThread = async (
   return response.json();
 };
 
+export const generateThreadTitle = (threadId: string, query: string) =>
+  apiClient.apiPost<{ title: string }, { query: string }>(
+    `/api/chat/thread/${encodeURIComponent(threadId)}/title-suggestion`,
+    { query: query.replace(/\s+/g, " ").trim().slice(0, 2000) },
+    { requiresAuth: true },
+  );
+
 export const deleteThread = (threadId: string) =>
   apiClient.apiDelete(`/api/chat/thread/${encodeURIComponent(threadId)}`, {
     requiresAuth: true,

@@ -5,8 +5,10 @@ import { useNavigate, useParams } from "react-router";
 
 import {
   createThread,
+  generateThreadTitle,
   getThreadDetail,
   listChatAgents,
+  renameThread,
 } from "@/api/thread";
 import type { UploadedAttachmentResponse } from "@/api/attachment";
 import type { AgentRunEndEvent } from "@/api/agent-run";
@@ -275,6 +277,7 @@ export default function ChatPage() {
 
   async function submit() {
     if (run.isActive() || run.getState().pendingInteraction) return;
+    const isFirstMessage = thread.getState().messages.length === 0;
     const submission = beginSubmission();
     if (!submission) return;
     const expected = ++operation.current;
@@ -306,6 +309,9 @@ export default function ChatPage() {
       });
       if (operation.current !== expected) return;
       runCreated = true;
+      if (isFirstMessage && submission.query) {
+        void updateTitle(currentThread.thread_id, submission.query);
+      }
       try {
         await loadThreadDetail(currentThread.thread_id, expected);
       } catch (caught) {
@@ -328,6 +334,20 @@ export default function ChatPage() {
         submissionInFlight.current = false;
         setSubmitting(false);
       }
+    }
+  }
+
+  async function updateTitle(id: string, query: string) {
+    try {
+      const { title } = await generateThreadTitle(id, query);
+      const updated = await renameThread(id, title);
+      const current = thread.getState().thread;
+      if (current?.thread_id === id) {
+        thread.setThread({ ...current, title: updated.title });
+      }
+      window.dispatchEvent(new Event("thread-title-updated"));
+    } catch (caught) {
+      console.error("Failed to update conversation title", caught);
     }
   }
 

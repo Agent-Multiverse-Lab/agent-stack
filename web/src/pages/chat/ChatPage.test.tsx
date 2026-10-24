@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   listModels: vi.fn(),
   getThreadDetail: vi.fn(),
   createThread: vi.fn(),
+  generateThreadTitle: vi.fn(),
+  renameThread: vi.fn(),
   listChatAgents: vi.fn(),
   createRun: vi.fn(),
   uploadAttachments: vi.fn(),
@@ -22,6 +24,8 @@ vi.mock("@/context/AuthContext", () => ({ useAuth: () => ({ accessToken: "token"
 vi.mock("@/api/model", () => ({ listModels: mocks.listModels }));
 vi.mock("@/api/thread", () => ({
   createThread: mocks.createThread,
+  generateThreadTitle: mocks.generateThreadTitle,
+  renameThread: mocks.renameThread,
   getThreadDetail: mocks.getThreadDetail,
   listChatAgents: mocks.listChatAgents,
 }));
@@ -94,6 +98,8 @@ beforeEach(() => {
   mocks.listModels.mockResolvedValue(catalog);
   mocks.listChatAgents.mockResolvedValue([{ id: "LeaderAgent", name: "Leader", description: "" }]);
   mocks.createThread.mockResolvedValue(thread);
+  mocks.generateThreadTitle.mockResolvedValue({ title: "Greeting" });
+  mocks.renameThread.mockResolvedValue({ ...thread, title: "Greeting" });
   mocks.createRun.mockResolvedValue({ run_id: "run-1", status: "pending" });
   mocks.uploadAttachments.mockResolvedValue([{
     file_id: "file-1",
@@ -133,6 +139,37 @@ it("binds the selected model while creating a conversation and its first Run", a
   await waitFor(() => expect(mocks.createRun).toHaveBeenCalled());
   expect(mocks.createThread).toHaveBeenCalledWith("LeaderAgent", deepseek);
   expect(mocks.createRun).toHaveBeenCalledWith(expect.objectContaining({ threadId: "thread-1", modelId: deepseek }));
+  await waitFor(() => expect(mocks.renameThread).toHaveBeenCalledWith("thread-1", "Greeting"));
+  expect(mocks.generateThreadTitle).toHaveBeenCalledWith("thread-1", "Hello");
+});
+
+it("submits the Run without waiting for title generation", async () => {
+  mocks.generateThreadTitle.mockReturnValueOnce(new Promise(() => {}));
+  renderChat("/");
+  await waitFor(() => expect(screen.getByLabelText("Model").textContent).toBe(qwen));
+  fireEvent.change(screen.getByLabelText("Question"), { target: { value: "Hello" } });
+  fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+  await waitFor(() => expect(mocks.generateThreadTitle).toHaveBeenCalled());
+  expect(mocks.createRun).toHaveBeenCalledTimes(1);
+  expect(mocks.renameThread).not.toHaveBeenCalled();
+});
+
+it("does not regenerate the title for a conversation with messages", async () => {
+  mocks.getThreadDetail.mockResolvedValue({
+    thread,
+    messages: [{
+      message_id: 1, role: "user", content: "Earlier question", image_content: null,
+      message_type: "text", status: "completed", request_id: null, run: null,
+      attachments: [], created_at: thread.created_at, updated_at: thread.updated_at,
+    }],
+    active_run: null, pending_interaction: null, next_before_message_id: null,
+  });
+  renderChat("/c/thread-1");
+  await waitFor(() => expect(screen.getByLabelText("Model").textContent).toBe(deepseek));
+  fireEvent.change(screen.getByLabelText("Question"), { target: { value: "Another question" } });
+  fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+  await waitFor(() => expect(mocks.createRun).toHaveBeenCalled());
+  expect(mocks.generateThreadTitle).not.toHaveBeenCalled();
 });
 
 it("restores a conversation model without resetting a later explicit selection", async () => {

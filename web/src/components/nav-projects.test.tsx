@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { listThreads, renameThread } from "@/api/thread"
@@ -43,6 +43,22 @@ function mockThreads() {
   })
   vi.mocked(renameThread).mockResolvedValue({ ...thread, title: "New title" })
 }
+
+it("refreshes the sidebar after an automatic title update", async () => {
+  installBrowserStubs()
+  mockThreads()
+  render(
+    <MemoryRouter>
+      <SidebarProvider><NavProjects onSearch={vi.fn()} /></SidebarProvider>
+    </MemoryRouter>,
+  )
+  expect(await screen.findByRole("link", { name: "Old title" })).toBeTruthy()
+  vi.mocked(listThreads).mockResolvedValue({
+    items: [{ ...thread, title: "Generated title" }], has_more: false, next_cursor: null,
+  })
+  act(() => window.dispatchEvent(new Event("thread-title-updated")))
+  expect(await screen.findByRole("link", { name: "Generated title" })).toBeTruthy()
+})
 
 it("renames a conversation from the shadcn sidebar", async () => {
   installBrowserStubs()
