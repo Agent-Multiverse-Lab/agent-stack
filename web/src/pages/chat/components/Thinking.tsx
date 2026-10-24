@@ -6,7 +6,7 @@ import {
 } from "@/components/ui/collapsible";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, History } from "lucide-react";
 import { useTranslation } from "@/i18n";
 
 const chevron = Array.from({ length: 9 }, (_, i) => {
@@ -86,15 +86,20 @@ export function Thinking({
   videoSrc = "https://95dnc2a95qgwt9ff.public.blob.vercel-storage.com/subway-surfers-min.mp4",
   children,
   startedAt,
+  active = true,
+  durationMs = null,
 }: {
   label?: string;
   variant?: string;
   videoSrc?: string;
   children?: ReactNode;
   startedAt?: number | null;
+  active?: boolean;
+  durationMs?: number | null;
 }) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(true);
+  const [expansion, setExpansion] = useState<{ active: boolean; open: boolean } | null>(null);
+  const expanded = expansion?.active === active ? expansion.open : active;
   const [videoOk, setVideoOk] = useState(true);
   const surfer = variant === "Surfer";
   const resolvedLabel = label ?? (surfer ? "Subway surfing" : "Thinking");
@@ -102,20 +107,24 @@ export function Thinking({
 
   const labelEl = (
     <span
-      className="thinking-shimmer bg-clip-text text-[13px] font-medium text-transparent"
-      style={{
+      className={active ? "thinking-shimmer bg-clip-text text-[13px] font-medium text-transparent" : "text-[13px] font-medium text-muted-foreground"}
+      style={active ? {
         backgroundImage:
           "linear-gradient(90deg, var(--muted-foreground) 35%, var(--foreground) 50%, var(--muted-foreground) 65%)",
         backgroundSize: "200% 100%",
         animation: "shimmer-text 1.4s linear infinite",
-      }}
+      } : undefined}
     >
       {t(resolvedLabel)}
     </span>
   );
   const elapsedEl =
-    typeof startedAt === "number" && Number.isFinite(startedAt) ? (
+    active && typeof startedAt === "number" && Number.isFinite(startedAt) ? (
       <ElapsedTime key={startedAt} startedAt={startedAt} />
+    ) : durationMs !== null ? (
+      <span className="font-mono text-[12px] text-muted-foreground tabular-nums">
+        {(Math.max(0, durationMs) / 1000).toFixed(1)}s
+      </span>
     ) : null;
 
   if (surfer) {
@@ -166,15 +175,15 @@ export function Thinking({
   return (
     <Collapsible
       open={expanded}
-      onOpenChange={setExpanded}
-      className="w-full max-w-[38rem]"
+      onOpenChange={(open) => setExpansion({ active, open })}
+      className="w-full min-w-0"
     >
       <div
         className="flex w-fit items-center gap-2.5 py-1"
-        role="status"
-        aria-live="polite"
+        role={active ? "status" : undefined}
+        aria-live={active ? "polite" : undefined}
       >
-        <LoaderGrid delays={delays} dur={dur} round={round} />
+        {active ? <LoaderGrid delays={delays} dur={dur} round={round} /> : <History size={15} className="text-muted-foreground" />}
         {labelEl}
         {elapsedEl}
         {children && (
@@ -186,7 +195,7 @@ export function Thinking({
                 : t("Expand thinking details")
             }
           >
-            <ChevronDown size={16} />
+            <ChevronDown size={16} className={`transition-transform motion-reduce:transition-none ${expanded ? "" : "-rotate-90"}`} />
           </CollapsibleTrigger>
         )}
       </div>

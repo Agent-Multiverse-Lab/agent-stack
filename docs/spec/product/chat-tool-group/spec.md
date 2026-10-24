@@ -14,8 +14,8 @@
 
 ### CHAT-TOOL-002 Group composition
 
-`AgentToolGroupComponent` 展示真实 Tool Message 内容。它紧随当前 Run 的 Thinking，
-作为独立的同级紧凑组件出现；组标题展示真实 Todo 数量与完成数量，组内每行
+`ChatMessage` 内的 `AgentTasks` 展示真实 Tool Message 内容。它位于当前 Run 的执行过程容器中，
+保持独立内容与状态；组标题展示真实 Todo 数量与完成数量，组内每行
 展示状态图标、状态名称和 Todo 内容，并允许展开查看该项的真实原始数据。
 
 ### CHAT-TOOL-003 Status presentation
@@ -28,9 +28,9 @@
 
 ### CHAT-TOOL-004 Current integration
 
-`ChatMessageComponent` 对 `payload.type === "tool"` 的消息渲染
-`AgentToolGroupComponent`；`ChatView` 负责让当前 Run 的 Tool Message 紧随 Thinking
-并保持独立生命周期。旧 `AgentToolComponent` 及其未被真实事件使用的
+`ChatMessage` 对 `payload.type === "tool"` 的消息按 event.type 区分 Reasoning、ToolCall 和
+AgentTasks；`ConversationMessages` 负责按 Run 将这些组件放入 Thinking 的过程内容区。
+展开与折叠不删除消息数据。旧 `AgentToolComponent` 及其未被真实事件使用的
 `running | completed | failed` 前端状态模型被删除，不保留兼容入口。
 
 ### CHAT-TOOL-005 Data integrity
@@ -44,12 +44,12 @@ Todo 时不渲染 Tool Group，也不构造替代数据。
 
 - Agent state 快照继续沿用现有 Run/SSE 协议。
 - 不从 Agent Todo 推断真实 tool call、文件修改或命令输出。
-- 不聚合 Assistant 文本或 Human approval 消息。
+- Todo 组件自身不聚合 Assistant 文本或 Human approval 消息；外层执行过程容器负责展示归组。
 - 工具调用只展示真实记录，不生成模拟调用。
 
 ## 4. Acceptance Criteria
 
-- 当前 Run 的有效 Tool Message 在 Thinking 下方同级渲染，不额外缩进。
+- 当前 Run 的有效 Tool Message 在 Thinking 的执行过程内容区渲染。
 - 空 Todo 不渲染；正文输出和 Run 结束后当前页面的 Tool Group 仍然保留。
 - 三种真实 Todo 状态具有可辨识的视觉反馈。
 - 分组、条目标题和展开详情均只来自当前事件。

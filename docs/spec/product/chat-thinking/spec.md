@@ -1,54 +1,29 @@
-# Specification: Chat Thinking Group
+# Chat 执行过程容器
 
-## 1. Purpose
+## 行为
 
-将对话运行中的 Thinking 状态收口为 Vue 原生组合组件，同时保留现有 3×3 像素
-图标及其错峰流动动画。该能力只调整 Web 对话页的运行中视觉反馈。
+`ChatPage` 使用 `ConversationMessages` 按 Run 组织消息。用户消息独立展示，助手的 reasoning、
+工具调用、Todo 和中间说明通过现有 `ChatMessage` 放入 `Thinking` 的可折叠内容区。
 
-## 2. Requirements
+- 执行中默认展开，保留 3×3 像素动画和基于 Run.started_at 的计时。正文出现或暂时无输出不停止运行提示。
+- 等待用户操作时停止运行动画和计时，显示等待状态。
+- 结束后默认折叠过程，用户可重新展开；从持久化 started_at/finished_at 展示耗时，没有时间则不估算。
+- 当前协议没有最终消息指针。只将分组末尾的主线程非空文本保留在过程外，其余内容留在过程内。
+  运行中这段文本仍可能是中间说明；后续活动到达后重新按消息顺序归组，不提前宣称 Run 完成。
+- 子线程文本留在过程内，不作为主线程回答。没有 Run 归属的消息原位展示，不猜测归属。
+- 完成的纯文本回答不创建空过程容器。失败、取消和中断使用对应状态文案。
 
-### CHAT-THINK-001 Pixel flow icon
+## 组件与边界
 
-`ChatThinkingIcon` 使用 3×3 像素矩阵。九个像素继续根据行列位置设置不同
-动画延迟，并使用现有 `pixel-on 650ms ease-in-out infinite` 流动效果。不得替换为
-星形图标、普通 spinner 或静态图片。
+`Thinking` 复用现有像素动画、Collapsible 和 Button，支持 active、durationMs 以及可选 children。
+展开状态在运行/静止转换时恢复该阶段默认值。加载会话继续复用 Thinking。
+`Reasoning`、`ToolCall`、`AgentTasks` 和 Markdown 渲染继续由 ChatMessage 拥有，不创建第二套消息状态。
+本能力不修改后端、数据库或 SSE 合同，不伪造推理、工具输出或阶段。
 
-### CHAT-THINK-002 Group composition
+## 验证
 
-`ChatThinkingGroupComponent` 组合 Thinking icon、状态文案、运行耗时和可选的默认
-slot。存在 slot 内容时允许用户展开或收起；无 slot 内容时只展示状态标题，不渲染
-无效的展开按钮。
-
-### CHAT-THINK-003 Current integration
-
-`ChatView` 在 Run 活跃、尚无 Assistant 文本且未等待用户交互时展示 Thinking Group。
-当前 Run 已产生的有效 Agent Tool 状态紧随 Thinking，以同级紧凑组件显示；它拥有
-独立生命周期，不随 Thinking 卸载。Conversation 加载状态也直接使用
-`ChatThinkingGroupComponent` 并传入对应 label，不维护第二套等待组件或像素动画。
-
-### CHAT-THINK-004 Event boundary
-
-本能力不新增前端 `thinking` 消息类型，不修改 Run/SSE 事件协议，也不使用演示代码中的
-静态阶段、模拟计时序列或 Steps/Reasoning/Search/Coding 假数据。同一 Run 的 Agent
-state 更新覆盖旧快照；没有有效 Todo 的状态不创建 Tool 组件。
-
-### CHAT-THINK-005 Accessibility
-
-运行状态使用 `role="status"` 和 `aria-live="polite"`。展开按钮必须暴露
-`aria-expanded`；系统启用减少动态效果时，像素保持可见但停止循环动画。
-
-## 3. Non-goals
-
-- 不修改后端、数据库、Run 生命周期或事件结构。
-- 不把 Assistant 文本或 Tool 状态放入 Thinking Group，也不为活动事件建立第二套状态模型。
-- 不迁移 React 示例或引入新的动画依赖。
-
-## 4. Acceptance Criteria
-
-- 运行中 Thinking 状态继续显示 3×3 像素流动效果。
-- Thinking Group 以独立 Vue 组件存在，并组合独立 icon 组件。
-- Conversation 加载和 Agent Thinking 复用同一个 Thinking Group。
-- 当前 Run 尚无 Assistant 文本时，Thinking 与有效 Agent Tool 状态依次同级展示。
-- 当前 Run 开始输出 Assistant 文本或等待用户交互后，Thinking Group 不再显示。
-- Thinking 卸载、Assistant 正文输出和 Run 终态收口不得删除当前页面已有的 Tool 组件。
-- `npm run typecheck`、定向 ESLint 和 `git diff --check` 通过。
+- 正文出现后，Run 活跃时仍保留运行提示和计时。
+- 终态默认折叠中间过程，回答独立可见；展开能查看原有组件。
+- 等待用户时停止计时；切换会话后恢复同一 Run 的起始时间。
+- 子线程内容不冒充最终回答，完成的纯文本回答没有空折叠按钮。
+- TypeScript、Lint、组件测试、构建与浏览器渲染检查。

@@ -14,28 +14,16 @@ import type { UploadedAttachmentResponse } from "@/api/attachment";
 import type { AgentRunEndEvent } from "@/api/agent-run";
 import { AskUser } from "@/pages/chat/components/AskUser";
 import { AgentMessageComposer } from "@/pages/chat/components/AgentMessageComposer";
-import { ChatMessage } from "@/pages/chat/components/ChatMessage";
+import { ConversationMessages } from "@/pages/chat/components/ConversationMessages";
 import { Thinking } from "@/pages/chat/components/Thinking";
 import { useAgentRun } from "@/pages/chat/hooks/useAgentRun";
 import { useAttachments } from "@/pages/chat/hooks/useAttachments";
 import { useThread } from "@/pages/chat/hooks/useThread";
 import { useModel } from "@/context/ModelContext";
 import { useTranslation } from "@/i18n";
-import type { ChatMessage as ChatMessageType } from "@/pages/chat/types";
 
 const isAbortError = (caught: unknown) =>
   caught instanceof DOMException && caught.name === "AbortError";
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
-const messageRunId = (message: ChatMessageType) =>
-  isRecord(message.payload.event) ? message.payload.event.run_id : undefined;
-const messageKey = (message: ChatMessageType, index: number) => {
-  const event = isRecord(message.payload.event) ? message.payload.event : null;
-  const identity = event?.activity_id ?? (event?.message_id !== undefined
-    ? `${String(event.message_id)}:${String(event.index ?? 0)}`
-    : event?.tool_call_id ?? event?.name ?? event?.id ?? index);
-  return `${message.type}:${message.payload.type}:${event?.type ?? ""}:${event?.run_id ?? ""}:${event?.thread_id ?? ""}:${identity}`;
-};
 
 interface ChatSubmission {
   query: string;
@@ -397,25 +385,6 @@ export default function ChatPage() {
     Boolean(pending) ||
     (submitting && !active);
   const docked = threadState.messages.length > 0 || Boolean(pending);
-  const hasAssistantText = threadState.messages.some((message) => {
-    if (message.type !== "ai" || message.payload.type !== "text") return false;
-    const event = isRecord(message.payload.event)
-      ? message.payload.event
-      : null;
-    return (
-      messageRunId(message) === runState.runId &&
-      typeof event?.content === "string" &&
-      event.content.trim().length > 0
-    );
-  });
-  const showThinking =
-    !loading && active && !pending && !hasAssistantText;
-  const firstActivityIndex = threadState.messages.findIndex(
-    (message) =>
-      message.type === "ai" &&
-      message.payload.type === "tool" &&
-      messageRunId(message) === runState.runId,
-  );
   const displayedError = attachmentState.uploadError || error;
   const conversationTitle =
     threadState.thread?.title ||
@@ -474,17 +443,15 @@ export default function ChatPage() {
           {loading ? (
             <Thinking label="Loading conversation" />
           ) : (
-            threadState.messages.map((message, index) => (
-              <div key={messageKey(message, index)}>
-                {showThinking && index === firstActivityIndex && (
-                  <Thinking startedAt={runState.startedAt} />
-                )}
-                <ChatMessage message={message} />
-              </div>
-            ))
-          )}
-          {showThinking && firstActivityIndex === -1 && (
-            <Thinking startedAt={runState.startedAt} />
+            <ConversationMessages
+              messages={threadState.messages}
+              threadId={threadState.thread?.thread_id}
+              currentRunId={runState.runId}
+              status={runState.runStatus}
+              active={active}
+              waiting={Boolean(pending)}
+              startedAt={runState.startedAt}
+            />
           )}
         </div>
       </div>

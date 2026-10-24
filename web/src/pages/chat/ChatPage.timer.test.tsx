@@ -102,17 +102,17 @@ it("restores elapsed time after A to B to A while reconnecting the same Run", as
   expect(mocks.cancel).not.toHaveBeenCalled();
 });
 
-it("preserves elapsed time when activity moves Thinking into and out of a tool row", async () => {
+it("preserves elapsed time as process activity appears and disappears", async () => {
   renderChat();
   await waitFor(() => expect(streams).toHaveLength(1));
   vi.setSystemTime(startMs + 18_300);
   await act(() => streams[0].emit(event({ type: "custom", name: "agent_state", agent_state: { agent_todo: [{ content: "Work", status: "in_progress" }] } })));
   expect(screen.getByText("Activity")).toBeTruthy();
-  expect(screen.getByText("18.3s")).toBeTruthy();
+  await waitFor(() => expect(screen.getByText("18.3s")).toBeTruthy());
   vi.setSystemTime(startMs + 22_300);
   await act(() => streams[0].emit(event({ type: "custom", name: "agent_state", agent_state: { agent_todo: [] } })));
   expect(screen.queryByText("Activity")).toBeNull();
-  expect(screen.getByText("22.3s")).toBeTruthy();
+  await waitFor(() => expect(screen.getByText("22.3s")).toBeTruthy());
 });
 
 it.each([null, "invalid"])("hydrates a missing/invalid start (%s) from running events and prefers persisted starts on return", async (startedAt) => {

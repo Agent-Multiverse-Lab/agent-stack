@@ -6,6 +6,10 @@ const supportedLanguages = ["en", "zh-CN"] as const;
 type Language = (typeof supportedLanguages)[number];
 
 const translations = {
+  "Execution process": "执行过程",
+  "Execution failed": "执行失败",
+  "Waiting for your response": "等待你的操作",
+  "Working": "正在处理",
   "Tool": "工具",
   "Arguments": "参数",
   "Progress": "执行进度",
