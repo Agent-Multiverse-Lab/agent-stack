@@ -102,6 +102,11 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
 
   const onThreadChange = useEffectEvent(() => void load())
   useEffect(() => {
+    const refresh = () => onThreadChange()
+    window.addEventListener("thread-title-updated", refresh)
+    return () => window.removeEventListener("thread-title-updated", refresh)
+  }, [])
+  useEffect(() => {
     onThreadChange()
     const requestVersion = version
     return () => {

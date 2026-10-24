@@ -18,6 +18,8 @@ from server.entities.thread import (
     ThreadRequest,
     ThreadResponse,
     ThreadSummaryResponse,
+    ThreadTitleRequest,
+    ThreadTitleResponse,
     ThreadUpdateRequest,
     UploadedAttachmentResponse,
 )
@@ -175,6 +177,25 @@ async def get_thread_detail(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
+
+
+@router.post("/thread/{thread_id}/title-suggestion", response_model=ThreadTitleResponse)
+async def generate_thread_title(
+    thread_id: str,
+    payload: ThreadTitleRequest,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+) -> ThreadTitleResponse:
+    """为当前用户的会话生成标题，保存复用会话更新接口。"""
+    try:
+        title = await thread_service.generate_thread_title(
+            db, uid=current_user.uid, thread_id=thread_id, query=payload.query,
+        )
+        return ThreadTitleResponse(title=title)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.patch("/thread/{thread_id}", response_model=ThreadSummaryResponse)

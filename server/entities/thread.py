@@ -15,6 +15,18 @@ class ThreadRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class ThreadTitleRequest(BaseModel):
+    """首条问题的标题生成请求。"""
+
+    query: str = Field(min_length=1, max_length=2000)
+
+
+class ThreadTitleResponse(BaseModel):
+    """模型生成的简短标题。"""
+
+    title: str
+
+
 class ThreadSummaryResponse(BaseModel):
     """对话列表与详情共用的基础信息。"""
 
