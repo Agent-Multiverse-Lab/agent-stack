@@ -5,7 +5,13 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from src.database.models import AgentRun, Conversation, Message, ToolCall
+from src.database.models import (
+    AUDIT_MESSAGE_TYPES,
+    AgentRun,
+    Conversation,
+    Message,
+    ToolCall,
+)
 
 
 class ConversationRepository:
@@ -145,7 +151,9 @@ class ConversationRepository:
     ) -> list[Message]:
         """按 ID 倒序读取指定对话的一页消息。"""
         statement = select(Message).where(
-            Message.conversation_id == conversation_id
+            Message.conversation_id == conversation_id,
+            # running/未对账的审计行不进入普通历史。
+            func.coalesce(Message.message_type, "text").not_in(AUDIT_MESSAGE_TYPES),
         )
         if before_message_id is not None:
             statement = statement.where(Message.id < before_message_id)
@@ -300,6 +308,7 @@ class ConversationRepository:
         image_content: str | None = None,
         message_type: str = "text",
         status: str = "completed",
+        commit: bool = False,
         msg_metadata: dict | None = None,
     ) -> Message:
         """按用户和 Thread ID 添加消息，透传全部可写业务字段。"""
@@ -319,6 +328,9 @@ class ConversationRepository:
             image_content=image_content,
             message_type=message_type,
             status=status,
+            started_at=datetime.now(UTC),
+            execution_status="completed",
+            commit=commit,
             msg_metadata=msg_metadata,
         )
 
@@ -414,9 +426,19 @@ class ConversationRepository:
         image_content: str | None = None,
         message_type: str = "text",
         status: str = "completed",
+        sequence: int | None = None,
+        started_at: datetime | None = None,
+        finished_at: datetime | None = None,
+        execution_status: str | None = "completed",
+        operation_id: str | None = None,
+        usage: dict | None = None,
+        commit: bool = False,
         msg_metadata: dict | None = None,
     ) -> Message:
-        """创建一条持久化消息。"""
+        """创建一条持久化消息：未指定序号时分配会话内稳定序号并记录开始时间。"""
+        if sequence is None:
+            sequence = await self.next_sequence(conversation_id)
+        now = datetime.now(UTC)
         message = Message(
             conversation_id=int(conversation_id),
             agent_run_id=agent_run_id,
@@ -426,8 +448,32 @@ class ConversationRepository:
             request_id=request_id,
             message_type=message_type,
             status=status,
+            sequence=sequence,
+            started_at=started_at or now,
+            finished_at=finished_at,
+            execution_status=execution_status,
+            operation_id=operation_id,
+            usage=usage,
             msg_metadata=dict(msg_metadata or {}),
         )
         self.session.add(message)
         await self.session.flush()
+        if commit:
+            await self.session.commit()
         return message
+
+    async def next_sequence(self, conversation_id: int | str) -> int:
+        """返回指定会话的下一个展示序号。
+
+        审计行使用 ProtocolEvent 的 seq（Run 内顺序），不参与会话级序号分配，
+        避免流式事件序号污染普通消息的展示顺序。
+        """
+        result = await self.session.execute(
+            select(func.max(Message.sequence)).where(
+                Message.conversation_id == int(conversation_id),
+                func.coalesce(Message.message_type, "text").not_in(
+                    AUDIT_MESSAGE_TYPES
+                ),
+            )
+        )
+        return int(result.scalar() or 0) + 1

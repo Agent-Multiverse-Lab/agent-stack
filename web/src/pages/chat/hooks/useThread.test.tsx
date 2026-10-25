@@ -495,6 +495,28 @@ it("retains tool results and reasoning after reloading persisted messages", () =
   ])
 })
 
+it("restores multiple streamed activities of one Run in their original order after reload", () => {
+  const { result } = renderHook(() => useThread())
+  act(() => {
+    result.current.applyRunMessageEvent(
+      toolEvent("tool-started", { tool_call_id: "call-1", tool_name: "calculator" }), "run-1")
+    result.current.applyRunMessageEvent(
+      toolEvent("tool-finished", { tool_call_id: "call-1", output: "3" }), "run-1")
+    result.current.applyRunMessageEvent(
+      toolEvent("tool-started", { tool_call_id: "call-2", tool_name: "search" }), "run-1")
+    result.current.applyRunMessageEvent(
+      toolEvent("tool-finished", { tool_call_id: "call-2", output: "found" }), "run-1")
+    result.current.setMessages([
+      { message_id: 10, role: "assistant", content: "done", run: { run_id: "run-1" } },
+    ] as ThreadMessageResponse[])
+  })
+  const events = result.current.state.messages.map((message) => message.payload.event)
+  expect(
+    events.slice(0, 2).map((event) => (event as { name?: string }).name),
+  ).toEqual(["calculator", "search"])
+  expect(events[2]).toMatchObject({ message_id: 10, content: "done" })
+})
+
 it("updates Todo per thread and tolerates unknown custom events without adding empty cards", () => {
   const { result } = renderHook(() => useThread())
   const todo = (threadId: string, todos: unknown[]) => streamEvent("custom", {

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import unittest
 from contextlib import asynccontextmanager
@@ -161,7 +162,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                 new=no_interrupt,
             ),
             patch.object(thread_service.postgres_manager, "get_async_session_context", fake_session),
-            patch.object(thread_service, "save_interrupt_message", AsyncMock()),
+            patch.object(thread_service, "save_partial_message", AsyncMock()),
         ):
             return [
                 json.loads(chunk)
@@ -179,6 +180,143 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                     db=object(),
                 )
             ]
+
+    async def test_stream_error_saves_partial_message(self) -> None:
+        class PartialAgent:
+            agent_context = FakeContext
+
+            async def stream_messages_with_event(self, *_args, **_kwargs):
+                yield (
+                    "messages",
+                    (
+                        {
+                            "event": "content-block-delta",
+                            "index": 0,
+                            "delta": {"type": "text-delta", "text": "半句"},
+                        },
+                        {"run_id": "model-run-1"},
+                    ),
+                )
+                raise RuntimeError("stream boom")
+
+        with (
+            patch.object(
+                thread_service, "_build_agent_runtime",
+                AsyncMock(return_value=(
+                    SimpleNamespace(slug="test-agent", agent_config={}),
+                    PartialAgent(),
+                    "dashscope/qwen3.8-max",
+                )),
+            ),
+            patch.object(
+                thread_service, "_check_conv_status",
+                AsyncMock(return_value=SimpleNamespace(conversation_metadata={})),
+            ),
+            patch.object(thread_service, "check_agent_interrupt_handler", new=no_interrupt),
+            patch.object(thread_service.postgres_manager, "get_async_session_context", fake_session),
+            patch.object(thread_service, "save_partial_message", AsyncMock()) as partial,
+        ):
+            events = [
+                json.loads(chunk)
+                async for chunk in thread_service.stream_agent_response(
+                    agent_slug="test-agent",
+                    thread_id="thread-1",
+                    runtime_metadata={
+                        "run_id": "run-1",
+                        "request_id": "request-1",
+                        "thread_id": "thread-1",
+                        "worker_id": "worker-1",
+                    },
+                    thread_input_message=SimpleNamespace(
+                        content="hello",
+                        image_content=None,
+                        msg_type="text",
+                        msg_metadata={"attachment_file_ids": []},
+                        langchain_msg=HumanMessage(content="hello"),
+                    ),
+                    current_user=SimpleNamespace(uid="user-1"),
+                    db=object(),
+                )
+            ]
+
+        self.assertEqual("error", events[-1]["status"])
+        self.assertEqual("Error streaming messages: stream boom", events[-1]["error"])
+        self.assertEqual("unexpected_error", events[-1]["error_type"])
+        kwargs = partial.await_args.kwargs
+        self.assertEqual("半句", kwargs["full_msg"].content)
+        self.assertEqual("unexpected_error", kwargs["error_type"])
+        self.assertEqual("run-1", kwargs["run_id"])
+
+    async def test_stream_cancel_saves_partial_message(self) -> None:
+        started = asyncio.Event()
+
+        class BlockingAgent:
+            agent_context = FakeContext
+
+            async def stream_messages_with_event(self, *_args, **_kwargs):
+                yield (
+                    "messages",
+                    (
+                        {
+                            "event": "content-block-delta",
+                            "index": 0,
+                            "delta": {"type": "text-delta", "text": "半句"},
+                        },
+                        {"run_id": "model-run-1"},
+                    ),
+                )
+                started.set()
+                await asyncio.Event().wait()
+
+        async def consume():
+            async for _chunk in thread_service.stream_agent_response(
+                agent_slug="test-agent",
+                thread_id="thread-1",
+                runtime_metadata={
+                    "run_id": "run-1",
+                    "request_id": "request-1",
+                    "thread_id": "thread-1",
+                    "worker_id": "worker-1",
+                },
+                thread_input_message=SimpleNamespace(
+                    content="hello",
+                    image_content=None,
+                    msg_type="text",
+                    msg_metadata={"attachment_file_ids": []},
+                    langchain_msg=HumanMessage(content="hello"),
+                ),
+                current_user=SimpleNamespace(uid="user-1"),
+                db=object(),
+            ):
+                pass
+
+        with (
+            patch.object(
+                thread_service, "_build_agent_runtime",
+                AsyncMock(return_value=(
+                    SimpleNamespace(slug="test-agent", agent_config={}),
+                    BlockingAgent(),
+                    "dashscope/qwen3.8-max",
+                )),
+            ),
+            patch.object(
+                thread_service, "_check_conv_status",
+                AsyncMock(return_value=SimpleNamespace(conversation_metadata={})),
+            ),
+            patch.object(thread_service, "check_agent_interrupt_handler", new=no_interrupt),
+            patch.object(thread_service.postgres_manager, "get_async_session_context", fake_session),
+            patch.object(thread_service, "save_partial_message", AsyncMock()) as partial,
+        ):
+            task = asyncio.create_task(consume())
+            await asyncio.wait_for(started.wait(), timeout=5)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        kwargs = partial.await_args.kwargs
+        self.assertEqual("半句", kwargs["full_msg"].content)
+        self.assertEqual("interrupted", kwargs["error_type"])
+        self.assertEqual("run-1", kwargs["run_id"])
 
     async def test_v3_delta_populates_loading_response(self) -> None:
         metadata = {"run_id": "model-run-1"}
@@ -285,7 +423,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
         events = await self.collect_events(FakeAgent(events=(("values", None),)))
 
         self.assertEqual("error", events[-1]["status"])
-        self.assertEqual("AttributeError", events[-1]["error_type"])
+        self.assertEqual("unexpected_error", events[-1]["error_type"])
 
     async def test_subagent_command_result_can_be_sent_as_json(self):
         command = Command(update={"messages": [ToolMessage(content="child result", tool_call_id="task-1")]})
@@ -311,8 +449,8 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
         events = await self.collect_events(FakeAgent(error=RuntimeError("model failed")))
 
         self.assertEqual("error", events[-1]["status"])
-        self.assertEqual("model failed", events[-1]["error"])
-        self.assertEqual("RuntimeError", events[-1]["error_type"])
+        self.assertEqual("Error streaming messages: model failed", events[-1]["error"])
+        self.assertEqual("unexpected_error", events[-1]["error_type"])
 
     async def test_chat_stream_loads_bound_model_into_runtime_context(self):
         agent = FakeAgent()
@@ -386,7 +524,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(thread_service, "_require_thread", AsyncMock(return_value=SimpleNamespace(conversation_metadata={}))),
             patch.object(thread_service.postgres_manager, "get_async_session_context", fake_session),
-            patch.object(thread_service, "save_interrupt_message", AsyncMock()),
+            patch.object(thread_service, "save_partial_message", AsyncMock()),
         ):
             events = [
                 json.loads(chunk)
@@ -406,8 +544,8 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             ]
 
         self.assertEqual("error", events[-1]["status"])
-        self.assertEqual("resume failed", events[-1]["error"])
-        self.assertEqual("RuntimeError", events[-1]["error_type"])
+        self.assertEqual("Error during resume: resume failed", events[-1]["error"])
+        self.assertEqual("resume_error", events[-1]["error_type"])
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-﻿"""多问题 Resume 的请求、Service、checkpoint 和 Worker 接线验证。"""
+"""多问题 Resume 的请求、Service、checkpoint 和 Worker 接线验证。"""
 
 import asyncio
 import copy
@@ -192,7 +192,17 @@ class ResumeStreamTest(unittest.IsolatedAsyncioTestCase):
                       runtime_metadata={"worker_id": "owner-1", "run_id": "resume-run", "request_id": "request-1"},
                       current_user=SimpleNamespace(uid="user-1"), db=SimpleNamespace())
         values.update(overrides)
-        with patch.object(thread_service, "_build_agent_runtime", AsyncMock(return_value=(SimpleNamespace(slug="LeaderAgent", agent_config={}), agent, "dashscope/qwen3.8-max"))) as get_agent:
+        @asynccontextmanager
+        async def session():
+            yield SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+
+        with (
+            patch.object(
+                thread_service, "_build_agent_runtime",
+                AsyncMock(return_value=(SimpleNamespace(slug="LeaderAgent", agent_config={}), agent, "dashscope/qwen3.8-max")),
+            ) as get_agent,
+            patch.object(thread_service.postgres_manager, "get_async_session_context", session),
+        ):
             chunks = [json.loads(chunk) async for chunk in thread_service.resume_agent_response(**values)]
         if agent is not None:
             self.assertEqual(get_agent.await_args.kwargs["run_type"], "resume")
@@ -233,21 +243,25 @@ class ResumeStreamTest(unittest.IsolatedAsyncioTestCase):
         self.require.side_effect = LookupError("thread missing")
         chunks = await self.consume(None)
         self.assertEqual(chunks, [dict(request_id="request-1", response=None, thread_id="thread-1",
-                                      status="error", error="thread missing", error_type="LookupError")])
+                                      status="error",
+                                      error="Error during resume: thread missing",
+                                      error_type="resume_error")])
 
-    async def test_save_failure_keeps_original_error(self):
+    async def test_save_failure_reports_output_persistence_error(self):
         graph = await self.graph()
         self.saved.side_effect = RuntimeError("checkpoint save failed")
         @asynccontextmanager
         async def session():
-            yield SimpleNamespace()
+            yield SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
         with patch.object(thread_service.postgres_manager, "get_async_session_context", session), patch.object(
-            thread_service, "save_interrupt_message", AsyncMock(side_effect=RuntimeError("fallback failed"))
-        ) as fallback:
+            thread_service, "save_partial_message", AsyncMock()
+        ) as partial:
             chunks = await self.consume(FixtureAgent(graph))
         self.assertEqual(chunks[-1]["status"], "error")
-        self.assertEqual(chunks[-1]["error"], "checkpoint save failed")
-        self.assertEqual(fallback.await_args.kwargs["accumulated_msg"].content, "已继续")
+        self.assertEqual(chunks[-1]["error"], "最终输出持久化或绑定失败")
+        self.assertEqual(chunks[-1]["error_type"], "output_persistence_error")
+        # 终态落库失败属于显式失败，不追加部分输出消息。
+        partial.assert_not_awaited()
 
 
 class NormalStreamFinalizationTest(unittest.IsolatedAsyncioTestCase):
@@ -305,7 +319,8 @@ class NormalStreamFinalizationTest(unittest.IsolatedAsyncioTestCase):
         chunks, order = await self.consume(True, RuntimeError("save failed"))
         self.assertEqual(order, ["detect", "save", "error"])
         self.assertEqual([chunk["status"] for chunk in chunks], ["error"])
-        self.assertEqual(chunks[0]["error"], "save failed")
+        self.assertEqual(chunks[0]["error"], "最终输出持久化或绑定失败")
+        self.assertEqual(chunks[0]["error_type"], "output_persistence_error")
 
 
 class ResumeWorkerTest(unittest.IsolatedAsyncioTestCase):
@@ -316,7 +331,7 @@ class ResumeWorkerTest(unittest.IsolatedAsyncioTestCase):
                               run_metadata={"resume": {"answers": ANSWERS}})
         @asynccontextmanager
         async def session():
-            yield SimpleNamespace()
+            yield SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
         async def stream(**kwargs):
             self.assertIs(kwargs["resume_input"], ANSWERS)
             self.assertNotIn("agent_slug", kwargs)

@@ -47,6 +47,13 @@ if sys.platform == "win32":
 
 WORKER_ID = f"worker-{uuid4().hex}"
 
+# Run lease：认领时写入 120 秒租约，每 30 秒续期；失去租约的 Worker 必须停止
+# 执行，过期 Run 由扫描任务收敛为终态。
+RUN_LEASE_SECONDS = 120.0
+RUN_HEARTBEAT_SECONDS = 30.0
+LEASE_REAPER_INTERVAL_SECONDS = 30.0
+LEASE_REAPER_CTX_KEY = "lease_reaper"
+
 def init_worker_id(ctx) -> str:
     "初始化id"
     if isinstance(ctx, dict):
@@ -64,9 +71,11 @@ def create_run_owner(ctx) -> str:
 
 @dataclass
 class AgentRunController:
-    """持有单个 Agent Run 的进程内取消监听状态。"""
+    """持有单个 Agent Run 的进程内取消状态与租约续期任务。"""
 
     run_id: str
+    worker_id: str
+    lease_lost: bool = field(default=False, init=False)
     _cancel_event: asyncio.Event = field(
         default_factory=asyncio.Event,
         init=False,
@@ -75,13 +84,18 @@ class AgentRunController:
         default=None,
         init=False,
     )
+    _heartbeat_task: asyncio.Task[None] | None = field(
+        default=None,
+        init=False,
+    )
 
     def start(self) -> None:
-        """启动当前 Run 唯一的 Redis 取消信号监听任务。"""
+        """启动取消监听与租约续期，二者都只允许一个实例。"""
 
-        if self._cancel_listener_task is not None:
-            return
-        self._cancel_listener_task = asyncio.create_task(self._watch_cancel_signal())
+        if self._cancel_listener_task is None:
+            self._cancel_listener_task = asyncio.create_task(self._watch_cancel_signal())
+        if self._heartbeat_task is None:
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_lease())
 
     async def wait_cancel_signal(self) -> None:
         """等待当前 Run 的取消信号，并传播监听任务异常。"""
@@ -105,6 +119,9 @@ class AgentRunController:
         return True
 
     async def is_cancelled(self) -> bool:
+        if self.lease_lost:
+            return True
+
         if self._cancel_event.is_set():
             return True
 
@@ -120,14 +137,44 @@ class AgentRunController:
         )
 
     async def close(self) -> None:
-        """取消并等待当前 Run 的 Redis 取消信号监听任务。"""
+        """取消并等待当前 Run 的取消监听与租约续期任务。"""
 
-        listener_task = self._cancel_listener_task
-        if listener_task is None:
-            return
-        if not listener_task.done():
-            listener_task.cancel()
-        await asyncio.gather(listener_task, return_exceptions=True)
+        tasks = [
+            task
+            for task in (self._cancel_listener_task, self._heartbeat_task)
+            if task is not None
+        ]
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _heartbeat_lease(self) -> None:
+        """周期性续租；续租失败说明 Run 已被其他 Worker 收敛，必须停止执行。"""
+
+        while not self._cancel_event.is_set():
+            await asyncio.sleep(RUN_HEARTBEAT_SECONDS)
+            if self._cancel_event.is_set():
+                return
+            try:
+                renewed = await _renew_run_lease(self.run_id, self.worker_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "Agent Run 租约续期失败：run_id=%s", self.run_id
+                )
+                renewed = False
+            if not renewed:
+                logger.warning(
+                    "Agent Run 租约丢失，停止执行：run_id=%s worker_id=%s",
+                    self.run_id,
+                    self.worker_id,
+                )
+                self.lease_lost = True
+                self._cancel_event.set()
+                return
 
     async def _watch_cancel_signal(self) -> None:
         try:
@@ -177,6 +224,8 @@ async def worker_startup(ctx) -> None:
         await postgres_manager.ensure_tables_exist()
         await postgres_manager.setup_langgraph_persistence()
         await ensure_agents_exist()
+        await reconcile_expired_run_leases()
+        ctx[LEASE_REAPER_CTX_KEY] = asyncio.create_task(_run_lease_reaper())
     except Exception:
         logger.exception("Worker 启动资源初始化失败")
         await postgres_manager.dispose()
@@ -187,15 +236,63 @@ async def worker_startup(ctx) -> None:
 async def worker_shutdown(ctx) -> None:
     """释放 Worker 自己持有的 PostgreSQL 和 Sandbox 资源。"""
 
+    reaper = ctx.pop(LEASE_REAPER_CTX_KEY, None) if isinstance(ctx, dict) else None
+    if reaper is not None:
+        reaper.cancel()
+        await asyncio.gather(reaper, return_exceptions=True)
     await shutdown_sandbox_provider()
     await postgres_manager.dispose()
 
 
 async def set_run_running(run_id: str, *, worker_id: str) -> AgentRun | None:
-    # FIXME: Worker 开始执行时单独设置 running 状态。
+    """认领 Run 并写入租约；后续由 heartbeat 任务续期。"""
+
     async with postgres_manager.get_async_session_context() as db:
         agent_run_repo = AgentRunRepository(db)
-        return await agent_run_repo.set_running(run_id, worker_id=worker_id)
+        return await agent_run_repo.set_running(
+            run_id,
+            worker_id=worker_id,
+            lease_seconds=RUN_LEASE_SECONDS,
+        )
+
+
+async def _renew_run_lease(run_id: str, worker_id: str) -> bool:
+    """续期当前 Run 的租约；owner 或租约失效时返回 False。"""
+
+    async with postgres_manager.get_async_session_context() as db:
+        agent_run_repo = AgentRunRepository(db)
+        return await agent_run_repo.renew_lease(
+            run_id,
+            worker_id=worker_id,
+            lease_seconds=RUN_LEASE_SECONDS,
+        )
+
+
+async def reconcile_expired_run_leases() -> int:
+    """把租约过期的 Run 收敛为失败/取消终态，返回处理数量。"""
+
+    async with postgres_manager.get_async_session_context() as db:
+        runs = await AgentRunRepository(db).reconcile_expired_leases()
+    for run in runs:
+        logger.warning(
+            "Agent Run 租约过期，已收敛：run_id=%s status=%s",
+            run.id,
+            run.agent_status,
+        )
+    return len(runs)
+
+
+async def _run_lease_reaper() -> None:
+    """Worker 常驻任务：周期性收敛失联 Worker 遗留的 Run。"""
+
+    while True:
+        await asyncio.sleep(LEASE_REAPER_INTERVAL_SECONDS)
+        try:
+            await reconcile_expired_run_leases()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Agent Run 租约巡检失败")
 
 
 async def release_run_for_retry(run_id: str, *, worker_id: str) -> bool:
@@ -636,7 +733,7 @@ async def process_agent_run(ctx, run_id: str):
             "parent_run_id": agent_run_event.parent_run_id,
         }
 
-        run_controller = AgentRunController(run_id)
+        run_controller = AgentRunController(run_id, worker_id=worker_id)
         run_controller.start()
         try:
             await write_stream_event(

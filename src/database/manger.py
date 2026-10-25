@@ -5,6 +5,9 @@ from contextlib import AsyncExitStack, asynccontextmanager
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.postgres import AsyncPostgresStore, PoolConfig
+from psycopg import AsyncConnection
+from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -20,6 +23,9 @@ from .base import Base
 
 _NOT_INITIALIZED_MSG = "PostgreManger is not initialized."
 
+# 跨进程串行化 Checkpointer 建表：API、Worker 同时启动时只允许一个进程执行 setup。
+_CHECKPOINT_SETUP_ADVISORY_LOCK = 94721802
+
 
 class PostgreManger:
     """PostgreSQL 运行时资源的唯一管理者。
@@ -31,7 +37,9 @@ class PostgreManger:
         self.session_maker: async_sessionmaker[AsyncSession] | None = None
         self.langgraph_store: AsyncPostgresStore | None = None
         self.langgraph_checkpointer: AsyncPostgresSaver | None = None
+        self.langgraph_pool: AsyncConnectionPool | None = None
         self._langgraph_resource_stack: AsyncExitStack | None = None
+        self._langgraph_dsn: str = ""
         # 初始化标记，防止重复初始化，并作为依赖方法的显式前置条件。
         self.initialized: bool = False
 
@@ -87,9 +95,22 @@ class PostgreManger:
                     pool_config=store_pool_config,
                 )
             )
-            langgraph_checkpointer = await resource_stack.enter_async_context(
-                AsyncPostgresSaver.from_conn_string(langgraph_database_url)
+            # 共享一个有界连接池，但每次构图独享 saver，
+            # 避免全局 Agent 缓存让不同用户的 checkpoint I/O 串行化。
+            langgraph_pool = AsyncConnectionPool(
+                conninfo=langgraph_database_url,
+                min_size=1,
+                max_size=10,
+                open=False,
+                kwargs={
+                    "autocommit": True,
+                    "prepare_threshold": 0,
+                    "row_factory": dict_row,
+                },
             )
+            resource_stack.push_async_callback(langgraph_pool.close)
+            await langgraph_pool.open()
+            langgraph_checkpointer = AsyncPostgresSaver(langgraph_pool)
         except asyncio.CancelledError:
             await resource_stack.aclose()
             self._reset_resource_references()
@@ -105,7 +126,9 @@ class PostgreManger:
 
         self.langgraph_store = langgraph_store
         self.langgraph_checkpointer = langgraph_checkpointer
+        self.langgraph_pool = langgraph_pool
         self._langgraph_resource_stack = resource_stack
+        self._langgraph_dsn = langgraph_database_url
         self.initialized = True
 
     def get_langgraph_store(self) -> AsyncPostgresStore:
@@ -116,17 +139,31 @@ class PostgreManger:
         return self.langgraph_store
 
     def get_langgraph_checkpointer(self) -> AsyncPostgresSaver:
-        '''获取当前进程已初始化的 LangGraph Checkpointer。'''
+        '''为本次构图创建独立 Checkpointer，共享连接池而不共享实例锁。'''
 
-        if not self.initialized or self.langgraph_checkpointer is None:
+        if not self.initialized or self.langgraph_pool is None:
             raise RuntimeError(_NOT_INITIALIZED_MSG)
-        return self.langgraph_checkpointer
+        return AsyncPostgresSaver(self.langgraph_pool)
 
     async def setup_langgraph_persistence(self) -> None:
-        '''创建或迁移 LangGraph Store 与 Checkpointer 表。'''
+        '''创建或迁移 LangGraph Store 与 Checkpointer 表。
 
+        Checkpointer 建表由 PostgreSQL advisory lock 串行化，API 与 Worker
+        同时启动时不会互相竞争建表。
+        '''
+
+        checkpointer = self.get_langgraph_checkpointer()
         await self.get_langgraph_store().setup()
-        await self.get_langgraph_checkpointer().setup()
+        async with await AsyncConnection.connect(self._langgraph_dsn, autocommit=True) as lock_connection:
+            await lock_connection.execute(
+                "SELECT pg_advisory_lock(%s)", (_CHECKPOINT_SETUP_ADVISORY_LOCK,)
+            )
+            try:
+                await checkpointer.setup()
+            finally:
+                await lock_connection.execute(
+                    "SELECT pg_advisory_unlock(%s)", (_CHECKPOINT_SETUP_ADVISORY_LOCK,)
+                )
 
     async def ensure_tables_exist(self) -> None:
         """创建缺失表，并补充 Agent Run 的非破坏性类型字段。"""
@@ -152,6 +189,32 @@ class PostgreManger:
                 text(
                     "CREATE INDEX IF NOT EXISTS ix_agent_run_run_type "
                     "ON agent_run (run_type)"
+                )
+            )
+            # 租约字段：旧库启动时补齐，Alembic 0019 负责正式迁移。
+            await connection.execute(
+                text(
+                    "ALTER TABLE agent_run "
+                    "ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER TABLE agent_run "
+                    "ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ"
+                )
+            )
+            await connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_agent_run_lease "
+                    "ON agent_run (agent_status, lease_expires_at)"
+                )
+            )
+            # 消息审计索引：旧库启动时补齐，Alembic 0021 负责正式迁移。
+            await connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_message_run_operation "
+                    "ON message (agent_run_id, operation_id)"
                 )
             )
 
@@ -190,7 +253,9 @@ class PostgreManger:
 
         self.langgraph_store = None
         self.langgraph_checkpointer = None
+        self.langgraph_pool = None
         self._langgraph_resource_stack = None
+        self._langgraph_dsn = ""
         self.engine = None
         self.session_maker = None
         self.initialized = False

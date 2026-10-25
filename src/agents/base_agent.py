@@ -2,6 +2,7 @@ from abc import abstractmethod
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
+from langchain_core.messages import ToolMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.store.postgres import AsyncPostgresStore
@@ -32,6 +33,45 @@ def _build_event_input_config(
     if tags:
         input_config["tags"] = list(tags)
     return input_config
+
+
+def _json_safe(value: Any) -> Any:
+    """把 ProtocolEvent 数据转成可 JSON 序列化的结构，供审计与前端共用。"""
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_safe(child) for key, child in value.items()}
+    if isinstance(value, list | tuple):
+        return [_json_safe(child) for child in value]
+    if hasattr(value, "model_dump"):
+        return _json_safe(value.model_dump())
+    return str(value)
+
+
+def _normalize_tool_event_data(data: Any) -> Any:
+    """规整 tools 流事件。
+
+    write_todos / task 等返回 Command 的工具，其 tool-finished output 是 Command
+    对象，_json_safe 只能退化成 repr 字符串，审计与前端都无法关联结果。这里从
+    Command.update["messages"] 取出真正的 ToolMessage，使其与普通工具一致。
+    """
+    if not isinstance(data, dict) or data.get("event") != "tool-finished":
+        return data
+    output = data.get("output")
+    if not isinstance(output, Command):
+        return data
+    update = output.update if isinstance(output.update, dict) else {}
+    messages = update.get("messages")
+    if not isinstance(messages, list):
+        return data
+    tool_call_id = data.get("tool_call_id")
+    tool_message = next(
+        (m for m in messages if isinstance(m, ToolMessage) and m.tool_call_id == tool_call_id),
+        next((m for m in messages if isinstance(m, ToolMessage)), None),
+    )
+    if tool_message is None:
+        return data
+    return {**data, "output": tool_message}
 
 
 def unpack_data(data: Any) -> Any:
@@ -203,6 +243,8 @@ class BaseAgent:
             stream_params = stream_event.get("params") or {}
             stream_data = stream_params.get("data")
             stream_namespace = stream_params.get("namespace", [])
+            stream_sequence = stream_event.get("seq")
+            stream_timestamp = stream_params.get("timestamp")
 
             if stream_method == "values":
                 yield stream_method, stream_data
@@ -214,6 +256,17 @@ class BaseAgent:
                     stream_agent_run_metadata or {}
                 )
                 stream_agent_run_metadata["namespace"] = stream_namespace
+                # 审计需要 root StreamMux 的单调 seq 和 wall-clock 毫秒。
+                # 协议未提供完整信封时不写审计元数据，避免把不可审计事件当成事实。
+                if isinstance(stream_sequence, int) and isinstance(
+                    stream_timestamp, int | float
+                ):
+                    stream_agent_run_metadata["stream_event"] = {
+                        "method": stream_method,
+                        "namespace": stream_namespace,
+                        "seq": stream_sequence,
+                        "timestamp": stream_timestamp,
+                    }
                 yield stream_method, (
                     stream_msg,
                     stream_agent_run_metadata,
@@ -221,8 +274,19 @@ class BaseAgent:
                 continue
 
             if stream_method == "tools":
-                yield "agent_execute_event", {
+                stream_data = _normalize_tool_event_data(stream_data)
+                tool_event_payload = {
+                    "method": stream_method,
+                    "namespace": stream_namespace,
+                    "data": _json_safe(stream_data),
+                    # 兼容既有前端约定的字段名。
                     "stream_methods": stream_method,
                     "stream_namesapce": stream_namespace,
                     "stream_data": stream_data,
                 }
+                if isinstance(stream_sequence, int) and isinstance(
+                    stream_timestamp, int | float
+                ):
+                    tool_event_payload["seq"] = stream_sequence
+                    tool_event_payload["timestamp"] = stream_timestamp
+                yield "agent_execute_event", tool_event_payload

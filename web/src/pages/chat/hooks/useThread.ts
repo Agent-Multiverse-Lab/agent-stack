@@ -197,18 +197,28 @@ export function useThread() {
 
   function mergeHistory(historyMessages: ThreadMessageResponse[]) {
     const history = historyMessages.map(toChatMessage);
-    const retained = getMessages().filter(
-      (message) => message.type === "ai" && message.payload.type === "tool",
-    );
-    for (const activity of retained) {
-      const activityRunId = chatMessageRunId(activity);
+    // FIXEME: 逐条插入会把同一 Run 的多条流式执行记录倒序；刷新后需要按原始
+    // 顺序整组还原，否则输出完成后数据读取源切换会打乱展示顺序。
+    const retainedByRun = new Map<string | null, ChatMessage[]>();
+    for (const message of getMessages()) {
+      if (message.type !== "ai" || message.payload.type !== "tool") continue;
+      const runId = chatMessageRunId(message) ?? null;
+      const activities = retainedByRun.get(runId);
+      if (activities) activities.push(message);
+      else retainedByRun.set(runId, [message]);
+    }
+    for (const [runId, activities] of retainedByRun) {
       const insertAt = history.findIndex(
         (message) =>
           message.type === "ai" &&
           message.payload.type === "text" &&
-          chatMessageRunId(message) === activityRunId,
+          chatMessageRunId(message) === runId,
       );
-      history.splice(insertAt === -1 ? history.length : insertAt, 0, activity);
+      history.splice(
+        insertAt === -1 ? history.length : insertAt,
+        0,
+        ...activities,
+      );
     }
     return history;
   }

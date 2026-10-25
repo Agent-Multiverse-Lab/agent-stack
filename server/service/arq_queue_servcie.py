@@ -88,6 +88,9 @@ async def write_agent_run_stream_event(
         created_at=datetime.now(tz=UTC).isoformat(),
     )
 
+    # 同一 Run 内单调递增的事件序号，前端据此排序。
+    chunk_envelope["seq"] = await redis_client.incr(f"run:seq:{run_id}")
+
     fields = {
         "event_type": event_type,
         "event": json.dumps(chunk_envelope, ensure_ascii=False, default=str),

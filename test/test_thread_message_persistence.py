@@ -23,13 +23,13 @@ def load_message_persistence():
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     module = ModuleType("isolated_message_persistence")
     module.__dict__.update(
-        AsyncSession=Any, BaseAgent=Any, Message=Message,
+        Any=Any, AsyncSession=Any, BaseAgent=Any, Message=Message,
         AIMessage=AIMessage, ToolMessage=ToolMessage, json=json, logger=Mock(),
         AgentRunRepository=AgentRunRepository, ConversationRepository=ConversationRepository,
     )
     nodes = [node for node in tree.body if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)) and node.name in {
         "_reslove_interrupt_state",
-        "save_ai_message", "save_tool_message", "save_message_from_langgraph_state", "save_interrupt_message",
+        "save_ai_message", "save_tool_message", "save_message_from_langgraph_state", "save_partial_message",
     }]
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), "exec"), module.__dict__)
     return module
@@ -97,25 +97,114 @@ class ThreadMessagePersistenceTest(unittest.IsolatedAsyncioTestCase):
         save_tool.assert_not_awaited()
         db.commit.assert_not_awaited()
 
-    async def test_foreign_owner_interrupt_output_rolls_back_without_creating_message(self):
-        repository = SimpleNamespace(lock_for_output_update=AsyncMock(
-            side_effect=RuntimeError("owner mismatch"),
-        ))
-        conversations = SimpleNamespace(add_message_by_thread_id=AsyncMock())
-        db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
-        with (
-            patch.object(thread_service, "AgentRunRepository", return_value=repository),
-            patch.object(thread_service, "ConversationRepository", return_value=conversations),
-        ):
-            result = await thread_service.save_interrupt_message(
-                db=db, thread_id="thread-1", uid="user-1", accumulated_msg="",
-                error="failed", error_type="RuntimeError", agent_run_id="run-1",
-                worker_id="foreign-owner",
+    def _partial_repository(self, message=None, *, lock_error=None, terminal=(None, False)):
+        run_repo = SimpleNamespace(
+            lock_output_persistence=(
+                AsyncMock(side_effect=lock_error)
+                if lock_error is not None
+                else AsyncMock(return_value=SimpleNamespace(id="run-1"))
+            ),
+            set_output_message=AsyncMock(),
+            set_agent_terminal=AsyncMock(return_value=terminal),
+        )
+        conv_repo = SimpleNamespace(
+            session=SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock()),
+            add_message_by_thread_id=AsyncMock(return_value=message),
+        )
+        return run_repo, conv_repo
+
+    async def test_partial_message_saves_streamed_text_and_error_metadata(self) -> None:
+        message = SimpleNamespace(id=11)
+        run_repo, conv_repo = self._partial_repository(message)
+        with patch.object(thread_service, "AgentRunRepository", return_value=run_repo):
+            result = await thread_service.save_partial_message(
+                conv_repo, "thread-1",
+                uid="user-1",
+                full_msg=AIMessage(content="部分输出"),
+                error_message="Error streaming messages: boom",
+                error_type="unexpected_error",
+                run_id="run-1",
+                request_id="request-1",
+                worker_id="owner-1",
             )
+
+        self.assertIs(result, message)
+        kwargs = conv_repo.add_message_by_thread_id.await_args.kwargs
+        self.assertEqual("部分输出", kwargs["content"])
+        self.assertEqual("assistant", kwargs["role"])
+        self.assertEqual(False, kwargs["commit"])
+        metadata = kwargs["msg_metadata"]
+        self.assertTrue(metadata["is_error"])
+        self.assertEqual("unexpected_error", metadata["error_type"])
+        self.assertEqual("Error streaming messages: boom", metadata["error_message"])
+        # 消息自身 dump 合并进 metadata，供调试面板还原上下文。
+        self.assertEqual("部分输出", metadata["content"])
+        run_repo.set_output_message.assert_awaited_once_with(
+            run_id="run-1", output_message_id=11, worker_id="owner-1",
+        )
+        conv_repo.session.commit.assert_awaited_once()
+
+    async def test_partial_message_without_run_commits_in_repository(self) -> None:
+        message = SimpleNamespace(id=12)
+        _run_repo, conv_repo = self._partial_repository(message)
+        result = await thread_service.save_partial_message(
+            conv_repo, "thread-1", uid="user-1", error_type="interrupted",
+        )
+
+        self.assertIs(result, message)
+        kwargs = conv_repo.add_message_by_thread_id.await_args.kwargs
+        self.assertEqual("", kwargs["content"])
+        self.assertEqual(True, kwargs["commit"])
+        conv_repo.session.commit.assert_not_awaited()
+
+    async def test_partial_message_interrupt_run_commits_terminal_in_same_transaction(self) -> None:
+        message = SimpleNamespace(id=13)
+        run_repo, conv_repo = self._partial_repository(
+            message, terminal=(SimpleNamespace(id="run-1"), True),
+        )
+        with patch.object(thread_service, "AgentRunRepository", return_value=run_repo):
+            await thread_service.save_partial_message(
+                conv_repo, "thread-1", uid="user-1",
+                full_msg=AIMessage(content="半句"),
+                error_type="interrupted",
+                run_id="run-1", request_id="request-1", worker_id="owner-1",
+                interrupt_run=True,
+            )
+
+        run_repo.set_agent_terminal.assert_awaited_once_with(
+            "run-1", status="interrupted", worker_id="owner-1",
+        )
+        conv_repo.session.commit.assert_awaited_once()
+
+    async def test_partial_message_interrupt_run_requires_terminal_commit(self) -> None:
+        run_repo, conv_repo = self._partial_repository(
+            SimpleNamespace(id=14), terminal=(SimpleNamespace(id="run-1"), False),
+        )
+        with patch.object(thread_service, "AgentRunRepository", return_value=run_repo):
+            with self.assertRaises(ValueError):
+                await thread_service.save_partial_message(
+                    conv_repo, "thread-1", uid="user-1",
+                    full_msg=AIMessage(content="半句"),
+                    run_id="run-1", request_id="request-1", worker_id="owner-1",
+                    interrupt_run=True,
+                )
+        conv_repo.session.rollback.assert_awaited_once()
+        conv_repo.session.commit.assert_not_awaited()
+
+    async def test_partial_message_returns_none_for_foreign_owner(self) -> None:
+        run_repo, conv_repo = self._partial_repository(
+            SimpleNamespace(id=15), lock_error=RuntimeError("owner mismatch"),
+        )
+        with patch.object(thread_service, "AgentRunRepository", return_value=run_repo):
+            result = await thread_service.save_partial_message(
+                conv_repo, "thread-1", uid="user-1",
+                full_msg=AIMessage(content="半句"),
+                run_id="run-1", request_id="request-1", worker_id="foreign-owner",
+            )
+
         self.assertIsNone(result)
-        conversations.add_message_by_thread_id.assert_not_awaited()
-        db.commit.assert_not_awaited()
-        db.rollback.assert_awaited_once()
+        conv_repo.add_message_by_thread_id.assert_not_awaited()
+        conv_repo.session.rollback.assert_awaited_once()
 
     async def test_checkpoint_messages_are_saved_in_state_order(self) -> None:
         messages = [
@@ -243,7 +332,9 @@ class ThreadMessagePersistenceTest(unittest.IsolatedAsyncioTestCase):
             add=Mock(),
             flush=AsyncMock(),
             execute=AsyncMock(
-                return_value=SimpleNamespace(scalar_one_or_none=lambda: None)
+                return_value=SimpleNamespace(
+                    scalar_one_or_none=lambda: None, scalar=lambda: None
+                )
             ),
         )
         conversations = ConversationRepository(session)
@@ -278,7 +369,8 @@ class ThreadMessagePersistenceTest(unittest.IsolatedAsyncioTestCase):
             flush=AsyncMock(),
             execute=AsyncMock(
                 return_value=SimpleNamespace(
-                    scalar_one_or_none=lambda: SimpleNamespace(id=7)
+                    scalar_one_or_none=lambda: SimpleNamespace(id=7),
+                    scalar=lambda: None,
                 )
             ),
         )

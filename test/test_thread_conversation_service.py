@@ -194,6 +194,11 @@ def make_message(
         message_type="text",
         status="completed",
         request_id="request-1",
+        sequence=message_id,
+        started_at=NOW + timedelta(minutes=message_id),
+        finished_at=NOW + timedelta(minutes=message_id),
+        duration_ms=None,
+        execution_status="completed",
         created_at=NOW + timedelta(minutes=message_id),
         updated_at=NOW + timedelta(minutes=message_id),
     )

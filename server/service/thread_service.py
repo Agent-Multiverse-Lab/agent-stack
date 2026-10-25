@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import binascii
 import json
@@ -15,7 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import src.agents.buildin as agent
 from server.service.input_message_service import AgentInputMsg
 from server.service.langfuse_service import with_langfuse_config
+from server.service.model_message_audit_service import ModelMessageAuditCollector
 from server.service.model_service import build_model_list, load_chat_model, resolve_runtime_model
+from server.service.tool_message_audit_service import ToolMessageAuditCollector
 from server.utils.auth import AuthenticatedUser
 from server.utils.interrupt_utils import AskHumanPayload, parse_interrupt_questions
 from src.agents import BaseAgent
@@ -37,6 +40,9 @@ from src.database.repositories import (
     ConversationRepository,
     MessageAttachmentRepository,
     UserRepository,
+)
+from src.database.repositories.model_message_audit_repository import (
+    ModelMessageAuditRepository,
 )
 from src.model import resolve_chat_model_selection
 from src.storage import get_storage
@@ -223,11 +229,36 @@ async def get_thread_detail(
     return {
         "thread": _thread_summary(conversation),
         "messages": [
-            _message_response(
-                message,
-                runs,
-                message_attachments.get(int(message.id), []),
-            )
+            {
+                "message_id": int(message.id),
+                "role": str(message.role),
+                "content": str(message.content),
+                "image_content": (
+                    str(message.image_content)
+                    if message.image_content is not None
+                    else None
+                ),
+                "message_type": str(message.message_type or "text"),
+                "status": str(message.status),
+                "request_id": (
+                    str(message.request_id)
+                    if message.request_id is not None
+                    else None
+                ),
+                "run": _run_response(
+                    runs.get(str(message.agent_run_id))
+                    if message.agent_run_id is not None
+                    else None
+                ),
+                "attachments": message_attachments.get(int(message.id), []),
+                "sequence": message.sequence,
+                "started_at": message.started_at,
+                "finished_at": message.finished_at,
+                "duration_ms": message.duration_ms,
+                "execution_status": message.execution_status,
+                "created_at": message.created_at,
+                "updated_at": message.updated_at,
+            }
             for message in reversed(page_desc)
         ],
         "next_before_message_id": next_before_message_id,
@@ -381,38 +412,6 @@ async def _message_attachment_payloads(
             }
         )
     return grouped
-
-
-def _message_response(
-    message: Message,
-    runs: dict[str, AgentRun],
-    attachments: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """组装消息和对应的持久化 Run 元数据。"""
-    run = (
-        runs.get(str(message.agent_run_id))
-        if message.agent_run_id is not None
-        else None
-    )
-    run_payload = _run_response(run)
-
-    return {
-        "message_id": int(message.id),
-        "role": str(message.role),
-        "content": str(message.content),
-        "image_content": (
-            str(message.image_content) if message.image_content is not None else None
-        ),
-        "message_type": str(message.message_type or "text"),
-        "status": str(message.status),
-        "request_id": (
-            str(message.request_id) if message.request_id is not None else None
-        ),
-        "run": run_payload,
-        "attachments": attachments,
-        "created_at": message.created_at,
-        "updated_at": message.updated_at,
-    }
 
 
 # FIXEME: Thread 顶层状态与消息内 Run 元数据使用同一序列化合同。
@@ -795,71 +794,86 @@ def _serialize_agent_state(agent_state: AgentState | None) -> str:
         return str(agent_state)
 
 
-async def save_interrupt_message(
-    *,
-    db: AsyncSession,
+async def save_partial_message(
+    conv_repo: ConversationRepository,
     thread_id: str,
+    *,
     uid: str,
-    accumulated_msg: str,
-    error: str,
-    error_type: str,
-    agent_run_id: str | None,
-    worker_id: str,
+    full_msg: Any = None,
+    error_message: str | None = None,
+    error_type: str = "interrupted",
+    run_id: str | None = None,
     request_id: str | None = None,
+    worker_id: str | None = None,
+    interrupt_run: bool = False,
 ):
-    agent_run_repo = AgentRunRepository(db)
-    conv_repo = ConversationRepository(db)
+    """保存失败或中断时已经流出的部分输出。
 
+    错误信息写入结构化 metadata（is_error / error_type / error_message），正文只取
+    full_msg 的 content；Run 归属由 lock_output_persistence 校验；interrupt_run 时把
+    interrupted 终态与消息放进同一个事务，避免消息写入而终态未提交。
+    """
     try:
-        # 保存发生错误/主动打断/等产生的消息
-        agent_metadata = {
-            "error": error or "错了",
+        extra_metadata = {
             "error_type": error_type,
+            "is_error": True,
+            "error_message": error_message or f"发生错误: {error_type}",
         }
-
-        # 判断是否有堆积预防消息
-        if accumulated_msg:
-            accumulated_msg = (
-                accumulated_msg.model_dump()
-                if hasattr(accumulated_msg, "model_dump")
-                else {}
-            )
-            accumulated_content = (
-                accumulated_msg.content
-                if hasattr(accumulated_msg, "content")
-                else str(accumulated_msg)
-            )
-            agent_metadata = accumulated_msg or agent_metadata
+        if full_msg:
+            msg_dict = full_msg.model_dump() if hasattr(full_msg, "model_dump") else {}
+            content = full_msg.content if hasattr(full_msg, "content") else str(full_msg)
+            extra_metadata = msg_dict | extra_metadata
         else:
-            accumulated_content = ""
+            content = ""
 
-        # save msg 到 database
-        if agent_run_id:
-            await agent_run_repo.lock_for_output_update(
-                agent_run_id, worker_id=worker_id
+        run_repo = AgentRunRepository(conv_repo.session) if run_id else None
+        if run_id:
+            if not worker_id or not request_id:
+                raise ValueError("持久化 AgentRun 部分输出需要当前 worker 和 request")
+            locked_run = await run_repo.lock_output_persistence(
+                run_id,
+                worker_id=worker_id,
+                conversation_thread_id=thread_id,
+                request_id=request_id,
             )
+            if locked_run is None:
+                raise ValueError(f"AgentRun 不存在: {run_id}")
 
         message = await conv_repo.add_message_by_thread_id(
             thread_id=thread_id,
             user_id=uid,
-            agent_run_id=agent_run_id,
-            content=accumulated_content,
-            role="ai",
-            msg_metadata=agent_metadata,
+            role="assistant",
+            content=content,
+            message_type="text",
+            agent_run_id=run_id,
+            request_id=request_id,
+            msg_metadata=extra_metadata,
+            commit=run_id is None,
         )
-
-        if agent_run_id and message:
-            await agent_run_repo.set_output_message(
-                run_id=agent_run_id,
+        if run_id and message is not None:
+            await run_repo.set_output_message(
+                run_id=run_id,
                 output_message_id=int(message.id),
                 worker_id=worker_id,
             )
-            await db.commit()
+            if interrupt_run:
+                terminal_run, changed = await run_repo.set_agent_terminal(
+                    run_id, status="interrupted", worker_id=worker_id
+                )
+                if terminal_run is None or not changed:
+                    raise ValueError(
+                        "AgentRun 部分输出已写入但 interrupted 终态未能在同一事务提交"
+                    )
+            await conv_repo.session.commit()
         return message
     except Exception as e:
-        logger.exception(f"保存agent中断消息失败: {e}")
-        await db.rollback()
+        if run_id:
+            await conv_repo.session.rollback()
+        logger.exception(f"Error saving message: {e}")
+        if interrupt_run:
+            raise
         return None
+
 
 
 async def save_ai_message(
@@ -918,18 +932,30 @@ async def save_ai_message(
     elif not isinstance(ai_content, str):
         ai_content = str(ai_content)
 
-    saved_ai_message = await conversations_repo.add_message_by_thread_id(
-        thread_id=thread_id,
-        user_id=user_id,
-        agent_run_id=agent_run_id,
-        content=ai_content,
-        role="ai",
-        msg_metadata=(
-            {"langgraph_message_id": langgraph_message_id}
-            if isinstance(langgraph_message_id, str) and langgraph_message_id
-            else None
-        ),
-    )
+    saved_ai_message = None
+    if isinstance(langgraph_message_id, str) and langgraph_message_id and agent_run_id:
+        # 终态 reconcile：流式期间已落库的审计行按 operation_id 复用，转为普通
+        # 输出，保留真实的 started_at / sequence / duration_ms / usage。
+        saved_ai_message = await ModelMessageAuditRepository(db).reconcile_to_history(
+            run_id=agent_run_id,
+            operation_id=langgraph_message_id,
+            content=ai_content,
+            message_metadata={"langgraph_message_id": langgraph_message_id},
+        )
+
+    if saved_ai_message is None:
+        saved_ai_message = await conversations_repo.add_message_by_thread_id(
+            thread_id=thread_id,
+            user_id=user_id,
+            agent_run_id=agent_run_id,
+            content=ai_content,
+            role="ai",
+            msg_metadata=(
+                {"langgraph_message_id": langgraph_message_id}
+                if isinstance(langgraph_message_id, str) and langgraph_message_id
+                else None
+            ),
+        )
 
     if saved_ai_message and tool_content:
         for tool_call in tool_content:
@@ -1188,12 +1214,57 @@ async def check_agent_interrupt_handler(
         )
 
 
+def _has_audit_stream_event(metadata: dict | None) -> bool:
+    """判断消息事件是否携带可审计的 v3 生命周期信封。"""
+    if not isinstance(metadata, dict):
+        return False
+    stream_event = metadata.get("stream_event")
+    return (
+        isinstance(stream_event, dict)
+        and isinstance(stream_event.get("seq"), int)
+        and isinstance(stream_event.get("timestamp"), int | float)
+    )
+
+
+def _build_model_message_audit_collector(
+    runtime_metadata: dict, thread_id: str
+) -> ModelMessageAuditCollector | None:
+    """仅为具备完整 AgentRun 因果归属的 Worker 流创建 Model 审计器。"""
+    run_id = str(runtime_metadata.get("run_id") or "").strip()
+    request_id = str(runtime_metadata.get("request_id") or "").strip()
+    worker_id = str(runtime_metadata.get("worker_id") or "").strip()
+    if not run_id or not request_id or not worker_id:
+        return None
+    return ModelMessageAuditCollector(
+        run_id=run_id,
+        request_id=request_id,
+        thread_id=thread_id,
+        worker_id=worker_id,
+    )
+
+
+def _build_tool_message_audit_collector(
+    model_audit: ModelMessageAuditCollector | None,
+) -> ToolMessageAuditCollector | None:
+    """复用已校验的 AgentRun 因果归属创建 Tool 审计器。"""
+    if model_audit is None:
+        return None
+    return ToolMessageAuditCollector(
+        run_id=model_audit.run_id,
+        request_id=model_audit.request_id,
+        thread_id=model_audit.thread_id,
+        worker_id=model_audit.worker_id,
+    )
+
+
 async def _stream_agent_event_chunks(
     *,
     stream_events: AsyncIterator[Any],
     thread_id: str,
     make_event: Callable[..., bytes],
     accumulated_msg: list[str],
+    model_audit: ModelMessageAuditCollector | None = None,
+    tool_audit: ToolMessageAuditCollector | None = None,
 ) -> AsyncIterator[bytes]:
     last_agent_state = ""
     message_ids: dict[tuple[str, str], str] = {}
@@ -1211,6 +1282,14 @@ async def _stream_agent_event_chunks(
             continue
 
         if method == "agent_execute_event":
+            # 只审计根命名空间的 tools 生命周期事件。
+            if (
+                tool_audit is not None
+                and isinstance(payload, dict)
+                and payload.get("method") == "tools"
+                and isinstance(payload.get("seq"), int)
+            ):
+                await tool_audit.consume(payload)
             yield make_event(
                 status="agent_execute_event",
                 event=unpack_data(payload),
@@ -1224,6 +1303,8 @@ async def _stream_agent_event_chunks(
             continue
 
         agent_msg, agent_metadata = payload
+        if model_audit is not None and _has_audit_stream_event(agent_metadata):
+            await model_audit.consume(agent_msg, agent_metadata)
         standard_stream_events = _make_lc_message_to_standard(
             agent_msg=agent_msg,
             agent_metadata=agent_metadata,
@@ -1333,7 +1414,9 @@ async def stream_agent_response(
     agent_context = agent_instance.agent_context()
     agent_context.update_context(agent_runtime_context)
     accumulated_msg: list[str] = []
-    lc_accumulated_msg = None
+    # 执行期间每条消息/lifecycle 边界独立提交审计短事务。
+    model_audit = _build_model_message_audit_collector(runtime_metadata, thread_id)
+    tool_audit = _build_tool_message_audit_collector(model_audit)
 
     try:
         attachment_file_ids = thread_input_message.msg_metadata.get(
@@ -1365,6 +1448,8 @@ async def stream_agent_response(
             thread_id=thread_id,
             make_event=make_agent_stream_event,
             accumulated_msg=accumulated_msg,
+            model_audit=model_audit,
+            tool_audit=tool_audit,
         ):
             yield chunk
 
@@ -1390,11 +1475,11 @@ async def stream_agent_response(
                 interrupt_chunks=interrupt_chunks,
             )
         except Exception as e:
-            logger.exception(f"保存信息出错:{e}")
+            logger.exception(f"Error saving messages from LangGraph state: {e}")
             yield make_agent_stream_event(
                 status="error",
-                error=str(e),
-                error_type=type(e).__name__,
+                error="最终输出持久化或绑定失败",
+                error_type="output_persistence_error",
             )
             return
 
@@ -1407,29 +1492,48 @@ async def stream_agent_response(
             status="finished",
             runtime_metadata=runtime_metadata,
         )
-    except Exception as e:
-        logger.exception("Agent stream 失败")
-
-        if not lc_accumulated_msg and accumulated_msg:
-            lc_accumulated_msg = AIMessage(content="\n".join(accumulated_msg))
-
-        async with postgres_manager.get_async_session_context() as db:
-            await save_interrupt_message(
-                db=db,
-                thread_id=thread_id,
+    except asyncio.CancelledError:
+        # 取消由 Worker 收敛终态，这里先把已经流出的部分输出落库。
+        logger.warning("Agent stream 已取消：保存部分输出")
+        full_msg = AIMessage(content="".join(accumulated_msg)) if accumulated_msg else None
+        async with postgres_manager.get_async_session_context() as new_db:
+            await save_partial_message(
+                ConversationRepository(new_db),
+                thread_id,
                 uid=current_user.uid,
-                accumulated_msg=lc_accumulated_msg,
-                error=str(e),
-                error_type=type(e).__name__,
-                agent_run_id=run_id,
+                full_msg=full_msg,
+                error_message="对话已中断",
+                error_type="interrupted",
+                run_id=run_id,
+                request_id=runtime_metadata.get("request_id"),
+                worker_id=runtime_metadata["worker_id"],
+            )
+        raise
+
+    except Exception as e:
+        logger.exception(f"Error streaming messages: {e}")
+
+        error_msg = f"Error streaming messages: {e}"
+        error_type = "unexpected_error"
+        full_msg = AIMessage(content="".join(accumulated_msg)) if accumulated_msg else None
+
+        async with postgres_manager.get_async_session_context() as new_db:
+            await save_partial_message(
+                ConversationRepository(new_db),
+                thread_id,
+                uid=current_user.uid,
+                full_msg=full_msg,
+                error_message=error_msg,
+                error_type=error_type,
+                run_id=run_id,
                 request_id=runtime_metadata.get("request_id"),
                 worker_id=runtime_metadata["worker_id"],
             )
 
         yield make_agent_stream_event(
             status="error",
-            error=str(e),
-            error_type=type(e).__name__,
+            error=error_msg,
+            error_type=error_type,
         )
         return
 
@@ -1446,6 +1550,8 @@ async def resume_agent_response(
     runtime_metadata = dict(runtime_metadata or {})
     run_id = runtime_metadata.get("run_id")
     accumulated_msg: list[str] = []
+    model_audit = _build_model_message_audit_collector(runtime_metadata, thread_id)
+    tool_audit = _build_tool_message_audit_collector(model_audit)
 
     # FIXEME: Resume Run 使用自己的 chunk builder，不复用普通 Run builder。
     def make_agent_resume_event(
@@ -1531,6 +1637,8 @@ async def resume_agent_response(
             thread_id=thread_id,
             make_event=make_agent_resume_event,
             accumulated_msg=accumulated_msg,
+            model_audit=model_audit,
+            tool_audit=tool_audit,
         ):
             yield chunk
 
@@ -1543,15 +1651,24 @@ async def resume_agent_response(
                 context=agent_context,
             )
         ]
-        await save_message_from_langgraph_state(
-            thread_id=thread_id,
-            run_id=run_id,
-            worker_id=runtime_metadata["worker_id"],
-            context=agent_context,
-            agent_instance=agent_instance,
-            db=db,
-            interrupt_chunks=interrupt_chunks,
-        )
+        try:
+            await save_message_from_langgraph_state(
+                thread_id=thread_id,
+                run_id=run_id,
+                worker_id=runtime_metadata["worker_id"],
+                context=agent_context,
+                agent_instance=agent_instance,
+                db=db,
+                interrupt_chunks=interrupt_chunks,
+            )
+        except Exception as e:
+            logger.exception(f"Error saving messages from LangGraph state: {e}")
+            yield make_agent_resume_event(
+                status="error",
+                error="最终输出持久化或绑定失败",
+                error_type="output_persistence_error",
+            )
+            return
         if interrupt_chunks:
             for interrupt_chunk in interrupt_chunks:
                 yield interrupt_chunk
@@ -1561,28 +1678,38 @@ async def resume_agent_response(
             status="finished",
             runtime_metadata=runtime_metadata,
         )
+    except asyncio.CancelledError:
+        logger.warning("Agent Resume stream 已取消：保存部分输出")
+        async with postgres_manager.get_async_session_context() as new_db:
+            await save_partial_message(
+                ConversationRepository(new_db),
+                thread_id,
+                uid=current_user.uid,
+                error_message="对话恢复已中断",
+                error_type="interrupted",
+                run_id=run_id,
+                request_id=runtime_metadata.get("request_id"),
+                worker_id=runtime_metadata["worker_id"],
+            )
+        raise
+
     except Exception as exc:
-        logger.exception("Agent Resume stream 响应失败")
-        if accumulated_msg:
-            try:
-                async with postgres_manager.get_async_session_context() as error_db:
-                    await save_interrupt_message(
-                        db=error_db,
-                        thread_id=thread_id,
-                        uid=current_user.uid,
-                        accumulated_msg=AIMessage(content="\n".join(accumulated_msg)),
-                        error=str(exc),
-                        error_type=type(exc).__name__,
-                        agent_run_id=run_id,
-                        request_id=runtime_metadata.get("request_id"),
-                        worker_id=runtime_metadata["worker_id"],
-                    )
-            except Exception:
-                logger.exception("保存 Resume 累计输出失败")
-        # FIXEME: Resume Run 使用自己的 builder 输出相同字段合同的 error chunk。
+        logger.exception(f"Error during resume: {exc}")
+
+        async with postgres_manager.get_async_session_context() as new_db:
+            await save_partial_message(
+                ConversationRepository(new_db),
+                thread_id,
+                uid=current_user.uid,
+                error_message=f"Error during resume: {exc}",
+                error_type="resume_error",
+                run_id=run_id,
+                request_id=runtime_metadata.get("request_id"),
+                worker_id=runtime_metadata["worker_id"],
+            )
         yield make_agent_resume_event(
             status="error",
-            error=str(exc),
-            error_type=type(exc).__name__,
+            error=f"Error during resume: {exc}",
+            error_type="resume_error",
         )
         return

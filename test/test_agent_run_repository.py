@@ -19,6 +19,10 @@ class FakeSession:
     async def flush(self) -> None:
         self.flush_count += 1
 
+    async def execute(self, statement):
+        # FIXEME: 终态写入会在同一事务内收敛残留 running 审计行。
+        return SimpleNamespace(rowcount=0)
+
 
 class AgentRunTerminalTest(unittest.IsolatedAsyncioTestCase):
     async def test_set_agent_terminal_persists_interrupt_payload(self) -> None:

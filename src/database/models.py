@@ -1,4 +1,5 @@
 from sqlalchemy import (
+    BigInteger,
     JSON,
     Boolean,
     Column,
@@ -23,6 +24,13 @@ from src.database.satellite_models import (
     SatelliteSceneAsset,  # noqa: F401
     SatelliteSource,  # noqa: F401
 )
+
+# 消息审计：Model/Tool 生命周期增量事实使用独立 message_type，
+# 与普通会话历史隔离；只有终态 State 能按 operation_id 证明的 Model 行才在
+# reconcile 时转为普通输出（text）。
+MODEL_AUDIT_MESSAGE_TYPE = "model_audit"
+TOOL_AUDIT_MESSAGE_TYPE = "tool_audit"
+AUDIT_MESSAGE_TYPES = (MODEL_AUDIT_MESSAGE_TYPE, TOOL_AUDIT_MESSAGE_TYPE)
 
 
 class ModelProvider(Base):
@@ -109,6 +117,8 @@ class Message(Base):
     __tablename__ = "message"
     __table_args__ = (
         Index("ix_message_conversation_id_id", "conversation_id", "id"),
+        # 审计行按 (Run, operation_id) 幂等查找。
+        Index("ix_message_run_operation", "agent_run_id", "operation_id"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="消息ID")
@@ -126,6 +136,14 @@ class Message(Base):
     )
 
     status = Column(String(16), nullable=False, default="completed", comment="消息状态，是刚开始，还是执行中还是结束啥的")
+    # 消息计时与展示顺序：sequence / started_at / finished_at / duration_ms。
+    sequence = Column(BigInteger, nullable=True, comment="同一会话内的稳定展示顺序")
+    started_at = Column(DateTime(timezone=True), nullable=True, comment="观察到的开始时间")
+    finished_at = Column(DateTime(timezone=True), nullable=True, comment="观察到的结束时间")
+    duration_ms = Column(BigInteger, nullable=True, comment="单调时钟计算的操作耗时")
+    execution_status = Column(String(32), nullable=True, comment="running/completed/failed/interrupted")
+    operation_id = Column(String(128), nullable=True, comment="同一 Run 内的 Model/Tool 稳定来源键")
+    usage = Column(JSON, nullable=True, comment="Provider 返回的单次可靠 usage")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), comment="更新时间")
     message_type = Column(String(30), default="text", comment="消息类型，是普通文本还是工具调用")
@@ -194,6 +212,8 @@ class AgentRun(Base):
     agent_status = Column(String(32), nullable=False, default="pending", comment="运行状态 pending, running, cancel_requested, interrupted, completed, failed, cancelled")
 
     worker_id = Column(String(128), nullable=True, comment="当前执行Worker标识")
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True, comment="最近一次租约续期时间")
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True, comment="租约到期时间，过期后由 Worker 收敛为终态")
 
     trigger_message_id = Column(Integer, nullable=True, comment="Input message ID")
     output_message_id = Column(

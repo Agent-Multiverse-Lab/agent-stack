@@ -30,6 +30,13 @@ export interface ThreadMessageResponse {
   request_id: string | null;
   run: ThreadRunMetadataResponse | null;
   attachments: ThreadMessageAttachmentResponse[];
+  // 消息计时：顺序、观察时间与单调耗时。
+  // 后端一定返回；乐观消息与历史记录可能没有，因此保持可选。
+  sequence?: number | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  execution_status?: string | null;
   created_at: string;
   updated_at: string;
 }
