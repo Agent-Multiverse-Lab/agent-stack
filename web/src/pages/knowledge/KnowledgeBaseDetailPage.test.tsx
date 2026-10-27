@@ -14,6 +14,8 @@ import {
   deleteKnowledgeFile,
   chatWithKnowledgeBase,
   searchKnowledgeEntities,
+  getKnowledgeFileChunks,
+  searchKnowledgeChunks,
 } from "@/api/knowledge"
 import KnowledgeBaseDetailPage from "@/pages/knowledge/KnowledgeBaseDetailPage"
 import { installBrowserStubs } from "@/test/browserStubs"
@@ -29,7 +31,9 @@ vi.mock("@/api/knowledge", () => ({
   uploadKnowledgeFile: vi.fn(),
   getKnowledgeGraph: vi.fn(),
   searchKnowledgeEntities: vi.fn(),
-  chatWithKnowledgeBase: vi.fn()
+  chatWithKnowledgeBase: vi.fn(),
+  getKnowledgeFileChunks: vi.fn(),
+  searchKnowledgeChunks: vi.fn()
 }))
 
 function renderPage() {
@@ -55,6 +59,11 @@ beforeEach(() => {
   vi.mocked(getKnowledgeFileMarkdown).mockResolvedValue({
     file_id: "file-1",
     markdown: "# Doc"
+  })
+  vi.mocked(getKnowledgeFileChunks).mockResolvedValue({
+    file_id: "file-1",
+    chunks: [],
+    has_more: false
   })
   vi.mocked(listKnowledgeFiles).mockResolvedValue([
     {
@@ -156,7 +165,7 @@ it("filters documents without losing the selected preview", async () => {
 })
 
 it("retries a failed file list", async () => {
-  vi.mocked(listKnowledgeFiles).mockRejectedValueOnce(new Error("Files unavailable"))
+  vi.mocked(listKnowledgeFiles).mockRejectedValueOnce(new Error("Files unavailable")).mockRejectedValueOnce(new Error("Files unavailable"))
   renderPage()
   expect(await screen.findByText("Files unavailable")).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Retry" }))
@@ -267,12 +276,166 @@ it.each(["resolve", "reject"])("ignores a cleared graph search that later %ss wi
   expect(screen.getByRole("button", { name: "Search" })).toHaveProperty("disabled", false)
 })
 
-it("keeps the collection identity and back link without repeating its name in navigation", async () => {
+it("keeps the collection identity and back link in navigation", async () => {
   renderPage()
   expect(await screen.findByRole("heading", { name: "Docs" })).toBeTruthy()
   const navigation = screen.getByRole("navigation", { name: "Knowledge base navigation" })
-  expect(within(navigation).queryByText("Docs")).toBeNull()
+  expect(within(navigation).getByText("Docs")).toBeTruthy()
   expect(within(navigation).getByRole("link", { name: "Knowledge Bases" }).getAttribute("href")).toBe("/knowledge")
-  expect(screen.getAllByText("Docs")).toHaveLength(1)
+  expect(screen.getAllByText("Docs")).toHaveLength(2)
   expect(await screen.findByRole("tab", { name: "Documents" })).toBeTruthy()
+  expect(screen.getByRole("tab", { name: "Chunks" })).toBeTruthy()
+  expect(screen.getByRole("tab", { name: "Search" })).toBeTruthy()
+})
+
+it("shows real collection statistics in the detail header", async () => {
+  vi.mocked(listKnowledgeFiles).mockResolvedValue([
+    {
+      file_id: "file-1",
+      kb_id: "kb-1",
+      original_file_name: "manual.pdf",
+      original_object_name: "original",
+      markdown_object_name: null,
+      content_type: "application/pdf",
+      file_size: 2048,
+      status: "indexed",
+      error_message: null
+    },
+    {
+      file_id: "file-2",
+      kb_id: "kb-1",
+      original_file_name: "notes.txt",
+      original_object_name: "original-2",
+      markdown_object_name: null,
+      content_type: "text/plain",
+      file_size: 1024,
+      status: "uploaded",
+      error_message: null
+    }
+  ])
+  renderPage()
+  expect(await screen.findByText("Total size")).toBeTruthy()
+  expect(screen.getByText("3.0 KB")).toBeTruthy()
+  const stats = screen.getByText("Total size").closest("dl")!
+  expect(within(stats).getByText("Files").nextElementSibling?.textContent).toBe("2")
+  expect(within(stats).getByText("Indexed").nextElementSibling?.textContent).toBe("1")
+})
+
+it("shows file size, updated time, status filtering and a chunks action", async () => {
+  vi.mocked(listKnowledgeFiles).mockResolvedValue([
+    {
+      file_id: "file-1",
+      kb_id: "kb-1",
+      original_file_name: "manual.pdf",
+      original_object_name: "original",
+      markdown_object_name: "parsed/document.md",
+      content_type: "application/pdf",
+      file_size: 2048,
+      status: "indexed",
+      error_message: null,
+      updated_at: "2026-01-02T10:30:00Z"
+    },
+    {
+      file_id: "file-2",
+      kb_id: "kb-1",
+      original_file_name: "draft.txt",
+      original_object_name: "original-2",
+      markdown_object_name: null,
+      content_type: "text/plain",
+      file_size: 512,
+      status: "uploaded",
+      error_message: "Parser timed out",
+      updated_at: "2026-01-03T09:00:00Z"
+    }
+  ])
+  renderPage()
+  await screen.findByRole("button", { name: /manual.pdf/ })
+  expect(screen.getAllByText("2.0 KB").length).toBeGreaterThan(0)
+  expect(screen.getAllByText("512 B").length).toBeGreaterThan(0)
+  expect(screen.getAllByText(/2026/).length).toBeGreaterThan(0)
+
+  fireEvent.click(screen.getByRole("button", { name: "Filter by status" }))
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Uploaded" }))
+  expect(screen.queryByRole("button", { name: /manual.pdf/ })).toBeNull()
+  expect(screen.getByRole("button", { name: /draft.txt/ })).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Filter by status" }))
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Indexed" }))
+  expect(screen.queryByRole("button", { name: /draft.txt/ })).toBeNull()
+
+  fireEvent.click(screen.getByRole("button", { name: "Filter by status" }))
+  fireEvent.click(await screen.findByRole("menuitem", { name: "All statuses" }))
+  fireEvent.click(screen.getAllByRole("button", { name: "Open file actions" })[0]!)
+  fireEvent.click(await screen.findByRole("menuitem", { name: "View chunks" }))
+  await waitFor(() => expect(getKnowledgeFileChunks).toHaveBeenCalledWith("kb-1", "file-1", 20, 0))
+})
+
+it("browses indexed chunks for a document", async () => {
+  vi.mocked(getKnowledgeFileChunks).mockResolvedValue({
+    file_id: "file-1",
+    chunks: [
+      {
+        chunk_id: "file-1:0",
+        chunk_index: 0,
+        content: "The refund policy allows returns within 30 days.",
+        metadata: { file_name: "manual.pdf" }
+      },
+      {
+        chunk_id: "file-1:1",
+        chunk_index: 1,
+        content: "Shipping usually takes three business days.",
+        metadata: {}
+      }
+    ],
+    has_more: false
+  })
+  renderPage()
+  await screen.findAllByText("manual.pdf")
+  fireEvent.click(screen.getByRole("tab", { name: "Chunks" }))
+  expect(await screen.findByText(/refund policy/)).toBeTruthy()
+  expect(screen.getByText("Chunk 1")).toBeTruthy()
+  expect(screen.getByText("Chunk 2")).toBeTruthy()
+})
+
+it("searches chunks with a configurable top K and groups results by document", async () => {
+  vi.mocked(searchKnowledgeChunks).mockResolvedValue({
+    kb_id: "kb-1",
+    hits: [
+      {
+        chunk_id: "file-1:0",
+        chunk_index: 0,
+        file_id: "file-1",
+        file_name: "manual.pdf",
+        content: "The refund policy allows returns within 30 days.",
+        score: 0.9123,
+        rerank_score: null,
+        retrieval_rank: null,
+        rerank_rank: null
+      },
+      {
+        chunk_id: "file-1:1",
+        chunk_index: 1,
+        file_id: "file-1",
+        file_name: "manual.pdf",
+        content: "Shipping usually takes three business days.",
+        score: 0.75,
+        rerank_score: null,
+        retrieval_rank: null,
+        rerank_rank: null
+      }
+    ],
+    rerank: null,
+    embedding_model_spec: "text-embedding-3-small",
+    embedding_dimension: 1536
+  })
+  renderPage()
+  await screen.findAllByText("manual.pdf")
+  fireEvent.click(screen.getByRole("tab", { name: "Search" }))
+  fireEvent.change(screen.getByRole("textbox", { name: "Query" }), { target: { value: "refund" } })
+  fireEvent.change(screen.getByRole("spinbutton", { name: "Top K" }), { target: { value: "5" } })
+  fireEvent.click(screen.getByRole("button", { name: "Search collection" }))
+  await waitFor(() => expect(searchKnowledgeChunks).toHaveBeenCalledWith("kb-1", "refund", 5))
+  expect(await screen.findByText(/refund policy/)).toBeTruthy()
+  expect(screen.getByText(/2 chunks from 1 files/)).toBeTruthy()
+  expect(screen.getByText("0.9123")).toBeTruthy()
+  expect(screen.getByText(/text-embedding-3-small/)).toBeTruthy()
 })

@@ -50,13 +50,13 @@ it("creates a collection with trimmed input and opens it", async () => {
   expect(await screen.findByRole("heading", { name: "Collection detail" })).toBeTruthy()
 })
 
-it("keeps the whole card as the only collection entry without numbers, statuses or action menus", async () => {
+it("shows collection type and status tags without turning the card into an action menu", async () => {
   renderPage()
   const link = await screen.findByRole("link", { name: /Docs/ })
   const card = link.closest("li")!
+  expect(within(card).getByText("Vector collection")).toBeTruthy()
+  expect(within(card).getByText("active")).toBeTruthy()
   expect(within(card).queryByText("01")).toBeNull()
-  expect(within(card).queryByText("Active")).toBeNull()
-  expect(card.querySelector(".bg-success")).toBeNull()
   expect(within(card).queryByRole("button")).toBeNull()
   expect(within(card).getAllByRole("link")).toEqual([link])
   expect(link.getAttribute("href")).toBe("/knowledge/kb-1")
@@ -65,8 +65,8 @@ it("keeps the whole card as the only collection entry without numbers, statuses 
 
   fireEvent.click(screen.getByRole("button", { name: "List view" }))
   const listLink = screen.getByRole("link", { name: /Docs/ })
-  expect(within(listLink).queryByText("Active")).toBeNull()
-  expect(listLink.querySelector(".bg-success")).toBeNull()
+  expect(within(listLink).getByText("Vector collection")).toBeTruthy()
+  expect(within(listLink).getByText("active")).toBeTruthy()
   expect(within(listLink.closest("li")!).queryByRole("button")).toBeNull()
   fireEvent.click(listLink)
   expect(screen.getByRole("heading", { name: "Collection detail" })).toBeTruthy()
@@ -91,12 +91,13 @@ it("keeps the create form accessible without repeating promotional helper copy",
   expect(screen.getByRole("textbox", { name: "Knowledge base name" })).toBeTruthy()
 })
 
-it("uses the collection toolbar without a separate page title row", async () => {
+it("renders the catalog page header above the collection toolbar", async () => {
   const { container } = renderPage()
   await screen.findByRole("link", { name: /Docs/ })
-  expect(screen.queryByRole("heading", { name: "Knowledge Bases" })).toBeNull()
+  expect(screen.getByRole("heading", { name: "Knowledge Bases", level: 1 })).toBeTruthy()
+  expect(screen.getByText("Collections hold documents you can parse, index and search.")).toBeTruthy()
   expect(screen.getByRole("region", { name: "Knowledge Bases" })).toBeTruthy()
-  expect(container.querySelector("header")).toBeNull()
+  expect(container.querySelector("header")).not.toBeNull()
   expect(screen.getByRole("heading", { name: "All collections" })).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Create knowledge base" }))
   expect(await screen.findByRole("dialog")).toBeTruthy()

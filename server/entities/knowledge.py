@@ -1,5 +1,8 @@
 """知识库接口的请求与响应 Schema。"""
 
+from datetime import datetime
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -31,6 +34,8 @@ class KnowledgeFileResponse(BaseModel):
     file_size: int
     status: str
     error_message: str | None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class KnowledgeIndexResponse(BaseModel):
@@ -166,3 +171,51 @@ class KnowledgeChatResponse(BaseModel):
     kb_id: str
     answer: str
     citations: list[KnowledgeCitation]
+
+
+class KnowledgeFileChunk(BaseModel):
+    """知识文件中的单个已入库分块。"""
+
+    chunk_id: str
+    chunk_index: int
+    content: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class KnowledgeFileChunksResponse(BaseModel):
+    """知识文件的分块只读分页结果。"""
+
+    file_id: str
+    chunks: list[KnowledgeFileChunk]
+    has_more: bool
+
+
+class KnowledgeChunkSearchRequest(BaseModel):
+    """知识库分块检索请求。"""
+
+    query: str = Field(min_length=1, max_length=2000)
+    limit: int = Field(default=8, ge=1, le=50)
+
+
+class KnowledgeChunkHit(BaseModel):
+    """知识库分块检索命中。"""
+
+    chunk_id: str
+    chunk_index: int
+    file_id: str
+    file_name: str
+    content: str
+    score: float | None = None
+    rerank_score: float | None = None
+    retrieval_rank: int | None = None
+    rerank_rank: int | None = None
+
+
+class KnowledgeChunkSearchResponse(BaseModel):
+    """知识库分块检索结果。"""
+
+    kb_id: str
+    hits: list[KnowledgeChunkHit]
+    rerank: dict[str, Any] | None = None
+    embedding_model_spec: str
+    embedding_dimension: int

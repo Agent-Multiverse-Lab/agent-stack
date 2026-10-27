@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router"
-import { ArrowDownAZ, ArrowUpRight, BookOpen, FolderOpen, LayoutGrid, List, Plus, Search, X } from "lucide-react"
+import { ArrowDownAZ, ArrowUpRight, BookOpen, FolderOpen, LayoutGrid, LibraryBig, List, Plus, Search, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { createKnowledgeBase, listKnowledgeBases } from "@/api/knowledge"
@@ -69,6 +69,17 @@ export default function KnowledgePage() {
 
   return (
     <div role="region" aria-label={t("Knowledge Bases")} className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-background text-foreground">
+      <header className="shrink-0 border-b border-border bg-card px-(--page-padding) pt-4 pb-3.5">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[11px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
+            <LibraryBig className="size-3.5" />{t("Knowledge")}
+          </div>
+          <h1 className="mt-1 text-xl font-semibold tracking-tight">{t("Knowledge Bases")}</h1>
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+            {t("Collections hold documents you can parse, index and search.")}
+          </p>
+        </div>
+      </header>
       <div className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-4 border-b border-border bg-card px-(--page-padding) py-1.5">
         <div className="flex items-center gap-2.5">
           <h2 className="text-sm font-medium">{t("All collections")}</h2>
@@ -120,7 +131,11 @@ export default function KnowledgePage() {
                         {view === "grid" && <ArrowUpRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />}
                       </div>
                       {base.description && <p className={`mt-1 text-[13px] leading-5 text-muted-foreground ${view === "grid" ? "line-clamp-2 min-h-10" : "truncate"}`}>{base.description}</p>}
-                      {view === "grid" && !base.description && <div className="h-11" />}
+                      {view === "grid" && !base.description && <div className="h-10" />}
+                      <div className={`flex flex-wrap items-center gap-1.5 ${view === "grid" ? "mt-3 border-t border-border pt-2.5" : "mt-2"}`}>
+                        <Badge variant="outline" className="rounded-md text-[10px] font-normal">{t("Vector collection")}</Badge>
+                        <Badge variant={base.status === "active" ? "success" : "outline"} className="rounded-md text-[10px] font-normal">{t(base.status)}</Badge>
+                      </div>
                     </div>
                     {view === "list" && <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />}
                   </Link>

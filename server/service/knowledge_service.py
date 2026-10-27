@@ -1066,3 +1066,131 @@ def _binding_result(
         "embedding_batch_size": binding.embedding_batch_size,
         **payload,
     }
+
+
+async def list_file_chunks(
+    db: AsyncSession,
+    *,
+    uid: str,
+    kb_id: str,
+    file_id: str,
+    limit: int,
+    offset: int,
+) -> dict[str, Any]:
+    """只读读取知识文件已入库的分块，按 chunk_index 排序。"""
+    if limit <= 0:
+        raise ValueError("分块读取 limit 必须大于 0")
+    if offset < 0:
+        raise ValueError("分块读取 offset 不能为负数")
+
+    knowledge_base = await KnowledgeBaseRepository(db).get_for_user(
+        uid=uid,
+        kb_id=kb_id,
+    )
+    if knowledge_base is None:
+        raise LookupError(f"知识库不存在：{kb_id}")
+    file_record = await KnowledgeFileRepository(db).get_for_user(
+        uid=uid,
+        kb_id=kb_id,
+        file_id=file_id,
+    )
+    if file_record is None:
+        raise LookupError(f"知识文件不存在：{file_id}")
+
+    binding = await KnowledgeEmbeddingBindingRepository(db).get(
+        uid=uid,
+        kb_id=kb_id,
+    )
+    if binding is None:
+        return {"file_id": file_id, "chunks": [], "has_more": False}
+
+    rows = await _get_knowledge("milvus").list_chunks(
+        collection_name=binding.collection_name,
+        file_id=file_id,
+        limit=limit + 1,
+        offset=offset,
+    )
+    has_more = len(rows) > limit
+    chunks = [
+        {
+            "chunk_id": str(row.get("chunk_id") or row.get("id") or ""),
+            "chunk_index": int(row.get("chunk_index") or 0),
+            "content": str(row.get("chunk") or ""),
+            "metadata": dict(row.get("metadata") or {}),
+        }
+        for row in rows[:limit]
+    ]
+    return {"file_id": file_id, "chunks": chunks, "has_more": has_more}
+
+
+async def search_chunks(
+    db: AsyncSession,
+    *,
+    uid: str,
+    kb_id: str,
+    query: str,
+    limit: int,
+) -> dict[str, Any]:
+    """检索知识库分块并归一化 Milvus 命中结构。"""
+    result = await search(
+        db,
+        uid=uid,
+        kb_id=kb_id,
+        query=query,
+        limit=limit,
+    )
+    return {
+        "kb_id": kb_id,
+        "hits": [_chunk_hit(hit) for hit in result.get("hits", [])],
+        "rerank": result.get("rerank"),
+        "embedding_model_spec": result["embedding_model_spec"],
+        "embedding_dimension": result["embedding_dimension"],
+    }
+
+
+def _chunk_hit(raw_hit: Mapping[str, Any]) -> dict[str, Any]:
+    """将 Milvus 原始命中转换为前端稳定的分块结构。"""
+    hit = dict(raw_hit)
+    raw_entity = hit.get("entity")
+    entity = dict(raw_entity) if isinstance(raw_entity, Mapping) else {}
+    raw_metadata = entity.get("metadata")
+    metadata = dict(raw_metadata) if isinstance(raw_metadata, Mapping) else {}
+    chunk_id = str(entity.get("chunk_id") or hit.get("id") or "")
+    file_id = str(entity.get("file_id") or metadata.get("file_id") or "")
+    file_name = str(
+        metadata.get("file_name")
+        or metadata.get("source")
+        or file_id
+        or "Unknown file"
+    )
+    try:
+        chunk_index = int(entity.get("chunk_index") or 0)
+    except (TypeError, ValueError):
+        chunk_index = 0
+    score = hit.get("distance")
+    rerank_score = hit.get("rerank_score")
+    retrieval_rank = hit.get("retrieval_rank")
+    rerank_rank = hit.get("rerank_rank")
+    return {
+        "chunk_id": chunk_id,
+        "chunk_index": chunk_index,
+        "file_id": file_id,
+        "file_name": file_name,
+        "content": str(entity.get("chunk") or ""),
+        "score": float(score) if isinstance(score, (int, float)) else None,
+        "rerank_score": (
+            float(rerank_score)
+            if isinstance(rerank_score, (int, float))
+            else None
+        ),
+        "retrieval_rank": (
+            int(retrieval_rank)
+            if isinstance(retrieval_rank, (int, float))
+            else None
+        ),
+        "rerank_rank": (
+            int(rerank_rank)
+            if isinstance(rerank_rank, (int, float))
+            else None
+        ),
+    }

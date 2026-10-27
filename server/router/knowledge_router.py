@@ -17,10 +17,13 @@ from server.entities.knowledge import (
     KnowledgeBaseResponse,
     KnowledgeChatRequest,
     KnowledgeChatResponse,
+    KnowledgeChunkSearchRequest,
+    KnowledgeChunkSearchResponse,
     KnowledgeDeleteRequest,
     KnowledgeEntitySearchRequest,
     KnowledgeEntitySearchResponse,
     KnowledgeExtractResponse,
+    KnowledgeFileChunksResponse,
     KnowledgeFileDeleteResponse,
     KnowledgeFileMarkdownResponse,
     KnowledgeFileResponse,
@@ -297,6 +300,73 @@ async def get_knowledge_file_markdown(
         ) from exc
 
 
+@router.get(
+    "/bases/{kb_id}/files/{file_id}/chunks",
+    response_model=KnowledgeFileChunksResponse,
+)
+async def list_knowledge_file_chunks(
+    kb_id: str,
+    file_id: str,
+    current_user: AuthenticatedUser,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """只读列出知识文件已入库的分块。"""
+    try:
+        result = await knowledge_service.list_file_chunks(
+            db,
+            uid=current_user.uid,
+            kb_id=kb_id,
+            file_id=file_id,
+            limit=limit,
+            offset=offset,
+        )
+        return KnowledgeFileChunksResponse(**result)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(
+    "/bases/{kb_id}/search",
+    response_model=KnowledgeChunkSearchResponse,
+)
+async def search_knowledge_chunks(
+    kb_id: str,
+    payload: KnowledgeChunkSearchRequest,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """检索知识库分块并返回归一化命中。"""
+    try:
+        result = await knowledge_service.search_chunks(
+            db,
+            uid=current_user.uid,
+            kb_id=kb_id,
+            query=payload.query,
+            limit=payload.limit,
+        )
+        return KnowledgeChunkSearchResponse(**result)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
 @router.post(
     "/bases/{kb_id}/files/{file_id}/extract",
     response_model=KnowledgeExtractResponse,
@@ -512,4 +582,6 @@ def _knowledge_file_response(knowledge_file) -> KnowledgeFileResponse:
         file_size=knowledge_file.file_size,
         status=knowledge_file.status,
         error_message=knowledge_file.error_message,
+        created_at=knowledge_file.created_at,
+        updated_at=knowledge_file.updated_at,
     )

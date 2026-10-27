@@ -27,6 +27,8 @@ export interface KnowledgeFile {
   file_size: number
   status: KnowledgeFileStatus
   error_message: string | null
+  created_at?: string | null
+  updated_at?: string | null
 }
 
 export interface KnowledgeIndexResult {
@@ -203,6 +205,71 @@ export const chatWithKnowledgeBase = (
 ) =>
   apiClient.apiPost<KnowledgeChatResponse, { query: string; limit: number }>(
     `/api/knowledge/bases/${encode(kbId)}/chat`,
+    { query, limit },
+    { requiresAuth: true }
+  )
+
+export interface KnowledgeChunk {
+  chunk_id: string
+  chunk_index: number
+  content: string
+  metadata: Record<string, unknown>
+}
+
+export interface KnowledgeFileChunksResponse {
+  file_id: string
+  chunks: KnowledgeChunk[]
+  has_more: boolean
+}
+
+export interface KnowledgeRerankInfo {
+  applied: boolean
+  model_spec: string
+  candidate_count: number
+  result_count: number
+}
+
+export interface KnowledgeChunkHit {
+  chunk_id: string
+  chunk_index: number
+  file_id: string
+  file_name: string
+  content: string
+  score: number | null
+  rerank_score: number | null
+  retrieval_rank: number | null
+  rerank_rank: number | null
+}
+
+export interface KnowledgeChunkSearchResponse {
+  kb_id: string
+  hits: KnowledgeChunkHit[]
+  rerank: KnowledgeRerankInfo | null
+  embedding_model_spec: string
+  embedding_dimension: number
+}
+
+export const getKnowledgeFileChunks = (
+  kbId: string,
+  fileId: string,
+  limit = 20,
+  offset = 0
+) =>
+  apiClient.apiGet<KnowledgeFileChunksResponse>(
+    `/api/knowledge/bases/${encode(kbId)}/files/${encode(fileId)}/chunks?limit=${limit}&offset=${offset}`,
+    { requiresAuth: true }
+  )
+
+export const searchKnowledgeChunks = (
+  kbId: string,
+  query: string,
+  limit = 8
+) =>
+  apiClient.apiPost<
+    KnowledgeChunkSearchResponse,
+    { query: string; limit: number }
+  >(
+    `/api/knowledge/bases/${encode(kbId)}/search`,
     { query, limit },
     { requiresAuth: true }
   )

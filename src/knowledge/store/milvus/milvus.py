@@ -92,6 +92,42 @@ class MilvusKnowledge(BaseKnowledge):
         )
         return result[0] if result else []
 
+    async def list_chunks(
+        self,
+        *,
+        collection_name: str,
+        file_id: str,
+        limit: int,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """按文件读取已入库的分块，用于只读浏览。"""
+        if not collection_name or not file_id:
+            return []
+        if limit <= 0:
+            raise ValueError("分块读取 limit 必须大于 0")
+        if not await self.milvus_client.has_collection(
+            collection_name=collection_name
+        ):
+            return []
+
+        rows = await self.milvus_client.query(
+            collection_name=collection_name,
+            filter=f'file_id == "{file_id}"',
+            output_fields=[
+                "chunk",
+                "chunk_id",
+                "chunk_index",
+                "file_id",
+                "metadata",
+            ],
+            limit=limit,
+            offset=max(offset, 0),
+        )
+        return sorted(
+            rows or [],
+            key=lambda row: int(row.get("chunk_index") or 0),
+        )
+
     async def delete(
         self,
         *,
