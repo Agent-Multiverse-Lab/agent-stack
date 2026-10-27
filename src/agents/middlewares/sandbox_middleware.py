@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from dataclasses import replace
-from typing import Any, NotRequired, TypedDict, override
+from typing import Annotated, Any, NotRequired, TypedDict, override
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
@@ -32,8 +32,18 @@ class SandboxRuntimeState(TypedDict):
     sandbox_id: str
 
 
+def _replace_sandbox_state(
+    current: SandboxRuntimeState | None,
+    update: SandboxRuntimeState | None,
+) -> SandboxRuntimeState | None:
+    """并行工具可重复写入会话实例引用；新引用和结束时的 None 覆盖旧值。"""
+    return update
+
+
 class SandboxMiddlewareState(AgentState):
-    sandbox: NotRequired[SandboxRuntimeState | None]
+    sandbox: NotRequired[
+        Annotated[SandboxRuntimeState | None, _replace_sandbox_state]
+    ]
 
 
 class SandboxMiddleware(AgentMiddleware[SandboxMiddlewareState]):

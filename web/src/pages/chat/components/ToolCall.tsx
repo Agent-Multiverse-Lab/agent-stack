@@ -22,16 +22,14 @@ export function TaskSpinnerRing({
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   return (
-    <span
-      className="relative inline-flex shrink-0 items-center justify-center"
-      style={{ width: size, height: size }}
-    >
+    <span className="relative inline-flex size-6 shrink-0 items-center justify-center">
       <svg
         width={size}
         height={size}
+        viewBox={`0 0 ${size} ${size}`}
         className={cn(
-          "absolute inset-0",
-          active && "motion-safe:animate-spin motion-safe:[animation-duration:1.1s]",
+          "size-6",
+          active && "motion-safe:animate-spin motion-safe:[animation-duration:1s]",
         )}
       >
         <circle
@@ -51,13 +49,15 @@ export function TaskSpinnerRing({
             stroke="var(--primary)"
             strokeWidth={stroke}
             strokeLinecap="round"
-            strokeDasharray={`${c * 0.28} ${c * 0.72}`}
+            strokeDasharray={`${c * 0.25} ${c * 0.75}`}
           />
         )}
       </svg>
-      <span className="relative text-[10.5px] font-semibold tabular-nums text-foreground">
-        {children}
-      </span>
+      {children !== undefined && (
+        <span className="absolute text-[10.5px] font-semibold tabular-nums text-foreground">
+          {children}
+        </span>
+      )}
     </span>
   );
 }
@@ -71,14 +71,14 @@ export function TaskStatusBadge({
 }) {
   const toneClass =
     tone === "green"
-      ? "bg-success text-white motion-safe:zoom-in-75"
+      ? "bg-success text-white"
       : tone === "red"
-        ? "bg-destructive text-white motion-safe:spin-in-12"
+        ? "bg-destructive text-white"
         : "bg-warning text-white";
   return (
     <span
       className={cn(
-        "flex size-5.5 shrink-0 items-center justify-center rounded-full motion-safe:animate-[task-pop-in_300ms_cubic-bezier(0.23,1,0.32,1)_both]",
+        "flex size-5.5 shrink-0 items-center justify-center rounded-full",
         toneClass,
       )}
     >
@@ -97,7 +97,7 @@ export const TaskCheckIcon = (
     strokeWidth="3.5"
     strokeLinecap="round"
     strokeLinejoin="round"
-    className="motion-safe:zoom-in-75"
+    className="size-[13px] motion-safe:zoom-in-75"
   >
     <path d="M20 6L9 17l-5-5" />
   </svg>
@@ -112,7 +112,7 @@ export const TaskXIcon = (
     stroke="currentColor"
     strokeWidth="3.5"
     strokeLinecap="round"
-    className="motion-safe:spin-in-12"
+    className="size-3"
   >
     <path d="M18 6L6 18M6 6l12 12" />
   </svg>
@@ -124,24 +124,10 @@ export const TaskPauseIcon = (
     height="11"
     viewBox="0 0 24 24"
     fill="currentColor"
+    className="size-[11px]"
   >
     <rect x="6" y="5" width="4" height="14" rx="1" />
     <rect x="14" y="5" width="4" height="14" rx="1" />
-  </svg>
-);
-
-export const TaskRetryIcon = (
-  <svg
-    width="12"
-    height="12"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="3"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" />
   </svg>
 );
 
@@ -160,7 +146,7 @@ export function TaskChevron({ open }: { open: boolean }) {
         strokeWidth="2.2"
         strokeLinecap="round"
         strokeLinejoin="round"
-        className="transition-transform duration-300 motion-reduce:transition-none"
+        className="size-[15px] transition-transform duration-200 motion-reduce:transition-none"
         style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}
       >
         <path d="M6 9l6 6 6-6" />
@@ -233,18 +219,15 @@ export function ToolCall({ event }: { event: Record<string, unknown> }) {
   const renderPill = () => {
     if (status === "completed") {
       return (
-        <span className="inline-flex h-5.5 items-center gap-1.5 rounded-full border border-success-border bg-success-muted px-2 text-[11.5px] font-medium text-success motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200">
+        <span className="inline-flex h-5.5 items-center gap-1.5 rounded-full border border-success-border bg-success-muted px-2 text-[11.5px] font-medium text-success">
           {statusLabel}
         </span>
       );
     }
     if (status === "error") {
       return (
-        <span className="inline-flex h-5.5 items-center gap-1.5 rounded-full border border-destructive-border bg-destructive-muted px-2 text-[11.5px] font-medium text-destructive motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200">
+        <span className="inline-flex h-5.5 items-center gap-1.5 rounded-full border border-destructive-border bg-destructive-muted px-2 text-[11.5px] font-medium text-destructive">
           {statusLabel}
-          <span className="flex motion-safe:animate-spin motion-safe:[animation-duration:1.2s]">
-            {TaskRetryIcon}
-          </span>
         </span>
       );
     }
@@ -266,7 +249,7 @@ export function ToolCall({ event }: { event: Record<string, unknown> }) {
 
   return (
     <div
-      className="w-full max-w-2xl min-w-0 self-stretch overflow-hidden border border-border bg-card text-card-foreground shadow-sm transition-[border-radius,background-color] duration-300 hover:bg-accent/50 motion-safe:animate-[task-fade-up_450ms_cubic-bezier(0.23,1,0.32,1)_both]"
+      className="w-full max-w-2xl min-w-0 self-stretch overflow-hidden border border-border bg-card text-card-foreground shadow-sm transition-[border-radius,background-color] duration-200 hover:bg-accent/50"
       style={{ borderRadius: open ? 14 : 22 }}
     >
       <Button
@@ -298,11 +281,10 @@ export function ToolCall({ event }: { event: Record<string, unknown> }) {
       </Button>
 
       <div
-        className="grid transition-[grid-template-rows,opacity] duration-300 motion-reduce:transition-none"
+        className="grid transition-[grid-template-rows,opacity] duration-200 motion-reduce:transition-none"
         style={{
           gridTemplateRows: open && sections.length > 0 ? "1fr" : "0fr",
           opacity: open && sections.length > 0 ? 1 : 0,
-          transitionTimingFunction: "cubic-bezier(0.23, 1, 0.32, 1)",
         }}
       >
         <div className="overflow-hidden">
@@ -310,14 +292,8 @@ export function ToolCall({ event }: { event: Record<string, unknown> }) {
             <div className="mb-2.5 grid grid-cols-[24px_minmax(0,1fr)] gap-2.5 px-2.5 pt-0.5">
               <span aria-hidden="true" className="mx-auto h-full w-px bg-border" />
               <div className="flex min-w-0 flex-col gap-2.5">
-                {sections.map((item, j) => (
-                  <div
-                    key={item.label}
-                    className="min-w-0"
-                    style={{
-                      animation: `task-fade-up 300ms cubic-bezier(0.23,1,0.32,1) ${120 + j * 100}ms both`,
-                    }}
-                  >
+                {sections.map((item) => (
+                  <div key={item.label} className="min-w-0">
                     <div className="mb-1 flex items-center justify-between">
                       <span className="text-[12px] font-medium text-muted-foreground">
                         {t(item.label)}

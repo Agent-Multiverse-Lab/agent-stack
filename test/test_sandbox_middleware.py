@@ -10,7 +10,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from langchain.agents.middleware import AgentMiddleware  # noqa: F401
 from langchain_core.messages import ToolMessage
+from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
 _MODULE_NAME = "_sandbox_middleware_test_module"
@@ -188,6 +190,46 @@ class SandboxMiddlewareTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result, Command)
         self.assertEqual(update, {"sandbox": None})
         self.assertEqual(self.provider.release_calls, ["user-1:thread-1"])
+
+    async def test_parallel_tool_updates_and_cleanup(self) -> None:
+        for initial in (None, {"sandbox_id": "expired-instance"}):
+            with self.subTest(initial=initial):
+                seen = []
+                ready = asyncio.Event()
+                entered = 0
+
+                async def tool_node(state):
+                    async def handler(_request):
+                        nonlocal entered
+                        entered += 1
+                        if entered == 2:
+                            ready.set()
+                        await ready.wait()
+                        return make_tool_message()
+
+                    return await self.middleware.awrap_tool_call(
+                        make_request("read_file", dict(state)), handler
+                    )
+
+                async def cleanup(state):
+                    seen.append(state["sandbox"])
+                    self.assertEqual(len(state["messages"]), 2)
+                    return await self.middleware.aafter_agent(state, None)
+
+                with mock.patch.dict(sys.modules, {_MODULE_NAME: _sandbox_middleware}):
+                    builder = StateGraph(_sandbox_middleware.SandboxMiddlewareState)
+                builder.add_node("first", tool_node)
+                builder.add_node("second", tool_node)
+                builder.add_node("cleanup", cleanup)
+                builder.add_edge(START, "first")
+                builder.add_edge(START, "second")
+                builder.add_edge(["first", "second"], "cleanup")
+                builder.add_edge("cleanup", END)
+                result = await builder.compile().ainvoke(
+                    {"messages": [], "sandbox": initial}
+                )
+                self.assertEqual(seen, [{"sandbox_id": "user-1:thread-1"}])
+                self.assertIsNone(result["sandbox"])
 
 
 if __name__ == "__main__":

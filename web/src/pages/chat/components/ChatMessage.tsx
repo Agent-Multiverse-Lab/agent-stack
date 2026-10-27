@@ -77,10 +77,7 @@ function AgentTasks({ event }: { event: Record<string, unknown> }) {
         return (
           <div
             key={rowKey}
-            className="self-stretch overflow-hidden border-b border-border transition-colors duration-300 last:border-0 hover:bg-accent/50"
-            style={{
-              animation: `task-fade-up 450ms cubic-bezier(0.23,1,0.32,1) ${i * 80}ms both`,
-            }}
+            className="self-stretch overflow-hidden border-b border-border transition-colors duration-200 last:border-0 hover:bg-accent/50"
           >
             <Button
               type="button"
@@ -120,24 +117,17 @@ function AgentTasks({ event }: { event: Record<string, unknown> }) {
             </Button>
 
             <div
-              className="grid transition-[grid-template-rows,opacity] duration-300 motion-reduce:transition-none"
+              className="grid transition-[grid-template-rows,opacity] duration-200 motion-reduce:transition-none"
               style={{
                 gridTemplateRows: open ? "1fr" : "0fr",
                 opacity: open ? 1 : 0,
-                transitionTimingFunction: "cubic-bezier(0.23, 1, 0.32, 1)",
               }}
             >
               <div className="overflow-hidden">
                 {open && (
                   <div className="mb-2.5 grid grid-cols-[24px_minmax(0,1fr)] gap-2.5 px-2.5 pt-0.5">
                     <span aria-hidden="true" className="mx-auto h-full w-px bg-border" />
-                    <div
-                      className="flex flex-col gap-1.5"
-                      style={{
-                        animation:
-                          "task-fade-up 300ms cubic-bezier(0.23,1,0.32,1) 120ms both",
-                      }}
-                    >
+                    <div className="flex flex-col gap-1.5">
                       <div className="flex items-center justify-between">
                         <span className="text-[12px] text-muted-foreground">
                           {t("Status")}

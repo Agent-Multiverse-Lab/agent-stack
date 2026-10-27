@@ -13,7 +13,7 @@ from src.agents.middlewares.image_validation_middleware import (
 )
 from src.agents.middlewares.model_retry_middleware import create_model_retry_middleware
 from src.agents.middlewares.sandbox_middleware import create_sandbox_middleware
-from src.knowledge.tools import knowledge_search, web_search_one, web_search_parallel
+from src.knowledge.tools import knowledge_search, web_search
 from src.third_party.satellite_gateway.tools import build_satellite_catalog_tools
 
 
@@ -28,8 +28,8 @@ async def _create_tools(context: SubAgentContext):
         )
     tools = [
         knowledge_search,
-        web_search_parallel,
-        web_search_one,
+        # web_search_parallel,
+        web_search,
         *build_satellite_catalog_tools(context),
         *mcp_tools,
     ]
