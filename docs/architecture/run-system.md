@@ -9,7 +9,7 @@
 - [Run Lifecycle Spec](../spec/run/lifecycle/spec.md)
 - [Run Cancellation Spec](../spec/run/cancellation/spec.md)
 - [Agent Run Event Streaming Spec](../spec/run/event-streaming/spec.md)
-- [Run 执行尝试表结构](run-attempt-schema.md)：仅数据库预留结构，尚未接入运行流程
+- [Run 执行尝试与租约](run-attempt-schema.md)：attempt 持有执行权、心跳、租约与结束事实
 
 ## 2. Core Components
 

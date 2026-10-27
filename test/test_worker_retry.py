@@ -135,7 +135,10 @@ class WorkerRetryTest(unittest.IsolatedAsyncioTestCase):
         await self.process({"worker_id": "worker-test", "job_try": 2}, "run-1")
         self.assertEqual(self.namespace["_get_agent_run"].await_count, 2)
         self.namespace["set_run_terminal"].assert_not_awaited()
-        self.namespace["AgentRunController"].assert_called_once_with("run-1")
+        owner = self.namespace["set_run_running"].await_args.kwargs["worker_id"]
+        self.namespace["AgentRunController"].assert_called_once_with(
+            "run-1", worker_id=owner
+        )
         self.namespace["_finalize_run"].assert_awaited_once()
         self.assertEqual(self.run.agent_status, "completed")
 

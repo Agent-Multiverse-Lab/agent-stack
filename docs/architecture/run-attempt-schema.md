@@ -1,83 +1,82 @@
-# Run 执行尝试表结构
+# Run 执行尝试与租约
 
-本次仅增加数据库结构，不改变现有 Worker、队列、取消、重试、事件或结果写入流程。
+`AgentRun` 保存业务聚合状态（`agent_status`/结果/输出指针）；`AgentRunAttempt`
+保存每次执行的持有者、心跳、租约与结束事实。Run 上的 `worker_id`/
+`heartbeat_at`/`lease_expires_at` 是当前 owner 的查询快照，attempt 才是执行权
+和租约的事实来源。
 
-## 表与字段
+## 表结构
 
-`AgentRun` / `agent_run` 新增两个可空字段，无默认值：
+### `agent_run`
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `current_attempt_id` | `varchar(64)` | 当前执行尝试的标识 |
-| `owner_worker_id` | `varchar(128)` | 当前执行 Worker 的标识 |
+| `id` | `varchar(64)` | Run 主键 |
+| `agent_status` | `varchar(32)` | 业务状态，终态不可回退 |
+| `worker_id` | `varchar(128)` | 当前执行 owner 的快照，可空 |
+| `heartbeat_at` | `timestamptz` | 当前 owner 最近一次成功续租时间，可空 |
+| `lease_expires_at` | `timestamptz` | 当前 owner 租约到期时间，可空 |
 
-新增 `AgentRunAttempt` / `agent_run_attempt`：
+### `agent_run_attempt`
 
 | 字段 | 类型 | 可空 | 含义 |
 | --- | --- | --- | --- |
-| `id` | `varchar(64)` | 否 | 尝试主键，由未来写入方提供 |
-| `run_id` | `varchar(64)` | 否 | 所属 Run |
-| `worker_id` | `varchar(128)` | 否 | 这次尝试的 Worker 标识，不引用新 Worker 表 |
-| `status` | `varchar(32)` | 否 | 尝试状态，由未来写入方提供；本次不定义状态流转 |
-| `started_at` | `timestamp with time zone` | 否 | 开始时间，默认数据库当前时间 |
-| `finished_at` | `timestamp with time zone` | 是 | 结束时间 |
-| `error` | `text` | 是 | 错误信息 |
-| `error_type` | `varchar(64)` | 是 | 错误类型 |
+| `id` | `varchar(64)` | 否 | attempt 主键，由认领方生成 |
+| `run_id` | `varchar(64)` | 否 | 所属 Run；删除 Run 级联删除 |
+| `attempt_no` | `integer` | 否 | Run 内递增序号，从 1 开始 |
+| `worker_id` | `varchar(128)` | 否 | 本次执行 owner token |
+| `status` | `varchar(32)` | 否 | `running`/`completed`/`failed`/`cancelled`/`interrupted`/`retry_released`/`lease_expired`/`orphaned` |
+| `started_at` | `timestamptz` | 否 | 取得执行权时间 |
+| `heartbeat_at` | `timestamptz` | 是 | 本 attempt 最近续租时间 |
+| `lease_expires_at` | `timestamptz` | 是 | 本 attempt 租约到期时间 |
+| `finished_at` | `timestamptz` | 是 | 结束时间；NULL 表示仍开放 |
+| `error` | `text` | 是 | 错误摘要 |
+| `error_type` | `varchar(64)` | 是 | 结构化错误分类 |
 
 约束与索引：
 
-- `attempt.run_id → run.id` 使用 `ON DELETE CASCADE`，删除 Run 时删除其尝试记录
-- `UNIQUE (run_id, id)` 支持复合外键
-- `run.(id, current_attempt_id) → attempt.(run_id, id)` 确保非空当前尝试属于同一个 Run
-- 当前尝试仍被引用时不可单独删除；需先清空指针。反向外键使用默认 `NO ACTION`，不会清空 Run 主键
-- `(run_id, started_at)` 索引支持按 Run 查询尝试历史
-- 不限制一个 Worker 只能有一次尝试；不同尝试使用不同 `id`
+- `UNIQUE (run_id, attempt_no)`：同一 Run 的尝试序号唯一
+- 部分唯一索引 `uq_agent_run_attempt_one_open (run_id) WHERE finished_at IS NULL`：
+  同一 Run 同时最多一条开放 attempt
+- `(run_id, finished_at)` 与 `(finished_at, lease_expires_at)` 支持历史/过期查询
 
-```mermaid
-erDiagram
-    agent_run ||--o{ agent_run_attempt : "run_id / CASCADE"
-    agent_run {
-        varchar id PK
-        varchar current_attempt_id FK "新增，可空"
-        varchar owner_worker_id "新增，可空"
-    }
-    agent_run_attempt {
-        varchar id PK
-        varchar run_id FK
-        varchar worker_id
-        varchar status
-        timestamptz started_at
-        timestamptz finished_at "可空"
-        text error "可空"
-        varchar error_type "可空"
-    }
-```
+## 认领、续租与终态
 
-## 迁移与兼容性
+1. `AgentRunRepository.set_running` 在 Run 行锁内检查状态/owner，关闭任何残留开放
+   attempt，再通过 `AgentRunAttemptRepository.claim` 创建新 attempt；Run 写入
+   owner/heartbeat/lease 快照。
+2. `renew_lease` 先锁 Run 校验 owner 与 Run 级租约，再找到当前开放 attempt，
+   由 `AgentRunAttemptRepository.renew` 校验 attempt owner/到期时间并更新心跳/租约；
+   Run 快照同步更新。只有 `running` 续租；`cancel_requested` 立即停止续租，
+   保留最后一次租约给当前 owner 完成取消收尾，超过租约由 reaper 收敛。
+3. `set_agent_terminal` 在 Run 行锁内用 attempt 的 owner 和未过期租约做 fencing，
+   写入 Run 终态并关闭 attempt；`release_for_retry` 关闭为 `retry_released`；
+   过期巡检关闭为 `lease_expired`/`cancelled`。
+4. `check_run_stopped(run_id, worker_id)` 判断当前 worker 是否仍可执行，返回
+   `not_found`/`terminal`/`cancel_requested`/`attempt_missing`/`owner_mismatch`/
+   `lease_expired`。`is_run_stopped` 是布尔入口。
+5. 输出/审计写入通过 `lock_for_output_update`/`lock_output_persistence` 校验当前
+   attempt 的 owner 与租约，过期 owner 不能写终态或输出。
 
-- Alembic revision：`0017_agent_run_attempt`，前置 revision：`0016_qwen_provider_id`
-- 升级只建表、加字段、加约束与索引；不回填历史尝试，不改动已有 Run 状态或业务数据
-- 旧 Run 的两个新字段保持 `NULL`；现有创建 Run 的调用不需要传新字段
-- 已有数据库必须先运行 `uv run --no-sync alembic upgrade head`，再启动使用新 ORM 的 API/Worker；`create_all` 不会给已有表补列
-- 降级 `uv run --no-sync alembic downgrade 0016_qwen_provider_id` 先解除反向外键，再移除新字段与新表；会丢弃未来写入的尝试历史与归属字段，应先备份这些数据
-- ORM 的反向外键设置 `use_alter=True`，处理全新数据库建表时的双向引用顺序
+## 迁移与兼容
 
-## 本次能力边界
+- 历史结构：`0017_agent_run_attempt` → `0018_agent_run_attempt_no` →
+  `0019_agent_run_lease`。
+- `0022_agent_run_attempt_lease` 为 attempt 增加 `heartbeat_at`/
+  `lease_expires_at`、过期索引和“一 Run 一开放 attempt”部分唯一索引；迁移会先把
+  现存的多条开放 attempt 收敛为最新一条，其余标记 `orphaned`。
+- 迁移前已认领、没有 attempt 的旧 Run 在终态/输出校验中退回 Run 级
+  owner/租约；新认领一律创建 attempt，不再产生这种旧形态。
+- 有已有数据库必须先执行 `uv run --no-sync alembic upgrade head`，再启动使用新
+  ORM 的 API/Worker；`create_all` 不会给已有表补列。
 
-这些结构目前不会被运行流程自动填充。现有 Run 生命周期继续沿用 `agent_status`。
-表结构本身不校验 `owner_worker_id` 与尝试的 `worker_id` 一致，不校验状态转换，
-也不会阻止重复执行或过期 Worker 写入。领取、取消撤权、重试创建尝试及事件/结果
-写入校验均尚未接入，不能将本次变更视为已实现并发隔离或 attempt fencing。
-
-## 结构验证
+## 验证
 
 ```bash
-uv run --no-sync python -m unittest discover -s test -p 'test_agent_run_attempt_schema.py' -v
-uv run --no-sync python -m unittest discover -s test -p 'test_thread_message_persistence.py' -v
+uv run --no-sync python -m pytest -q test/test_agent_run_lease.py \
+  test/test_agent_run_repository.py test/test_agent_run_attempt_schema.py
 ```
 
-默认测试 SQLite 外键行为、迁移前后数据保留及 PostgreSQL 离线 DDL 顺序。
-设置 `AGENT_STACK_SCHEMA_TEST_POSTGRES_URL` 为独立测试库的 SQLAlchemy PostgreSQL URL
-（`postgresql+psycopg://...`）后，同一组结构及迁移测试也会在真实 PostgreSQL 上执行。
-每个 PostgreSQL 测试使用独立 schema 并回滚整个事务；测试用户需要创建 schema 的权限。
-未设置该变量时 PostgreSQL 实测会明确标为跳过，不代表通过。
+SQLite 覆盖认领/续租/过期/终态/审计收敛；设置
+`AGENT_STACK_SCHEMA_TEST_POSTGRES_URL` 后同一组结构测试在独立 PostgreSQL schema
+中执行。真实 PostgreSQL 行锁竞争仍需在集成环境验证。

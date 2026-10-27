@@ -119,22 +119,20 @@ class AgentRunController:
         return True
 
     async def is_cancelled(self) -> bool:
-        if self.lease_lost:
-            return True
-
-        if self._cancel_event.is_set():
+        if self.lease_lost or self._cancel_event.is_set():
             return True
 
         if await has_agent_run_cancel_signal(self.run_id):
             return True
 
-        if await _pending_run_cancel(self.run_id):
+        stop = await _check_run_stopped(self.run_id, self.worker_id)
+        if stop.stopped:
+            # 用户取消和终态不是 lease 丢失；其余原因（owner/租约/attempt
+            # 不一致）都意味着当前 worker 已无权继续执行。
+            if stop.reason not in {"cancel_requested", "terminal"}:
+                self.lease_lost = True
             return True
-
-        agent_run = await _get_agent_run(self.run_id)
-        return (
-            agent_run is not None and str(agent_run.agent_status) == "cancel_requested"
-        )
+        return False
 
     async def close(self) -> None:
         """取消并等待当前 Run 的取消监听与租约续期任务。"""
@@ -167,6 +165,18 @@ class AgentRunController:
                 )
                 renewed = False
             if not renewed:
+                # cancel_requested 不再续租，但它不是 lease 丢失；保留最后
+                # 一次租约让当前 owner 完成取消收尾，超时由 reaper 收敛。
+                stop = None
+                try:
+                    stop = await _check_run_stopped(self.run_id, self.worker_id)
+                except Exception:
+                    logger.exception(
+                        "Agent Run 停止状态检查失败：run_id=%s", self.run_id
+                    )
+                if stop is not None and stop.reason == "cancel_requested":
+                    self._cancel_event.set()
+                    return
                 logger.warning(
                     "Agent Run 租约丢失，停止执行：run_id=%s worker_id=%s",
                     self.run_id,
@@ -341,6 +351,16 @@ async def _get_agent_run(run_id: str):
     async with postgres_manager.get_async_session_context() as db:
         agent_run_repo = AgentRunRepository(db)
         return await agent_run_repo.get_by_id(run_id)
+
+
+async def _check_run_stopped(run_id: str, worker_id: str):
+    """用 repository 的 attempt/lease 判定当前 worker 是否仍可执行。"""
+
+    async with postgres_manager.get_async_session_context() as db:
+        return await AgentRunRepository(db).check_run_stopped(
+            run_id,
+            worker_id=worker_id,
+        )
 
 
 async def _cancellable_stream(
@@ -624,14 +644,6 @@ def _normalize_steam_agent_chunk(steam_agent_chunk_bytes: bytes) -> list[dict]:
         except Exception:
             logger.warning(f"解析输出流失败{line}")
     return steam_agent_chunks
-
-async def _pending_run_cancel(run_id: str) -> bool:
-    # 判断当前前端是否发起了取消请求
-    current_agent_run = await _get_agent_run(run_id)
-    if current_agent_run is not None:
-        return current_agent_run.agent_status == "cancel_requested"
-    return False
-
 
 async def process_agent_run(ctx, run_id: str):
     """领取并执行 Run，仅重试 Agent Stream 启动前的 RetryJob。"""

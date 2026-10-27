@@ -33,11 +33,15 @@ run = await set_run_terminal(
 `set_agent_terminal` 必须拒绝非法回退；并发场景下仅允许一处成功写入终态。
 
 Worker 在 `startup(ctx)` 中生成进程身份，每次 Job 执行再追加 UUID，组成独立的
-owner token。`AgentRun.worker_id` 保存该 token；Repository 不依赖 Worker 全局变量。
+owner token。每次认领在 `AgentRunAttempt` 创建一条开放 attempt，由 attempt 保存
+owner、心跳和租约；`AgentRun.worker_id`/`heartbeat_at`/`lease_expires_at` 只作为
+当前 owner 的查询快照。Repository 不依赖 Worker 全局变量。
 
 - `set_running` 在同一事务和行锁内检查状态与归属，只认领无 owner 的
   `pending/queued/cancel_requested` Run；认领取消中的 Run 时保留取消状态。
 - Worker 在读取输入和执行准备前完成认领；已有执行者时退出，不执行 Agent。
+- Worker 在流消费的非消息边界通过 `check_run_stopped` 检查当前开放 attempt 的
+  owner/租约；owner 变化、attempt 缺失或租约过期都必须停止执行。
 - Worker 的终态和输出写入必须携带相同 token，在数据库行锁内核对当前归属。
 - 无 token 的终态调用仅允许将尚未认领的 `pending/queued` Run 标记为入队失败，
   不能修改正在执行的 Run。用户取消通过 `request_cancel` 提交意图，不替换 owner。

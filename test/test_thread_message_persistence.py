@@ -349,7 +349,10 @@ class ThreadMessagePersistenceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({"a": 17, "b": 25}, tool_call.tool_arguments)
         session.add.assert_called_once_with(tool_call)
 
-        session.execute = AsyncMock(return_value=SimpleNamespace(scalar_one=lambda: tool_call))
+        session.execute = AsyncMock(return_value=SimpleNamespace(
+            scalar_one=lambda: tool_call,
+            scalar_one_or_none=lambda: None,
+        ))
         await conversations.update_tool_call(
             tool_call_id="call-1",
             tool_result="42",

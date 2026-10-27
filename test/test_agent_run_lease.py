@@ -6,10 +6,10 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from src.database.models import AgentRun, Conversation, Message, User
+from src.database.models import AgentRun, AgentRunAttempt, Conversation, Message, User
 from src.database.repositories.agent_run_repository import (
-    AgentRunRepository,
     DEFAULT_RUN_LEASE_SECONDS,
+    AgentRunRepository,
 )
 
 
@@ -22,6 +22,7 @@ class LeaseTestCase(unittest.IsolatedAsyncioTestCase):
             Conversation.__table__,
             Message.__table__,
             AgentRun.__table__,
+            AgentRunAttempt.__table__,
         ])
         self.db = Session(engine, expire_on_commit=False)
         self.addCleanup(self.db.close)
@@ -45,6 +46,12 @@ class LeaseTestCase(unittest.IsolatedAsyncioTestCase):
             async def flush(_):
                 self.db.flush()
 
+            async def scalar(_, statement):
+                return self.db.scalar(statement)
+
+            def add(_, instance):
+                self.db.add(instance)
+
         self.repository = AgentRunRepository(AsyncSessionAdapter())
 
     def _reload(self) -> AgentRun:
@@ -61,6 +68,15 @@ class LeaseTestCase(unittest.IsolatedAsyncioTestCase):
         self.db.commit()
         self.assertEqual(now, self.run.heartbeat_at)
         self.assertEqual(now + timedelta(seconds=120), self.run.lease_expires_at)
+        attempt = self.db.execute(
+            select(AgentRunAttempt).where(AgentRunAttempt.run_id == "run-1")
+        ).scalar_one()
+        self.assertEqual("worker-a:1", attempt.worker_id)
+        self.assertEqual(1, attempt.attempt_no)
+        self.assertEqual("running", attempt.status)
+        self.assertEqual(now, attempt.heartbeat_at.replace(tzinfo=UTC))
+        self.assertEqual(now + timedelta(seconds=120), attempt.lease_expires_at.replace(tzinfo=UTC))
+        self.assertIsNone(attempt.finished_at)
 
         later = now + timedelta(seconds=30)
         renewed = await self.repository.renew_lease(
@@ -71,6 +87,11 @@ class LeaseTestCase(unittest.IsolatedAsyncioTestCase):
         run = self._reload()
         self.assertEqual(later, run.heartbeat_at)
         self.assertEqual(later + timedelta(seconds=120), run.lease_expires_at)
+        attempt = self.db.execute(
+            select(AgentRunAttempt).where(AgentRunAttempt.run_id == "run-1")
+        ).scalar_one()
+        self.assertEqual(later, attempt.heartbeat_at.replace(tzinfo=UTC))
+        self.assertEqual(later + timedelta(seconds=120), attempt.lease_expires_at.replace(tzinfo=UTC))
 
     async def test_other_owner_cannot_renew(self):
         now = datetime.now(UTC)
@@ -101,6 +122,14 @@ class LeaseTestCase(unittest.IsolatedAsyncioTestCase):
             "run-1", worker_id="worker-a:1", lease_seconds=30, now=now,
         )
         self.run.agent_status = "cancel_requested"
+        self.db.execute(Message.__table__.insert().values(
+            conversation_id=1,
+            agent_run_id="run-1",
+            role="assistant",
+            content="",
+            message_type="model_audit",
+            execution_status="running",
+        ))
         self.db.commit()
 
         reconciled = await self.repository.reconcile_expired_leases(
@@ -115,6 +144,11 @@ class LeaseTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(run.lease_expires_at)
         self.assertIsNone(run.heartbeat_at)
         self.assertIsNotNone(run.finished_at)
+        audit = self.db.execute(
+            select(Message).where(Message.agent_run_id == "run-1")
+        ).scalar_one()
+        self.assertEqual("interrupted", audit.execution_status)
+        self.assertIsNotNone(audit.finished_at)
 
     async def test_reconcile_marks_running_as_failed_when_lease_expires(self):
         now = datetime.now(UTC)
@@ -145,6 +179,84 @@ class LeaseTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], reconciled)
         self.assertEqual("running", self._reload().agent_status)
 
+    async def test_cancel_requested_stops_renewal(self):
+        now = datetime.now(UTC)
+        await self.repository.set_running(
+            "run-1", worker_id="worker-a:1", lease_seconds=120, now=now,
+        )
+        await self.repository.request_cancel("run-1")
+        self.db.commit()
+
+        renewed = await self.repository.renew_lease(
+            "run-1",
+            worker_id="worker-a:1",
+            lease_seconds=120,
+            now=now + timedelta(seconds=30),
+        )
+        self.assertFalse(renewed)
+        attempt = self.db.execute(
+            select(AgentRunAttempt).where(AgentRunAttempt.run_id == "run-1")
+        ).scalar_one()
+        self.assertIsNone(attempt.finished_at)
+        self.assertEqual(
+            now + timedelta(seconds=120),
+            attempt.lease_expires_at.replace(tzinfo=UTC),
+        )
+
+        _, changed = await self.repository.set_agent_terminal(
+            "run-1", worker_id="worker-a:1", status="cancelled",
+        )
+        self.assertTrue(changed)
+        self.db.commit()
+        attempt = self.db.execute(
+            select(AgentRunAttempt).where(AgentRunAttempt.run_id == "run-1")
+        ).scalar_one()
+        self.assertEqual("cancelled", attempt.status)
+
+    async def test_check_run_stopped_uses_attempt_owner_and_lease(self):
+        now = datetime.now(UTC)
+        await self.repository.set_running(
+            "run-1", worker_id="worker-a:1", lease_seconds=30, now=now,
+        )
+        self.db.commit()
+
+        live = await self.repository.check_run_stopped(
+            "run-1", worker_id="worker-a:1", now=now + timedelta(seconds=5),
+        )
+        self.assertFalse(live.stopped)
+        self.assertEqual("worker-a:1", self._reload().worker_id)
+
+        other_owner = await self.repository.check_run_stopped(
+            "run-1", worker_id="worker-b:1", now=now + timedelta(seconds=5),
+        )
+        self.assertTrue(other_owner.stopped)
+        self.assertEqual("owner_mismatch", other_owner.reason)
+
+        expired = await self.repository.check_run_stopped(
+            "run-1", worker_id="worker-a:1", now=now + timedelta(seconds=31),
+        )
+        self.assertTrue(expired.stopped)
+        self.assertEqual("lease_expired", expired.reason)
+
+        await self.repository.request_cancel("run-1")
+        self.db.commit()
+        cancelled = await self.repository.check_run_stopped(
+            "run-1", worker_id="worker-a:1", now=now + timedelta(seconds=5),
+        )
+        self.assertTrue(cancelled.stopped)
+        self.assertEqual("cancel_requested", cancelled.reason)
+
+        _, changed = await self.repository.set_agent_terminal(
+            "run-1", worker_id="worker-a:1", status="cancelled",
+        )
+        self.assertTrue(changed)
+        self.db.commit()
+        terminal = await self.repository.check_run_stopped(
+            "run-1", worker_id="worker-a:1", now=now + timedelta(seconds=5),
+        )
+        self.assertTrue(terminal.stopped)
+        self.assertEqual("terminal", terminal.reason)
+
     async def test_terminal_status_releases_the_lease(self):
         now = datetime.now(UTC)
         await self.repository.set_running(
@@ -162,6 +274,11 @@ class LeaseTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("completed", run.agent_status)
         self.assertIsNone(run.heartbeat_at)
         self.assertIsNone(run.lease_expires_at)
+        attempt = self.db.execute(
+            select(AgentRunAttempt).where(AgentRunAttempt.run_id == "run-1")
+        ).scalar_one()
+        self.assertEqual("completed", attempt.status)
+        self.assertIsNotNone(attempt.finished_at)
         self.assertEqual([], await self.repository.reconcile_expired_leases(
             now=now + timedelta(seconds=3600)
         ))

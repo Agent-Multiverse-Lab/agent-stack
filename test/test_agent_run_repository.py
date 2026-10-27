@@ -8,8 +8,21 @@ from unittest.mock import AsyncMock
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from src.database.models import AgentRun, Conversation, Message, User
+from src.database.models import AgentRun, AgentRunAttempt, Conversation, Message, User
 from src.database.repositories.agent_run_repository import AgentRunRepository
+
+
+class _EmptyResult:
+    rowcount = 0
+
+    def scalar_one_or_none(self):
+        return None
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return []
 
 
 class FakeSession:
@@ -20,8 +33,8 @@ class FakeSession:
         self.flush_count += 1
 
     async def execute(self, statement):
-        # FIXEME: 终态写入会在同一事务内收敛残留 running 审计行。
-        return SimpleNamespace(rowcount=0)
+        # FIXEME: 终态写入会在同一事务内收敛残留 running 审计行和 attempt。
+        return _EmptyResult()
 
 
 class AgentRunTerminalTest(unittest.IsolatedAsyncioTestCase):
@@ -145,6 +158,7 @@ class AgentRunOwnershipTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(engine.dispose)
         AgentRun.metadata.create_all(engine, tables=[
             User.__table__, Conversation.__table__, Message.__table__, AgentRun.__table__,
+            AgentRunAttempt.__table__,
         ])
         self.db = Session(engine, expire_on_commit=False)
         self.addCleanup(self.db.close)
@@ -167,6 +181,12 @@ class AgentRunOwnershipTest(unittest.IsolatedAsyncioTestCase):
 
             async def flush(_):
                 self.db.flush()
+
+            async def scalar(_, statement):
+                return self.db.scalar(statement)
+
+            def add(_, instance):
+                self.db.add(instance)
 
         self.repository = AgentRunRepository(AsyncSessionAdapter())
 

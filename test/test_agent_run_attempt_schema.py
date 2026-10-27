@@ -5,6 +5,7 @@ import io
 import os
 import unittest
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -91,12 +92,23 @@ class RunAttemptSchemaTest(DatabaseTestCase):
         self.assert_integrity_error(self.attempt.insert().values(
             id="duplicate", run_id="run-1", attempt_no=1, worker_id="worker-1", status="running",
         ))
+        # 同一 Run 只允许一条开放 attempt；先结束第一条，再创建下一条。
+        self.db.execute(self.attempt.update().where(
+            self.attempt.c.id == "attempt-1"
+        ).values(finished_at=datetime.now(UTC), status="completed"))
         self.insert_attempt("attempt-2", attempt_no=2)
         self.insert_attempt("attempt-3", run_id="run-2")
         rows = self.db.execute(sa.select(self.attempt).order_by(self.attempt.c.id)).mappings().all()
         self.assertEqual([row["attempt_no"] for row in rows], [1, 2, 1])
         self.assertEqual({row["worker_id"] for row in rows}, {"worker-1"})
         self.assertTrue(all(row["started_at"] is not None for row in rows))
+
+    def test_only_one_open_attempt_per_run(self):
+        self.insert_attempt()
+        self.assert_integrity_error(self.attempt.insert().values(
+            id="second-open", run_id="run-1", attempt_no=2,
+            worker_id="worker-2", status="running",
+        ))
 
     def test_attempt_requires_existing_run_and_required_fields(self):
         self.assert_integrity_error(self.attempt.insert().values(
@@ -173,9 +185,13 @@ class RunAttemptMigrationTest(DatabaseTestCase):
         self.assert_legacy_unchanged()
         inspector = sa.inspect(self.db)
         columns = {item["name"]: item for item in inspector.get_columns("agent_run_attempt")}
-        self.assertEqual(set(columns), set(AgentRunAttempt.__table__.c.keys()) - {"attempt_no"})
+        self.assertEqual(
+            set(columns),
+            set(AgentRunAttempt.__table__.c.keys())
+            - {"attempt_no", "heartbeat_at", "lease_expires_at"},
+        )
         for column in AgentRunAttempt.__table__.c:
-            if column.name == "attempt_no":
+            if column.name in {"attempt_no", "heartbeat_at", "lease_expires_at"}:
                 continue
             with self.subTest(column=column.name):
                 self.assertEqual(columns[column.name]["nullable"], column.nullable)
