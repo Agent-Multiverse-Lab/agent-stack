@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, Copy, FolderOpen, MoreHorizontal, Pencil, Plus, PanelRight } from "lucide-react";
 import { useNavigate, useParams } from "react-router";
 
 import {
@@ -11,6 +11,9 @@ import {
   renameThread,
 } from "@/api/thread";
 import type { UploadedAttachmentResponse } from "@/api/attachment";
+import { Badge } from "@/components/ui/badge";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import type { AgentRunEndEvent } from "@/api/agent-run";
 import { AskUser } from "@/pages/chat/components/AskUser";
 import { AgentMessageComposer } from "@/pages/chat/components/AgentMessageComposer";
@@ -56,6 +59,8 @@ export default function ChatPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [showScroll, setShowScroll] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
 
   const abortStream = () => {
     controller.current?.abort();
@@ -207,6 +212,33 @@ export default function ChatPage() {
       setShowScroll(false);
     }
   }, [thread.state.messages, run.state.pendingInteraction]);
+
+  function startTitleEdit() {
+    const current = thread.getState().thread;
+    if (!current) return;
+    setTitleDraft(current.title);
+    setEditingTitle(true);
+  }
+
+  async function saveTitle() {
+    const current = thread.getState().thread;
+    const next = titleDraft.trim();
+    setEditingTitle(false);
+    if (!current || !next || next === current.title) return;
+    try {
+      const updated = await renameThread(current.thread_id, next);
+      thread.setThread({ ...current, title: updated.title });
+      window.dispatchEvent(new Event("thread-title-updated"));
+    } catch (caught) {
+      setError(errorText(caught));
+    }
+  }
+
+  function copyThreadLink() {
+    const id = thread.getState().thread?.thread_id;
+    if (!id) return;
+    void navigator.clipboard?.writeText(`${window.location.origin}/c/${encodeURIComponent(id)}`);
+  }
 
   function beginSubmission(): ChatSubmission | null {
     const attachmentState = attachments.getState();
@@ -410,23 +442,76 @@ export default function ChatPage() {
 
   return (
     <section className="relative flex h-full min-h-0 flex-col bg-card text-foreground">
-      <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-(--page-padding)">
-        <h2 className="min-w-0 truncate text-sm font-medium">
-          {conversationTitle}
-        </h2>
-        <Button
-          variant="ghost"
-          size="sm"
-          type="button"
-          aria-label={`${t("Status")}: ${statusLabel}`}
-          className="h-7 shrink-0 gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground"
-        >
-          <span
-            aria-hidden="true"
-            className={`size-2 rounded-full ${statusDotClass}`}
-          />
-          <span>{statusLabel}</span>
-        </Button>
+      <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-(--page-padding)">
+        <div className="flex min-w-0 items-center gap-2">
+          {editingTitle ? (
+            <Input
+              value={titleDraft}
+              onChange={(event) => setTitleDraft(event.target.value)}
+              onBlur={() => void saveTitle()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  void saveTitle();
+                }
+                if (event.key === "Escape") setEditingTitle(false);
+              }}
+              autoFocus
+              aria-label={t("Conversation title")}
+              className="h-7 w-[min(42vw,360px)] text-sm"
+            />
+          ) : (
+            <h2 className="min-w-0 truncate text-sm font-medium">
+              <button
+                type="button"
+                className="max-w-full truncate rounded-sm text-left outline-none hover:text-foreground/80 focus-visible:ring-2 focus-visible:ring-ring"
+                title={threadState.thread ? t("Rename conversation") : conversationTitle}
+                onClick={startTitleEdit}
+              >
+                {conversationTitle}
+              </button>
+            </h2>
+          )}
+          {threadState.thread && (
+            <Badge variant="outline" className="hidden shrink-0 sm:inline-flex">
+              {threadState.thread.agent_id || t("Agent")}
+            </Badge>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            aria-label={`${t("Status")}: ${statusLabel}`}
+            className="hidden h-7 shrink-0 gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground sm:inline-flex"
+          >
+            <span aria-hidden="true" className={`size-2 rounded-full ${statusDotClass}`} />
+            <span>{statusLabel}</span>
+          </Button>
+          <Button variant="ghost" size="icon-sm" type="button" aria-label={t("New chat")} title={t("New chat")} onClick={() => navigate("/")}>
+            <Plus />
+          </Button>
+          <Button variant="ghost" size="icon-sm" type="button" aria-label={t("Open workspace")} title={t("Open workspace")} onClick={() => navigate("/sandbox")}>
+            <PanelRight />
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" />} type="button" aria-label={t("Conversation actions")} title={t("Conversation actions")}>
+              <MoreHorizontal />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem disabled={!threadState.thread} onClick={startTitleEdit}>
+                <Pencil />{t("Rename conversation")}
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={!threadState.thread} onClick={copyThreadLink}>
+                <Copy />{t("Copy conversation link")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/sandbox")}>
+                <FolderOpen />{t("Open workspace")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </header>
       <div
         ref={scroller}

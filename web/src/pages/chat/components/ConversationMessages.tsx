@@ -1,4 +1,6 @@
 import type { ChatMessage as Message } from "@/pages/chat/types";
+import { extractArtifactsFromMessages } from "@/pages/chat/artifacts";
+import { ArtifactList } from "./ArtifactCard";
 import { ChatMessage } from "./ChatMessage";
 import { Thinking } from "./Thinking";
 
@@ -74,6 +76,7 @@ function RunMessages({ row, ...props }: Props & { row: Row }) {
   const start = current ? props.startedAt : timestamp(metadata.started_at);
   const end = timestamp(metadata.finished_at);
   const durationMs = start !== null && end !== null ? end - start : null;
+  const artifacts = extractArtifactsFromMessages(row.messages, props.threadId);
   const label = waiting ? "Waiting for your response"
     : status === "failed" ? "Execution failed"
       : status === "cancelled" ? "Cancelled"
@@ -91,6 +94,8 @@ function RunMessages({ row, ...props }: Props & { row: Row }) {
         </Thinking>
       )}
       {hasAnswer && last && <ChatMessage message={last} />}
+      {artifacts.length > 0 && <ArtifactList artifacts={artifacts} threadId={props.threadId} />}
     </section>
   );
 }
+

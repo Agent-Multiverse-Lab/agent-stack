@@ -41,6 +41,15 @@ export const readSandboxFile = (threadId: string, path: string, editable = false
   )
 }
 
+export const downloadSandboxFile = async (threadId: string, path: string): Promise<Blob> => {
+  const params = new URLSearchParams({ thread_id: threadId, path })
+  const response = await apiClient.apiFetch(
+    `/api/sandbox/workspace/download?${params.toString()}`,
+    { method: "GET", requiresAuth: true, cache: "no-store" },
+  )
+  return response.blob()
+}
+
 export const renameSandboxFile = (threadId: string, path: string, name: string) =>
   apiClient.apiPost<{ path: string }, { thread_id: string; path: string; name: string }>(
     "/api/sandbox/workspace/rename",
@@ -63,3 +72,4 @@ export const deleteSandboxFile = (threadId: string, path: string) => {
   const params = new URLSearchParams({ thread_id: threadId, path })
   return apiClient.apiDelete(`/api/sandbox/workspace/file?${params.toString()}`, { requiresAuth: true })
 }
+

@@ -137,9 +137,19 @@ export function AppSidebar({
         <SidebarTrigger className="size-[30px] shrink-0 rounded-[7px] group-data-[collapsible=icon]:mx-auto" />
       </SidebarHeader>
       <SidebarContent className="gap-2 py-0">
+        <div className="px-3 pt-2 text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase group-data-[collapsible=icon]:hidden">
+          {t("Workspace")}
+        </div>
         <NavMain items={data.navMain} />
         {accessToken && <SidebarSeparator className="mx-2.5 my-1 group-data-[collapsible=icon]:hidden" />}
-        {accessToken && <NavProjects onSearch={onSearch} />}
+        {accessToken && (
+          <>
+            <div className="px-3 pt-1 text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase group-data-[collapsible=icon]:hidden">
+              {t("Conversations")}
+            </div>
+            <NavProjects onSearch={onSearch} />
+          </>
+        )}
       </SidebarContent>
       <SidebarFooter className="px-2 pt-0 pb-1.5">
         <NavUser

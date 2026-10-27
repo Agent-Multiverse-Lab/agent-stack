@@ -53,7 +53,9 @@ FILESYSTEM_CONTEXT_PROMPT = """<| 文件系统与工作目录 |>
 - `/workspace/` 是当前对话的持久化工作目录，任务产物和需要跨工具复用的中间文件优先放在这里。
 - `/skill/` 保存可用 Skill；先根据 Skills 提示选择能力，需要使用时再读取对应 `SKILL.md`。
 - `/memory/` 保存当前用户跨会话共享的长期记忆，只在任务相关或用户明确要求时读取和维护。
-- 默认文件系统由当前隔离沙箱承载。未经用户明确要求，不要修改与当前任务无关的文件。"""
+- 默认文件系统由当前隔离沙箱承载。未经用户明确要求，不要修改与当前任务无关的文件。
+- 最终交付文件优先写入 `/workspace/outputs/`，写完后调用 `present_artifacts` 登记，前端会展示文件卡片。
+- 只有真正需要用户预览或下载的最终结果才调用 `present_artifacts`，不要登记中间过程文件。"""
 
 
 def build_prompt(context) -> str:
@@ -64,3 +66,4 @@ def build_prompt(context) -> str:
         f"{FILESYSTEM_CONTEXT_PROMPT}\n\n"
         f"{context.system_prompt or ''}"
     )
+

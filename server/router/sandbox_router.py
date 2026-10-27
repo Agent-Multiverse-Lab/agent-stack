@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -72,6 +74,32 @@ async def read_workspace_file(
         _raise_sandbox_http_error(exc)
 
 
+@router.get("/workspace/download")
+async def download_workspace_file(
+    current_user: AuthenticatedUser,
+    thread_id: str = Query(min_length=1),
+    path: str = Query(min_length=1, max_length=4096),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    try:
+        content, filename = await sandbox_service.download_workspace_file(
+            db,
+            uid=current_user.uid,
+            thread_id=thread_id,
+            path=path,
+        )
+    except (LookupError, ValueError, RuntimeError, OSError) as exc:
+        _raise_sandbox_http_error(exc)
+    return Response(
+        content=content,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+            "Cache-Control": "no-store",
+        },
+    )
+
+
 @router.post("/workspace/rename", response_model=SandboxFileOperationResponse)
 async def rename_workspace_file(
     request: SandboxFileRenameRequest,
@@ -116,3 +144,4 @@ async def delete_workspace_file(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except (LookupError, ValueError, RuntimeError, OSError) as exc:
         _raise_sandbox_http_error(exc)
+

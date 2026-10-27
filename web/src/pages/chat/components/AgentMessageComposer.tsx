@@ -7,6 +7,7 @@ import type {
 } from "react";
 import {
   ArrowUpIcon,
+  AtSignIcon,
   LoaderCircleIcon,
   MicIcon,
   PaperclipIcon,
@@ -366,6 +367,22 @@ export function AgentMessageComposer({
       : t("Start dictation")
     : t("Dictation is not supported in this browser");
 
+  const insertMention = () => {
+    const textarea = editor.current;
+    if (textarea) {
+      const start = textarea.selectionStart ?? draft.length;
+      const end = textarea.selectionEnd ?? start;
+      const next = `${draft.slice(0, start)}@${draft.slice(end)}`;
+      setDraft(next);
+      requestAnimationFrame(() => {
+        textarea.focus();
+        textarea.setSelectionRange(start + 1, start + 1);
+      });
+      return;
+    }
+    setDraft(`${draft}@`);
+  };
+
   return (
     <form
       ref={composer}
@@ -542,6 +559,34 @@ export function AgentMessageComposer({
           </TooltipTrigger>
           <TooltipContent>{running ? t("Cancel") : t("Send")}</TooltipContent>
         </Tooltip>
+      </div>
+
+      <div className="relative z-10 mt-1 flex w-full items-center justify-between gap-3 border-t border-border/60 px-1 pt-1.5 text-[11px] text-muted-foreground">
+        <div className="flex min-w-0 items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={disabled}
+            aria-label={t("Mention files, knowledge or agents")}
+            title={t("Mention files, knowledge or agents")}
+            onClick={insertMention}
+            className="h-6 gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+          >
+            <AtSignIcon className="size-3.5" />
+            {t("Mention")}
+          </Button>
+          <span className="hidden truncate sm:inline">
+            {attachments.length > 0
+              ? t("{{count}} attachment(s)", { count: attachments.length })
+              : t("Attach files or @ reference")}
+          </span>
+        </div>
+        <span className="shrink-0 tabular-nums">
+          {draft.trim()
+            ? t("{{count}} characters", { count: draft.length })
+            : t("Enter to send · Shift+Enter for newline")}
+        </span>
       </div>
     </form>
   );

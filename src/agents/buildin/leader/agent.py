@@ -18,7 +18,9 @@ from src.agents.backends.composite_backend import (
     create_custom_filesystem_middleware,
 )
 from src.agents.base_agent import BaseAgent
+from src.agents.base_state import BaseState
 from src.agents.buildin.leader.context import LeaderAgentContext
+from src.agents.buildin.leader.present_artifacts import present_artifacts
 from src.agents.buildin.leader.prompt import TODO_MIDDLEWARE_SYSTEM_PROMPT, build_prompt
 from src.agents.buildin.leader.tools import ask_user, calculator
 from src.agents.middlewares.memory_middleware import create_memory_middleware
@@ -71,7 +73,7 @@ class LeaderAgent(BaseAgent):
         # FIXEME: ask_user 仅注册到顶层 LeaderAgent，不扩散到 SubAgent。
         return await self._build_agent(
             runtime_context,
-            tools=[*mcp_tools, ask_user, calculator],
+            tools=[*mcp_tools, ask_user, calculator, present_artifacts],
             chat_model=chat_model,
         )
 
@@ -86,6 +88,7 @@ class LeaderAgent(BaseAgent):
             model=chat_model,
             tools=tools,
             system_prompt=build_prompt(runtime_context),
+            state_schema=BaseState,
             context_schema=type(runtime_context),
             checkpointer=self.get_checkpointer(),
             store=self.get_store(),
@@ -94,3 +97,4 @@ class LeaderAgent(BaseAgent):
                 chat_model=chat_model,
             ),
         )  # ty:ignore[invalid-return-type]
+

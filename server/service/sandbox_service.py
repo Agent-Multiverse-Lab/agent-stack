@@ -22,6 +22,7 @@ from src.agents.backends.sandbox import get_sandbox_provider
 from src.database.repositories import ConversationRepository
 
 WORKSPACE_PATH = "/workspace"
+MAX_ARTIFACT_DOWNLOAD_BYTES = 128 * 1024 * 1024
 MAX_FILE_PREVIEW_LINES = 2000
 MAX_FILE_PREVIEW_CHARS = 200_000
 
@@ -302,6 +303,85 @@ async def read_workspace_file(
     )
 
 
+_WORKSPACE_FILE_CHECK_SCRIPT = r'''
+import json, sys
+from pathlib import Path
+
+root = Path("/workspace").resolve()
+path = root / sys.argv[1].removeprefix("/workspace/")
+try:
+    for part in [path, *path.parents]:
+        if part == root:
+            break
+        if part.is_symlink():
+            raise ValueError("symbolic links are not allowed")
+    resolved = path.resolve()
+    resolved.relative_to(root)
+    if not resolved.is_file():
+        raise ValueError("Choose a regular file")
+    print(json.dumps({"ok": True, "size": resolved.stat().st_size}))
+except Exception as error:
+    print(json.dumps({"ok": False, "error": str(error)}))
+'''
+
+
+async def download_workspace_file(
+    db: AsyncSession,
+    *,
+    uid: str,
+    thread_id: str,
+    path: str,
+) -> tuple[bytes, str]:
+    """读取当前会话工作区内普通文件字节，供交付物下载与图片预览。"""
+    workspace_path = normalize_workspace_path(path)
+    if workspace_path == WORKSPACE_PATH:
+        raise ValueError("path must point to a file inside /workspace")
+    _, sandbox_id, sandbox, provider = await _get_owned_sandbox(
+        db, uid=uid, thread_id=thread_id,
+    )
+    try:
+        check = await asyncio.to_thread(
+            sandbox.execute,
+            f"python3 -c {shlex.quote(_WORKSPACE_FILE_CHECK_SCRIPT)} {shlex.quote(workspace_path)}",
+        )
+        try:
+            checked = json.loads(check.output)
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError("Invalid workspace file check response") from exc
+        if check.exit_code or not checked.get("ok"):
+            error = str(checked.get("error") or "File not found")
+            if "not exist" in error.lower() or "not found" in error.lower() or "no such" in error.lower():
+                raise FileNotFoundError(error)
+            raise ValueError(error)
+        if int(checked.get("size") or 0) > MAX_ARTIFACT_DOWNLOAD_BYTES:
+            raise ValueError("file is too large to download")
+        responses = await asyncio.to_thread(
+            sandbox.download_files, [to_sandbox_path(workspace_path)],
+        )
+    finally:
+        provider.release(sandbox_id)
+    if not responses:
+        raise RuntimeError("File download failed")
+    response = responses[0]
+    error = getattr(response, "error", None)
+    if error:
+        if str(error) == "file_not_found":
+            raise FileNotFoundError("File not found")
+        if str(error) == "is_directory":
+            raise ValueError("Choose a regular file")
+        if str(error) == "permission_denied":
+            raise PermissionError("File access denied")
+        raise RuntimeError(str(error))
+    content = getattr(response, "content", None)
+    if content is None:
+        raise FileNotFoundError("File not found")
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+    if len(content) > MAX_ARTIFACT_DOWNLOAD_BYTES:
+        raise ValueError("file is too large to download")
+    return content, posixpath.basename(workspace_path)
+
+
 async def mutate_workspace_file(
     db: AsyncSession,
     *,
@@ -362,3 +442,4 @@ def _execute_file_operation(sandbox, request: dict) -> dict:
         error_type = {"conflict": FileExistsError, "not_found": FileNotFoundError, "invalid": ValueError}.get(response.get("kind"), RuntimeError)
         raise error_type(response["error"])
     return response
+
