@@ -282,3 +282,38 @@ class LeaseTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], await self.repository.reconcile_expired_leases(
             now=now + timedelta(seconds=3600)
         ))
+
+    async def test_reconcile_converges_unclaimed_cancel_requested_run(self):
+        now = datetime.now(UTC)
+        await self.repository.request_cancel("run-1")
+        self.db.commit()
+
+        reconciled = await self.repository.reconcile_expired_leases(now=now)
+        self.db.commit()
+
+        self.assertEqual(["run-1"], [item.id for item in reconciled])
+        run = self._reload()
+        self.assertEqual("cancelled", run.agent_status)
+        self.assertIsNotNone(run.finished_at)
+
+    async def test_recover_unclaimed_pending_runs_requeues_or_times_out(self):
+        now = datetime.now(UTC)
+        self.run.created_at = now - timedelta(seconds=30)
+        self.db.commit()
+
+        requeue, timed_out = await self.repository.recover_unclaimed_pending_runs(
+            now=now, dispatch_timeout_seconds=900,
+        )
+        self.assertEqual(["run-1"], [item.id for item in requeue])
+        self.assertEqual([], timed_out)
+        self.assertEqual("pending", self._reload().agent_status)
+
+        requeue_late, timed_out_late = await self.repository.recover_unclaimed_pending_runs(
+            now=now + timedelta(seconds=901), dispatch_timeout_seconds=900,
+        )
+        self.db.commit()
+        self.assertEqual([], requeue_late)
+        self.assertEqual(["run-1"], [item.id for item in timed_out_late])
+        run = self._reload()
+        self.assertEqual("failed", run.agent_status)
+        self.assertEqual("DispatchTimeout", run.error_type)

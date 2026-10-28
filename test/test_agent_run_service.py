@@ -57,6 +57,14 @@ class FakeAgentRunRepository:
         self.arguments = None
         self.error = None
         self.run = None
+        self.existing_by_request = None
+        self.active_run = None
+
+    async def get_by_request_id(self, _request_id):
+        return self.existing_by_request
+
+    async def get_latest_active_for_thread(self, **_values):
+        return self.active_run
 
     async def create_run(self, **values):
         self.events.append("run")
@@ -66,6 +74,9 @@ class FakeAgentRunRepository:
         self.run = SimpleNamespace(
             id=values["run_id"],
             thread_id=values["thread_id"],
+            uid=values["uid"],
+            agent_id=values["agent_slug"],
+            run_type=values["run_type"],
             request_id=values["request_id"],
             agent_status="pending",
             error=None,
@@ -88,7 +99,7 @@ class FakeAgentRunRepository:
         self.run.agent_status = status
         self.run.error = error
         self.run.error_type = error_type
-        return self.run
+        return self.run, True
 
 
 class FakeMessageAttachmentRepository:
@@ -393,6 +404,57 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual([], self.events)
+
+    async def test_duplicate_request_id_returns_existing_run_without_new_message(self):
+        existing = SimpleNamespace(
+            id="existing-run",
+            uid="user-1",
+            thread_id="thread-1",
+            agent_id="leaderagent",
+            run_type="chat",
+            request_id="request-1",
+            agent_status="running",
+        )
+        self.runs.existing_by_request = existing
+        with patch.object(agent_run_service, "enqueue_agent_run", AsyncMock()) as enqueue:
+            run = await self.create_run()
+        self.assertIs(run, existing)
+        self.assertEqual([], self.events)
+        enqueue.assert_not_awaited()
+
+    async def test_duplicate_request_id_from_another_thread_raises_conflict(self):
+        self.runs.existing_by_request = SimpleNamespace(
+            id="existing-run",
+            uid="user-1",
+            thread_id="other-thread",
+            agent_id="leaderagent",
+            run_type="chat",
+            request_id="request-1",
+            agent_status="running",
+        )
+        with self.assertRaisesRegex(
+            agent_run_service.AgentRunConflictError,
+            "request_id 已被其他请求使用",
+        ):
+            await self.create_run()
+        self.assertEqual([], self.events)
+
+    async def test_active_run_on_same_thread_raises_conflict(self):
+        self.runs.active_run = SimpleNamespace(
+            id="active-run",
+            uid="user-1",
+            thread_id="thread-1",
+            agent_id="leaderagent",
+            run_type="chat",
+            agent_status="running",
+        )
+        with self.assertRaisesRegex(
+            agent_run_service.AgentRunConflictError,
+            "当前会话有正在执行的任务",
+        ):
+            await self.create_run()
+        self.assertEqual([], self.events)
+        self.assertTrue(self.conversations.lookup_arguments.get("for_update"))
 
 
 class AgentRunEventTest(unittest.IsolatedAsyncioTestCase):

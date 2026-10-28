@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.exception import AgentRunTimeOut
@@ -78,6 +79,7 @@ async def create_agent_run_service(
     conversation = await conversation_repository.get_conversation_by_thread_id_for_user(
         thread_id=thread_id,
         user_id=str(current_user.uid),
+        for_update=True,
     )
     if conversation is None:
         raise LookupError("当前会话不存在或已删除")
@@ -95,9 +97,24 @@ async def create_agent_run_service(
     await resolve_runtime_model(db, model_id)
     run_metadata["model"] = model_id
 
+    run_repository = AgentRunRepository(db)
+    raw_request_id = run_metadata.get("request_id")
+    request_id = str(raw_request_id or uuid.uuid4())
+    if raw_request_id and hasattr(run_repository, "get_by_request_id"):
+        existing_run = await run_repository.get_by_request_id(request_id)
+        if existing_run is not None:
+            if (
+                str(existing_run.uid) == str(current_user.uid)
+                and str(existing_run.thread_id) == thread_id
+                and str(existing_run.agent_id) == agent_id
+                and str(existing_run.run_type) == "chat"
+            ):
+                return existing_run
+            raise AgentRunConflictError("request_id 已被其他请求使用")
+
     # FIXEME: 待回答 ask_user 时不能再追加普通 HumanMessage。
     if (
-        await AgentRunRepository(db).get_pending_interaction_run(
+        await run_repository.get_pending_interaction_run(
             uid=str(current_user.uid),
             thread_id=thread_id,
         )
@@ -105,7 +122,15 @@ async def create_agent_run_service(
     ):
         raise AgentRunConflictError("当前会话有待回答的问题")
 
-    request_id = str(run_metadata.get("request_id") or uuid.uuid4())
+    if hasattr(run_repository, "get_latest_active_for_thread") and (
+        await run_repository.get_latest_active_for_thread(
+            uid=str(current_user.uid),
+            thread_id=thread_id,
+        )
+        is not None
+    ):
+        raise AgentRunConflictError("当前会话有正在执行的任务")
+
     run_id = str(uuid.uuid4())
     copied_objects: list[tuple[str, str]] = []
 
@@ -136,7 +161,7 @@ async def create_agent_run_service(
             message_id=int(message.id),
             attachments=attachments,
         )
-        run = await AgentRunRepository(db).create_run(
+        run = await run_repository.create_run(
             run_id=run_id,
             thread_id=thread_id,
             conversation_id=int(conversation.id),
@@ -150,6 +175,29 @@ async def create_agent_run_service(
         message.agent_run_id = run.id
         await db.flush()
         await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        await delete_copied_targets(copied_objects)
+        if raw_request_id and hasattr(run_repository, "get_by_request_id"):
+            existing_run = await run_repository.get_by_request_id(request_id)
+            if existing_run is not None:
+                if (
+                    str(existing_run.uid) == str(current_user.uid)
+                    and str(existing_run.thread_id) == thread_id
+                    and str(existing_run.agent_id) == agent_id
+                    and str(existing_run.run_type) == "chat"
+                ):
+                    return existing_run
+                raise AgentRunConflictError("request_id 已被其他请求使用") from None
+        if hasattr(run_repository, "get_latest_active_for_thread") and (
+            await run_repository.get_latest_active_for_thread(
+                uid=str(current_user.uid),
+                thread_id=thread_id,
+            )
+            is not None
+        ):
+            raise AgentRunConflictError("当前会话有正在执行的任务") from None
+        raise
     except Exception:
         await db.rollback()
         await delete_copied_targets(copied_objects)
@@ -160,11 +208,16 @@ async def create_agent_run_service(
         await enqueue_agent_run(str(run.id))
     except Exception as exc:
         logger.exception("Agent Run 入队失败：run_id=%s", run.id)
-        failed_run = await AgentRunRepository(db).set_agent_terminal(
+        terminal_result = await AgentRunRepository(db).set_agent_terminal(
             str(run.id),
             status="failed",
             error=f"Agent Run 入队失败：{exc}",
             error_type=type(exc).__name__,
+        )
+        failed_run = (
+            terminal_result[0]
+            if isinstance(terminal_result, tuple)
+            else terminal_result
         )
         if failed_run is not None:
             run = failed_run

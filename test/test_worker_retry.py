@@ -305,6 +305,11 @@ class WorkerRetryTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(call.kwargs["worker_id"], owners[call.args[0]])
         self.assertEqual(context, {"worker_id": "worker-test", "job_try": 1})
 
+    def test_worker_settings_configure_job_timeout_and_keep_result(self):
+        settings = self.namespace["WorkerSettings"]
+        self.assertGreaterEqual(settings.job_timeout, 3600)
+        self.assertEqual(settings.keep_result, 60)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -195,6 +195,17 @@ class AgentRun(Base):
             "conversation_id",
             "agent_status",
         ),
+        Index(
+            "uq_agent_run_one_executing_per_thread",
+            "thread_id",
+            unique=True,
+            postgresql_where=text(
+                "agent_status IN ('pending', 'running', 'cancel_requested')"
+            ),
+            sqlite_where=text(
+                "agent_status IN ('pending', 'running', 'cancel_requested')"
+            ),
+        ),
     )
 
     id = Column(String(64), primary_key=True, comment="运行ID")

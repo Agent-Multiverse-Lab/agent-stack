@@ -109,6 +109,8 @@ class Config(BaseSettings):
     redis_url: str = Field(default="redis://8.136.2.212:6379/0", description="Redis 连接地址")
     arq_queue_name: str = Field(default="agent-runs", description="ARQ 队列名称")
     arq_max_jobs: int = Field(default=64, description="ARQ worker 最大并发任务数")
+    arq_job_timeout_seconds: int = Field(default=3600, gt=0, description="ARQ 单次任务执行超时秒数")
+    arq_keep_result_seconds: int = Field(default=60, gt=0, description="ARQ 任务结果保留秒数")
     enable_run_queue: bool = Field(default=False, description="是否使用 ARQ/Redis 执行 agent run")
     redis_pool_max_connections: int = Field(default=20, description="Redis 连接池最大连接数")
     run_stream_poll_timeout_ms: int = Field(default=15000, description="Redis Stream 阻塞读取超时时间")

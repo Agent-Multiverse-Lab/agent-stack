@@ -21,6 +21,8 @@ AGENT_RUN_LEASED_STATUSES = frozenset({"running", "cancel_requested"})
 AGENT_RUN_RENEWABLE_STATUSES = frozenset({"running"})
 # 默认租约 120 秒；Worker 每 30 秒续期一次，过期即视为执行者失联。
 DEFAULT_RUN_LEASE_SECONDS = 120.0
+# 未被 Worker 认领的 pending Run 超过 15 分钟视为派发超时。
+DEFAULT_RUN_DISPATCH_TIMEOUT_SECONDS = 900.0
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,17 @@ class AgentRunRepository:
         result = await self.session.execute(
             select(AgentRun)
             .where(AgentRun.id == run_id)
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_request_id(self, request_id: str) -> AgentRun | None:
+        """按 request_id 查询已有 Agent Run，用于创建幂等校验。"""
+        if not request_id:
+            return None
+        result = await self.session.execute(
+            select(AgentRun)
+            .where(AgentRun.request_id == request_id)
             .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
@@ -614,6 +627,15 @@ class AgentRunRepository:
             )
         )
         candidate_ids.update(str(run_id) for run_id in legacy.scalars().all())
+        unclaimed_cancelled = await self.session.execute(
+            select(AgentRun.id).where(
+                AgentRun.agent_status == "cancel_requested",
+                AgentRun.worker_id.is_(None),
+            )
+        )
+        candidate_ids.update(
+            str(run_id) for run_id in unclaimed_cancelled.scalars().all()
+        )
 
         runs: list[AgentRun] = []
         for run_id in sorted(candidate_ids):
@@ -646,6 +668,12 @@ class AgentRunRepository:
                 and _as_utc(run.lease_expires_at) > _as_utc(current_time)
             ):
                 continue
+            if (
+                open_attempt is None
+                and run.worker_id is None
+                and current_status != "cancel_requested"
+            ):
+                continue
 
             cancelled = current_status == "cancel_requested"
             await self.attempts.close_open(
@@ -672,6 +700,55 @@ class AgentRunRepository:
         if runs:
             await self.session.flush()
         return runs
+
+    async def recover_unclaimed_pending_runs(
+        self,
+        *,
+        now: datetime | None = None,
+        dispatch_timeout_seconds: float = DEFAULT_RUN_DISPATCH_TIMEOUT_SECONDS,
+    ) -> tuple[list[AgentRun], list[AgentRun]]:
+        """扫描未认领的 pending Run：超时收敛为 failed，未超时返回供补投。"""
+
+        current_time = now or datetime.now(UTC)
+        unclaimed = await self.session.execute(
+            select(AgentRun.id).where(
+                AgentRun.agent_status == "pending",
+                AgentRun.worker_id.is_(None),
+            )
+        )
+        candidate_ids = sorted(str(run_id) for run_id in unclaimed.scalars().all())
+        requeue_runs: list[AgentRun] = []
+        timed_out_runs: list[AgentRun] = []
+
+        for run_id in candidate_ids:
+            run = await self._lock_update(run_id)
+            if (
+                run is None
+                or str(run.agent_status) != "pending"
+                or run.worker_id is not None
+            ):
+                continue
+            open_attempt = await self.attempts.open(run_id)
+            if open_attempt is not None:
+                continue
+
+            created_at = getattr(run, "created_at", None)
+            if (
+                created_at is not None
+                and (_as_utc(current_time) - _as_utc(created_at)).total_seconds()
+                >= dispatch_timeout_seconds
+            ):
+                run.agent_status = "failed"
+                run.finished_at = current_time
+                run.error = "Agent Run dispatch timed out before a worker claimed it"
+                run.error_type = "DispatchTimeout"
+                timed_out_runs.append(run)
+            else:
+                requeue_runs.append(run)
+
+        if timed_out_runs:
+            await self.session.flush()
+        return requeue_runs, timed_out_runs
 
     async def release_for_retry(self, run_id: str, *, worker_id: str) -> bool:
         """仅当前 attempt 可以释放归属，供 ARQ 下一次重试重新领取。"""

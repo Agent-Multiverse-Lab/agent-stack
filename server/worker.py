@@ -12,6 +12,7 @@ from arq.worker import RetryJob
 from sqlalchemy import select
 
 import src.agents.buildin as agent
+from server.service.agent_run_service import enqueue_agent_run
 from server.service.arq_queue_servcie import (
     RUN_REDIS_TTL_SECONDS,
     clear_agent_run_cancel_signal,
@@ -279,17 +280,29 @@ async def _renew_run_lease(run_id: str, worker_id: str) -> bool:
 
 
 async def reconcile_expired_run_leases() -> int:
-    """把租约过期的 Run 收敛为失败/取消终态，返回处理数量。"""
+    """把租约过期的 Run 收敛为失败/取消终态，并补投未认领的 pending Run。"""
 
     async with postgres_manager.get_async_session_context() as db:
-        runs = await AgentRunRepository(db).reconcile_expired_leases()
+        repo = AgentRunRepository(db)
+        runs = await repo.reconcile_expired_leases()
+        requeue_runs, timed_out_runs = await repo.recover_unclaimed_pending_runs()
     for run in runs:
         logger.warning(
-            "Agent Run 租约过期，已收敛：run_id=%s status=%s",
+            "Agent Run 租约过期或未认领取消，已收敛：run_id=%s status=%s",
             run.id,
             run.agent_status,
         )
-    return len(runs)
+    for run in timed_out_runs:
+        logger.warning(
+            "Agent Run 派发超时，已收敛为失败：run_id=%s",
+            run.id,
+        )
+    for run in requeue_runs:
+        try:
+            await enqueue_agent_run(str(run.id))
+        except Exception:
+            logger.exception("未认领的 pending Agent Run 重新入队失败：run_id=%s", run.id)
+    return len(runs) + len(timed_out_runs)
 
 
 async def _run_lease_reaper() -> None:
@@ -999,6 +1012,8 @@ class WorkerSettings:
     queue_name = config.arq_queue_name
     redis_settings = RedisSettings.from_dsn(config.redis_url)
     max_jobs = config.arq_max_jobs
+    job_timeout = getattr(config, "arq_job_timeout_seconds", 3600)
+    keep_result = getattr(config, "arq_keep_result_seconds", 60)
     retry_jobs = True
     max_tries = 3  # 包含首次执行，最多再重试两次。
     on_startup = worker_startup

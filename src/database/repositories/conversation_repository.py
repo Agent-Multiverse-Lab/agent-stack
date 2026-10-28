@@ -131,15 +131,18 @@ class ConversationRepository:
         self,
         thread_id: str,
         user_id: str,
+        *,
+        for_update: bool = False,
     ) -> Conversation | None:
         """按用户和 Thread ID 读取任意层级的未删除对话。"""
-        result = await self.session.execute(
-            select(Conversation).where(
-                Conversation.thread_id == thread_id,
-                Conversation.uid == str(user_id),
-                Conversation.deleted_at.is_(None),
-            )
+        statement = select(Conversation).where(
+            Conversation.thread_id == thread_id,
+            Conversation.uid == str(user_id),
+            Conversation.deleted_at.is_(None),
         )
+        if for_update:
+            statement = statement.with_for_update()
+        result = await self.session.execute(statement)
         return result.scalar_one_or_none()
 
     async def list_messages(

@@ -72,7 +72,7 @@ class RunAttemptSchemaTest(DatabaseTestCase):
         ))
         self.db.execute(self.run.insert(), [
             {"id": run_id, "uid": "user-1", "conversation_id": 1,
-             "thread_id": "thread-1", "agent_id": "agent", "agent_status": "running"}
+             "thread_id": f"thread-{run_id}", "agent_id": "agent", "agent_status": "running"}
             for run_id in ("run-1", "run-2")
         ])
 
@@ -108,6 +108,20 @@ class RunAttemptSchemaTest(DatabaseTestCase):
         self.assert_integrity_error(self.attempt.insert().values(
             id="second-open", run_id="run-1", attempt_no=2,
             worker_id="worker-2", status="running",
+        ))
+
+    def test_only_one_executing_run_per_thread(self):
+        self.assert_integrity_error(self.run.insert().values(
+            id="run-dup", uid="user-1", conversation_id=1,
+            thread_id="thread-run-1", agent_id="agent", agent_status="pending",
+        ))
+        self.db.execute(self.run.insert().values(
+            id="run-completed", uid="user-1", conversation_id=1,
+            thread_id="thread-run-1", agent_id="agent", agent_status="completed",
+        ))
+        self.db.execute(self.run.insert().values(
+            id="run-interrupted", uid="user-1", conversation_id=1,
+            thread_id="thread-run-1", agent_id="agent", agent_status="interrupted",
         ))
 
     def test_attempt_requires_existing_run_and_required_fields(self):
