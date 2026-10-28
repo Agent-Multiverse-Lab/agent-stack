@@ -236,4 +236,97 @@ describe("AgentMessageComposer", () => {
     expect(selectModel).toHaveBeenCalledWith("second");
     expect(document.querySelector("[data-model-sweep]")).toBeTruthy();
   });
+
+  it("opens the inline @ mention popup on typing @, filters candidates, and inserts mention tokens", () => {
+    const setDraft = vi.fn();
+    const submit = vi.fn();
+    const mention = {
+      files: [
+        {
+          type: "file" as const,
+          value: "/workspace/report.md",
+          label: "report.md",
+          description: "/workspace/report.md",
+        },
+      ],
+      knowledgeBases: [
+        {
+          type: "knowledge" as const,
+          value: "GIS Docs",
+          label: "GIS Docs",
+          description: "Spatial reference docs",
+        },
+      ],
+      agents: [
+        {
+          type: "agent" as const,
+          value: "ResearchAgent",
+          label: "Research Agent",
+          description: "Deep research subagent",
+        },
+      ],
+    };
+
+    const { rerender } = render(
+      <AgentMessageComposer
+        {...baseProps}
+        draft=""
+        setDraft={setDraft}
+        submit={submit}
+        mention={mention}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: /Mention files, knowledge or agents/ }),
+    ).toBeNull();
+
+    const editor = screen.getByRole("textbox", {
+      name: "Message",
+    }) as HTMLTextAreaElement;
+
+    fireEvent.change(editor, { target: { value: "Check @", selectionStart: 7 } });
+    expect(setDraft).toHaveBeenLastCalledWith("Check @");
+
+    rerender(
+      <AgentMessageComposer
+        {...baseProps}
+        draft="Check @"
+        setDraft={setDraft}
+        submit={submit}
+        mention={mention}
+      />,
+    );
+
+    const listbox = screen.getByRole("listbox", { name: "Mention suggestions" });
+    expect(listbox).toBeTruthy();
+    expect(screen.getAllByRole("option")).toHaveLength(3);
+
+    fireEvent.keyDown(editor, { key: "ArrowDown" });
+    fireEvent.keyDown(editor, { key: "Enter" });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(setDraft).toHaveBeenLastCalledWith('Check @knowledge:"GIS Docs" ');
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("deletes an entire @mention token atomically on Backspace", () => {
+    const setDraft = vi.fn();
+    const draft = "Read @file:/workspace/report.md";
+    render(
+      <AgentMessageComposer
+        {...baseProps}
+        draft={draft}
+        setDraft={setDraft}
+      />,
+    );
+
+    const editor = screen.getByRole("textbox", {
+      name: "Message",
+    }) as HTMLTextAreaElement;
+    editor.setSelectionRange(draft.length, draft.length);
+
+    fireEvent.keyDown(editor, { key: "Backspace" });
+    expect(setDraft).toHaveBeenCalledWith("Read ");
+  });
 });

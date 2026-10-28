@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
+  ChangeEvent,
   ClipboardEvent,
   DragEvent,
   KeyboardEvent,
@@ -7,13 +8,17 @@ import type {
 } from "react";
 import {
   ArrowUpIcon,
-  AtSignIcon,
+  BookOpenIcon,
+  BotIcon,
+  FileTextIcon,
+  FolderIcon,
   LoaderCircleIcon,
   MicIcon,
   PaperclipIcon,
   PlugIcon,
   PlusIcon,
   SquareIcon,
+  WandSparklesIcon,
 } from "lucide-react";
 import { createShader, playSweep, accentChain, ACCENTS } from "glimm";
 
@@ -27,6 +32,10 @@ const RAINBOW = accentChain([
   ACCENTS.purple,
 ]);
 
+import { listAgents } from "@/api/agent";
+import type { UploadedAttachmentResponse } from "@/api/attachment";
+import { listKnowledgeBases } from "@/api/knowledge";
+import { listSandboxWorkspace } from "@/api/sandbox";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -44,7 +53,15 @@ import {
 import { useTranslation } from "@/i18n";
 import { Attachment } from "@/pages/chat/components/Attachment";
 import ModelSelector from "@/pages/chat/components/ModelSelector";
-import type { UploadedAttachmentResponse } from "@/api/attachment";
+import {
+  expandMentionDeletionRange,
+  findActiveMentionQuery,
+  formatMentionToken,
+  replaceRawRange,
+  splitTextByQuery,
+  type MentionItem,
+  type MentionSources,
+} from "@/pages/chat/mentions";
 import type { ChatModelOption } from "@/types/model";
 
 type AgentMessageComposerProps = {
@@ -58,6 +75,8 @@ type AgentMessageComposerProps = {
   models: ChatModelOption[];
   modelsLoading: boolean;
   placement: "top" | "bottom";
+  threadId?: string;
+  mention?: MentionSources;
   selectModel: (id: string) => void;
   upload: (files: File[]) => void;
   removeAttachment: (id: string) => void;
@@ -96,6 +115,48 @@ const COMPOSER_MIN_HEIGHT = 44;
 const COMPOSER_MAX_HEIGHT = 200;
 const CONTROL_MOTION_DURATION = 240;
 
+function HighlightedText({
+  text,
+  query,
+}: {
+  text: string;
+  query: string;
+}) {
+  const parts = splitTextByQuery(text, query);
+  return (
+    <>
+      {parts.map((part, index) => (
+        <span
+          key={`${part.text}-${index}`}
+          className={part.isMatch ? "font-semibold text-primary" : undefined}
+        >
+          {part.text}
+        </span>
+      ))}
+    </>
+  );
+}
+
+function MentionItemIcon({ item }: { item: MentionItem }) {
+  if (item.type === "file") {
+    return item.isDir ? (
+      <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
+    ) : (
+      <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+    );
+  }
+  if (item.type === "knowledge") {
+    return <BookOpenIcon className="size-4 shrink-0 text-primary" />;
+  }
+  if (item.type === "agent") {
+    return <BotIcon className="size-4 shrink-0 text-primary" />;
+  }
+  if (item.type === "skill") {
+    return <WandSparklesIcon className="size-4 shrink-0 text-primary" />;
+  }
+  return <PlugIcon className="size-4 shrink-0 text-muted-foreground" />;
+}
+
 export function AgentMessageComposer({
   draft,
   setDraft,
@@ -107,6 +168,8 @@ export function AgentMessageComposer({
   models,
   modelsLoading,
   placement,
+  threadId,
+  mention,
   selectModel,
   upload,
   removeAttachment,
@@ -118,6 +181,7 @@ export function AgentMessageComposer({
   const fileInput = useRef<HTMLInputElement>(null);
   const editor = useRef<HTMLTextAreaElement>(null);
   const controls = useRef<HTMLDivElement>(null);
+  const mentionPopupRef = useRef<HTMLDivElement>(null);
   const previousPositions = useRef(new Map<string, DOMRect>());
   const recognition = useRef<SpeechRecognitionLike | null>(null);
   const dictationBase = useRef("");
@@ -127,6 +191,17 @@ export function AgentMessageComposer({
   const [speechSupported, setSpeechSupported] = useState<boolean | null>(null);
   const [listening, setListening] = useState(false);
   const [modelSweep, setModelSweep] = useState(0);
+  const [caretOffset, setCaretOffset] = useState<number | null>(null);
+  const [dismissedMentionStart, setDismissedMentionStart] = useState<
+    number | null
+  >(null);
+  const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0);
+  const [remoteKnowledge, setRemoteKnowledge] = useState<MentionItem[]>([]);
+  const [remoteAgents, setRemoteAgents] = useState<MentionItem[]>([]);
+  const [remoteFiles, setRemoteFiles] = useState<MentionItem[]>([]);
+  const loadedCatalogRef = useRef(false);
+  const loadedThreadFilesRef = useRef<string | null>(null);
+  const previousQueryRef = useRef<string | null>(null);
   const glimmRef = useRef<HTMLCanvasElement>(null);
   const shaderRef = useRef<ReturnType<typeof createShader> | null>(null);
   const sweepingRef = useRef(false);
@@ -229,6 +304,102 @@ export function AgentMessageComposer({
     }
   }, [disabled, listening, running]);
 
+  const resolvedCaret =
+    caretOffset === null
+      ? draft.length
+      : Math.max(0, Math.min(caretOffset, draft.length));
+  const activeMention =
+    disabled || composing ? null : findActiveMentionQuery(draft, resolvedCaret);
+  const mentionOpen =
+    Boolean(activeMention) && dismissedMentionStart !== activeMention?.start;
+
+  useEffect(() => {
+    const nextQuery = activeMention?.query ?? null;
+    if (previousQueryRef.current !== nextQuery) {
+      previousQueryRef.current = nextQuery;
+      setMentionSelectedIndex(0);
+    }
+  }, [activeMention?.query]);
+
+  useEffect(() => {
+    if (!mentionOpen || !activeMention) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (editor.current?.contains(target)) return;
+      if (mentionPopupRef.current?.contains(target)) return;
+      setDismissedMentionStart(activeMention.start);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [activeMention, mentionOpen]);
+
+  useEffect(() => {
+    if (!mentionOpen) return;
+    let cancelled = false;
+
+    if (!mention?.knowledgeBases && !mention?.agents && !loadedCatalogRef.current) {
+      loadedCatalogRef.current = true;
+      void Promise.resolve(listKnowledgeBases())
+        .then((bases) => {
+          if (cancelled || !Array.isArray(bases)) return;
+          setRemoteKnowledge(
+            bases.map((kb) => ({
+              type: "knowledge",
+              value: kb.name,
+              label: kb.name,
+              description: kb.description || "",
+            })),
+          );
+        })
+        .catch(() => {});
+
+      void Promise.resolve(listAgents())
+        .then((agents) => {
+          if (cancelled || !Array.isArray(agents)) return;
+          setRemoteAgents(
+            agents
+              .filter((agent) => agent.enabled)
+              .map((agent) => ({
+                type: "agent",
+                value: agent.id,
+                label: agent.name || agent.id,
+                description: agent.description || "",
+              })),
+          );
+        })
+        .catch(() => {});
+    }
+
+    if (
+      !mention?.files &&
+      threadId &&
+      loadedThreadFilesRef.current !== threadId
+    ) {
+      loadedThreadFilesRef.current = threadId;
+      void Promise.resolve(listSandboxWorkspace(threadId, "/workspace"))
+        .then((workspace) => {
+          if (cancelled || !Array.isArray(workspace?.entries)) return;
+          setRemoteFiles(
+            workspace.entries.map((entry) => ({
+              type: "file",
+              value: entry.path,
+              label: entry.name,
+              description: entry.path,
+              isDir: entry.kind === "directory",
+            })),
+          );
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mention?.agents, mention?.files, mention?.knowledgeBases, mentionOpen, threadId]);
+
   useLayoutEffect(() => {
     const textarea = editor.current;
     if (!textarea) return;
@@ -292,6 +463,69 @@ export function AgentMessageComposer({
     previousPositions.current = nextPositions;
   }, [expanded]);
 
+  const mentionQuery = activeMention?.query ?? "";
+  const normalizedQuery = mentionQuery.trim().toLowerCase();
+
+  const matchesQuery = (item: MentionItem) => {
+    if (!normalizedQuery) return true;
+    return [item.label, item.value, item.description]
+      .filter(Boolean)
+      .some((text) => String(text).toLowerCase().includes(normalizedQuery));
+  };
+
+  const mergedFileCandidates = (() => {
+    const seen = new Set<string>();
+    const list: MentionItem[] = [];
+    const push = (item: MentionItem) => {
+      if (!item.value || seen.has(item.value)) return;
+      seen.add(item.value);
+      list.push(item);
+    };
+    attachments.forEach((attachment) => {
+      push({
+        type: "file",
+        value: attachment.file_name,
+        label: attachment.file_name,
+        description: attachment.content_type,
+      });
+    });
+    (mention?.files ?? (threadId ? remoteFiles : [])).forEach(push);
+    return list.filter(matchesQuery);
+  })();
+
+  const filteredKnowledgeBases = (
+    mention?.knowledgeBases ?? remoteKnowledge
+  ).filter(matchesQuery);
+
+  const filteredAgents = (mention?.agents ?? remoteAgents).filter(matchesQuery);
+
+  const flatMentionItems: MentionItem[] = [
+    ...mergedFileCandidates,
+    ...filteredKnowledgeBases,
+    ...filteredAgents,
+  ];
+
+  const selectMentionItem = (item: MentionItem) => {
+    if (disabled || !activeMention) return;
+    const tokenText = `${formatMentionToken(item.type, item.value)} `;
+    const nextDraft = replaceRawRange(
+      draft,
+      activeMention.start,
+      activeMention.end,
+      tokenText,
+    );
+    const nextCaret = activeMention.start + tokenText.length;
+    setDismissedMentionStart(activeMention.start);
+    setCaretOffset(nextCaret);
+    setDraft(nextDraft);
+    requestAnimationFrame(() => {
+      const textarea = editor.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(nextCaret, nextCaret);
+    });
+  };
+
   const selectFiles = (files: FileList | null) => {
     if (files?.length) upload(Array.from(files));
   };
@@ -316,6 +550,8 @@ export function AgentMessageComposer({
 
   const submitMessage = () => {
     stopDictation();
+    setDismissedMentionStart(null);
+    setCaretOffset(null);
     submit();
   };
 
@@ -336,7 +572,88 @@ export function AgentMessageComposer({
     }
   };
 
+  const onDraftChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    const nextValue = event.target.value;
+    const caret = event.target.selectionStart ?? nextValue.length;
+    setDismissedMentionStart(null);
+    setCaretOffset(caret);
+    setDraft(nextValue);
+  };
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionOpen && activeMention) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setDismissedMentionStart(activeMention.start);
+        return;
+      }
+      if (flatMentionItems.length > 0) {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          setMentionSelectedIndex(
+            (current) => (current + 1) % flatMentionItems.length,
+          );
+          return;
+        }
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          setMentionSelectedIndex(
+            (current) =>
+              (current - 1 + flatMentionItems.length) %
+              flatMentionItems.length,
+          );
+          return;
+        }
+        if (
+          (event.key === "Enter" || event.key === "Tab") &&
+          !event.shiftKey &&
+          !event.nativeEvent.isComposing &&
+          !composing
+        ) {
+          event.preventDefault();
+          const chosen =
+            flatMentionItems[mentionSelectedIndex] ?? flatMentionItems[0];
+          if (chosen) selectMentionItem(chosen);
+          return;
+        }
+      }
+    }
+
+    if (
+      (event.key === "Backspace" || event.key === "Delete") &&
+      !event.nativeEvent.isComposing &&
+      !composing
+    ) {
+      const textarea = event.currentTarget;
+      const start = textarea.selectionStart ?? draft.length;
+      const end = textarea.selectionEnd ?? start;
+      const direction =
+        event.key === "Backspace" && start === end ? "backward" : "forward";
+      const expandedRange = expandMentionDeletionRange(
+        draft,
+        start,
+        end,
+        direction,
+      );
+      if (expandedRange) {
+        event.preventDefault();
+        const nextDraft = replaceRawRange(
+          draft,
+          expandedRange.start,
+          expandedRange.end,
+          "",
+        );
+        setDismissedMentionStart(null);
+        setCaretOffset(expandedRange.start);
+        setDraft(nextDraft);
+        requestAnimationFrame(() => {
+          textarea.focus();
+          textarea.setSelectionRange(expandedRange.start, expandedRange.start);
+        });
+        return;
+      }
+    }
+
     if (
       event.key === "Enter" &&
       !event.shiftKey &&
@@ -367,20 +684,10 @@ export function AgentMessageComposer({
       : t("Start dictation")
     : t("Dictation is not supported in this browser");
 
-  const insertMention = () => {
-    const textarea = editor.current;
-    if (textarea) {
-      const start = textarea.selectionStart ?? draft.length;
-      const end = textarea.selectionEnd ?? start;
-      const next = `${draft.slice(0, start)}@${draft.slice(end)}`;
-      setDraft(next);
-      requestAnimationFrame(() => {
-        textarea.focus();
-        textarea.setSelectionRange(start + 1, start + 1);
-      });
-      return;
-    }
-    setDraft(`${draft}@`);
+  const getFlatIndex = (group: "file" | "knowledge" | "agent", index: number) => {
+    if (group === "file") return index;
+    if (group === "knowledge") return mergedFileCandidates.length + index;
+    return mergedFileCandidates.length + filteredKnowledgeBases.length + index;
   };
 
   return (
@@ -389,7 +696,7 @@ export function AgentMessageComposer({
       aria-label={t("Agent message composer")}
       aria-busy={uploading > 0}
       data-expanded={expanded}
-      className="relative isolate flex w-full flex-col overflow-hidden rounded-[1.4rem] border border-border bg-card px-3 pt-[0.8rem] pb-[0.6rem] shadow-[0_2px_8px_rgb(0_0_0/0.05)]"
+      className="relative isolate flex w-full flex-col rounded-[1.4rem] border border-border bg-card px-3 pt-[0.8rem] pb-[0.6rem] shadow-[0_2px_8px_rgb(0_0_0/0.05)]"
       onSubmit={onSubmit}
       onDragOver={(event) => event.preventDefault()}
       onDrop={onDrop}
@@ -402,6 +709,149 @@ export function AgentMessageComposer({
         className="pointer-events-none absolute inset-0 -z-10 h-full w-full"
         style={{ borderRadius: "inherit" }}
       />
+
+      {mentionOpen && activeMention && !disabled && (
+        <div
+          ref={mentionPopupRef}
+          role="listbox"
+          aria-label={t("Mention suggestions")}
+          onMouseDown={(event) => event.preventDefault()}
+          className={` absolute inset-x-0 z-50 max-h-[280px] overflow-y-auto rounded-xl border border-border bg-popover py-2 text-popover-foreground shadow-lg ${
+            placement === "top" ? "bottom-full mb-2" : "top-full mt-2"
+          }`}
+        >
+          {mergedFileCandidates.length > 0 && (
+            <div className="mb-1 last:mb-0">
+              <div className="mb-0.5 border-b border-border/60 px-2.5 py-1 text-xs text-muted-foreground">
+                {t("Files")}
+              </div>
+              {mergedFileCandidates.map((item, index) => {
+                const flatIdx = getFlatIndex("file", index);
+                const selected = flatIdx === mentionSelectedIndex;
+                return (
+                  <Button
+                    key={`file-${item.value}`}
+                    type="button"
+                    variant="ghost"
+                    role="option"
+                    aria-selected={selected}
+                    onMouseEnter={() => setMentionSelectedIndex(flatIdx)}
+                    onClick={() => selectMentionItem(item)}
+                    className={`mx-1 flex h-auto w-[calc(100%-0.5rem)] items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] font-normal ${
+                      selected
+                        ? "bg-selection text-selection-foreground hover:bg-selection hover:text-selection-foreground"
+                        : "text-foreground"
+                    }`}
+                  >
+                    <span className="flex min-w-0 items-center gap-2 font-medium">
+                      <MentionItemIcon item={item} />
+                      <span className="truncate">
+                        <HighlightedText text={item.label} query={mentionQuery} />
+                      </span>
+                    </span>
+                    {item.description && (
+                      <span className="shrink-0 truncate text-xs text-muted-foreground">
+                        <HighlightedText
+                          text={item.description}
+                          query={mentionQuery}
+                        />
+                      </span>
+                    )}
+                  </Button>
+                );
+              })}
+            </div>
+          )}
+
+          {filteredKnowledgeBases.length > 0 && (
+            <div className="mb-1 last:mb-0">
+              <div className="mb-0.5 border-b border-border/60 px-2.5 py-1 text-xs text-muted-foreground">
+                {t("Knowledge")}
+              </div>
+              {filteredKnowledgeBases.map((item, index) => {
+                const flatIdx = getFlatIndex("knowledge", index);
+                const selected = flatIdx === mentionSelectedIndex;
+                return (
+                  <Button
+                    key={`kb-${item.value}`}
+                    type="button"
+                    variant="ghost"
+                    role="option"
+                    aria-selected={selected}
+                    onMouseEnter={() => setMentionSelectedIndex(flatIdx)}
+                    onClick={() => selectMentionItem(item)}
+                    className={`mx-1 flex h-auto w-[calc(100%-0.5rem)] items-center justify-start gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] font-normal ${
+                      selected
+                        ? "bg-selection text-selection-foreground hover:bg-selection hover:text-selection-foreground"
+                        : "text-foreground"
+                    }`}
+                  >
+                    <MentionItemIcon item={item} />
+                    <span className="shrink-0 font-medium">
+                      <HighlightedText text={item.label} query={mentionQuery} />
+                    </span>
+                    {item.description && (
+                      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                        <HighlightedText
+                          text={item.description}
+                          query={mentionQuery}
+                        />
+                      </span>
+                    )}
+                  </Button>
+                );
+              })}
+            </div>
+          )}
+
+          {filteredAgents.length > 0 && (
+            <div className="mb-1 last:mb-0">
+              <div className="mb-0.5 border-b border-border/60 px-2.5 py-1 text-xs text-muted-foreground">
+                {t("Agents")}
+              </div>
+              {filteredAgents.map((item, index) => {
+                const flatIdx = getFlatIndex("agent", index);
+                const selected = flatIdx === mentionSelectedIndex;
+                return (
+                  <Button
+                    key={`agent-${item.value}`}
+                    type="button"
+                    variant="ghost"
+                    role="option"
+                    aria-selected={selected}
+                    onMouseEnter={() => setMentionSelectedIndex(flatIdx)}
+                    onClick={() => selectMentionItem(item)}
+                    className={`mx-1 flex h-auto w-[calc(100%-0.5rem)] items-center justify-start gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] font-normal ${
+                      selected
+                        ? "bg-selection text-selection-foreground hover:bg-selection hover:text-selection-foreground"
+                        : "text-foreground"
+                    }`}
+                  >
+                    <MentionItemIcon item={item} />
+                    <span className="shrink-0 font-medium">
+                      <HighlightedText text={item.label} query={mentionQuery} />
+                    </span>
+                    {item.description && (
+                      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                        <HighlightedText
+                          text={item.description}
+                          query={mentionQuery}
+                        />
+                      </span>
+                    )}
+                  </Button>
+                );
+              })}
+            </div>
+          )}
+
+          {flatMentionItems.length === 0 && (
+            <div className="px-3 py-3 text-center text-[13px] text-muted-foreground">
+              {t("No matching items to mention")}
+            </div>
+          )}
+        </div>
+      )}
 
       {(attachments.length > 0 || uploading > 0) && (
         <ul className="relative z-10 m-0 flex w-full list-none flex-wrap gap-1.5 px-1 pb-2">
@@ -487,10 +937,24 @@ export function AgentMessageComposer({
         <Textarea
           ref={editor}
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={onDraftChange}
+          onClick={(event) => {
+            const caret =
+              event.currentTarget.selectionStart ??
+              event.currentTarget.value.length;
+            setDismissedMentionStart(null);
+            setCaretOffset(caret);
+          }}
           onKeyDown={onKeyDown}
           onCompositionStart={() => setComposing(true)}
-          onCompositionEnd={() => setComposing(false)}
+          onCompositionEnd={(event) => {
+            setComposing(false);
+            const caret =
+              event.currentTarget.selectionStart ??
+              event.currentTarget.value.length;
+            setDismissedMentionStart(null);
+            setCaretOffset(caret);
+          }}
           disabled={disabled}
           aria-label={t("Message")}
           placeholder={listening ? t("Listening…") : t("Ask anything")}
@@ -559,34 +1023,6 @@ export function AgentMessageComposer({
           </TooltipTrigger>
           <TooltipContent>{running ? t("Cancel") : t("Send")}</TooltipContent>
         </Tooltip>
-      </div>
-
-      <div className="relative z-10 mt-1 flex w-full items-center justify-between gap-3 border-t border-border/60 px-1 pt-1.5 text-[11px] text-muted-foreground">
-        <div className="flex min-w-0 items-center gap-1">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={disabled}
-            aria-label={t("Mention files, knowledge or agents")}
-            title={t("Mention files, knowledge or agents")}
-            onClick={insertMention}
-            className="h-6 gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
-          >
-            <AtSignIcon className="size-3.5" />
-            {t("Mention")}
-          </Button>
-          <span className="hidden truncate sm:inline">
-            {attachments.length > 0
-              ? t("{{count}} attachment(s)", { count: attachments.length })
-              : t("Attach files or @ reference")}
-          </span>
-        </div>
-        <span className="shrink-0 tabular-nums">
-          {draft.trim()
-            ? t("{{count}} characters", { count: draft.length })
-            : t("Enter to send · Shift+Enter for newline")}
-        </span>
       </div>
     </form>
   );

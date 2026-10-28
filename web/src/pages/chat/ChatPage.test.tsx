@@ -176,7 +176,6 @@ it("restores a conversation model without resetting a later explicit selection",
   renderChat("/c/thread-1");
   await waitFor(() => expect(screen.getByLabelText("Model").textContent).toBe(deepseek));
   expect(screen.getByRole("heading", { name: "Conversation" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Status: Active" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: qwen }));
   fireEvent.change(screen.getByLabelText("Question"), { target: { value: "New message" } });
   expect(screen.getByLabelText("Model").textContent).toBe(qwen);
@@ -213,4 +212,20 @@ it("restores the draft and attachments when creating the first conversation fail
   );
   expect(screen.getByLabelText("Attachments").textContent).toBe("draft.txt");
   expect(mocks.createRun).not.toHaveBeenCalled();
+});
+
+it("opens the right workspace sidebar with Agent state and Workspace files tabs", async () => {
+  renderChat("/c/thread-1");
+  await waitFor(() => expect(screen.getByLabelText("Model").textContent).toBe(deepseek));
+
+  expect(screen.queryByRole("complementary", { name: "Workspace sidebar" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Open workspace" }));
+
+  const sidebar = screen.getByRole("complementary", { name: "Workspace sidebar" });
+  expect(sidebar).toBeTruthy();
+  expect(screen.getByRole("tab", { name: "Agent state" })).toBeTruthy();
+  expect(screen.getByRole("tab", { name: "Workspace files" })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Close workspace" }));
+  expect(screen.queryByRole("complementary", { name: "Workspace sidebar" })).toBeNull();
 });

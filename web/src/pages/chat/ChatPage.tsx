@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { ArrowDown, Copy, FolderOpen, MoreHorizontal, Pencil, Plus, PanelRight } from "lucide-react";
+import { ArrowDown, PanelRight } from "lucide-react";
 import { useNavigate, useParams } from "react-router";
 
 import {
@@ -12,11 +12,14 @@ import {
 } from "@/api/thread";
 import type { UploadedAttachmentResponse } from "@/api/attachment";
 import { Badge } from "@/components/ui/badge";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import type { AgentRunEndEvent } from "@/api/agent-run";
 import { AskUser } from "@/pages/chat/components/AskUser";
 import { AgentMessageComposer } from "@/pages/chat/components/AgentMessageComposer";
+import {
+  ChatWorkspaceSidebar,
+  type ChatSidebarTab,
+} from "@/pages/chat/components/ChatWorkspaceSidebar";
 import { ConversationMessages } from "@/pages/chat/components/ConversationMessages";
 import { Thinking } from "@/pages/chat/components/Thinking";
 import { useAgentRun } from "@/pages/chat/hooks/useAgentRun";
@@ -61,6 +64,8 @@ export default function ChatPage() {
   const [showScroll, setShowScroll] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState<ChatSidebarTab>("state");
 
   const abortStream = () => {
     controller.current?.abort();
@@ -232,12 +237,6 @@ export default function ChatPage() {
     } catch (caught) {
       setError(errorText(caught));
     }
-  }
-
-  function copyThreadLink() {
-    const id = thread.getState().thread?.thread_id;
-    if (!id) return;
-    void navigator.clipboard?.writeText(`${window.location.origin}/c/${encodeURIComponent(id)}`);
   }
 
   function beginSubmission(): ChatSubmission | null {
@@ -441,173 +440,177 @@ export default function ChatPage() {
           : "bg-success";
 
   return (
-    <section className="relative flex h-full min-h-0 flex-col bg-card text-foreground">
-      <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-(--page-padding)">
-        <div className="flex min-w-0 items-center gap-2">
-          {editingTitle ? (
-            <Input
-              value={titleDraft}
-              onChange={(event) => setTitleDraft(event.target.value)}
-              onBlur={() => void saveTitle()}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.nativeEvent.isComposing) {
-                  event.preventDefault();
-                  void saveTitle();
-                }
-                if (event.key === "Escape") setEditingTitle(false);
-              }}
-              autoFocus
-              aria-label={t("Conversation title")}
-              className="h-7 w-[min(42vw,360px)] text-sm"
-            />
-          ) : (
-            <h2 className="min-w-0 truncate text-sm font-medium">
-              <button
-                type="button"
-                className="max-w-full truncate rounded-sm text-left outline-none hover:text-foreground/80 focus-visible:ring-2 focus-visible:ring-ring"
-                title={threadState.thread ? t("Rename conversation") : conversationTitle}
-                onClick={startTitleEdit}
+    <section className="relative flex h-full min-h-0 flex-row bg-card text-foreground">
+      <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
+        <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-(--page-padding)">
+          <div className="flex min-w-0 items-center gap-2">
+            {editingTitle ? (
+              <Input
+                value={titleDraft}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                onBlur={() => void saveTitle()}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    void saveTitle();
+                  }
+                  if (event.key === "Escape") setEditingTitle(false);
+                }}
+                autoFocus
+                aria-label={t("Conversation title")}
+                className="h-7 w-[min(42vw,360px)] text-sm"
+              />
+            ) : (
+              <h2 className="min-w-0 truncate text-sm font-medium">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-auto max-w-full truncate rounded-sm p-0 text-left text-sm font-medium hover:bg-transparent hover:text-foreground/80"
+                  title={
+                    threadState.thread
+                      ? t("Rename conversation")
+                      : conversationTitle
+                  }
+                  onClick={startTitleEdit}
+                >
+                  {conversationTitle}
+                </Button>
+              </h2>
+            )}
+            {threadState.thread && (
+              <Badge variant="outline" className="hidden shrink-0 sm:inline-flex">
+                {threadState.thread.agent_id || t("Agent")}
+              </Badge>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              type="button"
+              aria-label={t("Open workspace")}
+              title={t("Open workspace")}
+              aria-expanded={sidebarOpen}
+              onClick={() => setSidebarOpen((current) => !current)}
+            >
+              <PanelRight />
+            </Button>
+          </div>
+        </header>
+        <div
+          ref={scroller}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          onScroll={(event) => {
+            const element = event.currentTarget;
+            setShowScroll(
+              element.scrollHeight - element.scrollTop - element.clientHeight >
+                48,
+            );
+          }}
+        >
+          <div className="mx-auto grid w-full max-w-[800px] content-start gap-6 px-8 py-4">
+            {loading ? (
+              <Thinking label="Loading conversation" />
+            ) : (
+              <ConversationMessages
+                messages={threadState.messages}
+                threadId={threadState.thread?.thread_id}
+                currentRunId={runState.runId}
+                status={runState.runStatus}
+                active={active}
+                waiting={Boolean(pending)}
+                startedAt={runState.startedAt}
+              />
+            )}
+          </div>
+        </div>
+
+        <footer
+          className={`inset-x-0 ${
+            docked
+              ? "shrink-0 bg-card px-3.5 pt-3.5 pb-[max(1rem,env(safe-area-inset-bottom))]"
+              : "absolute top-[45%] mx-auto w-[90%] max-w-[800px] -translate-y-1/2 px-0"
+          } ${pending ? "max-h-full overflow-y-auto overscroll-contain" : ""}`}
+        >
+          <div className="relative mx-auto grid w-full max-w-[800px] gap-2">
+            {!docked && !loading && (
+              <div className="mb-4 text-center select-none">
+                <h1 className="text-2xl font-semibold">
+                  {t("Welcome to AM")}
+                </h1>
+              </div>
+            )}
+            {displayedError && (
+              <p
+                role="alert"
+                className="m-0 rounded-md bg-destructive-muted px-3 py-2 text-sm text-destructive"
               >
-                {conversationTitle}
-              </button>
-            </h2>
-          )}
-          {threadState.thread && (
-            <Badge variant="outline" className="hidden shrink-0 sm:inline-flex">
-              {threadState.thread.agent_id || t("Agent")}
-            </Badge>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            type="button"
-            aria-label={`${t("Status")}: ${statusLabel}`}
-            className="hidden h-7 shrink-0 gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground sm:inline-flex"
-          >
-            <span aria-hidden="true" className={`size-2 rounded-full ${statusDotClass}`} />
-            <span>{statusLabel}</span>
-          </Button>
-          <Button variant="ghost" size="icon-sm" type="button" aria-label={t("New chat")} title={t("New chat")} onClick={() => navigate("/")}>
-            <Plus />
-          </Button>
-          <Button variant="ghost" size="icon-sm" type="button" aria-label={t("Open workspace")} title={t("Open workspace")} onClick={() => navigate("/sandbox")}>
-            <PanelRight />
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" />} type="button" aria-label={t("Conversation actions")} title={t("Conversation actions")}>
-              <MoreHorizontal />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem disabled={!threadState.thread} onClick={startTitleEdit}>
-                <Pencil />{t("Rename conversation")}
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled={!threadState.thread} onClick={copyThreadLink}>
-                <Copy />{t("Copy conversation link")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate("/sandbox")}>
-                <FolderOpen />{t("Open workspace")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </header>
-      <div
-        ref={scroller}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
-        onScroll={(event) => {
-          const element = event.currentTarget;
-          setShowScroll(
-            element.scrollHeight - element.scrollTop - element.clientHeight >
-              48,
-          );
-        }}
-      >
-        <div className="mx-auto grid w-full max-w-[800px] content-start gap-6 px-8 py-4">
-          {loading ? (
-            <Thinking label="Loading conversation" />
-          ) : (
-            <ConversationMessages
-              messages={threadState.messages}
+                {displayedError}
+              </p>
+            )}
+            {docked && showScroll && (
+              <Button
+                variant="ghost"
+                type="button"
+                aria-label={t("Scroll to latest message")}
+                title={t("Scroll to latest message")}
+                className="z-10 grid size-9 place-items-center justify-self-center rounded-full border border-border bg-card text-muted-foreground"
+                onClick={() => {
+                  scroller.current?.scrollTo({
+                    top: scroller.current.scrollHeight,
+                    behavior: "smooth",
+                  });
+                  setShowScroll(false);
+                }}
+              >
+                <ArrowDown size={17} />
+              </Button>
+            )}
+            {!loading && pending && (
+              <AskUser
+                key={pending.parent_run_id}
+                interaction={pending}
+                disabled={runState.resuming}
+                submit={(answers) => void submitResume(answers)}
+              />
+            )}
+            <AgentMessageComposer
+              draft={draft}
+              setDraft={setDraft}
+              attachments={attachmentState.attachments}
+              uploading={attachmentState.uploadingCount}
+              running={active}
+              disabled={inputDisabled}
+              modelId={selectedModelId}
+              models={models}
+              modelsLoading={modelsLoading}
+              placement={docked ? "top" : "bottom"}
               threadId={threadState.thread?.thread_id}
-              currentRunId={runState.runId}
-              status={runState.runStatus}
-              active={active}
-              waiting={Boolean(pending)}
-              startedAt={runState.startedAt}
+              selectModel={selectModel}
+              upload={(files) => void attachments.uploadFiles(files)}
+              removeAttachment={attachments.removeAttachment}
+              submit={() => void submit()}
+              cancel={() => void cancel()}
             />
-          )}
-        </div>
+          </div>
+        </footer>
       </div>
 
-      <footer
-        className={`inset-x-0 ${
-          docked
-            ? "shrink-0 bg-card px-3.5 pt-3.5 pb-[max(1rem,env(safe-area-inset-bottom))]"
-            : "absolute top-[45%] mx-auto w-[90%] max-w-[800px] -translate-y-1/2 px-0"
-        } ${pending ? "max-h-full overflow-y-auto overscroll-contain" : ""}`}
-      >
-        <div className="relative mx-auto grid w-full max-w-[800px] gap-2">
-          {!docked && !loading && (
-            <div className="mb-4 text-center select-none">
-              <h1 className="text-2xl font-semibold">
-                {t("Welcome to AM")}
-              </h1>
-            </div>
-          )}
-          {displayedError && (
-            <p
-              role="alert"
-              className="m-0 rounded-md bg-destructive-muted px-3 py-2 text-sm text-destructive"
-            >
-              {displayedError}
-            </p>
-          )}
-          {docked && showScroll && (
-            <Button variant="ghost"
-              type="button"
-              aria-label={t("Scroll to latest message")}
-              title={t("Scroll to latest message")}
-              className="z-10 grid size-9 place-items-center justify-self-center rounded-full border border-border bg-card text-muted-foreground"
-              onClick={() => {
-                scroller.current?.scrollTo({
-                  top: scroller.current.scrollHeight,
-                  behavior: "smooth",
-                });
-                setShowScroll(false);
-              }}
-            >
-              <ArrowDown size={17} />
-            </Button>
-          )}
-          {!loading && pending && (
-            <AskUser
-              key={pending.parent_run_id}
-              interaction={pending}
-              disabled={runState.resuming}
-              submit={(answers) => void submitResume(answers)}
-            />
-          )}
-          <AgentMessageComposer
-            draft={draft}
-            setDraft={setDraft}
-            attachments={attachmentState.attachments}
-            uploading={attachmentState.uploadingCount}
-            running={active}
-            disabled={inputDisabled}
-            modelId={selectedModelId}
-            models={models}
-            modelsLoading={modelsLoading}
-            placement={docked ? "top" : "bottom"}
-            selectModel={selectModel}
-            upload={(files) => void attachments.uploadFiles(files)}
-            removeAttachment={attachments.removeAttachment}
-            submit={() => void submit()}
-            cancel={() => void cancel()}
-          />
-        </div>
-      </footer>
+      <ChatWorkspaceSidebar
+        open={sidebarOpen}
+        tab={sidebarTab}
+        onTabChange={setSidebarTab}
+        onClose={() => setSidebarOpen(false)}
+        threadId={threadState.thread?.thread_id}
+        agentId={threadState.thread?.agent_id}
+        modelId={selectedModelId}
+        runId={runState.runId}
+        runStatus={runState.runStatus}
+        statusLabel={statusLabel}
+        statusDotClass={statusDotClass}
+        active={active}
+        messages={threadState.messages}
+      />
     </section>
   );
 }
