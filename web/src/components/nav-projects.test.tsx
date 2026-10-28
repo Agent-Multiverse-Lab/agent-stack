@@ -44,6 +44,26 @@ function mockThreads() {
   vi.mocked(renameThread).mockResolvedValue({ ...thread, title: "New title" })
 }
 
+it("collapses and expands the conversation history", async () => {
+  installBrowserStubs()
+  mockThreads()
+  render(
+    <MemoryRouter>
+      <SidebarProvider><NavProjects onSearch={vi.fn()} /></SidebarProvider>
+    </MemoryRouter>,
+  )
+
+  expect(await screen.findByRole("link", { name: "Old title" })).toBeTruthy()
+  const toggle = screen.getByRole("button", { name: "Conversations" })
+  expect(toggle.getAttribute("aria-expanded")).toBe("true")
+  fireEvent.click(toggle)
+  expect(toggle.getAttribute("aria-expanded")).toBe("false")
+  expect(screen.queryByRole("link", { name: "Old title" })).toBeNull()
+  fireEvent.click(toggle)
+  expect(toggle.getAttribute("aria-expanded")).toBe("true")
+  expect(screen.getByRole("link", { name: "Old title" })).toBeTruthy()
+})
+
 it("refreshes the sidebar after an automatic title update", async () => {
   installBrowserStubs()
   mockThreads()

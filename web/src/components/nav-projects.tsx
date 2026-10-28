@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useEffectEvent, useRef, useState } from "react"
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react"
 import {
   ArrowRightIcon,
   ChevronDownIcon,
@@ -44,6 +44,8 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
   const { threadId } = useParams()
   const navigate = useNavigate()
   const [threads, setThreads] = useState<ThreadMetadataResponse[]>([])
+  const [expanded, setExpanded] = useState(true)
+  const listId = useId()
   const [cursor, setCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -161,11 +163,20 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
         className="min-h-0 flex-1 pt-1 group-data-[collapsible=icon]:hidden"
         aria-label={t("Conversation history")}
       >
-        <SidebarGroupLabel className="mb-1 gap-1.5 font-medium">
-          <ChevronDownIcon />
-          <span>{t("Conversations")}</span>
+        <SidebarGroupLabel className="mb-1 px-0 font-medium">
+          <Button
+            type="button"
+            variant="ghost"
+            aria-expanded={expanded}
+            aria-controls={listId}
+            onClick={() => setExpanded((value) => !value)}
+            className="h-full w-full justify-start gap-1.5 rounded-md px-2 text-left text-xs font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          >
+            <ChevronDownIcon className={`size-4 shrink-0 transition-transform ${expanded ? "" : "-rotate-90"}`} />
+            <span>{t("Conversations")}</span>
+          </Button>
         </SidebarGroupLabel>
-        <SidebarMenu className="min-h-0 flex-1 overflow-y-auto gap-1">
+        <SidebarMenu id={listId} style={expanded ? undefined : { display: "none" }} className="min-h-0 flex-1 overflow-y-auto gap-1">
           {visibleThreads.map((item) => (
             <SidebarMenuItem key={item.thread_id}>
               <SidebarMenuButton
@@ -196,7 +207,7 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
                   })}
                 >
                   <MoreHorizontalIcon />
-                  <span className="sr-only">{t("More")}</span>
+                  {/* <span className="sr-only">{t("More")}</span> */}
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
                   className="w-fit"
@@ -278,8 +289,8 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
               className="text-sidebar-foreground/70"
               onClick={onSearch}
             >
-              <MoreHorizontalIcon className="text-sidebar-foreground/70" />
-              <span>{t("More")}</span>
+              {/* <MoreHorizontalIcon className="text-sidebar-foreground/70" /> */}
+              {/* <span>{t("More")}</span> */}
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

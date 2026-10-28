@@ -1,6 +1,6 @@
-"use client"
+"use client";
 
-import * as React from "react"
+import * as React from "react";
 import {
   BotIcon,
   BookOpenCheckIcon,
@@ -9,15 +9,15 @@ import {
   SearchIcon,
   SquarePenIcon,
   SquareTerminalIcon,
-} from "lucide-react"
-import { useLocation, useNavigate } from "react-router"
+} from "lucide-react";
+import { useLocation, useNavigate } from "react-router";
 
-import logoUrl from "@/assets/logo.svg"
-import { NavMain } from "@/components/nav-main"
-import { NavProjects } from "@/components/nav-projects"
-import { NavUser } from "@/components/nav-user"
-import { TeamSwitcher } from "@/components/team-switcher"
-import { Button } from "@/components/ui/button"
+import logoUrl from "@/assets/logo.svg";
+import { NavMain } from "@/components/nav-main";
+import { NavProjects } from "@/components/nav-projects";
+import { NavUser } from "@/components/nav-user";
+import { TeamSwitcher } from "@/components/team-switcher";
+import { Button } from "@/components/ui/button";
 import {
   Sidebar,
   SidebarContent,
@@ -26,15 +26,15 @@ import {
   SidebarRail,
   SidebarSeparator,
   SidebarTrigger,
-} from "@/components/ui/sidebar"
-import { useAuth } from "@/context/AuthContext"
-import { useTranslation } from "@/i18n"
+} from "@/components/ui/sidebar";
+import { useAuth } from "@/context/AuthContext";
+import { useTranslation } from "@/i18n";
 
 type AppSidebarProps = React.ComponentProps<typeof Sidebar> & {
-  onProfile: () => void
-  onSettings: () => void
-  onSearch: () => void
-}
+  onProfile: () => void;
+  onSettings: () => void;
+  onSearch: () => void;
+};
 
 export function AppSidebar({
   onProfile,
@@ -42,10 +42,10 @@ export function AppSidebar({
   onSearch,
   ...props
 }: AppSidebarProps) {
-  const { accessToken, user, logout } = useAuth()
-  const { t } = useTranslation()
-  const location = useLocation()
-  const navigate = useNavigate()
+  const { accessToken, user, logout } = useAuth();
+  const { t } = useTranslation();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const data = {
     user: {
@@ -113,7 +113,7 @@ export function AppSidebar({
         isActive: location.pathname === "/sandbox",
       },
     ],
-  }
+  };
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -137,19 +137,11 @@ export function AppSidebar({
         <SidebarTrigger className="size-[30px] shrink-0 rounded-[7px] group-data-[collapsible=icon]:mx-auto" />
       </SidebarHeader>
       <SidebarContent className="gap-2 py-0">
-        <div className="px-3 pt-2 text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase group-data-[collapsible=icon]:hidden">
-          {t("Workspace")}
-        </div>
         <NavMain items={data.navMain} />
-        {accessToken && <SidebarSeparator className="mx-2.5 my-1 group-data-[collapsible=icon]:hidden" />}
         {accessToken && (
-          <>
-            <div className="px-3 pt-1 text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase group-data-[collapsible=icon]:hidden">
-              {t("Conversations")}
-            </div>
-            <NavProjects onSearch={onSearch} />
-          </>
+          <SidebarSeparator className="mx-2.5 my-1 group-data-[collapsible=icon]:hidden" />
         )}
+        {accessToken && <NavProjects onSearch={onSearch} />}
       </SidebarContent>
       <SidebarFooter className="px-2 pt-0 pb-1.5">
         <NavUser
@@ -157,12 +149,12 @@ export function AppSidebar({
           onProfile={onProfile}
           onSettings={onSettings}
           onLogout={() => {
-            logout()
-            navigate("/login")
+            logout();
+            navigate("/login");
           }}
         />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
-  )
+  );
 }
