@@ -91,11 +91,10 @@ it("keeps the create form accessible without repeating promotional helper copy",
   expect(screen.getByRole("textbox", { name: "Knowledge base name" })).toBeTruthy()
 })
 
-it("renders the catalog page header above the collection toolbar", async () => {
+it("renders the collection toolbar header without redundant banner copy", async () => {
   const { container } = renderPage()
   await screen.findByRole("link", { name: /Docs/ })
-  expect(screen.getByRole("heading", { name: "Knowledge Bases", level: 1 })).toBeTruthy()
-  expect(screen.getByText("Collections hold documents you can parse, index and search.")).toBeTruthy()
+  expect(screen.queryByText("Collections hold documents you can parse, index and search.")).toBeNull()
   expect(screen.getByRole("region", { name: "Knowledge Bases" })).toBeTruthy()
   expect(container.querySelector("header")).not.toBeNull()
   expect(screen.getByRole("heading", { name: "All collections" })).toBeTruthy()
