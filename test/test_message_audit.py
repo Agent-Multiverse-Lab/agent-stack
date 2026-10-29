@@ -17,6 +17,7 @@ from src.database.models import (
     MODEL_AUDIT_MESSAGE_TYPE,
     TOOL_AUDIT_MESSAGE_TYPE,
     AgentRun,
+    AgentRunAttempt,
     Conversation,
     Message,
     User,
@@ -383,6 +384,7 @@ class AuditRepositoryTest(unittest.IsolatedAsyncioTestCase):
                 Conversation.__table__,
                 Message.__table__,
                 AgentRun.__table__,
+                AgentRunAttempt.__table__,
             ],
         )
         self.db = Session(engine, expire_on_commit=False)

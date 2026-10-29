@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
@@ -25,7 +25,7 @@ async def get_arq_pool():
 
 
 @asynccontextmanager
-async def subscribe_redis_channel(channel: str) -> AsyncIterator[PubSub]:
+async def subscribe_redis_channel(channel: str) -> AsyncGenerator[PubSub, None]:
     """订阅信道，并在退出上下文时关闭 PubSub。"""
 
     redis = await get_async_redis_client()

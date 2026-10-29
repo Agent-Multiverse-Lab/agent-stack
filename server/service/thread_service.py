@@ -1,9 +1,10 @@
 import asyncio
 import base64
 import binascii
+from contextlib import asynccontextmanager
 import json
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from dataclasses import fields
 from datetime import datetime
 from typing import Any
@@ -1327,6 +1328,18 @@ async def _stream_agent_event_chunks(
             )
 
 
+@asynccontextmanager
+async def _scoped_session(
+    db: AsyncSession | None = None,
+) -> AsyncGenerator[AsyncSession, None]:
+    """若调用方显式传入 session 则直接复用；否则创建并在用完后立即释放短会话。"""
+    if db is not None:
+        yield db
+    else:
+        async with postgres_manager.get_async_session_context() as session:
+            yield session
+
+
 async def stream_agent_response(
     *,
     agent_slug: str,
@@ -1334,7 +1347,7 @@ async def stream_agent_response(
     runtime_metadata: dict,
     thread_input_message: AgentInputMsg,
     current_user: AuthenticatedUser,
-    db: AsyncSession,
+    db: AsyncSession | None = None,
 ) -> AsyncIterator[Any]:
     """合并 SQL 配置与 Worker 的运行身份，使用一次性 Context 快照启动 Agent。
 
@@ -1377,29 +1390,30 @@ async def stream_agent_response(
 
     image_content = thread_input_message.image_content
     human_msg: HumanMessage = thread_input_message.langchain_msg
-    agent_item, agent_instance, model_id = await _build_agent_runtime(
-        agent_slug=agent_slug,
-        user=current_user,
-        thread_id=thread_id,
-        db=db,
-        run_type=runtime_metadata.get("run_type", "chat"),
-        model=runtime_metadata.get("model"),
-    )
-    runtime_metadata.update(
-        {
-            "query": query,
-            "agent_slug": agent_item.slug,
-            "thread_id": thread_id,
-            "uid": current_user.uid,
-            "has_image": bool(image_content),
-        }
-    )
-    conversation = await _check_conv_status(
-        conv_repo=ConversationRepository(db),
-        thread_id=thread_id,
-        uid=current_user.uid,
-        agent_item=agent_item,
-    )
+    async with _scoped_session(db) as session:
+        agent_item, agent_instance, model_id = await _build_agent_runtime(
+            agent_slug=agent_slug,
+            user=current_user,
+            thread_id=thread_id,
+            db=session,
+            run_type=runtime_metadata.get("run_type", "chat"),
+            model=runtime_metadata.get("model"),
+        )
+        runtime_metadata.update(
+            {
+                "query": query,
+                "agent_slug": agent_item.slug,
+                "thread_id": thread_id,
+                "uid": current_user.uid,
+                "has_image": bool(image_content),
+            }
+        )
+        conversation = await _check_conv_status(
+            conv_repo=ConversationRepository(session),
+            thread_id=thread_id,
+            uid=current_user.uid,
+            agent_item=agent_item,
+        )
     agent_runtime_context = await _build_agent_runtime_context(
         uid=current_user.uid,  # ty:ignore[invalid-argument-type]
         run_id=run_id,
@@ -1464,15 +1478,16 @@ async def stream_agent_response(
 
         # finish之前先save所有的的信息
         try:
-            await save_message_from_langgraph_state(
-                thread_id=thread_id,
-                run_id=runtime_metadata.get("run_id"),
-                worker_id=runtime_metadata["worker_id"],
-                context=agent_context,
-                agent_instance=agent_instance,
-                db=db,
-                interrupt_chunks=interrupt_chunks,
-            )
+            async with _scoped_session(db) as session:
+                await save_message_from_langgraph_state(
+                    thread_id=thread_id,
+                    run_id=runtime_metadata.get("run_id"),
+                    worker_id=runtime_metadata["worker_id"],
+                    context=agent_context,
+                    agent_instance=agent_instance,
+                    db=session,
+                    interrupt_chunks=interrupt_chunks,
+                )
         except Exception as e:
             logger.exception(f"Error saving messages from LangGraph state: {e}")
             yield make_agent_stream_event(
@@ -1543,7 +1558,7 @@ async def resume_agent_response(
     thread_id: str,
     runtime_metadata: dict,
     current_user: AuthenticatedUser,
-    db: AsyncSession,
+    db: AsyncSession | None = None,
 ) -> AsyncIterator[bytes]:
     runtime_metadata = dict(runtime_metadata or {})
     run_id = runtime_metadata.get("run_id")
@@ -1580,19 +1595,20 @@ async def resume_agent_response(
             raise ValueError("Resume Run 缺少 thread_id、run_id 或 request_id")
         if not isinstance(resume_input, dict) or not resume_input:
             raise ValueError("Resume Run 缺少回答字典")
-        conversation = await _require_thread(
-            conversations=ConversationRepository(db),
-            thread_id=thread_id,
-            uid=current_user.uid,
-        )
-        agent_item, agent_instance, model_id = await _build_agent_runtime(
-            agent_slug=runtime_metadata.get("agent_slug") or "LeaderAgent",
-            user=current_user,
-            thread_id=thread_id,
-            db=db,
-            run_type="resume",
-            model=runtime_metadata.get("model"),
-        )
+        async with _scoped_session(db) as session:
+            conversation = await _require_thread(
+                conversations=ConversationRepository(session),
+                thread_id=thread_id,
+                uid=current_user.uid,
+            )
+            agent_item, agent_instance, model_id = await _build_agent_runtime(
+                agent_slug=runtime_metadata.get("agent_slug") or "LeaderAgent",
+                user=current_user,
+                thread_id=thread_id,
+                db=session,
+                run_type="resume",
+                model=runtime_metadata.get("model"),
+            )
         runtime_metadata.update({"thread_id": thread_id, "uid": current_user.uid})
         agent_runtime_context = await _build_agent_runtime_context(
             uid=current_user.uid,
@@ -1649,15 +1665,16 @@ async def resume_agent_response(
             )
         ]
         try:
-            await save_message_from_langgraph_state(
-                thread_id=thread_id,
-                run_id=run_id,
-                worker_id=runtime_metadata["worker_id"],
-                context=agent_context,
-                agent_instance=agent_instance,
-                db=db,
-                interrupt_chunks=interrupt_chunks,
-            )
+            async with _scoped_session(db) as session:
+                await save_message_from_langgraph_state(
+                    thread_id=thread_id,
+                    run_id=run_id,
+                    worker_id=runtime_metadata["worker_id"],
+                    context=agent_context,
+                    agent_instance=agent_instance,
+                    db=session,
+                    interrupt_chunks=interrupt_chunks,
+                )
         except Exception as e:
             logger.exception(f"Error saving messages from LangGraph state: {e}")
             yield make_agent_resume_event(
