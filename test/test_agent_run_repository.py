@@ -33,7 +33,6 @@ class FakeSession:
         self.flush_count += 1
 
     async def execute(self, statement):
-        # FIXEME: 终态写入会在同一事务内收敛残留 running 审计行和 attempt。
         return _EmptyResult()
 
 
@@ -54,7 +53,6 @@ class AgentRunTerminalTest(unittest.IsolatedAsyncioTestCase):
             "options": ["PostgreSQL", "MySQL"],
         }
 
-        # FIXEME: interrupted 复用统一终态写入并保留已有 Run metadata。
         terminal_message = json.dumps(payload, ensure_ascii=False)
         result, changed = await repository.set_agent_terminal(
             "run-1", worker_id="owner-1",

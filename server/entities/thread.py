@@ -57,7 +57,6 @@ class ThreadRunMetadataResponse(BaseModel):
     finished_at: datetime | None
 
 
-# FIXEME: Thread 刷新只公开 ask_user 所需字段，不暴露 checkpoint。
 class InteractionRequired(BaseModel):
     """等待当前用户回答的 ask_user 问题。"""
 
@@ -108,7 +107,6 @@ class ThreadDetailResponse(BaseModel):
     thread: ThreadSummaryResponse
     messages: list[ThreadMessageResponse]
     next_before_message_id: int | None
-    # FIXEME: Resume Run 没有触发消息，Thread 状态必须独立于消息列表返回。
     active_run: ThreadRunMetadataResponse | None
     pending_interaction: InteractionRequired | None
 

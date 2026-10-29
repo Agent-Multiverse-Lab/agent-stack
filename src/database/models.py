@@ -58,7 +58,6 @@ class User(Base):
     __tablename__ = "user"
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="用户自增ID")
-    # FIXME: 用户唯一登录账号统一为邮箱，不再维护重复的账号字段。
     email = Column(String(255), unique=True, index=True, nullable=False, comment="登录邮箱")
     uid = Column(String, nullable=False, unique=True, index=True, comment="登录标识")  
 
@@ -152,7 +151,6 @@ class Message(Base):
     request_id = Column(String(64), nullable=True, index=True, comment="Request ID for idempotency")
 
     conversation = relationship("Conversation", back_populates="messages")
-    # FIXME: 恢复 AgentRun.messages 对应的反向关系，避免 ORM mapper 初始化失败。
     agent_run = relationship(
         "AgentRun",
         back_populates="messages",

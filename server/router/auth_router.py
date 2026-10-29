@@ -83,7 +83,6 @@ async def login(payload: LoginRequest, session: AsyncSession = Depends(get_db)):
             detail="Account is disabled.",
         )
 
-    # FIXME: JWT 需要完整用户身份字段，不能只传数据库主键。
     token = create_access_token(
         user_id=user.id,
         uid=user.uid,

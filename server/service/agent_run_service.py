@@ -43,7 +43,6 @@ _TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "interrupted"}
 SUBAGENT_PROGRESS_EVENT_COUNT = 5
 
 
-# FIXEME: 第一版用独立异常把可恢复冲突映射为 HTTP 409。
 class AgentRunConflictError(RuntimeError):
     """Agent Run 当前状态不允许执行请求。"""
 
@@ -112,7 +111,6 @@ async def create_agent_run_service(
                 return existing_run
             raise AgentRunConflictError("request_id 已被其他请求使用")
 
-    # FIXEME: 待回答 ask_user 时不能再追加普通 HumanMessage。
     if (
         await run_repository.get_pending_interaction_run(
             uid=str(current_user.uid),
@@ -225,7 +223,6 @@ async def create_agent_run_service(
     return run
 
 
-# FIXEME: Resume 创建仅复用父 Run 的身份与 Thread，不创建或重放 HumanMessage。
 async def create_resume_agent_run_service(
     *,
     db: AsyncSession,
@@ -352,7 +349,6 @@ async def create_resume_agent_run_service(
 
 async def enqueue_agent_run(run_id: str) -> None:
     queue = await get_arq_pool()
-    # FIXME: enqueue 必须写入与 WorkerSettings.queue_name 相同的 ARQ 队列。
     logger.info(f"当前事件 ID：{run_id}入队中...")
     await queue.enqueue_job(
         "process_agent_run",
@@ -575,7 +571,6 @@ async def stream_agent_run_events(
                 )
                 return
 
-            # FIXEME: Redis Stream 缺失时由 PostgreSQL interrupt metadata 恢复问题。
             if status == "interrupted":
                 interrupt_payload = dict(run.run_metadata or {}).get("interrupt")
                 if isinstance(interrupt_payload, dict):

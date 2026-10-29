@@ -1349,7 +1349,6 @@ async def stream_agent_response(
     if not runtime_metadata.get("request_id"):
         runtime_metadata["request_id"] = str(uuid.uuid4())
 
-    # FIXEME: 普通 Run 的 chunk builder 只属于 stream_agent_response。
     def make_agent_stream_event(
         status: str | None = None,
         content: Any = None,
@@ -1538,7 +1537,6 @@ async def stream_agent_response(
         return
 
 
-# FIXEME: Resume 与普通入口同级，直接把 Command 交给 BaseAgent 专用方法。
 async def resume_agent_response(
     *,
     resume_input: dict[str, str],
@@ -1553,7 +1551,6 @@ async def resume_agent_response(
     model_audit = _build_model_message_audit_collector(runtime_metadata, thread_id)
     tool_audit = _build_tool_message_audit_collector(model_audit)
 
-    # FIXEME: Resume Run 使用自己的 chunk builder，不复用普通 Run builder。
     def make_agent_resume_event(
         status: str | None = None,
         content: Any = None,

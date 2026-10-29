@@ -108,7 +108,6 @@ class AgentRunController:
         await self._cancel_event.wait()
         await listener_task
 
-    # FIXEME: Stream 自然耗尽后由 Context 提供取消状态，不读取 Redis 第二次。
     async def has_cancel_signal(self) -> bool:
         if not self._cancel_event.is_set():
             return False
@@ -445,7 +444,6 @@ async def _finalize_run(
     error: str | None = None,
     error_type: str | None = None,
 ) -> tuple[str | None, bool]:
-    # FIXEME: interrupted 与其他终态复用同一状态和消息参数。
     terminal_error = error
     terminal_error_type = error_type
     if status == "interrupted" and payload is not None:
@@ -518,7 +516,6 @@ def map_stream_event(chunk: dict[str, Any]) -> tuple[str, Any]:
             "agent_state": chunk.get("response"),
         }
     if status == "agent_execute_event":
-        # FIXEME: Tool 事件继续复用现有 custom SSE 通道。
         return "custom", {
             "name": "agent_execute_event",
             "chunk": chunk,
@@ -671,7 +668,6 @@ async def process_agent_run(ctx, run_id: str):
 
         # agent_status 是当前 Run 生命周期的唯一状态字段。
         initial_status = str(agent_run_event.agent_status)
-        # FIXEME: Worker 与 Repository 共用同一组已停止执行状态。
         if initial_status in AGENT_RUN_TERMINAL_STATUSES:
             return {"run_id": run_id, "status": initial_status}
 
@@ -696,7 +692,6 @@ async def process_agent_run(ctx, run_id: str):
 
         run_type = str(agent_run_event.run_type)
         agent_input_message_formatted = None
-        # FIXEME: Resume Run 没有 trigger_message_id，必须先按 run_type 分支。
         if run_type != "resume":
             agent_input_message = await _get_agent_input_msg(
                 message_id=agent_run_event.trigger_message_id
@@ -707,7 +702,6 @@ async def process_agent_run(ctx, run_id: str):
                     f"当前agent运行id：{run_id} 的输入消息不存在："
                     f"{agent_run_event.trigger_message_id}"
                 )
-                # FIXEME: Agent Stream 前的准备失败只写数据库终态，不发布 end。
                 await set_run_terminal(
                     run_id,
                     worker_id=worker_id,
@@ -719,7 +713,6 @@ async def process_agent_run(ctx, run_id: str):
 
             agent_input_message_formatted = build_agent_input_msg(
                 query=agent_input_message.content,
-                # FIXME: 恢复数据库里记录的输入消息类型，而不是传空字符串。
                 msg_type=agent_input_message.message_type,
                 image_content=agent_input_message.image_content,
                 msg_metadata=dict(agent_input_message.msg_metadata or {}),
@@ -730,7 +723,6 @@ async def process_agent_run(ctx, run_id: str):
 
         if not user:
             error = f"User not found: {uid}"
-            # FIXEME: Agent Stream 前的用户校验失败只写数据库终态，不发布 end。
             await set_run_terminal(
                 run_id,
                 worker_id=worker_id,
@@ -775,7 +767,6 @@ async def process_agent_run(ctx, run_id: str):
             )
             try:
                 async with postgres_manager.get_async_session_context() as db:
-                    # FIXEME: 两个入口参数不同，显式分支便于核验 Resume 不读取普通消息。
                     if run_type == "resume":
                         stream_thread_events: AsyncIterator = resume_agent_response(
                             resume_input=metadata["resume"]["answers"],
@@ -818,7 +809,6 @@ async def process_agent_run(ctx, run_id: str):
                             status = strem_agent_chunk.get("status") or "some_event"
 
 
-                            # FIXEME: 循环内只按 Thread Service 产出的 status 处理 chunk。
                             if status == "loading":
                                 await stream_event_smoother.append(
                                     strem_agent_chunk,
@@ -829,7 +819,6 @@ async def process_agent_run(ctx, run_id: str):
                                     thread_id=current_thread_id
                                 )
 
-                                # FIXEME: 子 Agent 事件只转发，不改变父 Run 状态。
                                 if current_thread_id != str(thread_id):
                                     event_type, payload = map_stream_event(
                                         strem_agent_chunk
@@ -929,13 +918,11 @@ async def process_agent_run(ctx, run_id: str):
                 if terminal_flag:
                     return
 
-                # FIXEME: 无终态 status 时先由 Run Context 判定是否为取消。
                 if not terminal_flag:
                     if await run_controller.is_cancelled():
                         raise asyncio.CancelledError(f"run {run_id} cancelled")
 
 
-                # FIXEME: 未取消且没有终态 status 才属于流协议错误。
                 protocol_error = "Agent stream ended without terminal status"
                 logger.error("%s: run_id=%s", protocol_error, run_id)
                 return await _finalize_run(

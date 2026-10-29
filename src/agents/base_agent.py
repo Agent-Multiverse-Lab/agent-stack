@@ -202,7 +202,6 @@ class BaseAgent:
 
         yield "agent_checkpoint", await agent.aget_state(input_config)
 
-    # FIXEME: Resume 必须把 Command 原样交给 LangGraph，不能包装成 messages。
     async def stream_message_by_resume(
         self,
         resume_input: Command,

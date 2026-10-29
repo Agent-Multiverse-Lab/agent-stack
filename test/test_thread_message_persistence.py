@@ -257,7 +257,6 @@ class ThreadMessagePersistenceTest(unittest.IsolatedAsyncioTestCase):
             set_output_message=AsyncMock(),
         )
         db = SimpleNamespace(commit=AsyncMock())
-        # FIXEME: state 持久化与 interrupt handler 都使用完整 Agent context。
         context = FakeContext()
         context.update_context({"uid": "user-1", "thread_id": "thread-1"})
 
@@ -327,7 +326,6 @@ class ThreadMessagePersistenceTest(unittest.IsolatedAsyncioTestCase):
         db.commit.assert_awaited_once_with()
 
     async def test_repository_methods_write_tool_and_output_fields(self) -> None:
-        # FIXEME: add_tool_call 会先按外部 Tool Call ID 检查幂等记录。
         session = SimpleNamespace(
             add=Mock(),
             flush=AsyncMock(),

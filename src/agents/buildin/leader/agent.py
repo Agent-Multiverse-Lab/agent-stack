@@ -70,7 +70,6 @@ class LeaderAgent(BaseAgent):
         runtime_context = context or self.context()
         mcp_tools = await get_mcp_tools(runtime_context.mcps)
         chat_model = await load_chat_model(runtime_context.model)
-        # FIXEME: ask_user 仅注册到顶层 LeaderAgent，不扩散到 SubAgent。
         return await self._build_agent(
             runtime_context,
             tools=[*mcp_tools, ask_user, calculator, present_artifacts],

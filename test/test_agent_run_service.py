@@ -83,7 +83,6 @@ class FakeAgentRunRepository:
         )
         return self.run
 
-    # FIXEME: 普通 Run 创建测试默认没有待回答 interaction。
     async def get_pending_interaction_run(self, **_values):
         return None
 

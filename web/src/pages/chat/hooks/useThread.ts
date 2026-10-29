@@ -197,8 +197,6 @@ export function useThread() {
 
   function mergeHistory(historyMessages: ThreadMessageResponse[]) {
     const history = historyMessages.map(toChatMessage);
-    // FIXEME: 逐条插入会把同一 Run 的多条流式执行记录倒序；刷新后需要按原始
-    // 顺序整组还原，否则输出完成后数据读取源切换会打乱展示顺序。
     const retainedByRun = new Map<string | null, ChatMessage[]>();
     for (const message of getMessages()) {
       if (message.type !== "ai" || message.payload.type !== "tool") continue;

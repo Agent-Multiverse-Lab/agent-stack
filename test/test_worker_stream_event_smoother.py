@@ -286,7 +286,6 @@ class WorkerStreamWriterTest(unittest.IsolatedAsyncioTestCase):
 
 class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
     async def test_interrupted_run_persists_before_interaction_and_end(self) -> None:
-        # FIXEME: finalizer 统一保证 interrupt 落库和事件发布顺序。
         events = []
         payload = {
             "name": "ask_user",
@@ -431,7 +430,6 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
         write_end_event.assert_not_awaited()
 
 
-# FIXEME: Agent Stream 前的退出只写 Repository 终态，不通过 finalizer 发布 end。
 class AgentRunPreStreamFailureTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         claim = patch(
@@ -581,7 +579,6 @@ class AgentRunPreStreamFailureTest(unittest.IsolatedAsyncioTestCase):
         write_end.assert_not_awaited()
 
 
-# FIXEME: 终态 chunk 必须在 process_agent_run 中按 status 驱动自然收口。
 class AgentRunProcessTest(unittest.IsolatedAsyncioTestCase):
     async def _run_process(
         self,
@@ -808,7 +805,6 @@ class AgentRunProcessTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("finished", events[-1][1]["chunk"]["status"])
 
     async def test_unchanged_finished_status_does_not_publish_end(self) -> None:
-        # FIXEME: case 只在本次数据库状态发生变化时发布终止事件。
         result, _, events = await self._run_process(
             [{"status": "finished", "request_id": "request-1"}],
             final_status="completed",

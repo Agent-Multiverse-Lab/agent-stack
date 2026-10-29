@@ -151,7 +151,6 @@ async def resume_agent_run(
             detail="请开启 ARQ 队列模式",
         )
 
-    # FIXEME: Resume 保持独立入口，普通 Run 创建接口不再猜测恢复语义。
     try:
         run = await create_resume_agent_run_service(
             db=db,

@@ -156,7 +156,6 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                 "server.service.thread_service.save_message_from_langgraph_state",
                 new=save_messages,
             ),
-            # FIXEME: 流事件单测不重复验证 checkpoint interrupt fixture。
             patch(
                 "server.service.thread_service.check_agent_interrupt_handler",
                 new=no_interrupt,
@@ -419,7 +418,6 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                 loading = [event for event in events if event["status"] == "loading"]
                 self.assertEqual([event["response"] for event in loading], ["OK"] if message.content else [])
     async def test_invalid_values_payload_yields_error_chunk(self) -> None:
-        # FIXEME: Thread Service 将内部解析异常转换为统一 error chunk。
         events = await self.collect_events(FakeAgent(events=(("values", None),)))
 
         self.assertEqual("error", events[-1]["status"])
@@ -445,7 +443,6 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[-1]["status"], "finished")
 
     async def test_agent_stream_error_yields_error_chunk(self) -> None:
-        # FIXEME: 模型异常不再越过 Thread Service 直接抛给 Worker。
         events = await self.collect_events(FakeAgent(error=RuntimeError("model failed")))
 
         self.assertEqual("error", events[-1]["status"])
@@ -506,7 +503,6 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.runtime_context["model"], "dashscope/qwen3.8-max")
 
     async def test_resume_stream_error_yields_error_chunk(self) -> None:
-        # FIXEME: Resume 入口使用自己的 builder 输出 error chunk。
         agent = FakeAgent(error=RuntimeError("resume failed"))
         agent_item = SimpleNamespace(slug="test-agent", agent_config={})
         current_user = SimpleNamespace(uid="user-1")

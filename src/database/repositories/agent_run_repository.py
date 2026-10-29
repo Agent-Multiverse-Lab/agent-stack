@@ -408,7 +408,6 @@ class AgentRunRepository:
         )
         return int(result.rowcount or 0)
 
-    # FIXEME: 锁定父 Run 后，Resume 创建与重复请求判断必须处于同一事务。
     async def get_for_resume_for_update(
         self,
         *,
@@ -432,7 +431,6 @@ class AgentRunRepository:
         )
         return result.scalar_one_or_none()
 
-    # FIXEME: Resume 与 SubAgent 共用 parent_run_id，查询必须显式限制 run_type。
     async def get_resume_child(self, parent_run_id: str) -> AgentRun | None:
         result = await self.session.execute(
             select(AgentRun)
@@ -444,7 +442,6 @@ class AgentRunRepository:
         )
         return result.scalar_one_or_none()
 
-    # FIXEME: Thread 刷新时直接返回尚在执行的最新 Run，Resume 不依赖消息关联。
     async def get_latest_active_for_thread(
         self,
         *,
@@ -468,7 +465,6 @@ class AgentRunRepository:
         )
         return result.scalar_one_or_none()
 
-    # FIXEME: 只有尚无 Resume 子 Run 的最新 interrupted Run 仍待用户回答。
     async def get_pending_interaction_run(
         self,
         *,
@@ -833,7 +829,6 @@ class AgentRunRepository:
                 if lease is not None and _as_utc(lease) <= _as_utc(current_time):
                     return run, False
 
-        # FIXEME: interrupted 复用现有 error/error_type 终态消息字段，不增加专用参数。
         if status == "interrupted" and error is not None:
             interrupt_payload = json.loads(error)
             if not isinstance(interrupt_payload, dict):

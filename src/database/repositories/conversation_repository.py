@@ -337,7 +337,6 @@ class ConversationRepository:
             msg_metadata=msg_metadata,
         )
 
-    # FIXEME: checkpoint 会返回完整历史，按 LangGraph Message ID 避免重复落库。
     async def get_message_by_langgraph_id(
         self,
         *,
@@ -368,7 +367,6 @@ class ConversationRepository:
         status: str
     ) -> ToolCall:
         """为 Assistant Message 创建工具调用。"""
-        # FIXEME: Resume checkpoint 重读历史 AI Tool Call 时复用已有记录。
         if tool_call_id:
             result = await self.session.execute(
                 select(ToolCall).where(ToolCall.tool_call_id == tool_call_id)

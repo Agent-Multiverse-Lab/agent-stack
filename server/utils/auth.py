@@ -67,7 +67,6 @@ def decode_access_token(token: str) -> dict[str, Any]:
             detail="Access token is invalid or expired.",
         ) from exc
 
-    # FIXME: 邮箱是唯一登录账号，JWT 只校验 sub、uid、email 三个身份字段。
     if "sub" not in payload or "uid" not in payload or "email" not in payload:
         logger.warning("Access token payload validation failed.")
         raise HTTPException(
@@ -103,7 +102,6 @@ async def get_current_user(
 
     user = await db.get(User, user_id)
     
-    # FIXME: JWT 的数据库用户主键存放在 sub；旧代码读取不存在的 id，导致所有登录用户都被拒绝。
     if user is None or not user.is_active or str(user.id) != str(payload["sub"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

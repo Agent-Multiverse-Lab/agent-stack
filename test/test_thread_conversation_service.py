@@ -101,7 +101,6 @@ class FakeAgentRunRepository:
         """返回预设活动 Run 状态。"""
         return self.has_active
 
-    # FIXEME: Thread 详情独立返回活动 Run 与待回答 interaction。
     async def get_latest_active_for_thread(self, **_values):
         return self.active_run
 
