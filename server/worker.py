@@ -75,7 +75,7 @@ class AgentRunController:
     """持有单个 Agent Run 的进程内取消状态与租约续期任务。"""
 
     run_id: str
-    worker_id: str
+    worker_id: str = ""
     lease_lost: bool = field(default=False, init=False)
     _cancel_event: asyncio.Event = field(
         default_factory=asyncio.Event,
@@ -99,24 +99,12 @@ class AgentRunController:
             self._heartbeat_task = asyncio.create_task(self._heartbeat_lease())
 
     async def wait_cancel_signal(self) -> None:
-        """等待当前 Run 的取消信号，并传播监听任务异常。"""
-
-        listener_task = self._cancel_listener_task
-        if listener_task is None:
-            raise RuntimeError("Agent Run 取消信号监听尚未启动")
-
+        """等待当前 Run 的取消信号。"""
         await self._cancel_event.wait()
-        await listener_task
 
     async def has_cancel_signal(self) -> bool:
-        if not self._cancel_event.is_set():
-            return False
-
-        listener_task = self._cancel_listener_task
-        if listener_task is None:
-            return False
-        await listener_task
-        return True
+        """查询当前是否已有取消信号。"""
+        return self._cancel_event.is_set()
 
     async def is_cancelled(self) -> bool:
         if self.lease_lost or self._cancel_event.is_set():
@@ -530,8 +518,7 @@ def map_stream_event(chunk: dict[str, Any]) -> tuple[str, Any]:
     if status == "finished":
         return "end", {"status": "completed", "chunk": chunk}
 
-    # raise ValueError(f"不支持的流事件状态：{status}")
-    return "custom"
+    raise ValueError(f"不支持的流事件状态：{status}")
 
 
 class StreamEventSmoother:
@@ -747,7 +734,7 @@ async def process_agent_run(ctx, run_id: str):
             "thread_id": thread_id,
             "uid": user.uid,  # ty:ignore[unresolved-attribute]
             "run_type": run_type,
-            "parent_run_id": agent_run_event.parent_run_id,
+            "parent_run_id": getattr(agent_run_event, "parent_run_id", None),
         }
 
         run_controller = AgentRunController(run_id, worker_id=worker_id)
@@ -934,13 +921,26 @@ async def process_agent_run(ctx, run_id: str):
                     error_type="RuntimeError",
                 )
             except asyncio.CancelledError:
-                logger.info(f"Agent run 收到取消请求：{run_id}")
                 await stream_event_smoother.release()
+                if getattr(run_controller, "lease_lost", False):
+                    logger.warning("Agent run 租约丢失，退出执行：run_id=%s", run_id)
+                    return
+                if await run_controller.is_cancelled():
+                    logger.info(f"Agent run 收到取消请求：{run_id}")
+                    return await _finalize_run(
+                        run_id,
+                        worker_id=worker_id,
+                        status="cancelled",
+                        thread_id=str(thread_id),
+                    )
+                logger.warning("Agent run 基础设施取消（超时或 Worker 退出）：run_id=%s", run_id)
                 return await _finalize_run(
                     run_id,
                     worker_id=worker_id,
-                    status="cancelled",
+                    status="failed",
                     thread_id=str(thread_id),
+                    error="任务执行超时或 Worker 退出",
+                    error_type="TimeoutOrShutdownError",
                 )
             except Exception as exc:
                 if not agent_stream_started:

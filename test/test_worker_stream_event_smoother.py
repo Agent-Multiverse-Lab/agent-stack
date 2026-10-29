@@ -7,7 +7,7 @@ from unittest.mock import ANY, AsyncMock, patch
 
 from server.service.arq_queue_servcie import RUN_REDIS_TTL_SECONDS
 from server.worker import (
-    AgentRunContext,
+    AgentRunController,
     StreamEventSmoother,
     _cancellable_stream,
     _finalize_run,
@@ -18,7 +18,7 @@ from server.worker import (
 )
 
 
-class AgentRunContextTest(unittest.IsolatedAsyncioTestCase):
+class AgentRunControllerTest(unittest.IsolatedAsyncioTestCase):
     async def test_cancel_signal_interrupts_stream(self) -> None:
         cancel_signal = asyncio.Event()
         stream_started = asyncio.Event()
@@ -33,19 +33,19 @@ class AgentRunContextTest(unittest.IsolatedAsyncioTestCase):
             await asyncio.Event().wait()
             yield ("messages", {})
 
-        run_context = AgentRunContext("run-1")
+        run_controller = AgentRunController("run-1", worker_id="worker-test")
         with patch(
             "server.worker.wait_agent_run_cancel_signal",
             new_callable=AsyncMock,
             side_effect=wait_cancel_signal,
         ) as wait_signal:
-            run_context.start()
+            run_controller.start()
             try:
                 next_chunk = asyncio.create_task(
                     anext(
                         _cancellable_stream(
                             stream(),
-                            run_context=run_context,
+                            run_controller=run_controller,
                         )
                     )
                 )
@@ -55,7 +55,7 @@ class AgentRunContextTest(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(asyncio.CancelledError):
                     await next_chunk
             finally:
-                await run_context.close()
+                await run_controller.close()
 
         wait_signal.assert_awaited_once_with("run-1")
 
@@ -69,18 +69,18 @@ class AgentRunContextTest(unittest.IsolatedAsyncioTestCase):
             await keep_listening.wait()
             return True
 
-        run_context = AgentRunContext("run-1")
+        run_controller = AgentRunController("run-1", worker_id="worker-test")
         with patch(
             "server.worker.wait_agent_run_cancel_signal",
             new_callable=AsyncMock,
             side_effect=wait_cancel_signal,
         ) as wait_signal:
-            run_context.start()
-            run_context.start()
+            run_controller.start()
+            run_controller.start()
             await listener_started.wait()
-            listener_task = run_context._cancel_listener_task
+            listener_task = run_controller._cancel_listener_task
 
-            await run_context.close()
+            await run_controller.close()
 
         self.assertIsNotNone(listener_task)
         self.assertTrue(listener_task.cancelled())
@@ -597,7 +597,7 @@ class AgentRunProcessTest(unittest.IsolatedAsyncioTestCase):
             request_id="request-1",
             thread_id="thread-1",
             run_type="resume",
-            run_metadata={"resume": {"answer": "PostgreSQL"}},
+            run_metadata={"resume": {"answers": {"question": "PostgreSQL"}}},
             trigger_message_id=None,
         )
         user = SimpleNamespace(uid="user-1")
@@ -618,6 +618,8 @@ class AgentRunProcessTest(unittest.IsolatedAsyncioTestCase):
             status,
             error=None,
             error_type=None,
+            worker_id=None,
+            **_ignored,
         ):
             events.append(
                 (
@@ -663,7 +665,7 @@ class AgentRunProcessTest(unittest.IsolatedAsyncioTestCase):
             patch("server.worker._cancellable_stream", new=passthrough_stream),
             patch(
                 "server.worker.postgres_manager.get_async_session_context",
-                return_value=session_context(),
+                side_effect=session_context,
             ),
             patch("server.worker.set_run_terminal", side_effect=set_terminal),
             patch("server.worker._finalize_run", wraps=_finalize_run) as finalizer,
@@ -673,14 +675,29 @@ class AgentRunProcessTest(unittest.IsolatedAsyncioTestCase):
                 "server.worker.clear_agent_run_cancel_signal",
                 new_callable=AsyncMock,
             ),
-            patch("server.worker.AgentRunContext.start"),
             patch(
-                "server.worker.AgentRunContext.has_cancel_signal",
+                "server.worker.has_agent_run_cancel_signal",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch(
+                "server.worker._check_run_stopped",
+                new_callable=AsyncMock,
+                return_value=SimpleNamespace(stopped=False, reason=None),
+            ),
+            patch("server.worker.AgentRunController.start"),
+            patch(
+                "server.worker.AgentRunController.has_cancel_signal",
                 new_callable=AsyncMock,
                 return_value=has_cancel_signal,
             ),
             patch(
-                "server.worker.AgentRunContext.close",
+                "server.worker.AgentRunController.is_cancelled",
+                new_callable=AsyncMock,
+                return_value=has_cancel_signal,
+            ),
+            patch(
+                "server.worker.AgentRunController.close",
                 new_callable=AsyncMock,
             ),
         ):
@@ -691,12 +708,13 @@ class AgentRunProcessTest(unittest.IsolatedAsyncioTestCase):
     async def test_interrupted_status_uses_finalizer(self) -> None:
         interrupt = {
             "name": "ask_user",
+            "run_id": "run-1",
             "question": "请选择数据库",
             "options": ["PostgreSQL", "MySQL"],
         }
 
         result, finalizer, events = await self._run_process(
-            [{"status": "interrupted", "interrupt": interrupt}],
+            [{"status": "ask_human", "pending_interrupt": interrupt}],
             final_status="interrupted",
         )
 
@@ -710,16 +728,17 @@ class AgentRunProcessTest(unittest.IsolatedAsyncioTestCase):
             finalizer.await_args.kwargs["payload"],
         )
         self.assertEqual("interrupted", events[-1][1]["status"])
-        self.assertEqual("interrupted", events[-1][1]["chunk"]["status"])
-        self.assertEqual(interrupt, events[-1][1]["chunk"]["interrupt"])
+        self.assertEqual("ask_human", events[-1][1]["chunk"]["status"])
+        self.assertEqual(interrupt, events[-1][1]["chunk"]["pending_interrupt"])
 
     async def test_unchanged_interrupted_status_does_not_publish(self) -> None:
         result, finalizer, events = await self._run_process(
             [
                 {
-                    "status": "interrupted",
-                    "interrupt": {
+                    "status": "ask_human",
+                    "pending_interrupt": {
                         "name": "ask_user",
+                        "run_id": "run-1",
                         "question": "请选择数据库",
                         "options": ["PostgreSQL"],
                     },
@@ -731,7 +750,7 @@ class AgentRunProcessTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(result)
         self.assertEqual(
-            ["status", "finalize"],
+            ["status", "finalize", "interrupt", "end"],
             [event[0] for event in events],
         )
         finalizer.assert_awaited_once()

@@ -209,3 +209,24 @@ class CancellableStreamTest(unittest.IsolatedAsyncioTestCase):
             await anext(self.wrapped(stream()))
         self.assertEqual(raised.exception.args, ("stream cancelled",))
         self.assert_children_finished()
+
+
+class AgentRunControllerWaitCancelTest(unittest.IsolatedAsyncioTestCase):
+    async def test_wait_cancel_signal_returns_immediately_when_event_set_even_if_listener_pending(self):
+        from server.worker import AgentRunController
+
+        controller = AgentRunController(run_id="test-run", worker_id="test-worker")
+        never_ending_event = asyncio.Event()
+
+        async def fake_watch():
+            await never_ending_event.wait()
+
+        controller._cancel_listener_task = asyncio.create_task(fake_watch())
+        self.addAsyncCleanup(controller.close)
+
+        # 模拟心跳或数据库发现取消信号，触发 _cancel_event
+        controller._cancel_event.set()
+
+        # wait_cancel_signal 必须在超时前直接返回，不能等待 fake_watch
+        await asyncio.wait_for(controller.wait_cancel_signal(), timeout=1.0)
+        self.assertTrue(await controller.has_cancel_signal())

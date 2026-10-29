@@ -228,8 +228,16 @@ class WorkerRetryTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_user_cancellation_during_stream_is_not_retried(self):
         self.stream_error = asyncio.CancelledError()
+        self.controller.is_cancelled.return_value = True
         result = await self.process({"worker_id": "worker-test", "job_try": 1}, "run-1")
         self.assertEqual(result, ("cancelled", True))
+        self.controller.close.assert_awaited_once()
+
+    async def test_infrastructure_cancellation_during_stream_marks_failed(self):
+        self.stream_error = asyncio.CancelledError()
+        self.controller.is_cancelled.return_value = False
+        result = await self.process({"worker_id": "worker-test", "job_try": 1}, "run-1")
+        self.assertEqual(result, ("failed", True))
         self.controller.close.assert_awaited_once()
 
     async def test_value_error_during_preparation_is_not_retried(self):
