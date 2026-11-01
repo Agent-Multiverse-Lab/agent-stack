@@ -5,7 +5,7 @@
 每次 Run 在 Service 入口合并一次配置快照，并将它显式传给 Agent：
 
 1. Context 声明的配置默认值。
-2. SQL `agent.agent_config` 中的角色配置。
+2. SQL `agent.agent_config` 中的角色配置；动态子任务使用创建时保存的 `run_metadata.spawn.agent_config`。
 3. SQL `conversation.conversation_metadata.model` 中的会话模型绑定。
 4. 当前 Run 已持久化的模型快照及受信任的运行身份。
 
@@ -17,10 +17,12 @@
 ### AG-CONT-001：显式来源与覆盖顺序
 
 Worker 从持久化 AgentRun、用户和输入消息构造执行参数；Run 的身份字段覆盖 metadata 同名值。
-Service 深拷贝 SQL 配置，模型优先级为：非空 Run 模型快照 > 非空会话绑定 > 非空 Agent 配置 > 应用默认模型。
+Service 新建本次运行配置字典，并独立创建 `tools`、`mcps` 列表；其余标量配置直接读取。
+模型优先级为：非空 Run 模型快照 > 非空会话绑定 > 非空 Agent 配置 > 应用默认模型。
 会话创建时将显式选择或 Agent / 应用默认模型写入 `conversation_metadata.model`；
 普通 Run 创建时解析会话模型并保存到 `run_metadata.model`，显式选择同时更新会话绑定，事务原子提交。
-已有会话缺少模型绑定时沿用 Agent 配置；子会话创建时使用子 Agent 自己的配置确定初始绑定。
+已有会话缺少模型绑定时沿用 Agent 配置；模板子任务使用模板模型，无模板的动态子任务继承父 Run 模型。
+子会话创建时保存解析后的模型绑定。
 `uid`、`run_id`、`thread_id`、`request_id` 和子 Run 的 `created_by_run_id` 来自本次执行参数。
 SQL 预设中的运行身份和未知 Context 字段由 Agent 构造入口拒绝。
 应用默认模型从配置文件读取，在入口或 Context 实例创建时确定，再通过 `update_context()` 写入本次 Context。
@@ -30,7 +32,8 @@ SQL 预设中的运行身份和未知 Context 字段由 Agent 构造入口拒绝
 ### AG-CONT-002：单次运行快照
 
 同一 Run 不重新查询角色配置或热更新 Context；数据库变更在后续 Run 生效。
-SQL 中的嵌套配置在合并时深拷贝，修改一个 Run 的快照不污染 SQL 默认值或另一个 Run。
+`tools`、`mcps` 是工具名称和服务名称列表，各 Run 持有自己的列表。
+动态子任务在创建时将完整配置持久化到 Run，模板修改不影响已经创建的任务。
 Resume 是新的 Run，通过相同的合并入口组装自己的 Context，再读取原会话的 checkpoint。
 
 ### AG-CONT-003：可追踪的组装与消费
@@ -39,7 +42,7 @@ Resume 是新的 Run，通过相同的合并入口组装自己的 Context，再�
 `server/service/thread_service.py:_build_agent_runtime_context()` 是 chat、subagent、resume 共用的合并入口，
 由 `stream_agent_response()` 和 `resume_agent_response()` 调用。
 `BaseAgent` 用显式传入的快照构造具体 Context；LeaderAgent、SubAgentGraph 和 Middleware 消费它。
-子代理中间件只使用显式的父 Context 传递父 Run 身份，子 Run 通过自身角色 slug 获取独立配置。
+子代理中间件只使用显式的父 Context 传递父 Run 身份，动态子 Run 从自身持久化快照获取配置。
 Context 不负责修改数据库中的 Run 状态。
 
 ## 3. Acceptance
@@ -48,4 +51,4 @@ Context 不负责修改数据库中的 Run 状态。
 - 会话模型覆盖 Agent 配置；缺少会话模型时沿用 Agent 配置，两者缺失时使用应用默认模型。
 - 显式选择更新会话绑定和本次 Run 快照，空字符串保持既有绑定；无效模型在写入前被拒绝。
 - 全局默认模型在快照构造后改变，不影响已有快照；构图与摘要使用同一个模型值。
-- 嵌套配置在不同 Run 之间隔离；普通执行、子 Run 和 Resume 的 Context 入口均可追踪。
+- 工具与 MCP 列表在不同 Run 之间隔离；普通执行、子 Run 和 Resume 的 Context 入口均可追踪。

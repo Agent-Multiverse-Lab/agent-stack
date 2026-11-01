@@ -16,9 +16,10 @@
 - `src/agents/base_context.py`：运行上下文模型。
 - `src/agents/buildin/__init__.py`：按 Backend ID 获取执行类的统一入口。
 - `src/agents/buildin/leader/`：主编排 Agent。
-- `src/agents/agent_library/`：Agent 属性模型与启动时补齐缺失数据库记录的角色预设。
+- `src/agents/library/`：Agent 属性模型与启动时补齐缺失数据库记录的角色预设。
 - `src/agents/buildin/subagents/subagent_graph.py`、`subagent_context.py`：所有子角色共用的执行图和 Context。
-- `src/agents/middlewares/subagent_middlware.py`：子代理调度与结果等待。
+- `src/agents/middlewares/subagent_middlware.py`：动态子任务创建、模板选择与结果等待。
+- `src/agents/tool_catalog.py`：可分配工具目录及子任务工具装配。
 - `src/agents/backends/*`：外部运行后端（沙箱、模型适配器）。
 
 ## 3. Context Rule
@@ -41,7 +42,8 @@ agent 运行上下文只来自：
 
 ## 4. Sub-agent Rule
 
-- 子代理只通过中间件被 `LeaderAgent` 调用。
+- Leader 通过 `spawn_agent` 按任务分配工具和上下文，预定义子角色是可选模板。
+- 动态任务统一使用 `generic_agent` 执行身份，创建时持久化独立配置快照。
 - 子代理生命周期仍使用同一 `AgentRun` 机制追踪。
 - 子代理结果返回给父流程，不直接绕过 run 系统。
 
@@ -58,7 +60,7 @@ agent 运行上下文只来自：
 | 上下文管理 | `src/agents/base_context.py`、具体 context | 合并并校验本次 Run 配置，不读取隐式全局运行状态 |
 | 顶层编排 | `src/agents/buildin/leader/` | 编排工具和内部 Agent，保持基础 Prompt 领域中立 |
 | 子代理委派 | `src/agents/middlewares/subagent_middlware.py`、`server/service/` | 通过 Run-backed 工具创建和等待子 Run，不嵌入父图执行 |
-| 子角色初始属性 | `src/agents/agent_library/subagents/` | 声明首次创建所需的 slug、名称、描述、backend 和 Context 预设 |
+| 子角色初始属性 | `src/agents/library/subagents/` | 声明首次创建所需的 slug、名称、描述、backend 和 Context 预设 |
 | 子角色执行 | `src/agents/buildin/subagents/` | 共用 SubAgentGraph 与 SubAgentContext，不成为新的 HTTP/Run 编排入口 |
 | 模型、工具和后端装配 | LeaderAgent、SubAgentGraph、`src/model/`、Agent backend | 在 Agent 边界组装；数据库、队列和对象存储仍由外层拥有 |
 
@@ -69,10 +71,13 @@ agent 运行上下文只来自：
 通过 `agent.get_agent_class(record.backend_id)` 获取 `LeaderAgent` 或 `SubAgentGraph` 并创建实例。
 每次 Run 使用新的实例、Context 和 Middleware；运行链路不导入或构造 AgentLibrary。
 Leader 接收数据库名称、描述和子角色字典；字典仅包含 slug、名称、描述，
-Middleware 通过 slug 创建并入队子 Run，子 Run 执行时重新读取自己的 SQL 配置。
+Middleware 将模板 slug、任务、工具和上下文交给 Service。动态子 Run 创建时解析模板配置，
+持久化到 `run_metadata.spawn.agent_config`；执行时消费该快照，运行身份由 Worker 注入。
+按角色 slug 调用的既有 `task`、`subagent_start` 仍从 SQL 读取角色配置。
 
-所有子角色共用知识/网络检索、Gateway 目录和 MCP 工具，以及沙箱、文件系统、图片校验和模型重试
-Middleware。专业 Prompt、报告 Schema 和预设参数放在角色文件；工具是否用于当前任务由角色规则约束。
+工具目录包含知识/网络检索、Gateway 目录、MCP 和文件系统工具。子 Run 只注册本次分配的工具，
+并在沙箱等中间件产生副作用前拒绝未分配工具的调用。显式 `tools=[]` 表示零工具。
+专业 Prompt 和默认工具放在模板配置中，Leader 可在 spawn 时覆盖工具列表。
 Gateway 工具仍通过 Python gRPC 客户端访问目录，不直接连接 PostgreSQL/PostGIS 或 RustFS。
 `src/knowledge/tools.py` 承接知识和网络检索工具。
 `src/agents/middlewares/image_validation_middleware.py` 检查 MCP 工具可用性并反馈调用错误；
@@ -81,7 +86,7 @@ Gateway 工具仍通过 Python gRPC 客户端访问目录，不直接连接 Post
 
 ## 7. Implementation Invariants
 
-- 每个预定义子角色在 `agent_library/subagents/` 的对应文件声明初始属性；
+- 每个预定义子角色在 `library/subagents/` 的对应文件声明初始属性；
   共享构造放在 SubAgentGraph，不为角色创建专业 Agent class 或独立 builder。
 - 内部 Agent 的现有位置只有在明确批准的结构重构中才能移动，
   不为未来想法创建空模块。

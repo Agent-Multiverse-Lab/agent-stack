@@ -3,17 +3,19 @@
 ## 1. 目标与边界
 
 `AgentLibrary` 用于描述 Agent 的角色属性，包括名称、描述、Prompt 和 Context 预设参数。
-属性模型定义在 `src/agents/agent_library/__init__.py` 中，每个角色在自己的文件中声明属性配置。
-子角色文件位于 `agent_library/subagents/`，以角色命名，例如 `search.py`、`citation.py`。
+属性模型定义在 `src/agents/library/__init__.py` 中，每个角色在自己的文件中声明属性配置。
+子角色文件位于 `library/subagents/`，以角色命名，例如 `search.py`、`citation.py`。
 这些预设仅用于启动时确保 SQL 中存在对应 Agent：缺失时按预设创建，已存在则保持原样。
-运行时读取数据库配置；执行实现按 `backend_id` 选择，每次 Run 直接实例化 Agent class。
+普通运行读取数据库配置；动态子任务读取创建时持久化的配置快照。
+执行实现按 `backend_id` 选择，每次 Run 直接实例化 Agent class。
 Leader 保留自己的构图实现，所有子 Agent 使用同一个 `SubAgentGraph` 和 `SubAgentContext`。
 
 本能力负责声明、注册和实例创建。上下文来源遵循
 [Context Management](../context-management/spec.md)；子 Run 创建、入队、等待和取消遵循
 [Subagent Delegation](../subagent-delegation/spec.md)。
 
-所有子角色共用工具和 Middleware，由各自专业 Prompt 和 Context 预设约束角色行为。
+所有子角色共用执行图，按当前 Context 的工具名称列表装配工具和 Middleware。
+预定义角色提供默认 Prompt 和工具；动态子任务可选模板并覆盖工具列表。
 智能体页面可以编辑现有数据库角色的名称、描述和启用状态。
 Prompt 与 Context 配置编辑、Markdown 编译、定义版本系统不在本次范围。
 
@@ -43,7 +45,8 @@ SQL 不序列化 Python class 对象。角色 `slug` 用于查询记录，Backen
 Worker 启动按 slug 确保预定义 Agent 存在：缺失时插入初始属性，已存在时跳过。
 跳过时保留全部字段，包括名称、描述、backend、角色标记、Context 配置、可见性、启用状态和时间戳。
 重复启动或多个 Worker 同时初始化不会覆盖已有配置，也不会产生相同 slug 的重复记录。
-运行时使用 SQL 中的有效角色配置，遵守已有启用状态和 Run 类型检查。
+运行时遵守已有启用状态和 Run 类型检查。动态任务统一绑定 `generic_agent`，
+可选模板仅提供创建时的配置，不为每次 spawn 新增 Agent 记录。
 
 ### AG-CON-003：统一子 Agent 构图
 
@@ -51,7 +54,8 @@ Worker 启动按 slug 确保预定义 Agent 存在：缺失时插入初始属性
 统一装配模型、工具和 Middleware。所有子 Agent 使用 `SubAgentContext`。
 Leader 使用自己的 `get_agent(context)`，通过构造参数接收数据库中的名称、描述和可用子角色列表。
 子角色列表是仅包含 `slug`、`name`、`description` 的普通字典；Middleware 用它展示和定位角色。
-该列表不持有 ORM 实例或运行配置，子 Run 的配置在执行时通过角色 slug 读取。
+该列表不持有 ORM 实例或运行配置。`spawn_agent` 在创建时读取模板并保存配置快照，
+既有按角色调用的子 Run 仍在执行时通过角色 slug 读取配置。
 现有专业工具、验证和结果表达方式的取舍必须在删除专业实现前明确。
 
 ### AG-CON-004：每次 Run 创建实例
@@ -62,7 +66,7 @@ Leader 使用自己的 `get_agent(context)`，通过构造参数接收数据库�
 Service 直接校验 SQL 中的角色标记和 `agent_config`，拒绝未知 Context 字段和预设 Run 身份。
 `BaseAgent` 的执行协议、checkpointer 和 store 接口继续使用。
 每次 Run 创建独立执行实例、Context 和绑定该 Context 的 Middleware。
-Context 预设配置在使用前复制；运行身份来自当前 Run，模型先使用 Run 快照，
+Context 使用独立字典和工具列表；运行身份来自当前 Run，模型先使用 Run 快照，
 缺少快照时依次使用会话 metadata 绑定、Agent 配置和应用默认模型。空字符串表示未指定。
 
 ### AG-CON-005：统一执行类解析
