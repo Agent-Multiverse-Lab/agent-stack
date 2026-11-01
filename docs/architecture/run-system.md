@@ -65,8 +65,8 @@ ARQ: process_agent_run(run_id)
 | SSE framing | `server/utils/agent_run_utils.py` | 将 Redis 信封转成公开 SSE，不访问 Redis 或数据库 |
 
 队列只传 `run_id`，使用 `run:{run_id}` 作为 Job ID；SSE 消费者独立读取
-`run:events:{run_id}`。`AgentRun.run_type` 表示执行类型，`parent_run_id` 只表示父子
-关系，不能互相替代。
+`run:events:{run_id}`。`AgentRun.run_type` 表示执行类型；`created_by_run_id` 表示来源 Run，
+子任务指向发起委派的 Run，resume 指向被恢复的 Run，普通顶层 Run 为空。两者不能互相替代。
 
 ## 9. Process Boundaries
 

@@ -178,7 +178,7 @@ async def resume_agent_run(
     return {
         "run_id": run.id,
         "run_type": run.run_type,
-        "parent_run_id": run.parent_run_id,
+        "created_by_run_id": run.created_by_run_id,
         "thread_id": run.thread_id,
         "status": run.agent_status,
         "request_id": run.request_id,

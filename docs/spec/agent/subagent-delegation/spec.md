@@ -10,7 +10,7 @@
 调用子代理必须通过 `SubAgentMiddleware`。父代理只通过约定的工具调用方式发起。
 
 ### AG-SUB-002
-子任务 run 使用 `run_type="subagent"`，并保留 `parent_run_id` 形成执行树。
+子任务 run 使用 `run_type="subagent"`，并保留 `created_by_run_id` 形成执行树。
 
 ### AG-SUB-003
 子代理取消遵循父 run cancel 触发路径：`request_cancel_agent_run` 递归标记子 run。
@@ -26,7 +26,7 @@
 
 ```python
 # 中间件触发子 run 的逻辑位置（概念）
-sub_run_id = await create_agent_run_service(..., run_type="subagent", parent_run_id=run_id)
+sub_run_id = await create_agent_run_service(..., run_type="subagent", created_by_run_id=run_id)
 await enqueue_agent_run(sub_run_id)
 ```
 

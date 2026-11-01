@@ -43,8 +43,8 @@ class WorkerInteractionEventTest(unittest.IsolatedAsyncioTestCase):
             "status": "ask_human", "thread_id": "thread-1", "pending_interrupt": pending,
         })
         self.assertEqual(event_type, "interrupt")
-        self.assertEqual(payload, {**pending, "parent_run_id": "run-1"})
-        self.assertNotIn("parent_run_id", pending)
+        self.assertEqual(payload, {**pending, "created_by_run_id": "run-1"})
+        self.assertNotIn("created_by_run_id", pending)
 
     async def test_finalizer_uses_mapping_after_persistence_before_end(self):
         order = []
@@ -70,7 +70,7 @@ class WorkerInteractionEventTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, ("interrupted", True))
         self.assertEqual(order, ["persist", "interrupt", "end"])
         self.namespace["write_stream_event"].assert_awaited_once_with(
-            "run-1", "interrupt", {**pending, "parent_run_id": "run-1"}, "thread-1",
+            "run-1", "interrupt", {**pending, "created_by_run_id": "run-1"}, "thread-1",
         )
 
     async def test_previously_saved_interrupt_still_publishes_interaction(self):

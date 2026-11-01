@@ -209,10 +209,10 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
                 async with session_context() as db:
                     service = _subagent_run_service(db)
                     parent_run = await service.get_parent_run(
-                        parent_run_id=self.parent_context.run_id,
+                        created_by_run_id=self.parent_context.run_id,
                     )
                     child_run_status = await service.get_child_run_status(
-                        parent_run_id=str(parent_run.id),
+                        created_by_run_id=str(parent_run.id),
                         run_id=run_id,
                     )
                     parent_uid = str(parent_run.uid)
@@ -261,10 +261,10 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
                 async with session_context() as db:
                     service = _subagent_run_service(db)
                     parent_run = await service.get_parent_run(
-                        parent_run_id=self.parent_context.run_id,
+                        created_by_run_id=self.parent_context.run_id,
                     )
                     child_run_status = await service.get_child_run_status(
-                        parent_run_id=str(parent_run.id),
+                        created_by_run_id=str(parent_run.id),
                         run_id=run_id,
                     )
                     parent_uid = str(parent_run.uid)
@@ -323,7 +323,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
                     child_run_status = await _subagent_run_service(
                         db
                     ).get_child_run_status(
-                        parent_run_id=self.parent_context.run_id,
+                        created_by_run_id=self.parent_context.run_id,
                         run_id=run_id,
                     )
                 result = await wait_agent_run_result(run_id, uid=self.parent_context.uid)
@@ -414,7 +414,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
                 subagent_record = await _subagent_run_service(
                     db
                 ).create_subagent_record(
-                    parent_run_id=self.parent_context.run_id,
+                    created_by_run_id=self.parent_context.run_id,
                     agent_slug=subagent_slug,
                     input_message=build_agent_input_msg(query=task_description),
                     uid=self.parent_context.uid,

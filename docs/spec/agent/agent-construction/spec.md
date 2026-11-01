@@ -116,5 +116,5 @@ Service 和 Worker 均通过它取得 `BaseAgent` 子类；调用方不再维护
 - 认证列表按数据库角色标记返回 `AgentResponse`，保留禁用项和数据库新增角色，不泄露运行配置；未认证请求被拒绝。
 - 基础字段修改保存到数据库，后续列表读取可见；非法更新被拒绝且不改变角色结构或运行配置。
 - 仅存在于数据库中的角色可以运行；Leader 名称、描述和可用子角色以 SQL 为准，不构造 AgentLibrary。
-- 委派仍走已有子 Run/ARQ 路径，保留 `run_type=subagent` 与 `parent_run_id`。
+- 委派仍走已有子 Run/ARQ 路径，保留 `run_type=subagent` 与 `created_by_run_id`。
 - 实施后的业务代码和测试没有 AgentManager 或已删除专业 Agent class 的引用。

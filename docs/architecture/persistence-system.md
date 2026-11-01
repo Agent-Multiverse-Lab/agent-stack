@@ -44,7 +44,7 @@
 | `Message.id` | PostgreSQL | 持久化消息标识 |
 | `AgentRun.trigger_message_id` | PostgreSQL | Worker 根据 Run 重建输入 |
 | `AgentRun.run_type` | PostgreSQL | `chat` 或 `subagent` 执行类型 |
-| `AgentRun.parent_run_id` | PostgreSQL | 父子 Run 关系，不是类型标记 |
+| `AgentRun.created_by_run_id` | PostgreSQL | 创建来源：子任务的委派 Run，或 resume 的被恢复 Run |
 | `AgentRun.agent_status` | PostgreSQL | Run 唯一生命周期字段 |
 | `run:{run_id}` | ARQ | 后台任务 Job ID |
 | `run:events:{run_id}` | Redis Stream | 事件传输和重连游标 |

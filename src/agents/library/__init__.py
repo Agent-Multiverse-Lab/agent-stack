@@ -25,7 +25,7 @@ class AgentLibrary:
             raise ValueError(f"未知 Agent backend：{self.backend_id}")
         if not isinstance(self.context, dict):
             raise ValueError("Agent Context 配置必须是字典")
-        if {"uid", "run_id", "thread_id", "request_id", "parent_run_id", "parent_thread_id"} & self.context.keys():
+        if {"uid", "run_id", "thread_id", "request_id", "created_by_run_id", "parent_thread_id"} & self.context.keys():
             raise ValueError("Agent 预设配置不能包含 Run 身份")
         json.dumps(self.context, allow_nan=False)
         object.__setattr__(self, "context", deepcopy(self.context))

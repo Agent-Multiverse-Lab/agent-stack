@@ -329,7 +329,7 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
             json.loads(events[0][2]["error"]),
         )
         self.assertEqual("ask_user", events[0][2]["error_type"])
-        self.assertEqual("parent-run", events[1][2]["parent_run_id"])
+        self.assertEqual("parent-run", events[1][2]["created_by_run_id"])
 
     async def test_failed_run_uses_unified_terminal_path(self) -> None:
         with (

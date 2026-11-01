@@ -93,17 +93,17 @@ class AgentRunRepository:
         self,
         *,
         run_id: str,
-        parent_run_id: str,
+        created_by_run_id: str,
     ) -> AgentRun | None:
         """按父运行作用域查询子运行，并校验父子用户归属一致。"""
 
         parent_run = aliased(AgentRun)
         result = await self.session.execute(
             select(AgentRun)
-            .join(parent_run, parent_run.id == AgentRun.parent_run_id)
+            .join(parent_run, parent_run.id == AgentRun.created_by_run_id)
             .where(
                 AgentRun.id == run_id,
-                parent_run.id == parent_run_id,
+                parent_run.id == created_by_run_id,
                 AgentRun.uid == parent_run.uid,
                 AgentRun.run_type == "subagent",
             )
@@ -114,7 +114,7 @@ class AgentRunRepository:
     async def list_active_child_runs(
         self,
         *,
-        parent_run_id: str,
+        created_by_run_id: str,
         uid: str,
     ) -> list[AgentRun]:
         """列出当前用户指定主 Run 下尚未结束的直接子 Agent Run。"""
@@ -123,7 +123,7 @@ class AgentRunRepository:
             select(AgentRun)
             .join(Conversation, Conversation.id == AgentRun.conversation_id)
             .where(
-                AgentRun.parent_run_id == parent_run_id,
+                AgentRun.created_by_run_id == created_by_run_id,
                 AgentRun.uid == uid,
                 Conversation.uid == uid,
                 AgentRun.run_type == "subagent",
@@ -146,7 +146,7 @@ class AgentRunRepository:
         trigger_message_id: int | None,
         agent_status: str = "pending",
         run_type: str = "chat",
-        parent_run_id: str | None = None,
+        created_by_run_id: str | None = None,
         run_metadata: dict | None = None,
     ) -> AgentRun:
         """创建持久化 Agent Run。"""
@@ -160,7 +160,7 @@ class AgentRunRepository:
             trigger_message_id=trigger_message_id,
             run_type=run_type,
             agent_status=agent_status,
-            parent_run_id=parent_run_id,
+            created_by_run_id=created_by_run_id,
             run_metadata=dict(run_metadata or {}),
         )
         self.session.add(run)
@@ -431,11 +431,11 @@ class AgentRunRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_resume_child(self, parent_run_id: str) -> AgentRun | None:
+    async def get_resume_child(self, created_by_run_id: str) -> AgentRun | None:
         result = await self.session.execute(
             select(AgentRun)
             .where(
-                AgentRun.parent_run_id == parent_run_id,
+                AgentRun.created_by_run_id == created_by_run_id,
                 AgentRun.run_type == "resume",
             )
             .execution_options(populate_existing=True)
@@ -477,7 +477,7 @@ class AgentRunRepository:
             .join(Conversation, Conversation.id == AgentRun.conversation_id)
             .outerjoin(
                 resume_child,
-                (resume_child.parent_run_id == AgentRun.id)
+                (resume_child.created_by_run_id == AgentRun.id)
                 & (resume_child.run_type == "resume"),
             )
             .where(

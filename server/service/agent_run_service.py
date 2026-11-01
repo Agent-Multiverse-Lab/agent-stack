@@ -326,7 +326,7 @@ async def create_resume_agent_run_service(
         request_id=request_id,
         trigger_message_id=None,
         run_type="resume",
-        parent_run_id=str(parent.id),
+        created_by_run_id=str(parent.id),
         run_metadata=run_metadata,
     )
     await db.commit()
@@ -582,7 +582,7 @@ async def stream_agent_run_events(
                             thread_id=thread_id,
                             payload={
                                 **interrupt_payload,
-                                "parent_run_id": run_id,
+                                "created_by_run_id": run_id,
                             },
                             created_at=datetime.now(UTC).isoformat(),
                         ),
@@ -639,7 +639,7 @@ async def request_cancel_agent_run(
         raise ValueError(f"Agent Run 不存在或不属于当前用户：{run_id}")
 
     child_runs = await run_repository.list_active_child_runs(
-        parent_run_id=run_id,
+        created_by_run_id=run_id,
         uid=current_uid,
     )
     for child_run in child_runs:

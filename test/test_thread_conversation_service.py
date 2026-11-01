@@ -335,7 +335,7 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
             id="run-1",
             run_type="chat",
             agent_status="completed",
-            parent_run_id=None,
+            created_by_run_id=None,
             run_metadata={"source": "web"},
             started_at=NOW,
             finished_at=NOW + timedelta(minutes=3),
@@ -392,7 +392,7 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
                 "thread_id": "thread-1",
                 "run_id": "parent-run",
                 "name": "ask_user",
-                "parent_run_id": "parent-run",
+                "created_by_run_id": "parent-run",
                 "questions": [{
                     "question_id": "database",
                     "question": "请选择数据库",

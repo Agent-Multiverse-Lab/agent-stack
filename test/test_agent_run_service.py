@@ -461,7 +461,7 @@ class AgentRunEventTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("msg_metadata", AgentRunCreateRequest.model_fields)
         self.assertNotIn("attachment_ids", AgentRunCreateRequest.model_fields)
         self.assertNotIn("is_resume", AgentRunCreateRequest.model_fields)
-        self.assertNotIn("parent_run_id", AgentRunCreateRequest.model_fields)
+        self.assertNotIn("created_by_run_id", AgentRunCreateRequest.model_fields)
 
     def test_format_sse_uses_queue_envelope(self):
         envelope = build_agent_chunk_envolope(

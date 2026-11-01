@@ -51,7 +51,7 @@ class ThreadRunMetadataResponse(BaseModel):
     run_id: str
     run_type: str
     status: str
-    parent_run_id: str | None
+    created_by_run_id: str | None
     metadata: dict[str, Any] = Field(default_factory=dict)
     started_at: datetime | None
     finished_at: datetime | None
@@ -61,7 +61,7 @@ class InteractionRequired(BaseModel):
     """等待当前用户回答的 ask_user 问题。"""
 
     name: str = "ask_user"
-    parent_run_id: str
+    created_by_run_id: str
     questions: list[dict[str, Any]]
 
 

@@ -387,7 +387,7 @@ export default function ChatPage() {
     abortStream();
     setError("");
     try {
-      await run.resumeRun(interaction.parent_run_id, {
+      await run.resumeRun(interaction.created_by_run_id, {
         thread_id: currentThread.thread_id,
         thread_metadata: {
           request_id: crypto.randomUUID(),
@@ -568,7 +568,7 @@ export default function ChatPage() {
             )}
             {!loading && pending && (
               <AskUser
-                key={pending.parent_run_id}
+                key={pending.created_by_run_id}
                 interaction={pending}
                 disabled={runState.resuming}
                 submit={(answers) => void submitResume(answers)}

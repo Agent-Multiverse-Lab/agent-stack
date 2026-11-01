@@ -26,7 +26,7 @@ Worker 的执行生命周期不得依赖某一条 SSE 连接。前端断开不�
 
 本次不包含：
 
-- SubAgent、`parent_run_id`、父子 Run 或子线程聚合；
+- SubAgent、`created_by_run_id`、父子 Run 或子线程聚合；
 - 根据 `run_type` 分支执行；
 - Human-in-the-loop resume；
 - 为每一种 Run Event 建立一个 TypeScript interface；
@@ -49,7 +49,7 @@ Worker 的执行生命周期不得依赖某一条 SSE 连接。前端断开不�
 | `msg_metadata` | object | 否 | 输入消息元数据和附件 ID |
 | `image_content` | string \| null | 否 | 当前输入图像内容 |
 
-`is_resume` 和 `parent_run_id` 即使仍存在于当前后端请求 Schema，也不由本次前端
+`is_resume` 和 `created_by_run_id` 即使仍存在于当前后端请求 Schema，也不由本次前端
 发送或消费。
 
 真实响应字段：
@@ -182,7 +182,7 @@ Stream Key 为 `run:events:{run_id}`。当前真实写入路径为：
 `agent_state` 由 `map_stream_event()` 映射为 `custom`。`finished` 的映射返回值不会
 直接写入；最终 `end` 由持久化终态形成。
 `ask_human` 由 `map_stream_event()` 映射为独立的 `interrupt`，保留
-`pending_interrupt` 的问题并补入 `parent_run_id`；`_finalize_run()` 在写入 interrupted
+`pending_interrupt` 的问题并补入 `created_by_run_id`；`_finalize_run()` 在写入 interrupted
 终态后复用该映射发布交互事件，再发布 `end`。
 
 Redis entry 只包含两个 field：

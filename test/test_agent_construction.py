@@ -227,7 +227,7 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
         values = dict(uid="user-1", run_id="run-1", thread_id="thread-1", request_id="request-1")
         with patch.object(sys_config, "default_model", "configured/model"):
             context = await thread_service._build_agent_runtime_context(
-                **values, defaults={"uid": "ignored", "model": ""}, parent_run_id="parent-1",
+                **values, defaults={"uid": "ignored", "model": ""}, created_by_run_id="parent-1",
             )
         with patch.object(sys_config, "default_model", "changed/model"):
             self.assertEqual(context["model"], "configured/model")
@@ -235,7 +235,7 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
             agent_context.update_context(context)
             self.assertEqual(agent_context.model, "configured/model")
         self.assertEqual(context["uid"], "user-1")
-        self.assertEqual(context["parent_run_id"], "parent-1")
+        self.assertEqual(context["created_by_run_id"], "parent-1")
 
     async def test_context_uses_run_snapshot_then_conversation_then_agent_then_config(self):
         identity = dict(uid="user-1", run_id="run-1", thread_id="thread-1", request_id="request-1")
@@ -272,7 +272,7 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
         for config, error in (
             ({"unrecognized_field": True}, "未知 Agent Context"),
             ({"uid": "forged"}, "Run 身份"),
-            ({"parent_run_id": "forged"}, "Run 身份"),
+            ({"created_by_run_id": "forged"}, "Run 身份"),
             ([], "配置必须是字典"),
             ({"summary_threshold": float("nan")}, "JSON compliant"),
         ):
@@ -351,7 +351,7 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
             self.assertIs(create_agent.call_args.kwargs["model"], model)
             self.assertIs(summary.call_args.kwargs["model"], model)
 
-    async def test_task_and_start_delegate_by_slug_using_parent_run_identity(self):
+    async def test_task_and_start_delegate_by_slug_using_created_by_run_identity(self):
         middleware = SubAgentMiddleware(
             subagents=[{"slug": SEARCH_AGENT.slug, "name": SEARCH_AGENT.name, "description": SEARCH_AGENT.description}],
             parent_context=SubAgentContext(uid="user-1", run_id="parent-1", request_id="request-1"),
@@ -381,7 +381,7 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.update["messages"][0].additional_kwargs["subagent_status"], "pending")
             self.assertEqual(wait.await_count, 1)
         values = service.create_subagent_record.await_args.kwargs
-        self.assertEqual((values["agent_slug"], values["parent_run_id"], values["uid"]), (SEARCH_AGENT.slug, "parent-1", "user-1"))
+        self.assertEqual((values["agent_slug"], values["created_by_run_id"], values["uid"]), (SEARCH_AGENT.slug, "parent-1", "user-1"))
 
 
 @asynccontextmanager

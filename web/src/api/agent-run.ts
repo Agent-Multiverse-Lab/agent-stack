@@ -5,7 +5,7 @@ export interface ThreadRunMetadataResponse {
   run_id: string
   run_type: string
   status: string
-  parent_run_id: string | null
+  created_by_run_id: string | null
   metadata: Record<string, unknown>
   started_at: string | null
   finished_at: string | null
@@ -19,7 +19,7 @@ export interface HumanQuestionResponse {
 
 export interface InteractionRequiredResponse {
   name: "ask_user"
-  parent_run_id: string
+  created_by_run_id: string
   questions: HumanQuestionResponse[]
 }
 
@@ -53,7 +53,7 @@ export interface AgentRunResumeRequest {
 
 export interface AgentRunResumeResponse extends AgentRunCreateResponse {
   run_type: "resume"
-  parent_run_id: string
+  created_by_run_id: string
 }
 
 export interface AgentRunCancelResponse {
@@ -118,11 +118,11 @@ export const buildAgentRunStreamUrl = (runId: string, threadId: string) =>
 
 // The parent Run locates the checkpoint; the response returns a new Resume Run ID.
 export const resumeAgentRun = (
-  parentRunId: string,
+  createdByRunId: string,
   request: AgentRunResumeRequest
 ) =>
   apiClient.apiPost<AgentRunResumeResponse, AgentRunResumeRequest>(
-    `/api/agent/runs/${encodeURIComponent(parentRunId)}/resume`,
+    `/api/agent/runs/${encodeURIComponent(createdByRunId)}/resume`,
     request,
     { requiresAuth: true }
   )

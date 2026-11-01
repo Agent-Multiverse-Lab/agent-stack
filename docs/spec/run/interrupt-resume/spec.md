@@ -71,10 +71,10 @@ ToolMessage 保留两道问题各自的答案。
 `server/utils/interrupt_utils.py` 中的 `AskHumanPayload` 使用普通 dataclass，包含
 `thread_id`、`run_id`、`questions` 和默认值为 `ask_user` 的 `kind`，不增加字段验证。
 `thread_id` 表示所属会话，`run_id` 表示产生中断的执行；恢复时新 Run 的
-`parent_run_id` 指向该 Run，同一会话可以经历多次 Run 和中断。
+`created_by_run_id` 指向该 Run，同一会话可以经历多次 Run 和中断。
 `build_agent_interrupt_message` 将实体转换为字典供事件链路使用。
 实时中断入口传入 context 的 thread_id/run_id；线程详情重建待回答问题时传入持久化 Run 的
-thread_id/id，并保留 parent_run_id。实时事件和刷新恢复使用相同 questions 结构。
+thread_id/id，并保留 created_by_run_id。实时事件和刷新恢复使用相同 questions 结构。
 
 ## 2. State Model
 
@@ -90,8 +90,8 @@ running --cancel--> cancel_requested -> cancelled
 ```
 
 - `interrupted` 是当前 Run 的终态，父 Run 不再回到 `running`。
-- Resume Run 使用新 `run_id`、`run_type="resume"` 和 `parent_run_id`。
-- `parent_run_id` 指向被打断 Run；新 Run 继续使用同一 `thread_id` 和 checkpoint。
+- Resume Run 使用新 `run_id`、`run_type="resume"` 和 `created_by_run_id`。
+- `created_by_run_id` 指向被打断 Run；新 Run 继续使用同一 `thread_id` 和 checkpoint。
 - 旧 Run ID 只用于父 Run 查询、校验、父子关联和刷新恢复，不重新入队，也不是
   LangGraph checkpoint key。
 
@@ -120,7 +120,7 @@ Resume Run 保存前端提交的 Run metadata：
 ```json
 {
   "run_type": "resume",
-  "parent_run_id": "<interrupted-run-id>",
+  "created_by_run_id": "<interrupted-run-id>",
   "run_metadata": {
     "resume": {
       "answers": {"database": "postgresql"}
@@ -159,7 +159,7 @@ POST /api/agent/runs/{interrupted_run_id}/resume
 {
   "run_id": "<resume-run-id>",
   "run_type": "resume",
-  "parent_run_id": "<interrupted-run-id>",
+  "created_by_run_id": "<interrupted-run-id>",
   "thread_id": "<thread-id>",
   "status": "pending",
   "request_id": "<client-idempotency-key>",
@@ -168,7 +168,7 @@ POST /api/agent/runs/{interrupted_run_id}/resume
 ```
 
 普通 `POST /api/agent/runs` 不承担恢复职责；未实现的 `is_resume` 和公开
-`parent_run_id` 从普通创建请求中删除。
+`created_by_run_id` 从普通创建请求中删除。
 
 ### RUN-HIL-004 Resume validation
 
@@ -315,7 +315,7 @@ AIMessage、ToolMessage 或 ToolCall。
   "event_type": "interaction_required",
   "payload": {
     "kind": "ask_user",
-    "parent_run_id": "<interrupted-run-id>",
+    "created_by_run_id": "<interrupted-run-id>",
     "questions": [{"question_id": "database", "question": "请选择数据库", "options": [{"label": "PostgreSQL", "value": "postgresql"}]}]
   }
 }
@@ -327,7 +327,7 @@ PostgreSQL 继续拥有 Run 状态和 interrupt metadata。
 ### RUN-HIL-010 Frontend ownership
 
 `useAgentRun` 保存 `pendingInteraction`，提交
-`resumeRun(parentRunId, request)`，其中请求按上述 `thread_metadata` 结构构造；成功后切换到
+`resumeRun(createdByRunId, request)`，其中请求按上述 `thread_metadata` 结构构造；成功后切换到
 响应中的新 Run ID 和 Stream URL。
 `ChatPage` 组合 `AskUser`；问题、选项和回答不伪造成普通聊天消息，也不写入
 `localStorage`。

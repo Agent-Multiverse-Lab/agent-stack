@@ -21,7 +21,7 @@ class WorkerRetryTest(unittest.IsolatedAsyncioTestCase):
         self.run = SimpleNamespace(
             id="run-1", agent_status="queued", uid="user-1", agent_id="leader",
             thread_id="thread-1", request_id="request-1", run_type="chat",
-            trigger_message_id=1, parent_run_id=None, run_metadata={},
+            trigger_message_id=1, created_by_run_id=None, run_metadata={},
         )
         self.controller = SimpleNamespace(
             start=Mock(), close=AsyncMock(), is_cancelled=AsyncMock(return_value=False),

@@ -513,7 +513,7 @@ def map_stream_event(chunk: dict[str, Any]) -> tuple[str, Any]:
         pending_interrupt = chunk["pending_interrupt"]
         return "interrupt", {
             **pending_interrupt,
-            "parent_run_id": chunk.get("run_id") or pending_interrupt["run_id"],
+            "created_by_run_id": chunk.get("run_id") or pending_interrupt["run_id"],
         }
     if status == "finished":
         return "end", {"status": "completed", "chunk": chunk}
@@ -719,7 +719,7 @@ async def process_agent_run(ctx, run_id: str):
             )
             return
 
-        # Run 类型由创建入口显式落库；parent_run_id 只保留运行间的关联关系。
+        # Run 类型由创建入口显式落库；created_by_run_id 只保留运行间的关联关系。
         metadata = {
             **dict(agent_run_event.run_metadata or {}),
             "run_id": run_id,
@@ -734,7 +734,7 @@ async def process_agent_run(ctx, run_id: str):
             "thread_id": thread_id,
             "uid": user.uid,  # ty:ignore[unresolved-attribute]
             "run_type": run_type,
-            "parent_run_id": getattr(agent_run_event, "parent_run_id", None),
+            "created_by_run_id": getattr(agent_run_event, "created_by_run_id", None),
         }
 
         run_controller = AgentRunController(run_id, worker_id=worker_id)
