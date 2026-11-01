@@ -139,7 +139,11 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(row.backend_id, definition.backend_id)
                     self.assertEqual(row.name, definition.name)
                     self.assertEqual(row.description, definition.description)
-                    self.assertEqual(row.agent_config, definition.context)
+                    expected_config = {
+                        **definition.context,
+                        "model": definition.context.get("model") or sys_config.default_model,
+                    }
+                    self.assertEqual(row.agent_config, expected_config)
                     self.assertEqual(row.role, "subagent")
                     self.assertTrue(row.is_subagent)
                     self.assertTrue(row.internal_only)
@@ -179,7 +183,9 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
         row = await self.repository._get_by_slug(SEARCH_AGENT.slug)
         row.enabled = False
         self.db.session.flush()
-        self.assertIsNone(await self.delegation_middleware())
+        middleware = await self.delegation_middleware()
+        self.assertEqual(middleware.subagent_slugs, set())
+        self.assertIn("spawn_agent", {tool.name for tool in middleware.tools})
 
     async def test_runtime_uses_database_attributes_without_agent_library(self):
         custom = Agent(
@@ -211,17 +217,19 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
             fresh = await self.delegation_middleware()
             self.assertEqual(fresh._subagents[custom.slug]["description"], custom.description)
 
-    async def test_context_defaults_survive_missing_model_and_do_not_share_nested_values(self):
-        defaults = {"model": "preset/model", "mcps": ["configured-server"], "tools": [["a"]]}
+    async def test_context_defaults_survive_missing_model_and_do_not_share_tool_lists(self):
+        defaults = {"model": "preset/model", "mcps": ["configured-server"], "tools": ["web_search"]}
         values = dict(uid="user-1", run_id="run-1", thread_id="thread-1", request_id="request-1", defaults=defaults)
         first = await thread_service._build_agent_runtime_context(**values, model="")
         second = await thread_service._build_agent_runtime_context(**values, model="chosen/model")
         first["mcps"].append("local")
-        first["tools"][0].append("b")
+        first["tools"].append("knowledge_search")
         self.assertEqual(first["model"], "preset/model")
         self.assertEqual(second["model"], "chosen/model")
         self.assertEqual(second["mcps"], ["configured-server"])
-        self.assertEqual(defaults["tools"], [["a"]])
+        self.assertEqual(second["tools"], ["web_search"])
+        self.assertEqual(defaults["tools"], ["web_search"])
+        self.assertEqual(defaults["mcps"], ["configured-server"])
 
     async def test_runtime_context_freezes_default_model_and_overrides_run_identity(self):
         values = dict(uid="user-1", run_id="run-1", thread_id="thread-1", request_id="request-1")

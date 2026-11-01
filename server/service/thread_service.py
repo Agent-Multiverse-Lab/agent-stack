@@ -1,10 +1,10 @@
 import asyncio
 import base64
 import binascii
-from contextlib import asynccontextmanager
 import json
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import fields
 from datetime import datetime
 from typing import Any
@@ -484,6 +484,7 @@ async def _build_agent_runtime(
     db: AsyncSession,
     run_type: str = "chat",
     model: str | None = None,
+    agent_config_snapshot: dict[str, Any] | None = None,
 ) -> tuple[Agent, BaseAgent, str]:
     """按角色 slug 读取数据库属性，并为本次 Run 创建执行实例。"""
     agent_repo = AgentRepository(db)
@@ -518,7 +519,10 @@ async def _build_agent_runtime(
     if agent_record.role != expected_role or agent_record.backend_id != expected_backend:
         raise ValueError(f"Agent 角色或 backend 配置不一致：{agent_record.slug}")
 
-    context_config = agent_record.agent_config if agent_record.agent_config is not None else {}
+    context_config = (
+        agent_config_snapshot if agent_config_snapshot is not None
+        else agent_record.agent_config if agent_record.agent_config is not None else {}
+    )
     if not isinstance(context_config, dict):
         raise ValueError("Agent Context 配置必须是字典")
     if {"uid", "run_id", "thread_id", "request_id", "created_by_run_id", "parent_thread_id"} & context_config.keys():
@@ -538,6 +542,16 @@ async def _build_agent_runtime(
     return agent_record, agent_instance, model_id
 
 
+def _spawn_agent_config(runtime_metadata: dict) -> dict[str, Any] | None:
+    """仅子 Run 可使用创建时持久化的配置快照。"""
+    if runtime_metadata.get("run_type") != "subagent" or "spawn" not in runtime_metadata:
+        return None
+    spawn = runtime_metadata["spawn"]
+    if not isinstance(spawn, dict) or not isinstance(spawn.get("agent_config"), dict):
+        raise ValueError("子任务运行配置快照不存在")
+    return dict(spawn["agent_config"])
+
+
 async def _build_agent_runtime_context(
     uid: str,
     run_id: str,
@@ -550,6 +564,9 @@ async def _build_agent_runtime_context(
 ):
     """复制 SQL 默认配置，注入本次 Run 身份和模型选择，生成运行快照。"""
     agent_runtime_context = dict(defaults or {})
+    for name in ("tools", "mcps"):
+        if agent_runtime_context.get(name) is not None:
+            agent_runtime_context[name] = list(agent_runtime_context[name])
 
     # 根据当前用户的传递内容填填充上下文
     agent_runtime_context.update(
@@ -1331,7 +1348,7 @@ async def _stream_agent_event_chunks(
 @asynccontextmanager
 async def _scoped_session(
     db: AsyncSession | None = None,
-) -> AsyncGenerator[AsyncSession, None]:
+) -> AsyncGenerator[AsyncSession]:
     """若调用方显式传入 session 则直接复用；否则创建并在用完后立即释放短会话。"""
     if db is not None:
         yield db
@@ -1390,6 +1407,7 @@ async def stream_agent_response(
 
     image_content = thread_input_message.image_content
     human_msg: HumanMessage = thread_input_message.langchain_msg
+    agent_config_snapshot = _spawn_agent_config(runtime_metadata)
     async with _scoped_session(db) as session:
         agent_item, agent_instance, model_id = await _build_agent_runtime(
             agent_slug=agent_slug,
@@ -1398,6 +1416,7 @@ async def stream_agent_response(
             db=session,
             run_type=runtime_metadata.get("run_type", "chat"),
             model=runtime_metadata.get("model"),
+            agent_config_snapshot=agent_config_snapshot,
         )
         runtime_metadata.update(
             {
@@ -1420,7 +1439,7 @@ async def stream_agent_response(
         thread_id=thread_id,
         request_id=runtime_metadata["request_id"],
         model=model_id,
-        defaults=agent_item.agent_config,
+        defaults=agent_config_snapshot if agent_config_snapshot is not None else agent_item.agent_config,
         created_by_run_id=runtime_metadata.get("created_by_run_id"),
         conversation_model=(conversation.conversation_metadata or {}).get("model"),
     )

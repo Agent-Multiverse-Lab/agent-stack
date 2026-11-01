@@ -58,12 +58,15 @@ class AgentRunRepository:
         self.attempts = AgentRunAttemptRepository(session)
         self.last_cascaded_signal_run_ids: list[str] = []
 
-    async def get_by_id(self, run_id: str) -> AgentRun | None:
-        result = await self.session.execute(
+    async def get_by_id(self, run_id: str, *, for_update: bool = False) -> AgentRun | None:
+        statement = (
             select(AgentRun)
             .where(AgentRun.id == run_id)
             .execution_options(populate_existing=True)
         )
+        if for_update:
+            statement = statement.with_for_update()
+        result = await self.session.execute(statement)
         return result.scalar_one_or_none()
 
     async def get_by_request_id(self, request_id: str) -> AgentRun | None:

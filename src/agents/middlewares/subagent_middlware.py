@@ -31,7 +31,7 @@ from src.database.session import session_context
 
 TASK_SYSTEM_PROMPT = """## 子智能体委派
 
-你可以把复杂、独立的子任务交给已配置的子智能体处理。子智能体只返回最终结果，你看不到它的中间步骤。
+你可以按任务创建子智能体，分配完成任务所需的工具和上下文，也可以使用预置模板。子智能体不会自动继承当前对话。
 
 使用原则：
 - 任务目标明确、足够复杂、可以独立完成或需要隔离上下文时才委派；任务方向尚未确定或只需少量直接工具调用时不要委派。
@@ -39,8 +39,12 @@ TASK_SYSTEM_PROMPT = """## 子智能体委派
 - 委派时说明清楚任务目标、已知背景、边界和期望输出，不要通过命令行或网络请求间接调用子智能体。
 
 调用方式：
+- 优先使用 `spawn_agent` 创建后台任务：task 写清目标、边界和期望输出，context 提供必要背景、证据和输入。
+- 需要工具时先调用 `list_agent_tools` 查看可用名称与说明，再通过 tools 指定所需工具；不要猜测工具名。
+- template 可选，用于采用预置指令和默认工具；显式 tools 会覆盖模板的工具集合，[] 表示不使用任何工具。无模板且未指定 tools 时也不分配工具。
+- `spawn_agent` 返回 run_id 后，用 `subagent_status` 查询进度、`subagent_await` 等待结果，或 `subagent_cancel` 取消。
 - 短任务且后续步骤必须立刻依赖结果时，使用 `task` 同步等待结果。
-- 耗时长或多个可并行的独立子任务，优先使用 `subagent_start` 在后台启动，后续按需使用 `subagent_status` 查询进度、`subagent_await` 等待结果或 `subagent_cancel` 取消。
+- 已配置角色也可以使用 `subagent_start` 在后台启动。
 - 收到子智能体结果后，检查其完整性和一致性，不要直接拼接未经整理或互相冲突的结果。"""
 
 TASK_TOOL_DESCRIPTION = """启动一个已配置的子智能体处理独立任务，并等待其最终结果。
@@ -60,7 +64,17 @@ SUBAGENT_AWAIT_DESCRIPTION = "等待一个子智能体任务结束并返回最�
 
 TASK_DESCRIPTION_ARG = "需要子智能体独立完成的任务描述，包含必要上下文和期望输出。"
 SUBAGENT_SLUG_ARG = "要调用的子智能体 slug，必须是工具描述中列出的可用项之一。"
-SUBAGENT_RUN_ID_ARG = "子智能体运行 ID，由 subagent_start 返回。"
+SUBAGENT_RUN_ID_ARG = "子智能体运行 ID，由 spawn_agent、subagent_start 或 task 返回。"
+
+
+class SpawnAgentInput(BaseModel):
+    task: str = Field(min_length=1, description="子任务的目标、边界、期望输出和完成标准。")
+    tools: list[str] | None = Field(
+        default=None,
+        description="从 list_agent_tools 选择的工具名称。[] 表示无工具；省略时采用模板默认工具，无模板则无工具。",
+    )
+    context: str = Field(default="", description="独立子任务需要的背景、已有证据和输入材料，不会自动继承父会话消息。")
+    template: str | None = Field(default=None, description="可选的预置模板 slug，省略时使用通用执行器。")
 
 
 class TaskInput(BaseModel):
@@ -102,8 +116,6 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
         system_prompt: str | None = TASK_SYSTEM_PROMPT,
     ) -> None:
         super().__init__()
-        if not subagents:
-            raise ValueError("必须至少指定一个子智能体")
 
         self._subagents: dict[str, dict[str, str]] = {}
         for subagent in subagents:
@@ -119,12 +131,103 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
 
     def _build_subagent_tools(self) -> list[BaseTool]:
         return [
+            self._create_spawn_tool(),
+            self._create_tool_catalog_tool(),
             self._create_task_tool(),
             self._create_start_tool(),
             self._create_status_tool(),
             self._create_cancel_tool(),
             self._create_await_tool(),
         ]
+
+    def _create_spawn_tool(self) -> StructuredTool:
+        async def spawn_agent(
+            task: str,
+            runtime: ToolRuntime,
+            tools: list[str] | None = None,
+            context: str = "",
+            template: str | None = None,
+        ) -> Command:
+            if not runtime.tool_call_id:
+                raise ValueError("子智能体工具调用缺少 tool_call_id")
+            label = template or "generic_agent"
+            if self._has_parallel_ask_user(runtime):
+                return self._result(
+                    runtime=runtime,
+                    tool_name="spawn_agent",
+                    subagent_slug=label,
+                    content="当前轮次同时调用了 ask_user，子智能体未启动；请等待用户回答后再启动子智能体。",
+                    status="cancelled",
+                    error=True,
+                )
+            if template is not None and template not in self._subagents:
+                return self._result(
+                    runtime=runtime,
+                    tool_name="spawn_agent",
+                    subagent_slug=label,
+                    content=f"未知或不可用的子智能体模板：{template}",
+                    status="failed",
+                    error=True,
+                )
+            try:
+                async with session_context() as db:
+                    record = await _subagent_run_service(db).create_spawn_record(
+                        created_by_run_id=self.parent_context.run_id,
+                        task=task,
+                        tools=tools,
+                        context=context,
+                        template=template,
+                        uid=self.parent_context.uid,
+                        tool_call_id=runtime.tool_call_id,
+                        request_id=self.parent_context.request_id,
+                    )
+            except Exception as exc:
+                return self._result(
+                    runtime=runtime,
+                    tool_name="spawn_agent",
+                    subagent_slug=label,
+                    content=f"子智能体启动失败：{exc}",
+                    status="failed",
+                    error=True,
+                )
+            return self._result(
+                runtime=runtime,
+                tool_name="spawn_agent",
+                subagent_slug=label,
+                content=json.dumps(record, ensure_ascii=False),
+                record=record,
+                status=str(record["status"]),
+            )
+
+        return StructuredTool.from_function(
+            name="spawn_agent",
+            coroutine=spawn_agent,
+            description=(
+                "按任务、工具集合和上下文创建后台子智能体，无需预先定义角色。"
+                "返回 run_id 和 thread_id；通过 subagent_status、subagent_await、subagent_cancel 管理运行。"
+                f"\n可选模板：\n{self._available_agents() or '无，可直接创建通用任务'}"
+            ),
+            args_schema=SpawnAgentInput,
+            infer_schema=False,
+        )
+
+    def _create_tool_catalog_tool(self) -> StructuredTool:
+        async def list_agent_tools() -> str:
+            from src.agents.buildin.subagents.subagent_context import SubAgentContext
+            from src.agents.tool_catalog import list_agent_tool_catalog
+
+            catalog_context = SubAgentContext(
+                uid=self.parent_context.uid,
+                thread_id=self.parent_context.thread_id,
+            )
+            catalog = await list_agent_tool_catalog(catalog_context)
+            return json.dumps(catalog, ensure_ascii=False)
+
+        return StructuredTool.from_function(
+            name="list_agent_tools",
+            coroutine=list_agent_tools,
+            description="列出可分配给 spawn_agent 的工具名称及说明，按任务选择 tools 中的名称。",
+        )
 
     def _create_task_tool(self) -> StructuredTool:
         async def atask(
@@ -548,24 +651,21 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
         )
 
     def _system_prompt(self) -> str:
-        return f"{self.system_prompt}\n可用子智能体：\n{self._available_agents()}"
+        return f"{self.system_prompt}\n可选子智能体模板：\n{self._available_agents() or '无，可直接使用 spawn_agent'}"
 
 
 async def create_subagent_middleware(
     *,
     parent_context: BaseContext,
     system_prompt: str | None = TASK_SYSTEM_PROMPT,
-) -> SubAgentMiddleware | None:
-    """查询可委派角色，创建绑定当前 Context 的子智能体中间件。"""
+) -> SubAgentMiddleware:
+    """查询可选模板，创建绑定当前 Context 的动态委派中间件。"""
     async with session_context() as db:
         records = await AgentRepository(db).list_agents(role="subagent", internal_only=True)
         subagents = [
             {"slug": item.slug, "name": item.name, "description": item.description}
             for item in records
         ]
-    if not subagents:
-        return None
-
     return SubAgentMiddleware(
         subagents=subagents,
         parent_context=parent_context,
