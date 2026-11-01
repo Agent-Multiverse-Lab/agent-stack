@@ -5,6 +5,7 @@ Knowledge Domain 关注知识文件与检索能力，不承载 Run 状态。先�
 
 | Capability | 当前契约 | 职责 |
 | --- | --- | --- |
+| workspace | [spec.md](workspace/spec.md) | 知识库管理、目录、处理配置、批任务与评估界面 |
 | ingestion | [spec.md](ingestion/spec.md) | 上传、解析、切块、索引 |
 | retrieval | [spec.md](retrieval/spec.md) | 检索与重排 |
 | graph | [spec.md](graph/spec.md) | 实体抽取、图谱查询、实体检索与知识库问答 |
