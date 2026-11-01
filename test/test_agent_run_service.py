@@ -1,5 +1,6 @@
 """Agent Run 创建事务与事件辅助函数测试。"""
 
+import asyncio
 import json
 import unittest
 from types import SimpleNamespace
@@ -540,6 +541,75 @@ class AgentRunEventTest(unittest.IsolatedAsyncioTestCase):
                     db=db,
                 )
         repo.request_cancel.assert_not_awaited()
+        db.commit.assert_not_awaited()
+
+    async def test_cancellation_waits_for_parent_lock_before_discovering_children(self):
+        for run_type, allow_subagent in (("chat", False), ("subagent", True)):
+            with self.subTest(run_type=run_type):
+                events = []
+                cancel_started = asyncio.Event()
+                spawn_committed = asyncio.Event()
+                children = []
+                run = SimpleNamespace(id="parent-1", run_type=run_type, agent_status="running")
+
+                async def request_cancel(run_id):
+                    self.assertEqual(run_id, run.id)
+                    cancel_started.set()
+                    # 模拟 spawn 持有父行锁，直到新子 Run 提交才允许取消方取得锁。
+                    await spawn_committed.wait()
+                    run.agent_status = "cancel_requested"
+                    events.append("parent_cancelled")
+                    return run
+
+                async def cascade(run_ids):
+                    self.assertEqual(run_ids, [run.id])
+                    self.assertEqual(run.agent_status, "cancel_requested")
+                    events.append("children_discovered")
+                    return list(children)
+
+                async def publish(run_id):
+                    self.assertIn("commit", events)
+                    events.append(("signal", run_id))
+
+                repository = SimpleNamespace(
+                    get_by_id_for_user=AsyncMock(return_value=run),
+                    request_cancel=AsyncMock(side_effect=request_cancel),
+                    cascade_cancel_descendants=AsyncMock(side_effect=cascade),
+                )
+                with (
+                    patch.object(agent_run_service, "AgentRunRepository", return_value=repository),
+                    patch.object(agent_run_service, "publish_agent_run_cancel_signal", side_effect=publish),
+                ):
+                    cancellation = asyncio.create_task(agent_run_service.request_cancel_agent_run(
+                        run_id=run.id, current_uid="user-1", db=FakeSession(events),
+                        allow_subagent=allow_subagent,
+                    ))
+                    try:
+                        await asyncio.wait_for(cancel_started.wait(), timeout=1)
+                        repository.cascade_cancel_descendants.assert_not_awaited()
+                        self.assertEqual(events, [])
+                        children.append("new-child")
+                    finally:
+                        spawn_committed.set()
+                        result = await asyncio.wait_for(cancellation, timeout=1)
+                self.assertIs(result, run)
+                self.assertEqual(events[:3], ["parent_cancelled", "children_discovered", "commit"])
+                self.assertEqual(set(events[3:]), {("signal", run.id), ("signal", "new-child")})
+
+    async def test_cancel_wrong_owner_does_not_lock_or_cascade(self):
+        repository = SimpleNamespace(
+            get_by_id_for_user=AsyncMock(return_value=None),
+            request_cancel=AsyncMock(),
+            cascade_cancel_descendants=AsyncMock(),
+        )
+        db = SimpleNamespace(commit=AsyncMock())
+        with patch.object(agent_run_service, "AgentRunRepository", return_value=repository):
+            with self.assertRaisesRegex(ValueError, "不属于当前用户"):
+                await agent_run_service.request_cancel_agent_run(
+                    run_id="another-users-run", current_uid="user-1", db=db,
+                )
+        repository.request_cancel.assert_not_awaited()
+        repository.cascade_cancel_descendants.assert_not_awaited()
         db.commit.assert_not_awaited()
 
 

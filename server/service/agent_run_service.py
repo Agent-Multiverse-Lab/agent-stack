@@ -641,6 +641,13 @@ async def request_cancel_agent_run(
     if not allow_subagent and str(getattr(run, "run_type", "chat")) == "subagent":
         raise AgentRunConflictError("子智能体运行不支持直接取消，请取消父智能体运行")
 
+    # 先持有目标 Run 行锁，等待并发 spawn 提交后再查询子树。
+    run = await run_repository.request_cancel(run_id)
+    if run is None:
+        raise ValueError(f"Agent Run 不存在：{run_id}")
+    if str(run.agent_status) == "cancel_requested":
+        signal_run_ids.append(run_id)
+
     if hasattr(run_repository, "cascade_cancel_descendants"):
         child_signal_ids = await run_repository.cascade_cancel_descendants(
             [run_id]
@@ -658,12 +665,6 @@ async def request_cancel_agent_run(
                 and str(child_run.agent_status) == "cancel_requested"
             ):
                 signal_run_ids.append(str(child_run.id))
-
-    run = await run_repository.request_cancel(run_id)
-    if run is None:
-        raise ValueError(f"Agent Run 不存在：{run_id}")
-    if str(run.agent_status) == "cancel_requested":
-        signal_run_ids.append(run_id)
 
     # Redis 信号只能在取消状态持久化成功后发布，避免 Worker 先收到信号。
     await db.commit()
