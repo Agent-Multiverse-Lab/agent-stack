@@ -158,6 +158,8 @@ const translations = {
   "Choose files to upload": "选择要上传的文件",
   "Loading files": "正在加载文件",
   "Unable to load files": "无法加载文件",
+  "Add document": "添加文档",
+  "Upload failed": "上传失败",
   "Add your first documents": "添加第一份资料",
   "Upload documents, then parse and index them to make them searchable.": "上传文档，解析并建立索引后即可检索。",
   "Choose files": "选择文件",

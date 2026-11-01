@@ -1,6 +1,6 @@
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.entities.sandbox import (
@@ -8,6 +8,7 @@ from server.entities.sandbox import (
     SandboxFileOperationResponse,
     SandboxFileRenameRequest,
     SandboxFileUpdateRequest,
+    SandboxWorkspaceEntry,
     SandboxWorkspaceResponse,
 )
 from server.service import sandbox_service
@@ -142,6 +143,28 @@ async def delete_workspace_file(
             db, uid=current_user.uid, thread_id=thread_id, path=path, operation="delete",
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except (LookupError, ValueError, RuntimeError, OSError) as exc:
+        _raise_sandbox_http_error(exc)
+
+
+@router.post("/workspace/upload", response_model=SandboxWorkspaceEntry)
+async def upload_workspace_file(
+    current_user: AuthenticatedUser,
+    thread_id: str = Form(min_length=1),
+    path: str = Form(default="/workspace"),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+) -> SandboxWorkspaceEntry:
+    try:
+        content = await file.read()
+        return await sandbox_service.upload_workspace_file(
+            db,
+            uid=current_user.uid,
+            thread_id=thread_id,
+            path=path,
+            filename=file.filename or "uploaded_file",
+            content=content,
+        )
     except (LookupError, ValueError, RuntimeError, OSError) as exc:
         _raise_sandbox_http_error(exc)
 
