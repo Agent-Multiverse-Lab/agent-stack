@@ -98,14 +98,20 @@ class AgentRunRepository:
     ) -> AgentRun | None:
         """按父运行作用域查询子运行，并校验父子用户归属一致。"""
 
-        parent_run = aliased(AgentRun)
+        creator_run = aliased(AgentRun)
+        current_parent_run = aliased(AgentRun)
         result = await self.session.execute(
             select(AgentRun)
-            .join(parent_run, parent_run.id == AgentRun.created_by_run_id)
+            .join(creator_run, creator_run.id == AgentRun.created_by_run_id)
+            .join(
+                current_parent_run,
+                current_parent_run.conversation_id == creator_run.conversation_id,
+            )
             .where(
                 AgentRun.id == run_id,
-                parent_run.id == created_by_run_id,
-                AgentRun.uid == parent_run.uid,
+                current_parent_run.id == created_by_run_id,
+                AgentRun.uid == creator_run.uid,
+                creator_run.uid == current_parent_run.uid,
                 AgentRun.run_type == "subagent",
             )
             .execution_options(populate_existing=True)
