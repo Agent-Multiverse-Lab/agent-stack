@@ -11,7 +11,6 @@ import {
   renameThread,
 } from "@/api/thread";
 import type { UploadedAttachmentResponse } from "@/api/attachment";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import type { AgentRunEndEvent } from "@/api/agent-run";
 import { AskUser } from "@/pages/chat/components/AskUser";
@@ -476,11 +475,6 @@ export default function ChatPage() {
                   {conversationTitle}
                 </Button>
               </h2>
-            )}
-            {threadState.thread && (
-              <Badge variant="outline" className="hidden shrink-0 sm:inline-flex">
-                {threadState.thread.agent_id || t("Agent")}
-              </Badge>
             )}
           </div>
           <div className="flex shrink-0 items-center gap-1">
