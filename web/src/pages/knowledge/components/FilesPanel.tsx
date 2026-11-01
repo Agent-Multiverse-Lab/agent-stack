@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { ArrowUpRight, Check, FileText, Files, Filter, MoreHorizontal, Rows3, Search, Sparkles, Trash2, Upload, X } from "lucide-react"
+import { ArrowUpRight, Check, FileText, Filter, MoreHorizontal, Rows3, Search, Sparkles, Trash2, Upload, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { deleteKnowledgeFile, extractKnowledgeFile, getKnowledgeFileMarkdown, indexKnowledgeFile, listKnowledgeFiles, parseKnowledgeFile, uploadKnowledgeFile } from "@/api/knowledge"
@@ -43,6 +43,7 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
   const [confirmDelete, setConfirmDelete] = useState<KnowledgeFile | null>(null)
   const [chunksFile, setChunksFile] = useState<KnowledgeFile | null>(null)
   const [statusFilter, setStatusFilter] = useState("all")
+  const [previewOpen, setPreviewOpen] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
   const mutationRef = useRef(false)
 
@@ -82,6 +83,7 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
   useEffect(() => {
     if (initialFileId && files.some((file) => file.file_id === initialFileId)) {
       setSelectedId(initialFileId)
+      setPreviewOpen(true)
     }
   }, [initialFileId, files])
 
@@ -169,12 +171,27 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 px-(--page-padding) py-3">
-        <div className="flex items-center gap-2.5"><h2 className="text-sm font-medium">{t("All documents")}</h2>{!loading && <Badge variant="secondary" className="rounded-md tabular-nums">{files.length}</Badge>}</div>
-        <div className="flex items-center gap-3">
-          <div role="search" className="relative w-48 xl:w-56"><Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("Search files")} aria-label={t("Search files")} className="h-8 pl-9 pr-8" />{query && <Button variant="ghost" size="icon-xs" className="absolute right-1.5 top-1/2 -translate-y-1/2" aria-label={t("Clear search")} onClick={() => setQuery("")}><X /></Button>}</div>
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-(--page-padding) py-2.5">
+        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium text-foreground">{t("All documents")}</span>
+            {!loading && <Badge variant="secondary" className="rounded-md tabular-nums">{files.length}</Badge>}
+          </div>
+          <span aria-hidden="true" className="text-border">|</span>
+          <span>{t("{{count}} indexed", { count: indexedCount })}</span>
+          <span aria-hidden="true" className="text-border">|</span>
+          <span>{t("Size")}: {formatFileSize(files.reduce((sum, file) => sum + file.file_size, 0))}</span>
+        </div>
+        <div className="flex items-center gap-2.5">
           <DropdownMenu>
-            <DropdownMenuTrigger render={<Button variant={statusFilter === "all" ? "ghost" : "secondary"} size="icon" />} aria-label={t("Filter by status")} title={t("Filter by status")} aria-pressed={statusFilter !== "all"}><Filter /></DropdownMenuTrigger>
+            <DropdownMenuTrigger
+              render={<Button variant={statusFilter === "all" ? "ghost" : "secondary"} size="icon" />}
+              aria-label={t("Filter by status")}
+              title={t("Filter by status")}
+              aria-pressed={statusFilter !== "all"}
+            >
+              <Filter />
+            </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               {[
                 ["all", t("All statuses")],
@@ -191,68 +208,221 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button className="h-8" onClick={() => fileInput.current?.click()} disabled={uploading || busyId !== null || deleting}>{uploading ? <Spinner /> : <Upload />}{t("Upload files")}</Button>
-          <Input ref={fileInput} type="file" multiple accept=".pdf,.doc,.docx,.txt,.md,.markdown,.csv,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.webp" aria-label={t("Choose files to upload")} className="hidden" onChange={(event) => { handleUpload(Array.from(event.target.files ?? [])); event.target.value = "" }} />
+          <div role="search" className="relative w-48 xl:w-56">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t("Search files")}
+              aria-label={t("Search files")}
+              className="h-8 pl-9 pr-8"
+            />
+            {query && (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2"
+                aria-label={t("Clear search")}
+                onClick={() => setQuery("")}
+              >
+                <X />
+              </Button>
+            )}
+          </div>
+          <Button
+            className="h-8 gap-1.5"
+            onClick={() => fileInput.current?.click()}
+            disabled={uploading || busyId !== null || deleting}
+          >
+            {uploading ? <Spinner /> : <Upload />}
+            {t("Upload files")}
+          </Button>
+          <Input
+            ref={fileInput}
+            type="file"
+            multiple
+            accept=".pdf,.doc,.docx,.txt,.md,.markdown,.csv,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.webp"
+            aria-label={t("Choose files to upload")}
+            className="hidden"
+            onChange={(event) => {
+              handleUpload(Array.from(event.target.files ?? []))
+              event.target.value = ""
+            }}
+          />
         </div>
       </div>
-      {loading ? <div className="grid flex-1 place-items-center text-muted-foreground" role="status" aria-label={t("Loading files")}><Spinner className="size-6" /></div> : error && !files.length ? (
-        <Empty className="flex-1"><EmptyTitle>{t("Unable to load files")}</EmptyTitle><EmptyDescription role="alert">{error}</EmptyDescription><Button variant="outline" onClick={() => setReload((value) => value + 1)}>{t("Retry")}</Button></Empty>
-      ) : !files.length ? (
-        <Empty className="mx-(--page-padding) mb-(--page-padding) flex-1 rounded-xl border border-dashed border-border bg-card">
-          <EmptyMedia className="grid size-16 place-items-center rounded-2xl bg-muted text-primary"><Files className="size-7" strokeWidth={1.4} /></EmptyMedia><EmptyTitle>{t("Add your first documents")}</EmptyTitle><EmptyDescription>{t("Upload documents, then parse and index them to make them searchable.")}</EmptyDescription><Button variant="outline" disabled={uploading} onClick={() => fileInput.current?.click()}><Upload />{t("Choose files")}</Button><p className="mt-2 text-[11px] text-muted-foreground">{t("Documents, spreadsheets, presentations, and images")}</p>
+      {loading ? (
+        <div className="grid flex-1 place-items-center text-muted-foreground" role="status" aria-label={t("Loading files")}>
+          <Spinner className="size-6" />
+        </div>
+      ) : error && !files.length ? (
+        <Empty className="flex-1">
+          <EmptyTitle>{t("Unable to load files")}</EmptyTitle>
+          <EmptyDescription role="alert">{error}</EmptyDescription>
+          <Button variant="outline" onClick={() => setReload((value) => value + 1)}>{t("Retry")}</Button>
         </Empty>
       ) : (
-        <div className="mx-(--page-padding) mb-(--page-padding) grid min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-card lg:grid-cols-[minmax(0,1.15fr)_minmax(290px,0.85fr)] lg:overflow-hidden">
+        <div className={`grid min-h-0 flex-1 overflow-hidden ${previewOpen && selectedFile ? "lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]" : "grid-cols-1"}`}>
           <section className="flex min-h-64 min-w-0 flex-col lg:min-h-0" aria-label={t("Documents")}>
-            {error && <div role="alert" className="flex items-center justify-between gap-3 border-b border-border px-4 py-2 text-xs text-destructive"><span>{error}</span><Button variant="ghost" size="sm" onClick={refresh}>{t("Retry")}</Button></div>}
+            {error && (
+              <div role="alert" className="flex items-center justify-between gap-3 border-b border-border px-4 py-2 text-xs text-destructive">
+                <span>{error}</span>
+                <Button variant="ghost" size="sm" onClick={refresh}>{t("Retry")}</Button>
+              </div>
+            )}
             <div className="min-h-0 flex-1 overflow-auto">
-              {visibleFiles.length ? <Table>
-                <TableHeader><TableRow><TableHead className="h-11 text-[11px] font-normal text-muted-foreground">{t("Document")}</TableHead><TableHead className="h-11 w-24 text-[11px] font-normal text-muted-foreground">{t("Size")}</TableHead><TableHead className="h-11 w-24 text-[11px] font-normal text-muted-foreground">{t("Status")}</TableHead><TableHead className="h-11 w-36 text-[11px] font-normal text-muted-foreground">{t("Updated")}</TableHead><TableHead className="w-10"><span className="sr-only">{t("Actions")}</span></TableHead></TableRow></TableHeader>
-                <TableBody>{visibleFiles.map((file) => (
-                  <TableRow key={file.file_id} className={selectedId === file.file_id ? "bg-selection/60 hover:bg-selection" : ""}>
-                    <TableCell className="max-w-0 py-3 pl-3 pr-1">
-                      <Button variant="ghost" className="h-auto w-full justify-start gap-3 px-1 py-1 text-left" aria-current={selectedId === file.file_id ? "true" : undefined} onClick={() => setSelectedId(file.file_id)}>
-                        <span className="grid size-9 shrink-0 place-items-center rounded-md border border-border bg-card text-primary"><FileText className="size-4" strokeWidth={1.5} /></span>
-                        <span className="min-w-0"><span className="block truncate text-[13px] font-medium" title={file.original_file_name}>{file.original_file_name}</span><span className="mt-1 block text-[10px] text-muted-foreground">{file.original_file_name.split(".").pop()?.toUpperCase()}</span></span>
-                      </Button>
-                    </TableCell>
-                    <TableCell className="w-24 px-2 text-[11px] text-muted-foreground tabular-nums">{formatFileSize(file.file_size)}</TableCell>
-                    <TableCell className="w-24 px-2"><StatusBadge file={fileStatus(file)} /></TableCell>
-                    <TableCell className="w-36 px-2 text-[11px] text-muted-foreground">{formatDateTime(file.updated_at ?? file.created_at)}</TableCell>
-                    <TableCell className="px-2"><DropdownMenu>
-                      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" />} aria-label={t("Open file actions")} title={file.original_file_name}><MoreHorizontal /></DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem disabled={isBusy(file) || !canParse(file)} onClick={() => runOperation(file, "parsing")}><FileText />{t("Parse file")}</DropdownMenuItem>
-                        <DropdownMenuItem disabled={isBusy(file) || file.status !== "parsed"} onClick={() => runOperation(file, "indexing")}><Search />{t("Build index")}</DropdownMenuItem>
-                        <DropdownMenuItem disabled={isBusy(file) || !canExtract(file)} onClick={() => runOperation(file, "extracting")}><Sparkles />{t("Extract graph")}</DropdownMenuItem>
-                        <DropdownMenuItem disabled={!canExtract(file)} onClick={() => setChunksFile(file)}><Rows3 />{t("View chunks")}</DropdownMenuItem>
-                        <DropdownMenuItem variant="destructive" disabled={isBusy(file)} onClick={() => setConfirmDelete(file)}><Trash2 />{t("Delete file")}</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu></TableCell>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="h-11 px-4 text-[11px] font-normal text-muted-foreground">{t("Document")}</TableHead>
+                    <TableHead className="h-11 w-24 px-2 text-[11px] font-normal text-muted-foreground">{t("Size")}</TableHead>
+                    <TableHead className="h-11 w-24 px-2 text-[11px] font-normal text-muted-foreground">{t("Status")}</TableHead>
+                    <TableHead className="h-11 w-36 px-2 text-[11px] font-normal text-muted-foreground">{t("Updated")}</TableHead>
+                    <TableHead className="w-10 px-2"><span className="sr-only">{t("Actions")}</span></TableHead>
                   </TableRow>
-                ))}</TableBody>
-              </Table> : <Empty className="min-h-60"><EmptyMedia><Search /></EmptyMedia><EmptyTitle>{t("No matching documents")}</EmptyTitle><Button variant="ghost" onClick={() => setQuery("")}>{t("Clear search")}</Button></Empty>}
+                </TableHeader>
+                <TableBody>
+                  {visibleFiles.length ? (
+                    visibleFiles.map((file) => (
+                      <TableRow key={file.file_id} className={previewOpen && selectedId === file.file_id ? "bg-selection/60 hover:bg-selection" : ""}>
+                        <TableCell className="max-w-0 py-3 pl-4 pr-1">
+                          <Button
+                            variant="ghost"
+                            className="h-auto w-full justify-start gap-3 px-1 py-1 text-left"
+                            aria-current={previewOpen && selectedId === file.file_id ? "true" : undefined}
+                            onClick={() => {
+                              setSelectedId(file.file_id)
+                              setPreviewOpen(true)
+                            }}
+                          >
+                            <span className="grid size-9 shrink-0 place-items-center rounded-md border border-border bg-card text-primary">
+                              <FileText className="size-4" strokeWidth={1.5} />
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block truncate text-[13px] font-medium" title={file.original_file_name}>
+                                {file.original_file_name}
+                              </span>
+                              <span className="mt-1 block text-[10px] text-muted-foreground">
+                                {file.original_file_name.split(".").pop()?.toUpperCase()}
+                              </span>
+                            </span>
+                          </Button>
+                        </TableCell>
+                        <TableCell className="w-24 px-2 text-[11px] text-muted-foreground tabular-nums">
+                          {formatFileSize(file.file_size)}
+                        </TableCell>
+                        <TableCell className="w-24 px-2">
+                          <StatusBadge file={fileStatus(file)} />
+                        </TableCell>
+                        <TableCell className="w-36 px-2 text-[11px] text-muted-foreground">
+                          {formatDateTime(file.updated_at ?? file.created_at)}
+                        </TableCell>
+                        <TableCell className="px-2">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              render={<Button variant="ghost" size="icon-sm" />}
+                              aria-label={t("Open file actions")}
+                              title={file.original_file_name}
+                            >
+                              <MoreHorizontal />
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => { setSelectedId(file.file_id); setPreviewOpen(true) }}>
+                                <FileText />{t("File preview")}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem disabled={isBusy(file) || !canParse(file)} onClick={() => runOperation(file, "parsing")}>
+                                <FileText />{t("Parse file")}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem disabled={isBusy(file) || file.status !== "parsed"} onClick={() => runOperation(file, "indexing")}>
+                                <Search />{t("Build index")}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem disabled={isBusy(file) || !canExtract(file)} onClick={() => runOperation(file, "extracting")}>
+                                <Sparkles />{t("Extract graph")}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem disabled={!canExtract(file)} onClick={() => setChunksFile(file)}>
+                                <Rows3 />{t("View chunks")}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem variant="destructive" disabled={isBusy(file)} onClick={() => setConfirmDelete(file)}>
+                                <Trash2 />{t("Delete file")}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : files.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="h-48 text-center text-xs text-muted-foreground">
+                        {t("No documents yet")}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={5} className="h-48 text-center text-xs text-muted-foreground">
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <p>{t("No matching documents")}</p>
+                          <Button variant="ghost" size="sm" onClick={() => setQuery("")}>{t("Clear search")}</Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
             </div>
-            <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3 text-[11px] text-muted-foreground"><span>{t("{{count}} documents", { count: files.length })} · {formatFileSize(files.reduce((sum, file) => sum + file.file_size, 0))}{statusFilter !== "all" ? ` · ${t("{{count}} shown", { count: visibleFiles.length })}` : ""}</span><span className="flex items-center gap-1"><Check className="size-3" />{t("{{count}} indexed", { count: indexedCount })}</span></footer>
           </section>
-          <section className="flex min-h-80 min-w-0 flex-col border-t border-border bg-background/50 lg:min-h-0 lg:border-l lg:border-t-0" aria-label={t("Document preview")}>
-            {selectedFile ? <>
+          {previewOpen && selectedFile && (
+            <section className="flex min-h-80 min-w-0 flex-col border-t border-border bg-background/50 lg:min-h-0 lg:border-l lg:border-t-0" aria-label={t("Document preview")}>
               <header className="shrink-0 border-b border-border px-5 py-4">
-                <div className="mb-3 flex items-center gap-2 text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase"><FileText className="size-3.5" />{t("Document preview")}</div>
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase">
+                    <FileText className="size-3.5" />{t("Document preview")}
+                  </div>
+                  <Button variant="ghost" size="icon-xs" aria-label={t("Close preview")} onClick={() => setPreviewOpen(false)}>
+                    <X className="size-3.5" />
+                  </Button>
+                </div>
                 <h3 className="truncate text-sm font-medium" title={selectedFile.original_file_name}>{selectedFile.original_file_name}</h3>
-                <div className="mt-3 flex flex-wrap items-center gap-2"><StatusBadge file={fileStatus(selectedFile)} />
-                  {canParse(selectedFile) && <Button variant="outline" size="sm" disabled={isBusy(selectedFile)} onClick={() => runOperation(selectedFile, "parsing")}>{t("Parse file")}<ArrowUpRight /></Button>}
-                  {selectedFile.status === "parsed" && <Button variant="outline" size="sm" disabled={isBusy(selectedFile)} onClick={() => runOperation(selectedFile, "indexing")}>{t("Build index")}<ArrowUpRight /></Button>}
-                  {selectedFile.status === "indexed" && <Button variant="outline" size="sm" disabled={isBusy(selectedFile)} onClick={() => runOperation(selectedFile, "extracting")}><Sparkles />{t("Extract graph")}</Button>}
-                  {canExtract(selectedFile) && <Button variant="outline" size="sm" onClick={() => setChunksFile(selectedFile)}><Rows3 />{t("View chunks")}</Button>}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <StatusBadge file={fileStatus(selectedFile)} />
+                  {canParse(selectedFile) && (
+                    <Button variant="outline" size="sm" disabled={isBusy(selectedFile)} onClick={() => runOperation(selectedFile, "parsing")}>
+                      {t("Parse file")}<ArrowUpRight />
+                    </Button>
+                  )}
+                  {selectedFile.status === "parsed" && (
+                    <Button variant="outline" size="sm" disabled={isBusy(selectedFile)} onClick={() => runOperation(selectedFile, "indexing")}>
+                      {t("Build index")}<ArrowUpRight />
+                    </Button>
+                  )}
+                  {selectedFile.status === "indexed" && (
+                    <Button variant="outline" size="sm" disabled={isBusy(selectedFile)} onClick={() => runOperation(selectedFile, "extracting")}>
+                      <Sparkles />{t("Extract graph")}
+                    </Button>
+                  )}
+                  {canExtract(selectedFile) && (
+                    <Button variant="outline" size="sm" onClick={() => setChunksFile(selectedFile)}>
+                      <Rows3 />{t("View chunks")}
+                    </Button>
+                  )}
                 </div>
                 {selectedFile.error_message && <p className="mt-3 text-xs leading-5 text-destructive" role="alert">{selectedFile.error_message}</p>}
               </header>
               <div className="flex min-h-0 flex-1 flex-col overflow-auto">
-                {selectedFile.markdown_object_name ? <><FileContentViewer path="document.md" content={markdown} loading={previewLoading} error={previewError} />{previewError && <Button variant="outline" className="mx-auto mb-5" onClick={() => setPreviewReload((value) => value + 1)}>{t("Retry")}</Button>}</> : <Empty className="min-h-60 flex-1"><EmptyMedia><FileText className="size-7" strokeWidth={1.3} /></EmptyMedia><EmptyTitle className="text-sm font-medium">{t("No parsed content")}</EmptyTitle><EmptyDescription className="text-xs">{t("Parse this document to read its content here.")}</EmptyDescription></Empty>}
+                {selectedFile.markdown_object_name ? (
+                  <>
+                    <FileContentViewer path="document.md" content={markdown} loading={previewLoading} error={previewError} />
+                    {previewError && <Button variant="outline" className="mx-auto mb-5" onClick={() => setPreviewReload((value) => value + 1)}>{t("Retry")}</Button>}
+                  </>
+                ) : (
+                  <Empty className="min-h-60 flex-1">
+                    <EmptyMedia><FileText className="size-7" strokeWidth={1.3} /></EmptyMedia>
+                    <EmptyTitle className="text-sm font-medium">{t("No parsed content")}</EmptyTitle>
+                    <EmptyDescription className="text-xs">{t("Parse this document to read its content here.")}</EmptyDescription>
+                  </Empty>
+                )}
               </div>
-            </> : <Empty className="flex-1"><EmptyMedia><FileText /></EmptyMedia><EmptyTitle>{t("Select a document to preview")}</EmptyTitle></Empty>}
-          </section>
+            </section>
+          )}
         </div>
       )}
       <FileChunksDialog

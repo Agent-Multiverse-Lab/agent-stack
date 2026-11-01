@@ -158,7 +158,8 @@ it("graph tab renders one circle per node", async () => {
 
 it("filters documents without losing the selected preview", async () => {
   renderPage()
-  await screen.findAllByText("manual.pdf")
+  const docButtons = await screen.findAllByRole("button", { name: /manual.pdf/ })
+  fireEvent.click(docButtons[0]!)
   fireEvent.change(screen.getByRole("textbox", { name: "Search files" }), { target: { value: "missing" } })
   expect(screen.getByText("No matching documents")).toBeTruthy()
   expect(within(screen.getByRole("region", { name: "Document preview" })).getByText("manual.pdf")).toBeTruthy()
@@ -187,7 +188,8 @@ it("respects the parse, index and graph extraction status contract", async () =>
   vi.mocked(listKnowledgeFiles).mockResolvedValue([{ ...uploaded, status: "parsed" }])
   vi.mocked(indexKnowledgeFile).mockResolvedValue({ kb_id: "kb-1", file_id: "file-1", status: "indexed", chunk_count: 4, collection_name: "collection", embedding_model_spec: "embedding", embedding_dimension: 3 })
   renderPage()
-  await screen.findAllByText("manual.pdf")
+  const [doc] = await screen.findAllByRole("button", { name: /manual.pdf/ })
+  fireEvent.click(doc!)
   fireEvent.click(screen.getByRole("button", { name: "Open file actions" }))
   expect((await screen.findByRole("menuitem", { name: "Parse file" })).getAttribute("aria-disabled")).toBe("true")
   expect(screen.getByRole("menuitem", { name: "Extract graph" }).getAttribute("aria-disabled")).toBe("true")
@@ -204,7 +206,8 @@ it("guards parse and delete while a file operation is running", async () => {
   const uploaded = (await vi.mocked(listKnowledgeFiles)("kb-1"))[0]!
   vi.mocked(parseKnowledgeFile).mockImplementation(() => new Promise((resolve) => { finishParse = resolve }))
   renderPage()
-  await screen.findAllByText("manual.pdf")
+  const [doc2] = await screen.findAllByRole("button", { name: /manual.pdf/ })
+  fireEvent.click(doc2!)
   fireEvent.click(screen.getByRole("button", { name: "Parse file" }))
   fireEvent.click(screen.getByRole("button", { name: "Parse file" }))
   expect(parseKnowledgeFile).toHaveBeenCalledTimes(1)
@@ -282,13 +285,13 @@ it("keeps the collection identity and back link in navigation", async () => {
   const navigation = screen.getByRole("navigation", { name: "Knowledge base navigation" })
   expect(within(navigation).getByText("Docs")).toBeTruthy()
   expect(within(navigation).getByRole("link", { name: "Knowledge Bases" }).getAttribute("href")).toBe("/knowledge")
-  expect(screen.getAllByText("Docs")).toHaveLength(2)
+  expect(screen.getAllByText("Docs")).toHaveLength(1)
   expect(await screen.findByRole("tab", { name: "Documents" })).toBeTruthy()
   expect(screen.getByRole("tab", { name: "Chunks" })).toBeTruthy()
   expect(screen.getByRole("tab", { name: "Search" })).toBeTruthy()
 })
 
-it("shows real collection statistics in the detail header", async () => {
+it("shows real collection statistics in the documents panel", async () => {
   vi.mocked(listKnowledgeFiles).mockResolvedValue([
     {
       file_id: "file-1",
@@ -314,11 +317,9 @@ it("shows real collection statistics in the detail header", async () => {
     }
   ])
   renderPage()
-  expect(await screen.findByText("Total size")).toBeTruthy()
-  expect(screen.getByText("3.0 KB")).toBeTruthy()
-  const stats = screen.getByText("Total size").closest("dl")!
-  expect(within(stats).getByText("Files").nextElementSibling?.textContent).toBe("2")
-  expect(within(stats).getByText("Indexed").nextElementSibling?.textContent).toBe("1")
+  expect(await screen.findByText("2")).toBeTruthy()
+  expect(screen.getByText("1 indexed")).toBeTruthy()
+  expect(screen.getByText(/3.0 KB/)).toBeTruthy()
 })
 
 it("shows file size, updated time, status filtering and a chunks action", async () => {
