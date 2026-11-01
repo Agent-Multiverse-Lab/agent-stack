@@ -130,7 +130,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
         ]
 
     def _create_task_tool(self) -> StructuredTool:
-        async def task(
+        async def atask(
             description: Annotated[str, TASK_DESCRIPTION_ARG],
             subagent_slug: Annotated[str, SUBAGENT_SLUG_ARG],
             runtime: ToolRuntime,
@@ -169,7 +169,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
 
         return StructuredTool.from_function(
             name="task",
-            coroutine=task,
+            coroutine=atask,
             description=TASK_TOOL_DESCRIPTION.format(
                 available_agents=self._available_agents()
             ),
@@ -272,6 +272,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
                         run_id=run_id,
                         current_uid=parent_uid,
                         db=db,
+                        allow_subagent=True,
                     )
                     cancel_status = str(cancelled_run.agent_status)
             except Exception as exc:

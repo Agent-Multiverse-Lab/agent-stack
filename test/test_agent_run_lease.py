@@ -317,3 +317,113 @@ class LeaseTestCase(unittest.IsolatedAsyncioTestCase):
         run = self._reload()
         self.assertEqual("failed", run.agent_status)
         self.assertEqual("DispatchTimeout", run.error_type)
+
+    async def test_startup_reconcile_terminates_active_runs_and_cascades_subagents(self):
+        now = datetime.now(UTC)
+        await self.repository.set_running(
+            "run-1", worker_id="worker-a:1", lease_seconds=120, now=now,
+        )
+        sub_running = AgentRun(
+            id="sub-running",
+            uid="user-1",
+            conversation_id=1,
+            thread_id="thread-sub-1",
+            agent_id="search_agent",
+            run_type="subagent",
+            created_by_run_id="run-1",
+            agent_status="pending",
+        )
+        sub_pending = AgentRun(
+            id="sub-pending",
+            uid="user-1",
+            conversation_id=1,
+            thread_id="thread-sub-2",
+            agent_id="search_agent",
+            run_type="subagent",
+            created_by_run_id="run-1",
+            agent_status="pending",
+            created_at=now,
+        )
+        self.db.add_all([sub_running, sub_pending])
+        self.db.commit()
+        await self.repository.set_running(
+            "sub-running", worker_id="worker-a:2", lease_seconds=120, now=now,
+        )
+        self.db.commit()
+
+        reconciled = await self.repository.reconcile_expired_leases(
+            now=now + timedelta(seconds=5),
+            terminate_active=True,
+        )
+        requeue, timed_out = await self.repository.recover_unclaimed_pending_runs(
+            now=now + timedelta(seconds=5),
+        )
+        self.db.commit()
+
+        self.assertEqual(
+            {"run-1", "sub-running", "sub-pending"},
+            {item.id for item in reconciled},
+        )
+        self.assertEqual([], requeue)
+        self.assertEqual([], timed_out)
+        self.assertEqual("failed", self._reload().agent_status)
+        self.assertEqual(
+            "cancelled",
+            self.db.execute(select(AgentRun).where(AgentRun.id == "sub-running")).scalar_one().agent_status,
+        )
+        self.assertEqual(
+            "cancelled",
+            self.db.execute(select(AgentRun).where(AgentRun.id == "sub-pending")).scalar_one().agent_status,
+        )
+
+    async def test_parent_terminal_cascades_to_pending_and_running_subagents(self):
+        now = datetime.now(UTC)
+        await self.repository.set_running(
+            "run-1", worker_id="worker-a:1", lease_seconds=120, now=now,
+        )
+        sub_running = AgentRun(
+            id="sub-running",
+            uid="user-1",
+            conversation_id=1,
+            thread_id="thread-sub-1",
+            agent_id="search_agent",
+            run_type="subagent",
+            created_by_run_id="run-1",
+            agent_status="pending",
+        )
+        sub_pending = AgentRun(
+            id="sub-pending",
+            uid="user-1",
+            conversation_id=1,
+            thread_id="thread-sub-2",
+            agent_id="search_agent",
+            run_type="subagent",
+            created_by_run_id="run-1",
+            agent_status="pending",
+        )
+        self.db.add_all([sub_running, sub_pending])
+        self.db.commit()
+        await self.repository.set_running(
+            "sub-running", worker_id="worker-b:1", lease_seconds=120, now=now,
+        )
+        self.db.commit()
+
+        _, changed = await self.repository.set_agent_terminal(
+            "run-1",
+            worker_id="worker-a:1",
+            status="failed",
+            error="boom",
+            error_type="RuntimeError",
+        )
+        self.db.commit()
+
+        self.assertTrue(changed)
+        self.assertEqual(["sub-running"], self.repository.last_cascaded_signal_run_ids)
+        self.assertEqual(
+            "cancel_requested",
+            self.db.execute(select(AgentRun).where(AgentRun.id == "sub-running")).scalar_one().agent_status,
+        )
+        self.assertEqual(
+            "cancelled",
+            self.db.execute(select(AgentRun).where(AgentRun.id == "sub-pending")).scalar_one().agent_status,
+        )

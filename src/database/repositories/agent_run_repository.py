@@ -56,6 +56,7 @@ class AgentRunRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.attempts = AgentRunAttemptRepository(session)
+        self.last_cascaded_signal_run_ids: list[str] = []
 
     async def get_by_id(self, run_id: str) -> AgentRun | None:
         result = await self.session.execute(
@@ -305,6 +306,17 @@ class AgentRunRepository:
             return RunStopState(True, "lease_expired", attempt.id)
         if str(run.agent_status) == "cancel_requested":
             return RunStopState(True, "cancel_requested", attempt.id)
+        if str(getattr(run, "run_type", "chat")) == "subagent":
+            created_by_run_id = getattr(run, "created_by_run_id", None)
+            parent_run = (
+                await self.get_by_id(str(created_by_run_id))
+                if created_by_run_id
+                else None
+            )
+            if parent_run is None or str(parent_run.agent_status) in (
+                AGENT_RUN_TERMINAL_STATUSES | {"cancel_requested"}
+            ):
+                return RunStopState(True, "cancel_requested", attempt.id)
         return RunStopState(False, None, attempt.id)
 
     async def is_run_stopped(
@@ -526,6 +538,19 @@ class AgentRunRepository:
         }:
             return None
 
+        if str(getattr(run, "run_type", "chat")) == "subagent":
+            created_by_run_id = getattr(run, "created_by_run_id", None)
+            parent_run = (
+                await self.get_by_id(str(created_by_run_id))
+                if created_by_run_id
+                else None
+            )
+            if parent_run is None or str(parent_run.agent_status) in (
+                AGENT_RUN_TERMINAL_STATUSES | {"cancel_requested"}
+            ):
+                current_status = "cancel_requested"
+                run.agent_status = "cancel_requested"
+
         # 正常路径不应存在开放 attempt；若存在，说明上次执行没有正常收口，
         # 先以 lease_expired 结束它，再创建新 attempt。
         stale = await self.attempts.open(run_id, for_update=True)
@@ -602,38 +627,154 @@ class AgentRunRepository:
         await self.session.flush()
         return True
 
-    async def reconcile_expired_leases(
-        self, *, now: datetime | None = None
-    ) -> list[AgentRun]:
-        """把租约过期的开放 attempt / Run 收敛为失败或取消终态。
+    async def _cancel_or_signal_subagent(
+        self,
+        child_id: str,
+        *,
+        current_time: datetime,
+        terminate_claimed: bool,
+    ) -> tuple[AgentRun | None, str | None]:
+        """在行锁内收敛单个活跃 subagent 子 Run。"""
 
-        候选来自两处：attempt 租约过期，以及迁移前没有 attempt 但 Run 级租约
-        过期的旧 Run。每个 Run 在行锁内处理，先关 attempt 再落 Run 终态，并在
-        同一事务内收敛残留的 running 审计行。
+        child_run = await self._lock_update(child_id)
+        if (
+            child_run is None
+            or str(child_run.agent_status) in AGENT_RUN_TERMINAL_STATUSES
+        ):
+            return None, None
+
+        has_live_owner = False
+        if not terminate_claimed:
+            open_attempt = await self.attempts.open(child_id, for_update=True)
+            has_live_owner = (
+                open_attempt is not None
+                and open_attempt.lease_expires_at is not None
+                and _as_utc(open_attempt.lease_expires_at) > _as_utc(current_time)
+            )
+
+        if has_live_owner:
+            child_run.agent_status = "cancel_requested"
+            return child_run, str(child_run.id)
+
+        await self.attempts.close_open(
+            child_id,
+            status="cancelled",
+            now=current_time,
+        )
+        child_run.agent_status = "cancelled"
+        child_run.finished_at = current_time
+        child_run.worker_id = None
+        child_run.heartbeat_at = None
+        child_run.lease_expires_at = None
+        await self.close_running_audit_messages(
+            child_id,
+            execution_status=_audit_terminal_status("cancelled"),
+        )
+        return child_run, None
+
+    async def cascade_cancel_descendants(
+        self,
+        created_by_run_ids: Sequence[str],
+        *,
+        now: datetime | None = None,
+        terminate_claimed: bool = False,
+        _flush: bool = True,
+    ) -> list[str]:
+        """顺着 created_by_run_id 向下级联取消未终止的 subagent 子 Run。"""
+
+        current_time = now or datetime.now(UTC)
+        frontier = sorted(
+            {str(parent_id) for parent_id in created_by_run_ids if parent_id}
+        )
+        if not frontier:
+            self.last_cascaded_signal_run_ids = []
+            return []
+
+        child_ids: list[str] = []
+        seen: set[str] = set(frontier)
+        while frontier:
+            # FIXME 这里的查询可能会产生 N+1 查询问题，后续可考虑改为一次性查询所有子孙 Run，再在内存中构建树形关系。
+            result = await self.session.execute(
+                select(AgentRun.id).where(
+                    AgentRun.created_by_run_id.in_(frontier),
+                    AgentRun.run_type == "subagent",
+                    AgentRun.agent_status.not_in(AGENT_RUN_TERMINAL_STATUSES),
+                )
+            )
+            children = sorted(
+                str(cid) for cid in result.scalars().all() if str(cid) not in seen
+            )
+            if not children:
+                break
+            seen.update(children)
+            child_ids.extend(children)
+            frontier = children
+
+        signal_run_ids: list[str] = []
+        changed = False
+        for child_id in child_ids:
+            child_run, signal_id = await self._cancel_or_signal_subagent(
+                child_id,
+                current_time=current_time,
+                terminate_claimed=terminate_claimed,
+            )
+            if child_run is not None:
+                changed = True
+            if signal_id is not None:
+                signal_run_ids.append(signal_id)
+
+        if _flush and changed:
+            await self.session.flush()
+        self.last_cascaded_signal_run_ids = list(signal_run_ids)
+        return signal_run_ids
+
+    async def reconcile_expired_leases(
+        self,
+        *,
+        now: datetime | None = None,
+        terminate_active: bool = False,
+    ) -> list[AgentRun]:
+        """把租约过期的开放 attempt / Run 收敛为失败或取消终态，并级联清理孤儿子 Run。
+
+        `terminate_active=True` 用于 Worker 启动（重部署/重启），将所有仍在执行中的
+        主 Agent 及子 Agent 立即终止收口，不等待租约自然到期。
         """
 
         current_time = now or datetime.now(UTC)
-        candidate_ids = set(await self.attempts.list_expired_run_ids(now=current_time))
-        legacy = await self.session.execute(
-            select(AgentRun.id).where(
-                AgentRun.agent_status.in_(tuple(AGENT_RUN_LEASED_STATUSES)),
-                AgentRun.worker_id.is_not(None),
-                AgentRun.lease_expires_at.is_not(None),
-                AgentRun.lease_expires_at <= current_time,
+        self.last_cascaded_signal_run_ids = []
+        if terminate_active:
+            candidate_ids = set(await self.attempts.list_open_run_ids())
+            active = await self.session.execute(
+                select(AgentRun.id).where(
+                    AgentRun.agent_status.in_(tuple(AGENT_RUN_LEASED_STATUSES))
+                )
             )
-        )
-        candidate_ids.update(str(run_id) for run_id in legacy.scalars().all())
-        unclaimed_cancelled = await self.session.execute(
-            select(AgentRun.id).where(
-                AgentRun.agent_status == "cancel_requested",
-                AgentRun.worker_id.is_(None),
+            candidate_ids.update(str(run_id) for run_id in active.scalars().all())
+        else:
+            candidate_ids = set(
+                await self.attempts.list_expired_run_ids(now=current_time)
             )
-        )
-        candidate_ids.update(
-            str(run_id) for run_id in unclaimed_cancelled.scalars().all()
-        )
+            legacy = await self.session.execute(
+                select(AgentRun.id).where(
+                    AgentRun.agent_status.in_(tuple(AGENT_RUN_LEASED_STATUSES)),
+                    AgentRun.worker_id.is_not(None),
+                    AgentRun.lease_expires_at.is_not(None),
+                    AgentRun.lease_expires_at <= current_time,
+                )
+            )
+            candidate_ids.update(str(run_id) for run_id in legacy.scalars().all())
+            unclaimed_cancelled = await self.session.execute(
+                select(AgentRun.id).where(
+                    AgentRun.agent_status == "cancel_requested",
+                    AgentRun.worker_id.is_(None),
+                )
+            )
+            candidate_ids.update(
+                str(run_id) for run_id in unclaimed_cancelled.scalars().all()
+            )
 
         runs: list[AgentRun] = []
+        reconciled_ids: set[str] = set()
         for run_id in sorted(candidate_ids):
             run = await self._lock_update(run_id)
             if run is None:
@@ -649,33 +790,42 @@ class AgentRunRepository:
                 )
                 continue
 
-            # 候选是锁外查询得到的；锁到 Run 后复查 attempt/lease，避免把
-            # 刚续租成功的执行误判为过期。
             open_attempt = await self.attempts.open(run_id)
-            if (
-                open_attempt is not None
-                and open_attempt.lease_expires_at is not None
-                and _as_utc(open_attempt.lease_expires_at) > _as_utc(current_time)
-            ):
-                continue
-            if (
-                open_attempt is None
-                and run.lease_expires_at is not None
-                and _as_utc(run.lease_expires_at) > _as_utc(current_time)
-            ):
-                continue
-            if (
-                open_attempt is None
-                and run.worker_id is None
-                and current_status != "cancel_requested"
-            ):
-                continue
+            if not terminate_active:
+                # 候选是锁外查询得到的；锁到 Run 后复查 attempt/lease，避免把
+                # 刚续租成功的执行误判为过期。
+                if (
+                    open_attempt is not None
+                    and open_attempt.lease_expires_at is not None
+                    and _as_utc(open_attempt.lease_expires_at) > _as_utc(current_time)
+                ):
+                    continue
+                if (
+                    open_attempt is None
+                    and run.lease_expires_at is not None
+                    and _as_utc(run.lease_expires_at) > _as_utc(current_time)
+                ):
+                    continue
+                if (
+                    open_attempt is None
+                    and run.worker_id is None
+                    and current_status != "cancel_requested"
+                ):
+                    continue
 
-            cancelled = current_status == "cancel_requested"
+            is_subagent = str(getattr(run, "run_type", "chat")) == "subagent"
+            cancelled = current_status == "cancel_requested" or (
+                terminate_active and is_subagent
+            )
+            failure_reason = (
+                "Worker restarted before the run finished"
+                if terminate_active
+                else "Worker lease expired before the run finished"
+            )
             await self.attempts.close_open(
                 run_id,
                 status="cancelled" if cancelled else "lease_expired",
-                error=None if cancelled else "Worker lease expired before the run finished",
+                error=None if cancelled else failure_reason,
                 error_type=None if cancelled else "LeaseExpired",
                 now=current_time,
             )
@@ -685,14 +835,49 @@ class AgentRunRepository:
             run.heartbeat_at = None
             run.lease_expires_at = None
             if not cancelled:
-                run.error = "Worker lease expired before the run finished"
+                run.error = failure_reason
                 run.error_type = "LeaseExpired"
             await self.close_running_audit_messages(
                 run_id,
                 execution_status=_audit_terminal_status(str(run.agent_status)),
             )
             runs.append(run)
+            reconciled_ids.add(str(run.id))
 
+        # 结束所有父 Leader Run 已终止或取消请求中的 subagent 子 Run。
+        parent_run = aliased(AgentRun)
+        orphan_query = (
+            select(AgentRun.id)
+            .outerjoin(parent_run, parent_run.id == AgentRun.created_by_run_id)
+            .where(
+                AgentRun.run_type == "subagent",
+                AgentRun.agent_status.not_in(AGENT_RUN_TERMINAL_STATUSES),
+                (
+                    parent_run.id.is_(None)
+                    | parent_run.agent_status.in_(
+                        tuple(AGENT_RUN_TERMINAL_STATUSES | {"cancel_requested"})
+                    )
+                ),
+            )
+        )
+        orphan_ids = sorted(
+            str(rid)
+            for rid in (await self.session.execute(orphan_query)).scalars().all()
+        )
+        signal_run_ids: list[str] = []
+        for child_id in orphan_ids:
+            child_run, signal_id = await self._cancel_or_signal_subagent(
+                child_id,
+                current_time=current_time,
+                terminate_claimed=terminate_active,
+            )
+            if child_run is not None and str(child_run.id) not in reconciled_ids:
+                runs.append(child_run)
+                reconciled_ids.add(str(child_run.id))
+            if signal_id is not None:
+                signal_run_ids.append(signal_id)
+
+        self.last_cascaded_signal_run_ids = signal_run_ids
         if runs:
             await self.session.flush()
         return runs
@@ -715,6 +900,7 @@ class AgentRunRepository:
         candidate_ids = sorted(str(run_id) for run_id in unclaimed.scalars().all())
         requeue_runs: list[AgentRun] = []
         timed_out_runs: list[AgentRun] = []
+        dirty = False
 
         for run_id in candidate_ids:
             run = await self._lock_update(run_id)
@@ -728,6 +914,25 @@ class AgentRunRepository:
             if open_attempt is not None:
                 continue
 
+            if str(getattr(run, "run_type", "chat")) == "subagent":
+                created_by_run_id = getattr(run, "created_by_run_id", None)
+                parent_run = (
+                    await self.get_by_id(str(created_by_run_id))
+                    if created_by_run_id
+                    else None
+                )
+                if parent_run is None or str(parent_run.agent_status) in (
+                    AGENT_RUN_TERMINAL_STATUSES | {"cancel_requested"}
+                ):
+                    run.agent_status = "cancelled"
+                    run.finished_at = current_time
+                    await self.close_running_audit_messages(
+                        run_id,
+                        execution_status=_audit_terminal_status("cancelled"),
+                    )
+                    dirty = True
+                    continue
+
             created_at = getattr(run, "created_at", None)
             if (
                 created_at is not None
@@ -739,10 +944,17 @@ class AgentRunRepository:
                 run.error = "Agent Run dispatch timed out before a worker claimed it"
                 run.error_type = "DispatchTimeout"
                 timed_out_runs.append(run)
+                dirty = True
             else:
                 requeue_runs.append(run)
 
         if timed_out_runs:
+            await self.cascade_cancel_descendants(
+                [str(run.id) for run in timed_out_runs],
+                now=current_time,
+                _flush=False,
+            )
+        if dirty:
             await self.session.flush()
         return requeue_runs, timed_out_runs
 
@@ -864,6 +1076,14 @@ class AgentRunRepository:
         await self.close_running_audit_messages(
             run_id, execution_status=_audit_terminal_status(status)
         )
+        if str(getattr(run, "run_type", "chat")) != "subagent":
+            await self.cascade_cancel_descendants(
+                [run_id],
+                now=current_time,
+                _flush=False,
+            )
+        else:
+            self.last_cascaded_signal_run_ids = []
         await self.session.flush()
         return run, True
 

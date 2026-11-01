@@ -201,6 +201,11 @@ async def cancel_agent_run(
             current_user_id=current_user.uid,
             db=db,
         )
+    except AgentRunConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

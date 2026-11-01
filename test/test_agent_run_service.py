@@ -511,6 +511,37 @@ class AgentRunEventTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("boom", progress["error"])
         self.assertEqual(envelope, progress["events"][0]["payload"])
 
+    async def test_user_cancel_rejects_direct_subagent_cancellation(self):
+        sub_run = SimpleNamespace(
+            id="sub-1",
+            uid="user-1",
+            thread_id="thread-sub-1",
+            agent_id="search_agent",
+            run_type="subagent",
+            agent_status="running",
+        )
+        repo = SimpleNamespace(
+            get_by_id_for_user=AsyncMock(return_value=sub_run),
+            cascade_cancel_descendants=AsyncMock(return_value=[]),
+            request_cancel=AsyncMock(),
+        )
+        db = SimpleNamespace(commit=AsyncMock())
+        with patch(
+            "server.service.agent_run_service.AgentRunRepository",
+            return_value=repo,
+        ):
+            with self.assertRaisesRegex(
+                agent_run_service.AgentRunConflictError,
+                "子智能体运行不支持直接取消",
+            ):
+                await agent_run_service.cancel_run_service(
+                    run_id="sub-1",
+                    current_user_id="user-1",
+                    db=db,
+                )
+        repo.request_cancel.assert_not_awaited()
+        db.commit.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()
