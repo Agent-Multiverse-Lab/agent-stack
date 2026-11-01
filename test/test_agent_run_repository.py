@@ -305,6 +305,61 @@ class AgentRunOwnershipTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs(claimed_late, sub_late)
         self.assertEqual("cancel_requested", sub_late.agent_status)
 
+    async def test_get_child_for_parent_allows_resumed_run_in_same_conversation(self):
+        self.run.agent_status = "interrupted"
+        sub_run = AgentRun(
+            id="sub-1",
+            uid="user-1",
+            conversation_id=2,
+            thread_id="thread-sub-1",
+            agent_id="search_agent",
+            run_type="subagent",
+            created_by_run_id="run-1",
+            agent_status="completed",
+        )
+        resumed_parent = AgentRun(
+            id="run-resume-1",
+            uid="user-1",
+            conversation_id=1,
+            thread_id="thread-1",
+            agent_id="LeaderAgent",
+            run_type="resume",
+            created_by_run_id="run-1",
+            agent_status="running",
+        )
+        other_conversation_parent = AgentRun(
+            id="run-other-conv",
+            uid="user-1",
+            conversation_id=99,
+            thread_id="thread-99",
+            agent_id="LeaderAgent",
+            run_type="chat",
+            agent_status="running",
+        )
+        self.db.add_all([sub_run, resumed_parent, other_conversation_parent])
+        self.db.commit()
+
+        same_run_found = await self.repository.get_child_for_parent(
+            run_id="sub-1",
+            created_by_run_id="run-1",
+        )
+        self.assertIsNotNone(same_run_found)
+        self.assertEqual("sub-1", same_run_found.id)
+
+        resumed_found = await self.repository.get_child_for_parent(
+            run_id="sub-1",
+            created_by_run_id="run-resume-1",
+        )
+        self.assertIsNotNone(resumed_found)
+        self.assertEqual("sub-1", resumed_found.id)
+
+        other_conv_found = await self.repository.get_child_for_parent(
+            run_id="sub-1",
+            created_by_run_id="run-other-conv",
+        )
+        self.assertIsNone(other_conv_found)
+
+
 
 if __name__ == "__main__":
     unittest.main()
