@@ -313,7 +313,7 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
             context = SubAgentContext(uid="user-1", thread_id=definition.slug, run_id=definition.slug)
             context.update_context(record.agent_config)
             with (
-                patch("src.agents.buildin.subagents.subagent_graph.get_mcp_tools", AsyncMock(return_value=[])),
+                patch("src.agents.tool_catalog.get_mcp_tools", AsyncMock(return_value=[])),
                 patch("src.agents.buildin.subagents.subagent_graph.load_chat_model", AsyncMock(return_value=model)) as load_model,
                 patch.object(agent, "get_checkpointer", return_value=checkpointer),
                 patch.object(agent, "get_store", return_value=store),

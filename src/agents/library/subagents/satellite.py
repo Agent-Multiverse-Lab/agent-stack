@@ -65,5 +65,9 @@ SATELLITE_AGENT = AgentLibrary(
     name="卫星数据",
     description="卫星目录检索、单时相解译与多时相变化分析",
     backend_id="SubAgentGraph",
-    context={"system_prompt": SYSTEM_PROMPT, "model": config.default_model},
+    context={
+        "system_prompt": SYSTEM_PROMPT,
+        "model": config.default_model,
+        "tools": ["list_satellite_sources", "search_satellite_scenes", "inspect_satellite_scenes"],
+    },
 )

@@ -78,5 +78,5 @@ CITATION_AGENT = AgentLibrary(
     name="引用校验",
     description="校验声明与所提供检索证据的对应关系",
     backend_id="SubAgentGraph",
-    context={"system_prompt": SYSTEM_PROMPT, "model": config.default_model},
+    context={"system_prompt": SYSTEM_PROMPT, "model": config.default_model, "tools": []},
 )

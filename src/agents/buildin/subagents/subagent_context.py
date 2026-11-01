@@ -6,6 +6,8 @@ from src.configs import config
 
 @dataclass(kw_only=True)
 class SubAgentContext(BaseContext):
+    # None 保留旧配置的完整工具集合；显式 [] 表示本次 Run 不使用工具。
+    tools: list[str] | None = field(default=None)
     parent_thread_id: str | None = field(default=None)
     created_by_run_id: str | None = field(default=None)
     gateway_target: str = field(default=config.satellite_gateway_target)

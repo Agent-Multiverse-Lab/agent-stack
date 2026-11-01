@@ -32,5 +32,5 @@ SEARCH_AGENT = AgentLibrary(
     name="资料检索",
     description="检索资料、比较来源并整理证据",
     backend_id="SubAgentGraph",
-    context={"system_prompt": SYSTEM_PROMPT, "model": config.flash_model},
+    context={"system_prompt": SYSTEM_PROMPT, "model": config.flash_model, "tools": ["web_search", "knowledge_search"]},
 )
