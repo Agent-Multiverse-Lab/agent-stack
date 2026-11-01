@@ -29,21 +29,18 @@ from src.agents.base_context import BaseContext
 from src.database.repositories.agent_repository import AgentRepository
 from src.database.session import session_context
 
-TASK_SYSTEM_PROMPT = """## `task`（子智能体任务工具）
+TASK_SYSTEM_PROMPT = """## 子智能体委派
 
-你可以使用 `task` 工具把复杂、独立的子任务交给已配置的子智能体处理。子智能体只返回最终结果，你看不到它的中间步骤。
+你可以把复杂、独立的子任务交给已配置的子智能体处理。子智能体只返回最终结果，你看不到它的中间步骤。
 
 使用原则：
-- 任务足够复杂、可以独立完成、或需要隔离上下文时使用。
-- 多个互不依赖的子任务可以并行调用多个 `task`。
-- 简单问题或少量直接工具调用不要委派。
-- 调用时必须选择下方可用的 `subagent_slug`，并在 `description` 中写清目标、上下文和期望输出。
-- 不要通过 shell、curl、HTTP API 或命令行间接调用子智能体；需要子智能体时必须使用这些子智能体工具。
+- 任务目标明确、足够复杂、可以独立完成或需要隔离上下文时才委派；任务方向尚未确定或只需少量直接工具调用时不要委派。
+- 多个互不依赖的子任务可以并行委派。
+- 委派时说明清楚任务目标、已知背景、边界和期望输出，不要通过命令行或网络请求间接调用子智能体。
 
-后台子智能体：
-- 长任务或多个可并行任务优先使用 `subagent_start`，它会立即返回 `run_id` 和 `thread_id`，父智能体可以继续工作。
-- 后续用 `subagent_status` 查询状态和最近进度，`subagent_cancel` 取消，`subagent_await` 在明确需要结果时等待。
-- 短任务且父智能体必须立刻依赖结果时继续使用 `task`。
+调用方式：
+- 短任务且后续步骤必须立刻依赖结果时，使用 `task` 同步等待结果。
+- 耗时长或多个可并行的独立子任务，优先使用 `subagent_start` 在后台启动，后续按需使用 `subagent_status` 查询进度、`subagent_await` 等待结果或 `subagent_cancel` 取消。
 - 收到子智能体结果后，检查其完整性和一致性，不要直接拼接未经整理或互相冲突的结果。"""
 
 TASK_TOOL_DESCRIPTION = """启动一个已配置的子智能体处理独立任务，并等待其最终结果。
