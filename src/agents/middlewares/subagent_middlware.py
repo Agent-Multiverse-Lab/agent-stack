@@ -398,6 +398,16 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
         if not runtime.tool_call_id:
             raise ValueError("子智能体工具调用缺少 tool_call_id")
 
+        if self._has_parallel_ask_user(runtime):
+            return None, self._result(
+                runtime=runtime,
+                tool_name=tool_name,
+                subagent_slug=subagent_slug,
+                content="当前轮次同时调用了 ask_user，子智能体未启动；请等待用户回答后再启动子智能体。",
+                status="cancelled",
+                error=True,
+            )
+
         subagent = self._subagents.get(subagent_slug)
         if subagent is None:
             allowed = "、".join(self._subagents)
@@ -432,6 +442,33 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
                 error=True,
             )
         return subagent_record, None
+
+    @staticmethod
+    def _has_parallel_ask_user(runtime: ToolRuntime) -> bool:
+        state = getattr(runtime, "state", None)
+        messages = (
+            state.get("messages")
+            if isinstance(state, Mapping)
+            else getattr(state, "messages", None)
+        )
+        if not isinstance(messages, Sequence):
+            return False
+        for message in reversed(messages):
+            tool_calls = getattr(message, "tool_calls", None)
+            if not isinstance(tool_calls, Sequence) or not tool_calls:
+                continue
+            call_ids = {
+                item.get("id") if isinstance(item, Mapping) else getattr(item, "id", None)
+                for item in tool_calls
+            }
+            if runtime.tool_call_id and runtime.tool_call_id not in call_ids:
+                continue
+            return any(
+                (item.get("name") if isinstance(item, Mapping) else getattr(item, "name", None))
+                == "ask_user"
+                for item in tool_calls
+            )
+        return False
 
     @staticmethod
     def _result(
