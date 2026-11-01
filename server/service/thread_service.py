@@ -221,7 +221,7 @@ async def get_thread_detail(
                 thread_id=str(pending_interaction_run.thread_id),
                 run_id=str(pending_interaction_run.id),
             ),
-            "parent_run_id": str(pending_interaction_run.id),
+            "created_by_run_id": str(pending_interaction_run.id),
         }
     attachment_rows = await MessageAttachmentRepository(
         db
@@ -423,8 +423,8 @@ def _run_response(run: AgentRun | None) -> dict[str, Any] | None:
         "run_id": str(run.id),
         "run_type": str(run.run_type),
         "status": str(run.agent_status),
-        "parent_run_id": (
-            str(run.parent_run_id) if run.parent_run_id is not None else None
+        "created_by_run_id": (
+            str(run.created_by_run_id) if run.created_by_run_id is not None else None
         ),
         "metadata": dict(run.run_metadata or {}),
         "started_at": run.started_at,
@@ -521,7 +521,7 @@ async def _build_agent_runtime(
     context_config = agent_record.agent_config if agent_record.agent_config is not None else {}
     if not isinstance(context_config, dict):
         raise ValueError("Agent Context 配置必须是字典")
-    if {"uid", "run_id", "thread_id", "request_id", "parent_run_id", "parent_thread_id"} & context_config.keys():
+    if {"uid", "run_id", "thread_id", "request_id", "created_by_run_id", "parent_thread_id"} & context_config.keys():
         raise ValueError("Agent 预设配置不能包含 Run 身份")
     json.dumps(context_config, allow_nan=False)
     unknown_fields = context_config.keys() - {item.name for item in fields(agent_class.agent_context)}
@@ -545,7 +545,7 @@ async def _build_agent_runtime_context(
     request_id: str,
     model: str | None = None,
     defaults: dict[str, Any] | None = None,
-    parent_run_id: str | None = None,
+    created_by_run_id: str | None = None,
     conversation_model: str | None = None,
 ):
     """复制 SQL 默认配置，注入本次 Run 身份和模型选择，生成运行快照。"""
@@ -565,8 +565,8 @@ async def _build_agent_runtime_context(
         conversation_model=conversation_model,
         agent_model=agent_runtime_context.get("model"),
     )
-    if parent_run_id:
-        agent_runtime_context["parent_run_id"] = parent_run_id
+    if created_by_run_id:
+        agent_runtime_context["created_by_run_id"] = created_by_run_id
     return agent_runtime_context
 
 
@@ -1421,7 +1421,7 @@ async def stream_agent_response(
         request_id=runtime_metadata["request_id"],
         model=model_id,
         defaults=agent_item.agent_config,
-        parent_run_id=runtime_metadata.get("parent_run_id"),
+        created_by_run_id=runtime_metadata.get("created_by_run_id"),
         conversation_model=(conversation.conversation_metadata or {}).get("model"),
     )
     agent_context = agent_instance.agent_context()

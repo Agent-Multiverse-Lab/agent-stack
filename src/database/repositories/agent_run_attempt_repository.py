@@ -185,3 +185,13 @@ class AgentRunAttemptRepository:
             .distinct()
         )
         return [str(run_id) for run_id in result.scalars().all()]
+
+    async def list_open_run_ids(self) -> list[str]:
+        """列出存在未结束开放 attempt 的全部 Run。"""
+
+        result = await self.session.execute(
+            select(AgentRunAttempt.run_id)
+            .where(AgentRunAttempt.finished_at.is_(None))
+            .distinct()
+        )
+        return [str(run_id) for run_id in result.scalars().all()]

@@ -265,6 +265,46 @@ class AgentRunOwnershipTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(changed)
         self.assertEqual(self.run.agent_status, "failed")
 
+    async def test_subagent_claim_and_stop_check_respect_parent_terminal_status(self):
+        await self.repository.set_running("run-1", worker_id="worker-a:1")
+        sub_run = AgentRun(
+            id="sub-1",
+            uid="user-1",
+            conversation_id=1,
+            thread_id="thread-sub-1",
+            agent_id="search_agent",
+            run_type="subagent",
+            created_by_run_id="run-1",
+            agent_status="pending",
+        )
+        self.db.add(sub_run)
+        self.db.commit()
+
+        await self.repository.set_running("sub-1", worker_id="worker-b:1")
+        self.assertEqual("running", sub_run.agent_status)
+        await self.repository.set_agent_terminal(
+            "run-1", worker_id="worker-a:1", status="completed"
+        )
+        stop = await self.repository.check_run_stopped("sub-1", worker_id="worker-b:1")
+        self.assertTrue(stop.stopped)
+        self.assertEqual("cancel_requested", stop.reason)
+
+        sub_late = AgentRun(
+            id="sub-2",
+            uid="user-1",
+            conversation_id=1,
+            thread_id="thread-sub-2",
+            agent_id="search_agent",
+            run_type="subagent",
+            created_by_run_id="run-1",
+            agent_status="pending",
+        )
+        self.db.add(sub_late)
+        self.db.commit()
+        claimed_late = await self.repository.set_running("sub-2", worker_id="worker-c:1")
+        self.assertIs(claimed_late, sub_late)
+        self.assertEqual("cancel_requested", sub_late.agent_status)
+
 
 if __name__ == "__main__":
     unittest.main()

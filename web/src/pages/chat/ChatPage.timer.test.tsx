@@ -45,7 +45,7 @@ function detail(id: string, startedAt: string | null = start): ThreadDetailRespo
   return {
     thread: { thread_id: id, title: id, summary: null, agent_id: "LeaderAgent", metadata: {}, created_at: start, updated_at: start },
     messages: [],
-    active_run: { run_id: `run-${id}`, run_type: "chat", status: startedAt ? "running" : "pending", started_at: startedAt, finished_at: null, parent_run_id: null, metadata: {} },
+    active_run: { run_id: `run-${id}`, run_type: "chat", status: startedAt ? "running" : "pending", started_at: startedAt, finished_at: null, created_by_run_id: null, metadata: {} },
     pending_interaction: null,
     next_before_message_id: null,
   };

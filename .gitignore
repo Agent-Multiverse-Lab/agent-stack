@@ -46,3 +46,7 @@ scripts/*
 
 # Application logs
 /logs/
+
+
+# agent related files
+/.agents/*

@@ -28,7 +28,7 @@ class SubAgentRunRecord(TypedDict):
     thread_id: str
     conversation_id: int
     parent_conversation_id: int
-    parent_run_id: str
+    created_by_run_id: str
     trigger_message_id: int
     request_id: str
     agent_slug: str
@@ -41,7 +41,7 @@ class SubAgentRunStatus(TypedDict):
     run_id: str
     thread_id: str
     conversation_id: int
-    parent_run_id: str
+    created_by_run_id: str
     agent_slug: str
     status: str
     terminal: bool
@@ -65,7 +65,7 @@ def _serialize_subagent_run_status(run: AgentRun) -> SubAgentRunStatus:
         "run_id": str(run.id),
         "thread_id": str(run.thread_id),
         "conversation_id": int(run.conversation_id),
-        "parent_run_id": str(run.parent_run_id),
+        "created_by_run_id": str(run.created_by_run_id),
         "agent_slug": str(run.agent_id),
         "status": status,
         "terminal": status in SUBAGENT_TERMINAL_STATUSES,
@@ -88,7 +88,7 @@ def _build_record(
         "thread_id": str(conversation.thread_id),
         "conversation_id": int(conversation.id),
         "parent_conversation_id": int(conversation.parent_conversation_id),
-        "parent_run_id": str(run.parent_run_id),
+        "created_by_run_id": str(run.created_by_run_id),
         "trigger_message_id": int(message.id),
         "request_id": str(run.request_id),
         "agent_slug": str(run.agent_id),
@@ -119,7 +119,7 @@ class SubAgentRunService:
     async def create_subagent_record(
         self,
         *,
-        parent_run_id: str,
+        created_by_run_id: str,
         agent_slug: str,
         input_message: AgentInputMsg,
         uid: str,
@@ -129,7 +129,7 @@ class SubAgentRunService:
         """落库并确认子会话、触发消息和运行记录，入队后立即返回。"""
 
         record = await self._persist_record(
-            parent_run_id=parent_run_id,
+            created_by_run_id=created_by_run_id,
             agent_slug=agent_slug,
             input_message=input_message,
             uid=uid,
@@ -139,26 +139,26 @@ class SubAgentRunService:
         await agent_run_service.enqueue_agent_run(record["run_id"])
         return record
 
-    async def get_parent_run(self, *, parent_run_id: str) -> AgentRun:
+    async def get_parent_run(self, *, created_by_run_id: str) -> AgentRun:
         """按父 Agent context 中的 Run ID 查询父 Run。"""
 
-        parent_run = await self.run_repository.get_by_id(parent_run_id)
+        parent_run = await self.run_repository.get_by_id(created_by_run_id)
 
         if parent_run is None:
-            raise ValueError(f"父 Agent Run 不存在：{parent_run_id}")
+            raise ValueError(f"父 Agent Run 不存在：{created_by_run_id}")
         return parent_run
 
     async def get_child_run_status(
         self,
         *,
-        parent_run_id: str,
+        created_by_run_id: str,
         run_id: str,
     ) -> SubAgentRunStatus:
         """校验父子 Run 归属并返回子 Agent Run 的数据库生命周期状态。"""
 
         run = await self.run_repository.get_child_for_parent(
             run_id=run_id,
-            parent_run_id=parent_run_id,
+            created_by_run_id=created_by_run_id,
         )
 
         if run is None:
@@ -168,7 +168,7 @@ class SubAgentRunService:
     async def _persist_record(
         self,
         *,
-        parent_run_id: str,
+        created_by_run_id: str,
         agent_slug: str,
         input_message: AgentInputMsg,
         uid: str,
@@ -178,9 +178,9 @@ class SubAgentRunService:
         # TODO 需要再完善一下，因为目前来说，子 agent 落库的流程还没有梳理清楚， 2026-07-20
 
         try:
-            parent_run = await self.run_repository.get_by_id(parent_run_id)
+            parent_run = await self.run_repository.get_by_id(created_by_run_id)
             if parent_run is None:
-                raise ValueError(f"父运行不存在：{parent_run_id}")
+                raise ValueError(f"父运行不存在：{created_by_run_id}")
 
             parent_conversation = (
                 await self.conversation_repository.get_conversation_by_id(
@@ -228,7 +228,7 @@ class SubAgentRunService:
                 request_id=child_request_id,
                 trigger_message_id=int(trigger_message.id),
                 run_type="subagent",
-                parent_run_id=parent_run_id,
+                created_by_run_id=created_by_run_id,
                 run_metadata={"tool_call_id": tool_call_id, "model": model},
             )
             trigger_message.agent_run_id = child_run.id

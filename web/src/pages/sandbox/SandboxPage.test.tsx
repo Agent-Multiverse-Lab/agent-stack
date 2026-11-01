@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { listThreads } from "@/api/thread";
-import { deleteSandboxFile, listSandboxWorkspace, readSandboxFile, renameSandboxFile, updateSandboxFile } from "@/api/sandbox";
+import { deleteSandboxFile, listSandboxWorkspace, readSandboxFile, renameSandboxFile, updateSandboxFile, uploadSandboxFile } from "@/api/sandbox";
 import SandboxPage from "@/pages/sandbox/SandboxPage";
 import { installBrowserStubs } from "@/test/browserStubs";
 
@@ -13,6 +13,7 @@ vi.mock("@/api/sandbox", () => ({
   renameSandboxFile: vi.fn(),
   deleteSandboxFile: vi.fn(),
   updateSandboxFile: vi.fn(),
+  uploadSandboxFile: vi.fn(),
 }));
 
 afterEach(() => {
@@ -26,6 +27,14 @@ beforeEach(() => {
   vi.mocked(renameSandboxFile).mockResolvedValue({ path: "/workspace/renamed.md" });
   vi.mocked(deleteSandboxFile).mockResolvedValue(undefined);
   vi.mocked(updateSandboxFile).mockResolvedValue(undefined);
+  vi.mocked(uploadSandboxFile).mockResolvedValue({
+    name: "new-doc.md",
+    path: "/workspace/new-doc.md",
+    kind: "file",
+    size: 100,
+    modified_at: "2026-09-21T00:00:00Z",
+    file_type: "document",
+  });
   installBrowserStubs();
   Object.defineProperty(Element.prototype, "getAnimations", { configurable: true, value: () => [] });
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(1000);
@@ -62,11 +71,17 @@ beforeEach(() => {
           { name: "analysis-report.md", path: "/workspace/outputs/analysis-report.md", kind: "file", size: 42, modified_at: "2026-09-21T00:00:00Z", file_type: "document" },
           { name: "scene-summary.json", path: "/workspace/outputs/scene-summary.json", kind: "file", size: 18, modified_at: "2026-09-21T00:00:00Z", file_type: "data" },
         ]
-      : path === "/workspace/scripts" ? [] : [
+      : path === "/workspace/scripts" ? [
+          { name: "tool.py", path: "/workspace/scripts/tool.py", kind: "file", size: 15, modified_at: "2026-09-21T00:00:00Z", file_type: "code" },
+        ]
+      : path === "/workspace/docs" ? [
+          { name: "guide.md", path: "/workspace/docs/guide.md", kind: "file", size: 20, modified_at: "2026-09-21T00:00:00Z", file_type: "document" },
+        ] : [
           { name: "outputs", path: "/workspace/outputs", kind: "directory", size: null, modified_at: "2026-09-21T00:00:00Z" },
           { name: "notes.txt", path: "/workspace/notes.txt", kind: "file", size: 8, modified_at: "2026-09-21T00:00:00Z", file_type: "document" },
           { name: "README.md", path: "/workspace/README.md", kind: "file", size: 10, modified_at: "2026-09-21T00:00:00Z", file_type: "document" },
           { name: "scripts", path: "/workspace/scripts", kind: "directory", size: null, modified_at: "2026-09-21T00:00:00Z" },
+          { name: "docs", path: "/workspace/docs", kind: "directory", size: null, modified_at: "2026-09-21T00:00:00Z" },
         ],
   }));
   vi.mocked(readSandboxFile).mockImplementation(async (_threadId, path) => ({
@@ -79,13 +94,31 @@ beforeEach(() => {
   }));
 });
 
-it("opens a workspace folder from the real sandbox response", async () => {
+it("opens a workspace folder from the real sandbox response and hides outputs in workspace", async () => {
   render(<SandboxPage />);
-  const outputs = await screen.findAllByRole("button", { name: "outputs" });
-  fireEvent.click(outputs.at(-1)!);
-  expect(await screen.findByText("analysis-report.md")).toBeTruthy();
-  expect(screen.getByText("scene-summary.json")).toBeTruthy();
-  expect(listSandboxWorkspace).toHaveBeenCalledWith("thread-1", "/workspace/outputs");
+  await screen.findByText("README.md");
+  expect(screen.queryByRole("button", { name: "outputs" })).toBeNull();
+  expect(screen.queryByText("outputs")).toBeNull();
+
+  const scripts = await screen.findAllByRole("button", { name: "scripts" });
+  fireEvent.click(scripts.at(-1)!);
+  expect(await screen.findByText("tool.py")).toBeTruthy();
+  expect(listSandboxWorkspace).toHaveBeenCalledWith("thread-1", "/workspace/scripts");
+});
+
+it("uploads a document from the left sidebar", async () => {
+  render(<SandboxPage />);
+  await screen.findByText("README.md");
+  const uploadButton = screen.getByRole("button", { name: /Add document|添加文档/ });
+  expect(uploadButton).toBeTruthy();
+
+  const fileInput = screen.getByLabelText(/Add document|添加文档/) as HTMLInputElement;
+  const file = new File(["test file content"], "uploaded.txt", { type: "text/plain" });
+  fireEvent.change(fileInput, { target: { files: [file] } });
+
+  await waitFor(() => {
+    expect(uploadSandboxFile).toHaveBeenCalledWith("thread-1", "/workspace", file);
+  });
 });
 
 it("filters the flat file list", async () => {
@@ -142,12 +175,12 @@ it("ignores a late directory response after navigating elsewhere", async () => {
   render(<SandboxPage />);
   await screen.findByText("README.md");
   vi.mocked(listSandboxWorkspace).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
-  fireEvent.click(screen.getAllByRole("button", { name: "outputs" })[0]);
-  await waitFor(() => expect(listSandboxWorkspace).toHaveBeenCalledWith("thread-1", "/workspace/outputs"));
+  fireEvent.click(screen.getAllByRole("button", { name: "docs" })[0]);
+  await waitFor(() => expect(listSandboxWorkspace).toHaveBeenCalledWith("thread-1", "/workspace/docs"));
   fireEvent.click(screen.getByRole("button", { name: "scripts" }));
   await waitFor(() => expect(listSandboxWorkspace).toHaveBeenCalledWith("thread-1", "/workspace/scripts"));
-  await screen.findByText("This folder is empty");
-  await act(async () => finish({ thread_id: "thread-1", sandbox_id: "sandbox", status: "running", path: "/workspace/outputs", entries: [{ name: "late.txt", path: "/workspace/outputs/late.txt", kind: "file", size: 4, modified_at: "" }] }));
+  await screen.findByText("tool.py");
+  await act(async () => finish({ thread_id: "thread-1", sandbox_id: "sandbox", status: "running", path: "/workspace/docs", entries: [{ name: "late.txt", path: "/workspace/docs/late.txt", kind: "file", size: 4, modified_at: "" }] }));
   expect(screen.queryByText("late.txt")).toBeNull();
 });
 

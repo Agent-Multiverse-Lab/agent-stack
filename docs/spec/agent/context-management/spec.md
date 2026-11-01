@@ -21,7 +21,7 @@ Service 深拷贝 SQL 配置，模型优先级为：非空 Run 模型快照 > �
 会话创建时将显式选择或 Agent / 应用默认模型写入 `conversation_metadata.model`；
 普通 Run 创建时解析会话模型并保存到 `run_metadata.model`，显式选择同时更新会话绑定，事务原子提交。
 已有会话缺少模型绑定时沿用 Agent 配置；子会话创建时使用子 Agent 自己的配置确定初始绑定。
-`uid`、`run_id`、`thread_id`、`request_id` 和子 Run 的 `parent_run_id` 来自本次执行参数。
+`uid`、`run_id`、`thread_id`、`request_id` 和子 Run 的 `created_by_run_id` 来自本次执行参数。
 SQL 预设中的运行身份和未知 Context 字段由 Agent 构造入口拒绝。
 应用默认模型从配置文件读取，在入口或 Context 实例创建时确定，再通过 `update_context()` 写入本次 Context。
 构图和摘要中间件只消费 `context.model`。

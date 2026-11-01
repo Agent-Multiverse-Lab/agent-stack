@@ -326,7 +326,7 @@ async def create_resume_agent_run_service(
         request_id=request_id,
         trigger_message_id=None,
         run_type="resume",
-        parent_run_id=str(parent.id),
+        created_by_run_id=str(parent.id),
         run_metadata=run_metadata,
     )
     await db.commit()
@@ -582,7 +582,7 @@ async def stream_agent_run_events(
                             thread_id=thread_id,
                             payload={
                                 **interrupt_payload,
-                                "parent_run_id": run_id,
+                                "created_by_run_id": run_id,
                             },
                             created_at=datetime.now(UTC).isoformat(),
                         ),
@@ -626,6 +626,7 @@ async def request_cancel_agent_run(
     run_id: str,
     current_uid: str,
     db: AsyncSession,
+    allow_subagent: bool = False,
 ) -> AgentRun:
     """持久化目标 Agent Run 及其活跃子 Run 的取消请求。"""
 
@@ -637,15 +638,26 @@ async def request_cancel_agent_run(
     )
     if run is None:
         raise ValueError(f"Agent Run 不存在或不属于当前用户：{run_id}")
+    if not allow_subagent and str(getattr(run, "run_type", "chat")) == "subagent":
+        raise AgentRunConflictError("子智能体运行不支持直接取消，请取消父智能体运行")
 
-    child_runs = await run_repository.list_active_child_runs(
-        parent_run_id=run_id,
-        uid=current_uid,
-    )
-    for child_run in child_runs:
-        child_run = await run_repository.request_cancel(str(child_run.id))
-        if child_run is not None and str(child_run.agent_status) == "cancel_requested":
-            signal_run_ids.append(str(child_run.id))
+    if hasattr(run_repository, "cascade_cancel_descendants"):
+        child_signal_ids = await run_repository.cascade_cancel_descendants(
+            [run_id]
+        )
+        signal_run_ids.extend(child_signal_ids)
+    else:
+        child_runs = await run_repository.list_active_child_runs(
+            created_by_run_id=run_id,
+            uid=current_uid,
+        )
+        for child_run in child_runs:
+            child_run = await run_repository.request_cancel(str(child_run.id))
+            if (
+                child_run is not None
+                and str(child_run.agent_status) == "cancel_requested"
+            ):
+                signal_run_ids.append(str(child_run.id))
 
     run = await run_repository.request_cancel(run_id)
     if run is None:

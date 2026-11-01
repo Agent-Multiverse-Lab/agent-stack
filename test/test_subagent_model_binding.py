@@ -56,7 +56,7 @@ class SubAgentModelBindingTest(unittest.IsolatedAsyncioTestCase):
 
     async def create(self):
         return await subagent_service.SubAgentRunService(self.db).create_subagent_record(
-            parent_run_id="parent-run", agent_slug="search_agent", uid="user-1", tool_call_id="tool-1", request_id="request-1",
+            created_by_run_id="parent-run", agent_slug="search_agent", uid="user-1", tool_call_id="tool-1", request_id="request-1",
             input_message=SimpleNamespace(content="Search", image_content=None, msg_type="text"),
         )
 

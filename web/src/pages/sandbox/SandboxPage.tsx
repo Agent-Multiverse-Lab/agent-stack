@@ -3,7 +3,7 @@ import { ArrowLeft, RefreshCw, Search, X } from "lucide-react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 
 import { listThreads } from "@/api/thread";
-import { listSandboxWorkspace } from "@/api/sandbox";
+import { listSandboxWorkspace, uploadSandboxFile } from "@/api/sandbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -19,7 +19,7 @@ function buildTree(entriesByPath: Record<string, WorkspaceEntry[]>): WorkspaceTr
   const buildNode = (name: string, path: string): WorkspaceTreeNode => ({
     name, path,
     children: (entriesByPath[path] ?? [])
-      .filter((entry) => entry.kind === "directory")
+      .filter((entry) => entry.kind === "directory" && !(path === "/workspace" && entry.name === "outputs"))
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
       .map((entry) => buildNode(entry.name, entry.path)),
   });
@@ -80,6 +80,8 @@ function SandboxWorkspace({ threadId }: { threadId: string }) {
   const [editing, setEditing] = useState(false);
   const [fileAction, setFileAction] = useState<{ entry: WorkspaceEntry; action: "rename" | "delete" } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
   const [query, setQuery] = useState("");
@@ -96,7 +98,10 @@ function SandboxWorkspace({ threadId }: { threadId: string }) {
     setError("");
     void listSandboxWorkspace(threadId, currentPath).then((response) => {
       if (!active) return;
-      const entries: WorkspaceEntry[] = response.entries.map((entry) => ({
+      const filteredEntries = response.entries.filter(
+        (entry) => !(currentPath === "/workspace" && entry.name === "outputs")
+      );
+      const entries: WorkspaceEntry[] = filteredEntries.map((entry) => ({
         name: entry.name, path: entry.path, kind: entry.kind,
         size: entry.size, modifiedAt: entry.modified_at, fileType: entry.file_type ?? undefined,
       }));
@@ -124,7 +129,33 @@ function SandboxWorkspace({ threadId }: { threadId: string }) {
     if (path === currentPath) setRevision((value) => value + 1);
     else { setLoading(true); setCurrentPath(path); }
   }
-  const tree = <WorkspaceTree nodes={nodes} currentPath={currentPath} onSelect={openFolder} />;
+
+  async function handleUpload(files: File[]) {
+    if (!files.length) return;
+    setUploading(true);
+    setUploadError("");
+    try {
+      for (const file of files) {
+        await uploadSandboxFile(threadId, currentPath, file);
+      }
+      setRevision((value) => value + 1);
+    } catch (caught: unknown) {
+      setUploadError(caught instanceof Error ? caught.message : t("Upload failed"));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  const tree = (
+    <WorkspaceTree
+      nodes={nodes}
+      currentPath={currentPath}
+      onSelect={openFolder}
+      onUpload={handleUpload}
+      isUploading={uploading}
+      uploadError={uploadError}
+    />
+  );
 
   const files = (
     <section inert={expanded} aria-label={t("Workspace files")} className="flex h-full min-w-0 flex-col overflow-hidden bg-card">

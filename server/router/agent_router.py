@@ -178,7 +178,7 @@ async def resume_agent_run(
     return {
         "run_id": run.id,
         "run_type": run.run_type,
-        "parent_run_id": run.parent_run_id,
+        "created_by_run_id": run.created_by_run_id,
         "thread_id": run.thread_id,
         "status": run.agent_status,
         "request_id": run.request_id,
@@ -201,6 +201,11 @@ async def cancel_agent_run(
             current_user_id=current_user.uid,
             db=db,
         )
+    except AgentRunConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

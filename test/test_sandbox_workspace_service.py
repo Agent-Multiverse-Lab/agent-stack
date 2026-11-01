@@ -180,6 +180,75 @@ class SandboxWorkspaceServiceTest(IsolatedAsyncioTestCase):
                     path="/workspace/image.png",
                 )
 
+    async def test_upload_workspace_file_success(self) -> None:
+        sandbox = MagicMock()
+        sandbox.upload_files.return_value = [SimpleNamespace(error=None)]
+        provider = MagicMock()
+        with (
+            patch.object(
+                sandbox_service,
+                "_get_owned_sandbox",
+                new=AsyncMock(return_value=("thread-1", "s2c-real", sandbox, provider)),
+            ),
+            patch.object(
+                sandbox_service.asyncio,
+                "to_thread",
+                new=AsyncMock(side_effect=lambda function, *args: function(*args)),
+            ),
+        ):
+            entry = await sandbox_service.upload_workspace_file(
+                MagicMock(),
+                uid="user-1",
+                thread_id="thread-1",
+                path="/workspace",
+                filename="document.pdf",
+                content=b"%PDF-1.4 test content",
+            )
+        sandbox.upload_files.assert_called_once_with([("/workspace/document.pdf", b"%PDF-1.4 test content")])
+        provider.release.assert_called_once_with("s2c-real")
+        self.assertEqual(entry.name, "document.pdf")
+        self.assertEqual(entry.path, "/workspace/document.pdf")
+        self.assertEqual(entry.kind, "file")
+        self.assertEqual(entry.size, len(b"%PDF-1.4 test content"))
+        self.assertEqual(entry.file_type, "document")
+
+    async def test_upload_workspace_file_rejects_invalid_names_and_errors(self) -> None:
+        with self.assertRaisesRegex(ValueError, "valid file name"):
+            await sandbox_service.upload_workspace_file(
+                MagicMock(),
+                uid="user-1",
+                thread_id="thread-1",
+                path="/workspace",
+                filename="../evil.sh",
+                content=b"echo hi",
+            )
+
+        sandbox = MagicMock()
+        sandbox.upload_files.return_value = [SimpleNamespace(error="disk full")]
+        provider = MagicMock()
+        with (
+            patch.object(
+                sandbox_service,
+                "_get_owned_sandbox",
+                new=AsyncMock(return_value=("thread-1", "s2c-real", sandbox, provider)),
+            ),
+            patch.object(
+                sandbox_service.asyncio,
+                "to_thread",
+                new=AsyncMock(side_effect=lambda function, *args: function(*args)),
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "disk full"):
+                await sandbox_service.upload_workspace_file(
+                    MagicMock(),
+                    uid="user-1",
+                    thread_id="thread-1",
+                    path="/workspace",
+                    filename="test.txt",
+                    content=b"test",
+                )
+        provider.release.assert_called_once_with("s2c-real")
+
 
 class SandboxFileOperationsTest(TestCase):
     def setUp(self) -> None:

@@ -17,6 +17,7 @@ from server.service.arq_queue_servcie import (
     RUN_REDIS_TTL_SECONDS,
     clear_agent_run_cancel_signal,
     has_agent_run_cancel_signal,
+    publish_agent_run_cancel_signal,
     wait_agent_run_cancel_signal,
     write_agent_run_stream_event,
 )
@@ -222,7 +223,7 @@ async def worker_startup(ctx) -> None:
         await postgres_manager.ensure_tables_exist()
         await postgres_manager.setup_langgraph_persistence()
         await ensure_agents_exist()
-        await reconcile_expired_run_leases()
+        await reconcile_expired_run_leases(terminate_active=True)
         ctx[LEASE_REAPER_CTX_KEY] = asyncio.create_task(_run_lease_reaper())
     except Exception:
         logger.exception("Worker 启动资源初始化失败")
@@ -266,13 +267,19 @@ async def _renew_run_lease(run_id: str, worker_id: str) -> bool:
         )
 
 
-async def reconcile_expired_run_leases() -> int:
-    """把租约过期的 Run 收敛为失败/取消终态，并补投未认领的 pending Run。"""
+async def reconcile_expired_run_leases(*, terminate_active: bool = False) -> int:
+    """把租约过期或启动时残留的 Run 收敛为失败/取消终态，并补投未认领的 pending Run。"""
 
+    signal_run_ids: list[str] = []
     async with postgres_manager.get_async_session_context() as db:
         repo = AgentRunRepository(db)
-        runs = await repo.reconcile_expired_leases()
+        runs = await repo.reconcile_expired_leases(
+            terminate_active=terminate_active
+        )
+        signal_run_ids.extend(repo.last_cascaded_signal_run_ids)
         requeue_runs, timed_out_runs = await repo.recover_unclaimed_pending_runs()
+        if timed_out_runs:
+            signal_run_ids.extend(repo.last_cascaded_signal_run_ids)
     for run in runs:
         logger.warning(
             "Agent Run 租约过期或未认领取消，已收敛：run_id=%s status=%s",
@@ -284,6 +291,13 @@ async def reconcile_expired_run_leases() -> int:
             "Agent Run 派发超时，已收敛为失败：run_id=%s",
             run.id,
         )
+    for signal_run_id in sorted(set(signal_run_ids)):
+        try:
+            await publish_agent_run_cancel_signal(signal_run_id)
+        except Exception:
+            logger.exception(
+                "级联取消子 Agent Run 信号发布失败：run_id=%s", signal_run_id
+            )
     for run in requeue_runs:
         try:
             await enqueue_agent_run(str(run.id))
@@ -321,6 +335,7 @@ async def set_run_terminal(
     error_type: str | None = None,
 ) -> tuple[str | None, bool]:
     """用于agent的run事件的结束(无论何种状态), 当状态确实改变后,改变agent的状态,"""
+    signal_run_ids: list[str] = []
     async with postgres_manager.get_async_session_context() as db:
         agent_run_repo = AgentRunRepository(db)
         run, changed = await agent_run_repo.set_agent_terminal(
@@ -330,9 +345,18 @@ async def set_run_terminal(
             error=error,
             error_type=error_type,
         )
+        if changed:
+            signal_run_ids = list(agent_run_repo.last_cascaded_signal_run_ids)
 
         current_agent_status = str(run.agent_status) if run else None
-        return current_agent_status, changed
+    for signal_run_id in signal_run_ids:
+        try:
+            await publish_agent_run_cancel_signal(signal_run_id)
+        except Exception:
+            logger.exception(
+                "级联取消子 Agent Run 信号发布失败：run_id=%s", signal_run_id
+            )
+    return current_agent_status, changed
 
 
 async def _get_user(uid: str) -> User | None:
@@ -513,7 +537,7 @@ def map_stream_event(chunk: dict[str, Any]) -> tuple[str, Any]:
         pending_interrupt = chunk["pending_interrupt"]
         return "interrupt", {
             **pending_interrupt,
-            "parent_run_id": chunk.get("run_id") or pending_interrupt["run_id"],
+            "created_by_run_id": chunk.get("run_id") or pending_interrupt["run_id"],
         }
     if status == "finished":
         return "end", {"status": "completed", "chunk": chunk}
@@ -719,7 +743,7 @@ async def process_agent_run(ctx, run_id: str):
             )
             return
 
-        # Run 类型由创建入口显式落库；parent_run_id 只保留运行间的关联关系。
+        # Run 类型由创建入口显式落库；created_by_run_id 只保留运行间的关联关系。
         metadata = {
             **dict(agent_run_event.run_metadata or {}),
             "run_id": run_id,
@@ -734,7 +758,7 @@ async def process_agent_run(ctx, run_id: str):
             "thread_id": thread_id,
             "uid": user.uid,  # ty:ignore[unresolved-attribute]
             "run_type": run_type,
-            "parent_run_id": getattr(agent_run_event, "parent_run_id", None),
+            "created_by_run_id": getattr(agent_run_event, "created_by_run_id", None),
         }
 
         run_controller = AgentRunController(run_id, worker_id=worker_id)

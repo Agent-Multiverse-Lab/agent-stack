@@ -233,7 +233,7 @@ class AgentRun(Base):
         comment="Output message ID",
     )
     request_id = Column(String(128), unique=True, index=True, nullable=True, comment="请求ID")
-    parent_run_id = Column(String(64), nullable=True, index=True, comment="当前runid的父id")
+    created_by_run_id = Column(String(64), nullable=True, index=True, comment="创建当前 Run 的来源 Run ID")
     run_metadata = Column(
         JSON,
         nullable=False,

@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import type { ChatMessage as Message } from "@/pages/chat/types";
 import { extractArtifactsFromMessages } from "@/pages/chat/artifacts";
 import { ArtifactList } from "./ArtifactCard";
@@ -73,19 +74,34 @@ function RunMessages({ row, ...props }: Props & { row: Row }) {
     typeof lastEvent.content === "string" && Boolean(lastEvent.content.trim()) &&
     (!lastEvent.thread_id || lastEvent.thread_id === props.threadId);
   const process = hasAnswer ? row.messages.slice(0, -1) : row.messages;
+  const isProcessActive = active && !hasAnswer;
+
+  const answerReceivedAt = useRef<number | null>(null);
+  if (hasAnswer && answerReceivedAt.current === null) {
+    answerReceivedAt.current = Date.now();
+  } else if (!hasAnswer) {
+    answerReceivedAt.current = null;
+  }
+
   const start = current ? props.startedAt : timestamp(metadata.started_at);
   const end = timestamp(metadata.finished_at);
-  const durationMs = start !== null && end !== null ? end - start : null;
+  const finishTime = hasAnswer
+    ? ((current ? answerReceivedAt.current : null) ?? timestamp(lastEvent.created_at) ?? end)
+    : (end ?? timestamp(lastEvent.created_at) ?? (current ? answerReceivedAt.current : null));
+  const durationMs = start !== null && finishTime !== null ? Math.max(0, finishTime - start) : null;
   const artifacts = extractArtifactsFromMessages(row.messages, props.threadId);
   const label = waiting ? "Waiting for your response"
     : status === "failed" ? "Execution failed"
       : status === "cancelled" ? "Cancelled"
         : status === "interrupted" ? "Interrupted"
-          : active ? (process.length ? "Working" : "Thinking") : "Execution process";
+          : isProcessActive ? (process.length ? "Working" : "Thinking") : "Execution process";
+
+  const showProcess = process.length > 0 || isProcessActive || waiting;
+
   return (
     <section className="grid min-w-0 gap-4" data-run-id={row.runId}>
-      {(active || waiting || process.length > 0) && (
-        <Thinking label={label} active={active} startedAt={start} durationMs={durationMs}>
+      {showProcess && (
+        <Thinking label={label} active={isProcessActive} startedAt={start} durationMs={durationMs}>
           {process.length > 0 ? (
             <div className="grid min-w-0 gap-4">
               {process.map((message, index) => <ChatMessage key={index} message={message} />)}

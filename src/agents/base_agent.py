@@ -249,7 +249,7 @@ class BaseAgent:
                 yield stream_method, stream_data
                 continue
 
-            if stream_method == "messages":
+            elif stream_method == "messages":
                 stream_msg, stream_agent_run_metadata = stream_data
                 stream_agent_run_metadata = dict(
                     stream_agent_run_metadata or {}
@@ -272,7 +272,7 @@ class BaseAgent:
                 )
                 continue
 
-            if stream_method == "tools":
+            elif stream_method in ["tools", "tasks"]:
                 stream_data = _normalize_tool_event_data(stream_data)
                 tool_event_payload = {
                     "method": stream_method,

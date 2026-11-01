@@ -54,6 +54,7 @@ export default function WorkspaceFileList({
   const normalized = query.trim().toLocaleLowerCase();
   const visibleEntries = entries
     .filter((entry) => entry.name.toLocaleLowerCase().includes(normalized))
+    .filter((entry) => !(entry.name === "outputs" && entry.path === "/workspace/outputs"))
     .sort((left, right) => {
       if (left.kind !== right.kind) return left.kind === "directory" ? -1 : 1;
       return left.name.localeCompare(right.name, undefined, { numeric: true });

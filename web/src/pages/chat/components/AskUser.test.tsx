@@ -14,7 +14,7 @@ it("requires an answer, aligns full width with composer, and keeps changed answe
   const submit = vi.fn()
   const interaction: InteractionRequired = {
     name: "ask_user",
-    parent_run_id: "run-1",
+    created_by_run_id: "run-1",
     questions: [
       {
         question_id: "first",

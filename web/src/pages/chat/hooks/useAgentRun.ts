@@ -74,7 +74,7 @@ const isInteractionRequiredEvent = (
 ): event is AgentRunStreamEvent & InteractionRequired & { type: "interrupt" } =>
   event.type === "interrupt" &&
   event.name === "ask_user" &&
-  typeof event.parent_run_id === "string" &&
+  typeof event.created_by_run_id === "string" &&
   Array.isArray(event.questions) &&
   event.questions.length > 0 &&
   event.questions.every(isHumanQuestion);
@@ -119,13 +119,13 @@ export function useAgentRun() {
   }
 
   async function resumeRun(
-    parentRunId: string,
+    createdByRunId: string,
     request: AgentRunResumeRequest,
   ) {
     const expected = ++version.current;
     update((previous) => ({ ...previous, resuming: true }));
     try {
-      const run = await resumeAgentRun(parentRunId, request);
+      const run = await resumeAgentRun(createdByRunId, request);
       if (version.current === expected) {
         update((previous) => ({
           ...previous,
@@ -197,7 +197,7 @@ export function useAgentRun() {
         if (isInteractionRequiredEvent(event)) {
           const pendingInteraction: InteractionRequired = {
             name: event.name,
-            parent_run_id: event.parent_run_id,
+            created_by_run_id: event.created_by_run_id,
             questions: event.questions,
           };
           update((previous) => ({

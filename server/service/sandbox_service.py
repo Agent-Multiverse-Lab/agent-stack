@@ -422,6 +422,48 @@ async def mutate_workspace_file(
         provider.release(sandbox_id)
 
 
+async def upload_workspace_file(
+    db: AsyncSession,
+    *,
+    uid: str,
+    thread_id: str,
+    path: str,
+    filename: str,
+    content: bytes,
+) -> SandboxWorkspaceEntry:
+    target_dir = normalize_workspace_path(path)
+    clean_filename = filename.strip()
+    if not clean_filename or clean_filename in {".", ".."} or any(char in clean_filename for char in "/\\\x00"):
+        raise ValueError("Enter a valid file name without path separators")
+    if len(content) > MAX_ARTIFACT_DOWNLOAD_BYTES:
+        raise ValueError("File exceeds maximum upload size")
+
+    destination_path = normalize_workspace_path(posixpath.join(target_dir, clean_filename))
+    _, sandbox_id, sandbox, provider = await _get_owned_sandbox(
+        db, uid=uid, thread_id=thread_id,
+    )
+    try:
+        uploaded = await asyncio.to_thread(
+            sandbox.upload_files,
+            [(to_sandbox_path(destination_path), content)],
+        )
+    finally:
+        provider.release(sandbox_id)
+
+    if not uploaded or getattr(uploaded[0], "error", None):
+        error_msg = str(getattr(uploaded[0], "error", None) or "File upload failed")
+        raise RuntimeError(error_msg)
+
+    return SandboxWorkspaceEntry(
+        name=clean_filename,
+        path=destination_path,
+        kind="file",
+        size=len(content),
+        modified_at=datetime.now(UTC).isoformat(),
+        file_type=_file_type(destination_path),
+    )
+
+
 def _execute_file_operation(sandbox, request: dict) -> dict:
     argument = json.dumps(request, ensure_ascii=False)
     if request["operation"] == "write":

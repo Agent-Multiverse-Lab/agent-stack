@@ -45,7 +45,7 @@ class ResumeRepository:
     async def get_for_resume_for_update(self, **_values):
         return self.parent
 
-    async def get_resume_child(self, _parent_run_id):
+    async def get_resume_child(self, _created_by_run_id):
         return self.existing
 
     async def create_run(self, **values):
@@ -57,7 +57,7 @@ class ResumeRequestTest(unittest.TestCase):
     def test_answers_request_and_thread_response(self):
         request = AgentRunResumeRequest(thread_id="thread-1", thread_metadata={"resume": {"answers": ANSWERS}})
         self.assertEqual(request.thread_metadata["resume"], {"answers": ANSWERS})
-        response = InteractionRequired(name="ask_user", parent_run_id="parent-run", questions=QUESTIONS)
+        response = InteractionRequired(name="ask_user", created_by_run_id="parent-run", questions=QUESTIONS)
         self.assertEqual(response.model_dump()["questions"], QUESTIONS)
 
     def test_invalid_answer_types_and_old_answer_rejected(self):
@@ -89,7 +89,7 @@ class ResumeServiceTest(unittest.IsolatedAsyncioTestCase):
         run = await self.submit()
         created = self.repo.create_arguments
         self.assertNotEqual(run.id, "parent-run")
-        self.assertEqual(created["parent_run_id"], "parent-run")
+        self.assertEqual(created["created_by_run_id"], "parent-run")
         self.assertEqual(created["run_type"], "resume")
         self.assertIsNone(created["trigger_message_id"])
         self.assertEqual(created["run_metadata"]["resume"], {"answers": ANSWERS})
@@ -327,7 +327,7 @@ class ResumeWorkerTest(unittest.IsolatedAsyncioTestCase):
     async def run_stream(self, chunks, cancelled=False):
         run = SimpleNamespace(agent_status="pending", uid="user-1", agent_id="LeaderAgent",
                               request_id="request-1", thread_id="thread-1", run_type="resume",
-                              trigger_message_id=None, parent_run_id="parent-run",
+                              trigger_message_id=None, created_by_run_id="parent-run",
                               run_metadata={"resume": {"answers": ANSWERS}})
         @asynccontextmanager
         async def session():

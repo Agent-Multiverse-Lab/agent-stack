@@ -73,3 +73,19 @@ export const deleteSandboxFile = (threadId: string, path: string) => {
   return apiClient.apiDelete(`/api/sandbox/workspace/file?${params.toString()}`, { requiresAuth: true })
 }
 
+export const uploadSandboxFile = (
+  threadId: string,
+  path: string,
+  file: File,
+) => {
+  const form = new FormData()
+  form.append("thread_id", threadId)
+  form.append("path", path)
+  form.append("file", file)
+  return apiClient.apiPost<SandboxWorkspaceResponse["entries"][number], FormData>(
+    "/api/sandbox/workspace/upload",
+    form,
+    { requiresAuth: true },
+  )
+}
+
