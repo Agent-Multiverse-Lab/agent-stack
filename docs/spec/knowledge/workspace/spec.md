@@ -33,3 +33,48 @@ flowchart LR
     F --> H[RustFS / Milvus / Neo4j]
     G --> H
 ```
+
+
+## 实现契约
+
+`KnowledgeSettings` 保存切块方式、标题策略、Token 大小、Embedding 选择、Top K、候选数、相似度阈值与重排开关。
+解析器按文件类型选择。切块设置由 `index_file` 读取；检索设置由 `search` 读取，测试请求可覆盖 Top K 与相似度阈值。
+模型首次绑定以后，索引和检索始终使用 `KnowledgeEmbeddingBinding`。
+
+`KnowledgeFolder` 以 `folder_id`、`kb_id`、`parent_id`、`name` 表示目录；更新在知识库行锁内校验父目录和环。
+`KnowledgeFile.folder_id` 关联目录，重命名保留对象键与 Chunk ID。目录只有为空时可以删除。
+
+`KnowledgeTask` 保存 `task_id`、`uid`、`kb_id`、`operation`、`status`、`payload`、`results`、`report` 和时间。
+任务状态为 pending、running、completed、failed、cancelled；单个文件失败后仍处理其他文件。
+取消会停止后续文件处理，正在执行的文件允许完成；Worker 结果保存在 PostgreSQL。
+检索评估 payload 包含数据集标识、版本、候选 K 和带 Chunk ID 标注的问题，复用 `RetrievalEvaluator`。
+
+| 接口（前缀 `/api/knowledge/bases/{kb_id}`） | 行为 |
+| --- | --- |
+| GET/POST `/settings` | 读取和保存配置 |
+| GET/POST `/folders`，POST/DELETE `/folders/{folder_id}` | 目录管理 |
+| POST `/files/{file_id}/metadata` | 文件移动和重命名 |
+| GET `/files/{file_id}/download` | 下载原文件 |
+| GET/POST `/tasks`，POST `/tasks/{task_id}/cancel` | 批任务和进度 |
+| POST `/evaluations` | 创建持久化检索评估任务 |
+
+改动前：
+
+```mermaid
+flowchart LR
+    A[文件表格] --> B[单文件 HTTP 处理]
+    B --> C[解析 / 索引 / 图谱]
+```
+
+改动后：
+
+```mermaid
+flowchart LR
+    A[目录与文件表格] --> B[知识任务 API]
+    B --> C[PostgreSQL 任务与结果]
+    B --> D[ARQ Worker]
+    D --> E[解析 / 索引 / 图谱 / 评估]
+    E --> C
+    F[任务和评估页面] --> C
+    G[知识库配置] --> H[索引与检索]
+```
