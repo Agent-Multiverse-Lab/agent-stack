@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { Link, useParams } from "react-router"
-import { BookOpen, Files, MessagesSquare, Network, Rows3, Search } from "lucide-react"
+import { BookOpen, ClipboardList, Copy, Files, MessagesSquare, Network, Rows3, Search, Settings, ChartNoAxesCombined } from "lucide-react"
 
 import { getKnowledgeBase, listKnowledgeFiles } from "@/api/knowledge"
 import { Button } from "@/components/ui/button"
@@ -8,6 +8,10 @@ import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useTranslation } from "@/i18n"
 import type { KnowledgeBase } from "@/api/knowledge"
+import { toast } from "sonner"
+import { KnowledgeSettingsDialog } from "./components/KnowledgeSettingsDialog"
+import { KnowledgeTasksPanel } from "./components/KnowledgeTasksPanel"
+import { KnowledgeEvaluationPanel } from "./components/KnowledgeEvaluationPanel"
 import { ChatPanel } from "@/pages/knowledge/components/ChatPanel"
 import { ChunksPanel } from "@/pages/knowledge/components/ChunksPanel"
 import { FilesPanel } from "@/pages/knowledge/components/FilesPanel"
@@ -22,6 +26,7 @@ export default function KnowledgeBaseDetailPage() {
   const [error, setError] = useState("")
   const [reload, setReload] = useState(0)
   const [activeTab, setActiveTab] = useState("documents")
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [focusFileId, setFocusFileId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -100,15 +105,20 @@ export default function KnowledgeBaseDetailPage() {
             >
               <MessagesSquare className="size-3.5" />{t("Knowledge Chat")}
             </TabsTrigger>
+            <TabsTrigger value="evaluation"><ChartNoAxesCombined className="size-3.5" />评估</TabsTrigger>
+            <TabsTrigger value="tasks"><ClipboardList className="size-3.5" />任务</TabsTrigger>
           </TabsList>
-          <div className="min-w-0 flex-1" />
+          <div className="flex min-w-0 flex-1 justify-end gap-1"><Button size="icon-sm" variant="ghost" aria-label="复制知识库 ID" onClick={() => { void navigator.clipboard.writeText(kbId).then(() => toast.success("ID 已复制")).catch(() => toast.error("复制失败")) }}><Copy /></Button><Button size="icon-sm" variant="ghost" aria-label="配置知识库" onClick={() => setSettingsOpen(true)}><Settings /></Button></div>
         </header>
         <TabsContent value="documents" className="min-h-0 flex-1"><FilesPanel kbId={kbId} initialFileId={focusFileId} /></TabsContent>
         <TabsContent value="chunks" className="min-h-0 flex-1"><ChunksPanel kbId={kbId} /></TabsContent>
         <TabsContent value="search" className="min-h-0 flex-1"><SearchPanel kbId={kbId} onOpenFile={handleOpenFile} /></TabsContent>
         <TabsContent value="graph" className="min-h-0 flex-1"><GraphPanel kbId={kbId} /></TabsContent>
         <TabsContent value="chat" className="min-h-0 flex-1"><ChatPanel kbId={kbId} /></TabsContent>
+        <TabsContent value="evaluation" className="min-h-0 flex-1"><KnowledgeEvaluationPanel kbId={kbId} /></TabsContent>
+        <TabsContent value="tasks" className="min-h-0 flex-1"><KnowledgeTasksPanel kbId={kbId} /></TabsContent>
       </Tabs>
+      <KnowledgeSettingsDialog kbId={kbId} open={settingsOpen} onOpenChange={setSettingsOpen} onSaved={() => setReload(value => value + 1)} />
     </div>
   )
 }

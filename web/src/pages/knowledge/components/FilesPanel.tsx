@@ -1,9 +1,12 @@
+import { Label } from "@/components/ui/label"
 import { useEffect, useRef, useState } from "react"
-import { ArrowUpRight, Check, FileText, Filter, MoreHorizontal, Rows3, Search, Sparkles, Trash2, Upload, X } from "lucide-react"
+import { ArrowUpRight, Check, Download, FileText, Filter, FolderUp, MoreHorizontal, Pencil, Rows3, Search, Sparkles, Trash2, Upload, X } from "lucide-react"
 import { toast } from "sonner"
 
-import { deleteKnowledgeFile, extractKnowledgeFile, getKnowledgeFileMarkdown, indexKnowledgeFile, listKnowledgeFiles, parseKnowledgeFile, uploadKnowledgeFile } from "@/api/knowledge"
+import { deleteKnowledgeFile, downloadKnowledgeFile, getKnowledgeFileMarkdown, listKnowledgeFiles, listKnowledgeTasks, saveKnowledgeFolder, startKnowledgeTask, updateKnowledgeFile, uploadKnowledgeFile } from "@/api/knowledge"
 import { FileContentViewer } from "@/components/common/file-content-viewer"
+import { Checkbox } from "@/components/ui/checkbox"
+import { ALL_KNOWLEDGE_FILES, FolderSelect, KnowledgeFolderSidebar } from "./KnowledgeFolderSidebar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -16,7 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useTranslation } from "@/i18n"
 import { FileChunksDialog } from "@/pages/knowledge/components/FileChunksDialog"
 import { formatDateTime, formatFileSize } from "@/pages/knowledge/lib/format"
-import type { KnowledgeFile, KnowledgeFileStatus } from "@/api/knowledge"
+import type { KnowledgeFile, KnowledgeFileStatus, KnowledgeFolder, KnowledgeOperation } from "@/api/knowledge"
 
 const supported = new Set(["pdf", "doc", "docx", "txt", "md", "markdown", "csv", "xls", "xlsx", "ppt", "pptx", "png", "jpg", "jpeg", "webp"])
 const PROCESSING: KnowledgeFileStatus[] = ["parsing", "indexing", "extracting"]
@@ -44,6 +47,14 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
   const [chunksFile, setChunksFile] = useState<KnowledgeFile | null>(null)
   const [statusFilter, setStatusFilter] = useState("all")
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [folderId, setFolderId] = useState<string | null>(ALL_KNOWLEDGE_FILES)
+  const [folders, setFolders] = useState<KnowledgeFolder[]>([])
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [taskPending, setTaskPending] = useState(false)
+  const [editFile, setEditFile] = useState<{ file: KnowledgeFile; name: string; folder: string | null } | null>(null)
+  const [bulkDelete, setBulkDelete] = useState(false)
+  const [metadataBusy, setMetadataBusy] = useState(false)
+  const folderInput = useRef<HTMLInputElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const mutationRef = useRef(false)
 
@@ -51,10 +62,11 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
     let active = true
     setLoading(true)
     setError("")
-    listKnowledgeFiles(kbId)
-      .then((items) => {
+    Promise.all([listKnowledgeFiles(kbId), listKnowledgeTasks(kbId)])
+      .then(([items, tasks]) => {
         if (!active) return
         setFiles(items)
+        setTaskPending(tasks.some(task => ["pending", "running"].includes(task.status)))
         setSelectedId((current) => items.some((file) => file.file_id === current) ? current : items[0]?.file_id ?? null)
       })
       .catch((caught: unknown) => { if (active) setError(caught instanceof Error ? caught.message : t("Request failed")) })
@@ -62,7 +74,7 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
     return () => { active = false }
   }, [kbId, t, reload])
 
-  const hasProcessing = files.some((file) => PROCESSING.includes(file.status))
+  const hasProcessing = taskPending || files.some((file) => PROCESSING.includes(file.status))
   useEffect(() => {
     if (!hasProcessing) return
     let active = true
@@ -71,8 +83,8 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
       if (inFlight) return
       inFlight = true
       try {
-        const items = await listKnowledgeFiles(kbId)
-        if (active) { setFiles(items); setError("") }
+        const [items, tasks] = await Promise.all([listKnowledgeFiles(kbId), listKnowledgeTasks(kbId)])
+        if (active) { setFiles(items); setTaskPending(tasks.some(task => ["pending", "running"].includes(task.status))); setError("") }
       } catch (caught) {
         if (active) setError(caught instanceof Error ? caught.message : t("Request failed"))
       } finally { inFlight = false }
@@ -106,6 +118,7 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
     try {
       const items = await listKnowledgeFiles(kbId)
       setFiles(items)
+      setSelectedIds(ids => ids.filter(id => items.some(file => file.file_id === id)))
       setError("")
       setSelectedId((current) => items.some((file) => file.file_id === current) ? current : items[0]?.file_id ?? null)
     } catch (caught) { setError(caught instanceof Error ? caught.message : t("Request failed")) }
@@ -116,13 +129,24 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
     mutationRef.current = true
     setUploading(true)
     try {
+      const knownFolders = [...folders]
       for (const file of selected) {
         const extension = file.name.split(".").pop()?.toLowerCase() ?? ""
         if (!supported.has(extension)) { toast.warning(t("{{file}} is not a supported source type.", { file: file.name })); continue }
-        try { await uploadKnowledgeFile(kbId, file) }
+        try {
+          let target = folderId === ALL_KNOWLEDGE_FILES ? null : folderId
+          const segments = file.webkitRelativePath.split("/").slice(0, -1)
+          for (const name of segments) {
+            let folder = knownFolders.find(item => item.name === name && item.parent_id === target)
+            if (!folder) { folder = await saveKnowledgeFolder(kbId, { name, parent_id: target }); knownFolders.push(folder) }
+            target = folder.folder_id
+          }
+          await uploadKnowledgeFile(kbId, file, target)
+        }
         catch (caught) { toast.error(caught instanceof Error ? caught.message : t("Request failed")) }
       }
       await refresh()
+      setReload(value => value + 1)
     } finally { mutationRef.current = false; setUploading(false) }
   }
 
@@ -135,12 +159,9 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
     setBusyId(file.file_id)
     setBusyStatus(status)
     try {
-      if (status === "parsing") { await parseKnowledgeFile(kbId, file.file_id); toast.success(t("Parsed")) }
-      else if (status === "indexing") { await indexKnowledgeFile(kbId, file.file_id); toast.success(t("Indexed")) }
-      else {
-        const result = await extractKnowledgeFile(kbId, file.file_id)
-        toast.success(t("Extracted: {{entities}} entities, {{relations}} relations", { entities: result.entity_count, relations: result.relation_count }))
-      }
+      await startKnowledgeTask(kbId, status === "parsing" ? "parse" : status === "indexing" ? "index" : "extract", [file.file_id])
+      setTaskPending(true)
+      toast.success("处理任务已提交，可在任务页查看结果")
     } catch (caught) { toast.error(caught instanceof Error ? caught.message : t("Request failed")) }
     finally { await refresh(); mutationRef.current = false; setBusyId(null); setBusyStatus(null) }
   }
@@ -158,6 +179,31 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
     finally { mutationRef.current = false; setDeleting(false) }
   }
 
+  async function runBatch(operation: KnowledgeOperation) {
+    if (!selectedIds.length || metadataBusy) return
+    setMetadataBusy(true)
+    try {
+      await startKnowledgeTask(kbId, operation, selectedIds)
+      setTaskPending(true); setSelectedIds([]); setBulkDelete(false)
+      toast.success("批处理任务已提交")
+    } catch (caught) { toast.error(caught instanceof Error ? caught.message : "任务提交失败") }
+    finally { setMetadataBusy(false) }
+  }
+  async function saveFile(event: React.FormEvent) {
+    event.preventDefault()
+    if (!editFile || metadataBusy) return
+    setMetadataBusy(true)
+    try {
+      await updateKnowledgeFile(kbId, editFile.file.file_id, { name: editFile.name, folder_id: editFile.folder })
+      setEditFile(null); await refresh()
+    } catch (caught) { toast.error(caught instanceof Error ? caught.message : "文件更新失败") }
+    finally { setMetadataBusy(false) }
+  }
+  async function download(file: KnowledgeFile) {
+    try { await downloadKnowledgeFile(kbId, file) }
+    catch (caught) { toast.error(caught instanceof Error ? caught.message : "下载失败") }
+  }
+
   const isBusy = (file: KnowledgeFile) => uploading || busyId !== null || deleting || PROCESSING.includes(file.status)
   const fileStatus = (file: KnowledgeFile) => busyId === file.file_id && busyStatus ? { ...file, status: busyStatus } : file
   const statusMatches = (file: KnowledgeFile) => {
@@ -166,7 +212,7 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
     if (statusFilter === "indexed") return ["indexed", "extracted"].includes(file.status)
     return file.status === statusFilter
   }
-  const visibleFiles = files.filter((file) => file.original_file_name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()) && statusMatches(file))
+  const visibleFiles = files.filter((file) => (folderId === ALL_KNOWLEDGE_FILES || (file.folder_id ?? null) === folderId) && file.original_file_name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()) && statusMatches(file))
   const indexedCount = files.filter((file) => ["indexed", "extracting", "extracted"].includes(file.status)).length
 
   return (
@@ -237,6 +283,8 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
             {uploading ? <Spinner /> : <Upload />}
             {t("Upload files")}
           </Button>
+          <Button variant="outline" size="sm" disabled={uploading} onClick={() => folderInput.current?.click()}><FolderUp />上传文件夹</Button>
+          <Input ref={folderInput} type="file" multiple {...{ webkitdirectory: "" }} className="hidden" aria-label="选择上传文件夹" onChange={event => { void handleUpload(Array.from(event.target.files ?? [])); event.target.value = "" }} />
           <Input
             ref={fileInput}
             type="file"
@@ -251,6 +299,9 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
           />
         </div>
       </div>
+      {selectedIds.length > 0 && <div className="flex items-center gap-2 border-b border-border px-(--page-padding) py-2"><span className="mr-2 text-xs">已选择 {selectedIds.length} 个文件</span>{([['parse', '批量解析'], ['index', '批量索引'], ['extract', '批量抽取']] as const).map(([operation, label]) => <Button key={operation} variant="outline" size="sm" disabled={metadataBusy} onClick={() => runBatch(operation)}>{label}</Button>)}<Button variant="destructive" size="sm" disabled={metadataBusy} onClick={() => setBulkDelete(true)}>批量删除</Button><Button variant="ghost" size="sm" onClick={() => setSelectedIds([])}>取消选择</Button></div>}
+      <div className="flex min-h-0 flex-1">
+      <KnowledgeFolderSidebar kbId={kbId} selected={folderId} onSelect={setFolderId} onLoaded={setFolders} version={reload} />
       {loading ? (
         <div className="grid flex-1 place-items-center text-muted-foreground" role="status" aria-label={t("Loading files")}>
           <Spinner className="size-6" />
@@ -274,6 +325,7 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-9 px-2"><Checkbox aria-label="选择当前列表全部文件" checked={visibleFiles.length > 0 && visibleFiles.every(file => selectedIds.includes(file.file_id))} onCheckedChange={value => setSelectedIds(value === true ? visibleFiles.map(file => file.file_id) : [])} /></TableHead>
                     <TableHead className="h-11 px-4 text-[11px] font-normal text-muted-foreground">{t("Document")}</TableHead>
                     <TableHead className="h-11 w-24 px-2 text-[11px] font-normal text-muted-foreground">{t("Size")}</TableHead>
                     <TableHead className="h-11 w-24 px-2 text-[11px] font-normal text-muted-foreground">{t("Status")}</TableHead>
@@ -285,6 +337,7 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
                   {visibleFiles.length ? (
                     visibleFiles.map((file) => (
                       <TableRow key={file.file_id} className={previewOpen && selectedId === file.file_id ? "bg-selection/60 hover:bg-selection" : ""}>
+                        <TableCell className="px-2"><Checkbox aria-label={`选择 ${file.original_file_name}`} checked={selectedIds.includes(file.file_id)} onCheckedChange={value => setSelectedIds(ids => value === true ? [...ids, file.file_id] : ids.filter(id => id !== file.file_id))} /></TableCell>
                         <TableCell className="max-w-0 py-3 pl-4 pr-1">
                           <Button
                             variant="ghost"
@@ -330,6 +383,8 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
                               <DropdownMenuItem onClick={() => { setSelectedId(file.file_id); setPreviewOpen(true) }}>
                                 <FileText />{t("File preview")}
                               </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => download(file)}><Download />下载原文件</DropdownMenuItem>
+                              <DropdownMenuItem disabled={isBusy(file)} onClick={() => setEditFile({ file, name: file.original_file_name, folder: file.folder_id ?? null })}><Pencil />重命名或移动</DropdownMenuItem>
                               <DropdownMenuItem disabled={isBusy(file) || !canParse(file)} onClick={() => runOperation(file, "parsing")}>
                                 <FileText />{t("Parse file")}
                               </DropdownMenuItem>
@@ -352,13 +407,13 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
                     ))
                   ) : files.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="h-48 text-center text-xs text-muted-foreground">
+                      <TableCell colSpan={6} className="h-48 text-center text-xs text-muted-foreground">
                         {t("No documents yet")}
                       </TableCell>
                     </TableRow>
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={5} className="h-48 text-center text-xs text-muted-foreground">
+                      <TableCell colSpan={6} className="h-48 text-center text-xs text-muted-foreground">
                         <div className="flex flex-col items-center justify-center gap-2">
                           <p>{t("No matching documents")}</p>
                           <Button variant="ghost" size="sm" onClick={() => setQuery("")}>{t("Clear search")}</Button>
@@ -425,6 +480,9 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
           )}
         </div>
       )}
+      </div>
+      <Dialog open={!!editFile} onOpenChange={open => { if (!open && !metadataBusy) setEditFile(null) }}><DialogContent><DialogHeader><DialogTitle>编辑文件</DialogTitle></DialogHeader>{editFile && <form onSubmit={saveFile} className="grid gap-4"><Label className="grid gap-2 text-sm">文件名<Input required value={editFile.name} onChange={e => setEditFile({ ...editFile, name: e.target.value })} /></Label><Label className="grid gap-2 text-sm">文件夹<FolderSelect folders={folders} value={editFile.folder} onChange={folder => setEditFile({ ...editFile, folder })} /></Label><DialogFooter><Button type="button" variant="outline" onClick={() => setEditFile(null)}>取消</Button><Button disabled={metadataBusy}>保存</Button></DialogFooter></form>}</DialogContent></Dialog>
+      <Dialog open={bulkDelete} onOpenChange={setBulkDelete}><DialogContent><DialogHeader><DialogTitle>删除选中的 {selectedIds.length} 个文件？</DialogTitle><DialogDescription>原文件、解析内容和索引会被永久删除。逐文件结果保存在任务记录中。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setBulkDelete(false)}>取消</Button><Button variant="destructive" disabled={metadataBusy} onClick={() => runBatch("delete")}>删除选中文件</Button></DialogFooter></DialogContent></Dialog>
       <FileChunksDialog
         kbId={kbId}
         fileId={chunksFile?.file_id ?? null}
