@@ -406,6 +406,7 @@ class KnowledgeBase(Base):
     )
     name = Column(String(255), nullable=False, comment="知识库名称")
     description = Column(Text, nullable=False, default="", comment="知识库描述")
+    settings = Column(JSON, nullable=False, default=dict, server_default="{}")
     status = Column(
         String(32),
         nullable=False,
@@ -447,6 +448,7 @@ class KnowledgeFile(Base):
         index=True,
         comment="所属知识库",
     )
+    folder_id = Column(String(64), ForeignKey("knowledge_folder.folder_id", ondelete="SET NULL"), nullable=True, index=True)
     original_file_name = Column(String(512), nullable=False, comment="原始文件名")
     original_object_name = Column(
         String(1024),
@@ -534,3 +536,28 @@ class Knowledge(Base):
     knowlege_markdown = Column(String(1024), nullable=True, comment="解析后Markdown文件路径")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), comment="更新时间")
+
+
+class KnowledgeFolder(Base):
+    __tablename__ = "knowledge_folder"
+
+    folder_id = Column(String(64), primary_key=True)
+    kb_id = Column(String(128), ForeignKey("knowledge_base.kb_id", ondelete="CASCADE"), nullable=False, index=True)
+    parent_id = Column(String(64), ForeignKey("knowledge_folder.folder_id", ondelete="CASCADE"), nullable=True)
+    name = Column(String(255), nullable=False)
+
+
+class KnowledgeTask(Base):
+    __tablename__ = "knowledge_task"
+
+    task_id = Column(String(64), primary_key=True)
+    kb_id = Column(String(128), ForeignKey("knowledge_base.kb_id", ondelete="CASCADE"), nullable=False, index=True)
+    uid = Column(String(128), ForeignKey("user.uid", ondelete="CASCADE"), nullable=False, index=True)
+    operation = Column(String(32), nullable=False)
+    status = Column(String(32), nullable=False, default="pending")
+    payload = Column(JSON, nullable=False, default=dict)
+    results = Column(JSON, nullable=False, default=list)
+    report = Column(JSON, nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    finished_at = Column(DateTime(timezone=True), nullable=True)
