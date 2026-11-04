@@ -33,7 +33,7 @@ Run 终态仍遵循 [`RUN-LC-002`](../lifecycle/spec.md)，Redis/SSE 事件仍�
 - `tool_call_id` 缺失时按名称、位置或其他字段回退匹配；
 - checkpoint 历史裁剪、重复同步或幂等扩展；
 - 新的 `MessageRepository` 或 `ToolCallRepository`；
-- Redis、SSE、前端或 Run 终态协议调整。
+- Run 终态协议调整。
 
 ## 3. Current persistence ownership
 
@@ -121,8 +121,8 @@ Agent Context 读取。遍历结束后，若存在最后保存的 AI Message，�
 
 1. 使用 `message.text` 创建关联当前 Run 的 Assistant Message；
 2. 返回新建的 Assistant Message，由父方法保留最后一次返回值；
-3. 当 `message.tool_calls` 非空时，读取 `message.tool_calls[0]`；
-4. 从该工具调用读取并保存原始 `id`、`name` 和 `args`；
+3. 当 `message.tool_calls` 非空时，遍历全部工具调用；
+4. 从各工具调用读取并保存原始 `id`、`name` 和 `args`；
 5. `args` 只写入 `ToolCall.tool_arguments`，不重复写入 `tool_input`；
 6. 不读取工具调用 content block 中重复出现的字段，不生成排序值。
 
@@ -187,6 +187,23 @@ Agent Stream 正常结束
 
 ## 5. Acceptance Criteria
 
+### 执行过程历史恢复
+
+- v3 `reasoning-delta.reasoning` 转为现有 SSE `message_delta.reasoning_content_delta`；正文与推理分别传输。
+- AI checkpoint 中的 reasoning block（或 `additional_kwargs.reasoning_content`）保存到
+  `Message.msg_metadata.reasoning_content`。Model 生命周期也聚合推理，并在 finish 时保存到同一元数据字段。
+- Thread Detail 的 Message 响应增加 `reasoning_content`、`tool_calls` 和 `agent_state`；
+  `tool_calls` 包含 `tool_call_id/name/args/status/output/error`。同时显式返回已有的消息计时字段。
+- 已结束的 Model/Tool 审计行参与历史分页；running 审计行仍由流重放恢复。
+  Tool 审计与 checkpoint 的 ToolCall 指向同一调用时，只展示审计记录；无审计记录的 ToolCall 仍按原消息返回。
+- 工具结果保留 `ToolMessage.status`；展示层将 `success` 转为 `completed`、`failed` 转为 `error`、
+  `abandoned` 转为 `stopped`，取消收敛后的工具显示 `cancelled`。
+- `values.todos` 变化时，在持有当前 Run owner 锁的短事务中更新一条 `message_type=agent_state` 的 Message；
+  元数据保存最新 `agent_todo`，空列表覆盖旧任务。消息仍归属该 Run，不新增表。
+- 前端从历史响应重建推理、工具、任务与正文，以后端快照替换内存流式块；交付物由恢复的
+  `present_artifacts` 调用派生。`ask_user` 继续由交互区域展示。
+- 同一消息产生多个展示块时，React key 由块类型与源消息 ID 组合；工具使用已有 tool_call_id。
+
 - 父方法通过 `aget_state` 读取 `checkpoint.values["messages"]` 并按 `type` 分发；
 - Human Message 不会被重复保存；
 - 工具调用 AI Message 创建一个 Assistant Message 和一个 ToolCall；
@@ -199,4 +216,4 @@ Agent Stream 正常结束
 - 保持 Conversation -> Message -> ToolCall 的物理删除级联；
 - 消息事务提交完成后才允许产生 `finished`；
 - 按 Thread 创建消息时，调用方提供的全部可写业务字段进入同一条 Message；
-- 未增加 fallback、幂等、Redis、SSE 或前端行为。
+- 历史与流式展示使用同一组内容语义，刷新后可恢复持久化的执行过程。

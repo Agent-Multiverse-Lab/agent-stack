@@ -1,6 +1,8 @@
 import ast
 import json
 import unittest
+from collections.abc import AsyncIterator, Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -10,6 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import configure_mappers
 
+from server.entities.thread import ThreadMessageResponse
 from src.database.models import AgentRun, AgentRunAttempt, Conversation, Message, ToolCall, User
 from src.database.repositories.agent_run_repository import AgentRunRepository
 from src.database.repositories.conversation_repository import (
@@ -23,12 +26,16 @@ def load_message_persistence():
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     module = ModuleType("isolated_message_persistence")
     module.__dict__.update(
-        Any=Any, AsyncSession=Any, BaseAgent=Any, Message=Message,
+        Any=Any, AsyncSession=Any, BaseAgent=Any, Message=Message, AgentRun=AgentRun,
+        AgentState=Any, AsyncIterator=AsyncIterator, Callable=Callable,
+        ModelMessageAuditCollector=Any, ToolMessageAuditCollector=Any,
+        _persist_agent_state=AsyncMock(),
         AIMessage=AIMessage, ToolMessage=ToolMessage, json=json, logger=Mock(),
         AgentRunRepository=AgentRunRepository, ConversationRepository=ConversationRepository,
     )
     nodes = [node for node in tree.body if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)) and node.name in {
-        "_reslove_interrupt_state",
+        "_reslove_interrupt_state", "_lc_message_v3_dispather", "_message_process_response",
+        "_stream_agent_event_chunks", "_reslove_agent_state", "_serialize_agent_state",
         "save_ai_message", "save_tool_message", "save_message_from_langgraph_state", "save_partial_message",
     }]
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), "exec"), module.__dict__)
@@ -49,6 +56,83 @@ class FakeContext:
 
 
 class ThreadMessagePersistenceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_stream_persists_changed_tasks_including_clear_before_emitting(self):
+        async def events():
+            yield "values", {"todos": [{"content": "Read", "status": "pending"}]}
+            yield "values", {"todos": [{"content": "Read", "status": "pending"}]}
+            yield "values", {"todos": []}
+        with patch.object(thread_service, "_persist_agent_state", AsyncMock()) as persist:
+            chunks = [chunk async for chunk in thread_service._stream_agent_event_chunks(
+                stream_events=events(), thread_id="thread-1", run_id="run-1", worker_id="worker-1",
+                make_event=lambda **kwargs: kwargs, accumulated_msg=[],
+            )]
+        self.assertEqual(len(chunks), 2)
+        persist.assert_has_awaits([
+            call("run-1", "worker-1", {"agent_todo": [{"content": "Read", "status": "pending"}]}),
+            call("run-1", "worker-1", {"agent_todo": []}),
+        ])
+
+    def test_v3_reasoning_is_forwarded_separately_from_body(self):
+        result = thread_service._lc_message_v3_dispather(
+            {"event": "content-block-delta", "delta": {"type": "reasoning-delta", "reasoning": "检查数据"}},
+            message_id="model-1", thread_id="thread-1",
+        )
+        self.assertEqual(result, {
+            "type": "message_delta", "message_id": "model-1", "thread_id": "thread-1",
+            "reasoning_content_delta": "检查数据",
+        })
+
+    async def test_tool_error_is_not_persisted_as_success(self):
+        repository = SimpleNamespace(update_tool_call=AsyncMock())
+        with patch.object(thread_service, "ConversationRepository", return_value=repository):
+            await thread_service.save_tool_message(db=object(), message=ToolMessage(
+                content="denied", tool_call_id="call-1", status="error",
+            ))
+        repository.update_tool_call.assert_awaited_once_with(
+            tool_call_id="call-1", tool_result="denied", status="error",
+        )
+
+    async def test_checkpoint_preserves_reasoning_and_multiple_tools(self):
+        repository = SimpleNamespace(
+            add_message_by_thread_id=AsyncMock(return_value=SimpleNamespace(id=7)),
+            add_tool_call=AsyncMock(),
+        )
+        with patch.object(thread_service, "ConversationRepository", return_value=repository):
+            await thread_service.save_ai_message(
+                db=object(), thread_id="thread-1", user_id="user-1", agent_run_id="run-1",
+                message=AIMessage(content=[
+                    {"type": "reasoning", "reasoning": "检查"},
+                    {"type": "text", "text": "查询文件"},
+                ], tool_calls=[
+                    {"id": "call-1", "name": "read_file", "args": {"path": "a"}},
+                    {"id": "call-2", "name": "read_file", "args": {"path": "b"}},
+                ]),
+            )
+        saved = repository.add_message_by_thread_id.await_args.kwargs
+        self.assertEqual(saved["content"], "查询文件")
+        self.assertEqual(saved["msg_metadata"]["reasoning_content"], "检查")
+        self.assertEqual(repository.add_tool_call.await_count, 2)
+
+    def test_history_projects_tools_and_deduplicates_audits(self):
+        message = SimpleNamespace(
+            message_type="text", msg_metadata={"reasoning_content": "检查"},
+            tool_calls=[SimpleNamespace(tool_call_id="call-1", tool_name="read_file",
+                tool_arguments={"path": "a"}, status="error", tool_result="denied")],
+        )
+        projection = thread_service._message_process_response(message, set())
+        self.assertEqual(projection["reasoning_content"], "检查")
+        self.assertEqual(projection["tool_calls"][0]["status"], "error")
+        self.assertEqual(projection["tool_calls"][0]["error"], "denied")
+        self.assertEqual(thread_service._message_process_response(message, {"call-1"})["tool_calls"], [])
+        response = ThreadMessageResponse(
+            message_id=1, role="ai", content="", image_content=None, message_type="text",
+            status="completed", request_id=None, run=None,
+            created_at=datetime.now(UTC), updated_at=datetime.now(UTC),
+            **projection,
+        ).model_dump()
+        self.assertEqual(response["reasoning_content"], "检查")
+        self.assertEqual(response["tool_calls"][0]["error"], "denied")
+
     async def test_interrupt_terminal_is_saved_before_commit(self):
         graph = SimpleNamespace(aget_state=AsyncMock(return_value=SimpleNamespace(
             values={"messages": []},

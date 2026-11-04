@@ -76,16 +76,33 @@ class ThreadMessageAttachmentResponse(BaseModel):
     access_url: str | None
 
 
+class ThreadToolCallResponse(BaseModel):
+    tool_call_id: str
+    name: str
+    args: dict[str, Any]
+    status: str
+    output: Any = None
+    error: str | None = None
+
+
 class ThreadMessageResponse(BaseModel):
     """指定对话中的持久化消息。"""
 
     message_id: int
     role: str
     content: str
+    reasoning_content: str = ""
+    tool_calls: list[ThreadToolCallResponse] = Field(default_factory=list)
+    agent_state: dict[str, Any] | None = None
     image_content: str | None
     message_type: str
     status: str
     request_id: str | None
+    sequence: int | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    duration_ms: int | None = None
+    execution_status: str | None = None
     run: ThreadRunMetadataResponse | None
     attachments: list[ThreadMessageAttachmentResponse] = Field(
         default_factory=list

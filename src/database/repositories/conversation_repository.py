@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import aliased, selectinload
 
 from src.database.models import (
     AUDIT_MESSAGE_TYPES,
@@ -155,16 +155,50 @@ class ConversationRepository:
         """按 ID 倒序读取指定对话的一页消息。"""
         statement = select(Message).where(
             Message.conversation_id == conversation_id,
-            # running/未对账的审计行不进入普通历史。
-            func.coalesce(Message.message_type, "text").not_in(AUDIT_MESSAGE_TYPES),
+            # 已结束的审计操作也是执行过程；running 行仍由 SSE 恢复。
+            or_(
+                func.coalesce(Message.message_type, "text").not_in(AUDIT_MESSAGE_TYPES),
+                Message.execution_status != "running",
+            ),
         )
         if before_message_id is not None:
             statement = statement.where(Message.id < before_message_id)
 
         result = await self.session.execute(
-            statement.order_by(Message.id.desc()).limit(limit)
+            statement.options(selectinload(Message.tool_calls))
+            .order_by(Message.id.desc()).limit(limit)
         )
         return list(result.scalars().all())
+
+    async def list_tool_audit_ids(self, *, conversation_id: int) -> set[str]:
+        """用于去重 checkpoint ToolCall 与生命周期审计的同一次调用。"""
+        result = await self.session.execute(select(Message.operation_id).where(
+            Message.conversation_id == conversation_id,
+            Message.message_type == "tool_audit",
+        ))
+        return set(result.scalars().all())
+
+    async def save_agent_state(self, *, run: AgentRun, state: dict) -> Message | None:
+        """每个 Run 保留一条最新任务状态，空列表也会覆盖已有状态。"""
+        result = await self.session.execute(select(Message).where(
+            Message.agent_run_id == run.id,
+            Message.message_type == "agent_state",
+        ))
+        message = result.scalar_one_or_none()
+        if message is not None:
+            message.msg_metadata = {"agent_state": state}
+            await self.session.flush()
+            return message
+        if not state.get("agent_todo"):
+            return None
+        return await self._create_message(
+            conversation_id=run.conversation_id,
+            agent_run_id=run.id,
+            role="ai",
+            content="",
+            message_type="agent_state",
+            msg_metadata={"agent_state": state},
+        )
 
     async def list_tree_for_user(
         self,

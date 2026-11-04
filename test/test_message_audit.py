@@ -20,6 +20,7 @@ from src.database.models import (
     AgentRunAttempt,
     Conversation,
     Message,
+    ToolCall,
     User,
 )
 from src.database.repositories.agent_run_repository import AgentRunRepository
@@ -110,6 +111,10 @@ class ModelAuditCollectorTest(unittest.IsolatedAsyncioTestCase):
                 metadata,
             )
             await collector.consume(
+                {"event": "content-block-delta", "delta": {"type": "reasoning-delta", "reasoning": "Check."}},
+                metadata,
+            )
+            await collector.consume(
                 {
                     "event": "message-finish",
                     "usage": {"input_tokens": 8, "output_tokens": 2, "total_tokens": 10},
@@ -127,6 +132,7 @@ class ModelAuditCollectorTest(unittest.IsolatedAsyncioTestCase):
 
         finish = calls[1][1]
         self.assertEqual(finish["content"], "hello")
+        self.assertEqual(finish["metadata"]["reasoning_content"], "Check.")
         self.assertEqual(finish["duration_ms"], 321)
         self.assertEqual(
             finish["usage"],
@@ -383,6 +389,7 @@ class AuditRepositoryTest(unittest.IsolatedAsyncioTestCase):
                 User.__table__,
                 Conversation.__table__,
                 Message.__table__,
+                ToolCall.__table__,
                 AgentRun.__table__,
                 AgentRunAttempt.__table__,
             ],
@@ -590,6 +597,41 @@ class AuditRepositoryTest(unittest.IsolatedAsyncioTestCase):
             conversation_id=1, limit=50
         )
         self.assertEqual([message.content for message in history], ["final"])
+
+    async def test_history_includes_finished_tool_audit(self):
+        repository = ToolMessageAuditRepository(self.session)
+        await repository.start(
+            run_id="run-1", request_id="request-1", thread_id="thread-1", worker_id="worker-1",
+            tool_call_id="call-1", tool_name="read_file", tool_input={"path": "a"},
+            sequence=1, started_at=datetime.now(UTC),
+        )
+        self.db.commit()
+        await repository.fail(
+            run_id="run-1", request_id="request-1", thread_id="thread-1", worker_id="worker-1",
+            tool_call_id="call-1", output={"content": "denied", "status": "error"}, content="denied",
+            error_message="denied", finished_at=datetime.now(UTC), duration_ms=10, finished_sequence=2,
+        )
+        self.db.commit()
+        conversations = ConversationRepository(self.session)
+        history = await conversations.list_messages(conversation_id=1, limit=10)
+        self.assertEqual([(m.message_type, m.execution_status, m.content) for m in history], [
+            ("tool_audit", "failed", "denied"),
+        ])
+        self.assertEqual(await conversations.list_tool_audit_ids(conversation_id=1), {"call-1"})
+
+    async def test_latest_agent_tasks_are_updated_and_cleared_in_same_row(self):
+        conversations = ConversationRepository(self.session)
+        run = self.db.get(AgentRun, "run-1")
+        first = await conversations.save_agent_state(run=run, state={"agent_todo": [
+            {"content": "Read", "status": "pending"},
+        ]})
+        updated = await conversations.save_agent_state(run=run, state={"agent_todo": [
+            {"content": "Read", "status": "completed"},
+        ]})
+        self.assertEqual(first.id, updated.id)
+        self.assertEqual(updated.msg_metadata["agent_state"]["agent_todo"][0]["status"], "completed")
+        await conversations.save_agent_state(run=run, state={"agent_todo": []})
+        self.assertEqual(updated.msg_metadata["agent_state"]["agent_todo"], [])
 
     async def test_terminal_closes_running_audit_rows(self):
         await self._start_model()

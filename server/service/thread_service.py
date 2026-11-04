@@ -1,10 +1,10 @@
 import asyncio
 import base64
 import binascii
-from contextlib import asynccontextmanager
 import json
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import fields
 from datetime import datetime
 from typing import Any
@@ -227,6 +227,9 @@ async def get_thread_detail(
         db
     ).list_attachments_by_message_ids([int(message.id) for message in page_desc])
     message_attachments = await _message_attachment_payloads(attachment_rows)
+    audited_tool_ids = await conversations.list_tool_audit_ids(
+        conversation_id=int(conversation.id),
+    )
     return {
         "thread": _thread_summary(conversation),
         "messages": [
@@ -234,6 +237,7 @@ async def get_thread_detail(
                 "message_id": int(message.id),
                 "role": str(message.role),
                 "content": str(message.content),
+                **_message_process_response(message, audited_tool_ids, runs.get(str(message.agent_run_id))),
                 "image_content": (
                     str(message.image_content)
                     if message.image_content is not None
@@ -265,6 +269,45 @@ async def get_thread_detail(
         "next_before_message_id": next_before_message_id,
         "active_run": _run_response(active_run),
         "pending_interaction": pending_interaction,
+    }
+
+
+def _message_process_response(
+    message: Message, audited_tool_ids: set[str], run: AgentRun | None = None,
+) -> dict[str, Any]:
+    metadata = message.msg_metadata or {}
+    tool_calls = []
+    if message.message_type == "tool_audit":
+        tool_calls.append({
+            "tool_call_id": metadata["tool_call_id"],
+            "name": metadata["tool_name"],
+            "args": metadata.get("input", {}),
+            "status": (
+                "cancelled" if message.execution_status == "interrupted" and run is not None
+                and run.agent_status == "cancelled" else
+                {"failed": "error", "abandoned": "stopped"}.get(
+                    message.execution_status, message.execution_status,
+                )
+            ),
+            "output": metadata.get("output", message.content),
+            "error": metadata.get("error_message"),
+        })
+    else:
+        for tool in message.tool_calls:
+            if tool.tool_call_id in audited_tool_ids:
+                continue
+            tool_calls.append({
+                "tool_call_id": tool.tool_call_id,
+                "name": tool.tool_name,
+                "args": tool.tool_arguments,
+                "status": "completed" if tool.status == "success" else (tool.status or "pending"),
+                "output": tool.tool_result,
+                "error": tool.tool_result if tool.status == "error" else None,
+            })
+    return {
+        "reasoning_content": metadata.get("reasoning_content", ""),
+        "tool_calls": tool_calls,
+        "agent_state": metadata.get("agent_state"),
     }
 
 
@@ -714,6 +757,14 @@ def _lc_message_v3_dispather(
                 "content_delta": text,
                 "thread_id": thread_id,
             }
+        reasoning = delta.get("reasoning")
+        if delta.get("type") == "reasoning-delta" and isinstance(reasoning, str) and reasoning:
+            return {
+                "type": "message_delta",
+                "message_id": message_id,
+                "reasoning_content_delta": reasoning,
+                "thread_id": thread_id,
+            }
         return None
 
     if event_type == "content-block-finish":
@@ -909,6 +960,18 @@ async def save_ai_message(
             return existing
 
     ai_content = ai_msg.get("content", "")
+    additional = ai_msg.get("additional_kwargs") or {}
+    reasoning = "".join(
+        block.get("reasoning", "") for block in ai_content
+        if isinstance(block, dict) and block.get("type") == "reasoning"
+        and isinstance(block.get("reasoning"), str)
+    ) if isinstance(ai_content, list) else ""
+    reasoning = reasoning or additional.get("reasoning_content", "")
+    message_metadata = {}
+    if isinstance(langgraph_message_id, str) and langgraph_message_id:
+        message_metadata["langgraph_message_id"] = langgraph_message_id
+    if reasoning:
+        message_metadata["reasoning_content"] = reasoning
     tool_content = ai_msg.get("tool_calls", [])
     if not isinstance(tool_content, list):
         tool_content = []
@@ -941,7 +1004,7 @@ async def save_ai_message(
             run_id=agent_run_id,
             operation_id=langgraph_message_id,
             content=ai_content,
-            message_metadata={"langgraph_message_id": langgraph_message_id},
+            message_metadata=message_metadata,
         )
 
     if saved_ai_message is None:
@@ -951,11 +1014,7 @@ async def save_ai_message(
             agent_run_id=agent_run_id,
             content=ai_content,
             role="ai",
-            msg_metadata=(
-                {"langgraph_message_id": langgraph_message_id}
-                if isinstance(langgraph_message_id, str) and langgraph_message_id
-                else None
-            ),
+            msg_metadata=message_metadata or None,
         )
 
     if saved_ai_message and tool_content:
@@ -1011,7 +1070,7 @@ async def save_tool_message(
     await conv_repo.update_tool_call(
         tool_call_id=tool_call_id,
         tool_result=tool_result,
-        status="success",
+        status=tool_message.get("status", "success"),
     )
 
 
@@ -1258,6 +1317,15 @@ def _build_tool_message_audit_collector(
     )
 
 
+async def _persist_agent_state(run_id: str, worker_id: str, state: AgentState) -> None:
+    async with postgres_manager.get_async_session_context() as session:
+        run = await AgentRunRepository(session).lock_for_output_update(
+            run_id, worker_id=worker_id,
+        )
+        await ConversationRepository(session).save_agent_state(run=run, state=state)
+        await session.commit()
+
+
 async def _stream_agent_event_chunks(
     *,
     stream_events: AsyncIterator[Any],
@@ -1266,6 +1334,8 @@ async def _stream_agent_event_chunks(
     accumulated_msg: list[str],
     model_audit: ModelMessageAuditCollector | None = None,
     tool_audit: ToolMessageAuditCollector | None = None,
+    run_id: str | None = None,
+    worker_id: str | None = None,
 ) -> AsyncIterator[bytes]:
     last_agent_state = ""
     message_ids: dict[tuple[str, str], str] = {}
@@ -1276,6 +1346,8 @@ async def _stream_agent_event_chunks(
             current_agent_state = _serialize_agent_state(agent_state)
             if current_agent_state and current_agent_state != last_agent_state:
                 last_agent_state = current_agent_state
+                if run_id is not None and worker_id is not None:
+                    await _persist_agent_state(run_id, worker_id, agent_state)
                 yield make_event(
                     status="agent_state",
                     content=agent_state,
@@ -1331,7 +1403,7 @@ async def _stream_agent_event_chunks(
 @asynccontextmanager
 async def _scoped_session(
     db: AsyncSession | None = None,
-) -> AsyncGenerator[AsyncSession, None]:
+) -> AsyncGenerator[AsyncSession]:
     """若调用方显式传入 session 则直接复用；否则创建并在用完后立即释放短会话。"""
     if db is not None:
         yield db
@@ -1463,6 +1535,8 @@ async def stream_agent_response(
             accumulated_msg=accumulated_msg,
             model_audit=model_audit,
             tool_audit=tool_audit,
+            run_id=run_id,
+            worker_id=runtime_metadata["worker_id"],
         ):
             yield chunk
 
@@ -1652,6 +1726,8 @@ async def resume_agent_response(
             accumulated_msg=accumulated_msg,
             model_audit=model_audit,
             tool_audit=tool_audit,
+            run_id=run_id,
+            worker_id=runtime_metadata["worker_id"],
         ):
             yield chunk
 
