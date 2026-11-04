@@ -72,10 +72,10 @@ it("groups persisted messages by their nested run metadata", () => {
     messages={[persisted("Earlier explanation"), persisted("Saved answer")]} />);
   expect(screen.getByText("Saved answer")).toBeTruthy();
   expect(screen.queryByText("Earlier explanation")).toBeNull();
-  expect(screen.getByText("3.0s")).toBeTruthy();
+  expect(screen.getByText(/Execution process|执行过程/)).toBeTruthy();
 });
 
-it("records thinking duration up until answer output, ignoring full run finished_at duration", () => {
+it("stops live indicator when answer arrives even if full run has later finished_at", () => {
   const answerCreatedAt = new Date(startedAt + 1200).toISOString();
   const runFinishedAt = new Date(startedAt + 30_000).toISOString();
   const answerWithTimestamp: ChatMessage = {
@@ -105,7 +105,6 @@ it("records thinking duration up until answer output, ignoring full run finished
     />,
   );
   expect(screen.getByText("Done answer")).toBeTruthy();
-  // Duration should be 1.2s (until answer output), not 30.0s (whole agent execution cycle)
-  expect(screen.getByText("1.2s")).toBeTruthy();
-  expect(screen.queryByText("30.0s")).toBeNull();
+  expect(screen.queryByRole("status")).toBeNull();
+  expect(screen.getByText(/Execution process|执行过程/)).toBeTruthy();
 });

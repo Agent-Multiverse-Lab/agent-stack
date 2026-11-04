@@ -12,7 +12,7 @@ it("shows a compact tool status before completion and expands arguments and resu
   const running = screen.getByRole("button", { name: "calculator In progress" });
   const runningSvg = running.querySelector('[data-tool-status-icon="running"] svg');
   expect(runningSvg?.getAttribute("class")).toContain("motion-safe:animate-spin");
-  expect(runningSvg?.getAttribute("class")).toContain("size-6");
+  expect(runningSvg?.getAttribute("class")).toContain("size-3.5");
   expect(runningSvg?.getAttribute("viewBox")).toBe("0 0 24 24");
   fireEvent.click(running);
   expect(screen.getByText('"a": 1', { exact: false })).toBeTruthy();

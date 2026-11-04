@@ -1,19 +1,13 @@
-# Tasks: Chat Thinking Group
+# 实施任务
 
-## Ordered work
-
-1. 提取并验证 3×3 像素流动 icon。
-2. 组合 Thinking Group 的标题、计时和可选内容区。
-3. 删除 Loading 中转组件，在 ChatView 中直接复用 Thinking Group，并把当前 Run 的有效 Tool 状态作为独立同级组件保留。
-4. 执行 TypeScript、ESLint 和 diff 检查。
-
-## Done Conditions
-
-- icon 外形、错峰延迟和流动动画保持不变；
-- Thinking Group 不依赖模拟阶段或虚构消息；
-- Conversation 加载和 Agent Thinking 不通过额外的 Loading 中转组件；
-- 当前 Run 尚无 Assistant 文本时，Thinking 与有效活动状态依次同级显示；
-- 当前 Run 出现 Assistant 文本或等待用户交互后不再显示 Thinking Group；
-- Thinking 卸载和 Run 终态收口不删除当前页面已有的 Tool 组件；
-- 减少动态效果时动画停止，状态文本仍可读取；
-- 定向检查通过并如实报告。
+- [x] 定义 `ChatRenderItem` 与 `AgentContentBlock` 判别联合类型及归约纯函数（强类型 ToolCall，全链路携带 messageId）。
+- [x] 拆分人类气泡、Markdown、Reasoning、AgentTasks 与 AgentRun 分支子组件，落实去容器化、单线时间线串联与参数等宽/思考自然字体区隔。
+- [x] 实现动态末尾判定与时间戳双态处理：活跃 Run 流式 answerReceivedAt 记忆与正文后新工具调用的回退/计时动画恢复。
+- [x] 重构 `ChatMessage` 为统一接入组件并收敛 `ConversationMessages` 为纯容器。
+- [x] 运行静态代码检查与单测：TypeScript 类型检查、ESLint、Vitest 组件单元测试（82 passed）与 Vite 构建打包。
+- [ ] 运行浏览器真实交互验收：
+  - [ ] 验证流式思考与正文动态流出；
+  - [ ] 验证正文后再次调用工具时的动态回退与计时/动画恢复；
+  - [ ] 验证外层折叠/展开不影响内层展开状态，工具参数与长日志正常滚动；
+  - [ ] 验证浅色与深色主题下的视觉对比度（确保状态区低调不喧宾夺主，正文清晰醒目）；
+  - [ ] 验证等待审批（`AskUser`）在时间线后的正常呈现与承接。

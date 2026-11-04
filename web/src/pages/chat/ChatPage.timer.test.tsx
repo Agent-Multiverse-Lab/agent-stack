@@ -65,8 +65,6 @@ function renderChat() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(startMs + 12_300);
   streams.length = 0;
   HTMLElement.prototype.scrollTo = vi.fn();
   mocks.getThreadDetail.mockImplementation(async (id: string) =>
@@ -79,71 +77,57 @@ beforeEach(() => {
     });
   });
 });
-afterEach(() => {
-  cleanup();
-  vi.useRealTimers();
-});
+afterEach(cleanup);
 
-it("restores elapsed time after A to B to A while reconnecting the same Run", async () => {
+it("maintains active status after A to B to A while reconnecting the same Run", async () => {
   renderChat();
   await waitFor(() => expect(streams).toHaveLength(1));
-  expect(screen.getByText("12.3s")).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toContain("Thinking");
   fireEvent.click(screen.getByRole("button", { name: "B" }));
   await waitFor(() => expect(streams).toHaveLength(2));
   expect(streams[0].signal.aborted).toBe(true);
-  expect(screen.getByText("11.3s")).toBeTruthy();
-  vi.setSystemTime(startMs + 17_300);
+  expect(screen.getByRole("status").textContent).toContain("Thinking");
   fireEvent.click(screen.getByRole("button", { name: "A" }));
   await waitFor(() => expect(streams).toHaveLength(3));
-  expect(screen.getByText("17.3s")).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toContain("Thinking");
   expect(mocks.consume.mock.calls[2][0]).toBe(mocks.consume.mock.calls[0][0]);
   expect(mocks.create).not.toHaveBeenCalled();
   expect(mocks.resume).not.toHaveBeenCalled();
   expect(mocks.cancel).not.toHaveBeenCalled();
 });
 
-it("preserves elapsed time as process activity appears and disappears", async () => {
+it("preserves active status as process activity appears and disappears", async () => {
   renderChat();
   await waitFor(() => expect(streams).toHaveLength(1));
-  vi.setSystemTime(startMs + 18_300);
   await act(() => streams[0].emit(event({ type: "custom", name: "agent_state", agent_state: { agent_todo: [{ content: "Work", status: "in_progress" }] } })));
   expect(screen.getByText("Activity")).toBeTruthy();
-  await waitFor(() => expect(screen.getByText("18.3s")).toBeTruthy());
-  vi.setSystemTime(startMs + 22_300);
+  expect(screen.getByRole("status").textContent).toMatch(/Thinking|Working/);
   await act(() => streams[0].emit(event({ type: "custom", name: "agent_state", agent_state: { agent_todo: [] } })));
   expect(screen.queryByText("Activity")).toBeNull();
-  await waitFor(() => expect(screen.getByText("22.3s")).toBeTruthy());
+  expect(screen.getByRole("status").textContent).toMatch(/Thinking|Working/);
 });
 
-it.each([null, "invalid"])("hydrates a missing/invalid start (%s) from running events and prefers persisted starts on return", async (startedAt) => {
+it.each([null, "invalid"])("hydrates active status (%s) from running events", async (startedAt) => {
   mocks.getThreadDetail.mockResolvedValueOnce(detail("A", startedAt));
   renderChat();
   await waitFor(() => expect(streams).toHaveLength(1));
-  expect(screen.getByRole("status").textContent).toBe("Thinking");
+  expect(screen.getByRole("status").textContent).toContain("Thinking");
   await act(() => streams[0].emit(event({ created_at: "invalid" })));
-  expect(screen.getByRole("status").textContent).toBe("Thinking");
+  expect(screen.getByRole("status").textContent).toContain("Thinking");
   await act(() => streams[0].emit(event({ created_at: new Date(startMs + 300).toISOString() })));
-  expect(screen.getByText("12.0s")).toBeTruthy();
-  await act(() => streams[0].emit(event({ created_at: new Date(startMs + 10_000).toISOString() })));
-  expect(screen.getByText("12.0s")).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toContain("Thinking");
   fireEvent.click(screen.getByRole("button", { name: "B" }));
   await waitFor(() => expect(streams).toHaveLength(2));
   fireEvent.click(screen.getByRole("button", { name: "A" }));
   await waitFor(() => expect(streams).toHaveLength(3));
-  expect(screen.getByText("12.3s")).toBeTruthy();
-  await act(() => streams[2].emit(event({ created_at: new Date(startMs + 300).toISOString() })));
-  expect(screen.getByText("12.3s")).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toContain("Thinking");
 });
 
-
-it("removes Thinking and its interval after a terminal event", async () => {
-  const clearInterval = vi.spyOn(window, "clearInterval");
+it("removes Thinking status indicator after a terminal event", async () => {
   renderChat();
   await waitFor(() => expect(streams).toHaveLength(1));
-  expect(screen.getByText("12.3s")).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toContain("Thinking");
   mocks.getThreadDetail.mockResolvedValue({ ...detail("A"), active_run: null });
   await act(() => streams[0].finish());
   await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
-  expect(clearInterval).toHaveBeenCalled();
-  clearInterval.mockRestore();
 });

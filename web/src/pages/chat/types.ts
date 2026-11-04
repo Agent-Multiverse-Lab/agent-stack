@@ -6,6 +6,7 @@ import type {
   HumanQuestionResponse,
   InteractionRequiredResponse,
 } from "@/api/agent-run"
+import type { PresentedArtifact } from "@/pages/chat/artifacts"
 
 export type JsonPrimitive = string | number | boolean | null
 export type JsonValue =
@@ -58,3 +59,72 @@ export interface AgentRunCreateInput {
 export type ChatAttachment =
   | UploadedAttachmentResponse
   | ThreadMessageAttachmentResponse
+
+export type AgentTodoStatus = "pending" | "in_progress" | "completed"
+
+export interface AgentTodoItem {
+  content: string
+  status: AgentTodoStatus
+}
+
+export interface BaseContentBlock {
+  messageId: string | number
+}
+
+export interface MarkdownBlock extends BaseContentBlock {
+  kind: "markdown"
+  content: string
+  attachments: ThreadMessageAttachmentResponse[]
+}
+
+export interface ReasoningBlock extends BaseContentBlock {
+  kind: "reasoning"
+  content: string
+}
+
+export interface ToolCallBlock extends BaseContentBlock {
+  kind: "tool_call"
+  toolCallId: string
+  name: string
+  status: ToolExecutionStatus
+  index?: number
+  args?: ToolCallArguments
+  output?: JsonValue
+  progress?: string
+  error?: string
+}
+
+export interface AgentTasksBlock extends BaseContentBlock {
+  kind: "agent_tasks"
+  todos: AgentTodoItem[]
+}
+
+export type AgentContentBlock =
+  | MarkdownBlock
+  | ReasoningBlock
+  | ToolCallBlock
+  | AgentTasksBlock
+
+export type ChatRenderItem =
+  | {
+      kind: "human"
+      key: string
+      messageId: string | number
+      content: string
+      attachments: ThreadMessageAttachmentResponse[]
+    }
+  | {
+      kind: "agent_run"
+      key: string
+      runId: string
+      threadId?: string
+      status: string | null
+      active: boolean
+      waiting: boolean
+      startedAt: number | null
+      finishedAt: number | null
+      answerCreatedAt: number | null
+      processBlocks: AgentContentBlock[]
+      answerBlock: MarkdownBlock | null
+      artifacts: PresentedArtifact[]
+    }
