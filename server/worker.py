@@ -8,7 +8,8 @@ from typing import Any
 from uuid import uuid4
 
 from arq.connections import RedisSettings
-from arq.worker import RetryJob
+from arq.worker import RetryJob, func
+from server.service.knowledge_workspace_service import process_knowledge_task
 from sqlalchemy import select
 
 import src.agents.buildin as agent
@@ -1014,7 +1015,7 @@ async def process_agent_run(ctx, run_id: str):
 
 
 class WorkerSettings:
-    functions = [process_agent_run]
+    functions = [process_agent_run, func(process_knowledge_task, max_tries=1)]
     queue_name = config.arq_queue_name
     redis_settings = RedisSettings.from_dsn(config.redis_url)
     max_jobs = config.arq_max_jobs

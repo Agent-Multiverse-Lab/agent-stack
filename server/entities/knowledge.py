@@ -20,6 +20,8 @@ class KnowledgeBaseResponse(BaseModel):
     name: str
     description: str
     status: str
+    settings: dict[str, Any] = Field(default_factory=dict)
+    embedding_model_spec: str | None = None
 
 
 class KnowledgeFileResponse(BaseModel):
@@ -27,6 +29,7 @@ class KnowledgeFileResponse(BaseModel):
 
     file_id: str
     kb_id: str
+    folder_id: str | None = None
     original_file_name: str
     original_object_name: str
     markdown_object_name: str | None
@@ -194,7 +197,8 @@ class KnowledgeChunkSearchRequest(BaseModel):
     """知识库分块检索请求。"""
 
     query: str = Field(min_length=1, max_length=2000)
-    limit: int = Field(default=8, ge=1, le=50)
+    limit: int | None = Field(default=None, ge=1, le=50)
+    min_score: float | None = Field(default=None, ge=-1, le=1)
 
 
 class KnowledgeChunkHit(BaseModel):

@@ -20,6 +20,7 @@ export interface KnowledgeBase {
 export interface KnowledgeFile {
   file_id: string
   kb_id: string
+  folder_id?: string | null
   original_file_name: string
   original_object_name: string
   markdown_object_name: string | null
@@ -138,9 +139,10 @@ export const listKnowledgeFiles = (kbId: string) =>
     { requiresAuth: true }
   )
 
-export const uploadKnowledgeFile = (kbId: string, file: File) => {
+export const uploadKnowledgeFile = (kbId: string, file: File, folderId?: string | null) => {
   const form = new FormData()
   form.append("file", file)
+  if (folderId) form.append("folder_id", folderId)
   return apiClient.apiPost<KnowledgeFile, FormData>(
     `/api/knowledge/bases/${encode(kbId)}/files`,
     form,
@@ -263,13 +265,72 @@ export const getKnowledgeFileChunks = (
 export const searchKnowledgeChunks = (
   kbId: string,
   query: string,
-  limit = 8
+  limit?: number,
+  minScore?: number
 ) =>
   apiClient.apiPost<
     KnowledgeChunkSearchResponse,
-    { query: string; limit: number }
+    { query: string; limit?: number; min_score?: number }
   >(
     `/api/knowledge/bases/${encode(kbId)}/search`,
-    { query, limit },
+    { query, limit, min_score: minScore },
     { requiresAuth: true }
   )
+
+
+export interface KnowledgeSettings {
+  chunker: "title" | "token"
+  title_method: "hierarchy" | "group"
+  target_level: number
+  chunk_token_size: number
+  embedding_model_spec: string | null
+  top_k: number
+  candidate_limit: number
+  min_score: number | null
+  rerank: boolean
+}
+export interface KnowledgeConfiguration extends KnowledgeBase {
+  settings: KnowledgeSettings
+  embedding_model_spec: string | null
+}
+export interface KnowledgeFolder { folder_id: string; parent_id: string | null; name: string }
+export type KnowledgeOperation = "parse" | "index" | "extract" | "delete"
+export interface KnowledgeTaskResult { file_id?: string; query?: string; success: boolean; error?: string; hit_count?: number }
+export interface RetrievalReport {
+  summary_by_k: { split: string; k: number; query_count: number; hit_rate: number; precision: number; recall: number; f1: number }[]
+  selection: { recommended_top_k: number }
+  queries: { query_id: string; query: string; relevant_chunk_ids: string[]; retrieved_chunk_ids: string[]; matched_chunk_ids: string[] }[]
+}
+export interface KnowledgeTask {
+  task_id: string; kb_id: string; operation: KnowledgeOperation | "evaluate"
+  status: "pending" | "running" | "completed" | "failed" | "cancelled"
+  total: number; completed: number; results: KnowledgeTaskResult[]
+  report: RetrievalReport | null; error: string | null
+  created_at: string; finished_at: string | null
+}
+export interface KnowledgeEvaluationInput {
+  dataset_id: string; dataset_version: string; corpus_version: string; ks: number[]
+  samples: { query_id: string; query: string; split: "validation" | "test"; relevant_chunk_ids: string[] }[]
+}
+const workspacePath = (kbId: string) => `/api/knowledge/bases/${encode(kbId)}`
+const auth = { requiresAuth: true }
+export const getKnowledgeSettings = (kbId: string) => apiClient.apiGet<KnowledgeConfiguration>(`${workspacePath(kbId)}/settings`, auth)
+export const saveKnowledgeSettings = (kbId: string, value: Pick<KnowledgeConfiguration, "name" | "description" | "settings">) => apiClient.apiPost<KnowledgeConfiguration, typeof value>(`${workspacePath(kbId)}/settings`, value, auth)
+export const listKnowledgeFolders = (kbId: string) => apiClient.apiGet<KnowledgeFolder[]>(`${workspacePath(kbId)}/folders`, auth)
+export const saveKnowledgeFolder = (kbId: string, value: { name: string; parent_id: string | null }, folderId?: string) => apiClient.apiPost<KnowledgeFolder, typeof value>(`${workspacePath(kbId)}/folders${folderId ? `/${encode(folderId)}` : ""}`, value, auth)
+export const deleteKnowledgeFolder = (kbId: string, folderId: string) => apiClient.apiDelete(`${workspacePath(kbId)}/folders/${encode(folderId)}`, auth)
+export const updateKnowledgeFile = (kbId: string, fileId: string, value: { name: string; folder_id: string | null }) => apiClient.apiPost<unknown, typeof value>(`${workspacePath(kbId)}/files/${encode(fileId)}/metadata`, value, auth)
+export const listKnowledgeTasks = (kbId: string) => apiClient.apiGet<KnowledgeTask[]>(`${workspacePath(kbId)}/tasks`, auth)
+export const startKnowledgeTask = (kbId: string, operation: KnowledgeOperation, fileIds: string[]) => apiClient.apiPost<KnowledgeTask, { operation: KnowledgeOperation; file_ids: string[] }>(`${workspacePath(kbId)}/tasks`, {operation, file_ids: fileIds}, auth)
+export const cancelKnowledgeTask = (kbId: string, taskId: string) => apiClient.apiPost<KnowledgeTask, undefined>(`${workspacePath(kbId)}/tasks/${encode(taskId)}/cancel`, undefined, auth)
+export const startKnowledgeEvaluation = (kbId: string, payload: KnowledgeEvaluationInput) => apiClient.apiPost<KnowledgeTask, KnowledgeEvaluationInput>(`${workspacePath(kbId)}/evaluations`, payload, auth)
+export async function downloadKnowledgeFile(kbId: string, file: KnowledgeFile) {
+  const response = await apiClient.apiFetch(`${workspacePath(kbId)}/files/${encode(file.file_id)}/download`, auth)
+  saveKnowledgeDownload(await response.blob(), file.original_file_name)
+}
+export function saveKnowledgeDownload(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url; link.download = name; link.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}

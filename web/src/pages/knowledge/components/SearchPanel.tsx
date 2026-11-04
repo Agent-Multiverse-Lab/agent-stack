@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react"
+import { Label } from "@/components/ui/label"
+import { useEffect, useMemo, useState } from "react"
 import { FileText, Search, Sparkles, X } from "lucide-react"
 
-import { searchKnowledgeChunks } from "@/api/knowledge"
+import { getKnowledgeSettings, searchKnowledgeChunks } from "@/api/knowledge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -37,6 +38,14 @@ export function SearchPanel({
   const [error, setError] = useState("")
   const [dialogFile, setDialogFile] = useState<{ id: string; name: string } | null>(null)
 
+  useEffect(() => {
+    let active = true
+    getKnowledgeSettings(kbId).then(value => {
+      if (active) { setTopK(String(value.settings.top_k)); setMinScore(value.settings.min_score === null ? "" : String(value.settings.min_score)) }
+    }).catch((e: unknown) => { if (active) setError(e instanceof Error ? e.message : "配置读取失败") })
+    return () => { active = false }
+  }, [kbId])
+
   const visibleHits = useMemo(() => {
     if (!response) return []
     const threshold = minScore.trim() === "" ? null : Number(minScore)
@@ -58,7 +67,7 @@ export function SearchPanel({
     setLoading(true)
     setError("")
     try {
-      const result = await searchKnowledgeChunks(kbId, query, limit)
+      const result = await searchKnowledgeChunks(kbId, query, limit, minScore === "" ? undefined : Number(minScore))
       setResponse(result)
       setSearchedQuery(query)
     } catch (caught) {
@@ -103,9 +112,9 @@ export function SearchPanel({
             </p>
           </div>
           <div className="grid gap-2">
-            <label htmlFor="knowledge-search-query" className="text-xs font-medium">
+            <Label htmlFor="knowledge-search-query" className="text-xs font-medium">
               {t("Query")}
-            </label>
+            </Label>
             <Textarea
               id="knowledge-search-query"
               value={draft}
@@ -122,9 +131,9 @@ export function SearchPanel({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-2">
-              <label htmlFor="knowledge-search-topk" className="text-xs font-medium">
+              <Label htmlFor="knowledge-search-topk" className="text-xs font-medium">
                 {t("Top K")}
-              </label>
+              </Label>
               <Input
                 id="knowledge-search-topk"
                 type="number"
@@ -135,9 +144,9 @@ export function SearchPanel({
               />
             </div>
             <div className="grid gap-2">
-              <label htmlFor="knowledge-search-minscore" className="text-xs font-medium">
+              <Label htmlFor="knowledge-search-minscore" className="text-xs font-medium">
                 {t("Minimum similarity")}
-              </label>
+              </Label>
               <Input
                 id="knowledge-search-minscore"
                 type="number"
@@ -151,7 +160,7 @@ export function SearchPanel({
             </div>
           </div>
           <p className="text-[11px] leading-4 text-muted-foreground">
-            {t("Minimum similarity is applied in the browser to the returned chunks.")}
+            相似度阈值应用于服务端召回结果。
           </p>
           <Button type="submit" disabled={!draft.trim() || loading}>
             {loading ? <Spinner /> : <Search />}

@@ -4,6 +4,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     HTTPException,
     Query,
     UploadFile,
@@ -155,6 +156,7 @@ async def upload_knowledge_file(
     kb_id: str,
     current_user: AuthenticatedUser,
     file: UploadFile = File(...),
+    folder_id: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """上传知识库原文件，不触发解析和索引。"""
@@ -167,6 +169,7 @@ async def upload_knowledge_file(
             file_name=file.filename or "file",
             content=content,
             content_type=file.content_type,
+            folder_id=folder_id,
         )
         return _knowledge_file_response(knowledge_file)
     except LookupError as exc:
@@ -353,6 +356,7 @@ async def search_knowledge_chunks(
             kb_id=kb_id,
             query=payload.query,
             limit=payload.limit,
+            min_score=payload.min_score,
         )
         return KnowledgeChunkSearchResponse(**result)
     except LookupError as exc:
@@ -575,6 +579,7 @@ def _knowledge_file_response(knowledge_file) -> KnowledgeFileResponse:
     return KnowledgeFileResponse(
         file_id=knowledge_file.file_id,
         kb_id=knowledge_file.kb_id,
+        folder_id=knowledge_file.folder_id,
         original_file_name=knowledge_file.original_file_name,
         original_object_name=knowledge_file.original_object_name,
         markdown_object_name=knowledge_file.markdown_object_name,

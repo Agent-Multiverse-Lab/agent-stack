@@ -9,6 +9,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.service.model_service import resolve_runtime_model
+from server.entities.knowledge_workspace import KnowledgeSettings
+from src.database.repositories.knowledge_workspace_repository import KnowledgeWorkspaceRepository
 from src.configs import config as sys_config
 from src.database.models import (
     KnowledgeBase,
@@ -82,6 +84,7 @@ async def upload_file(
     file_name: str,
     content: bytes,
     content_type: str | None = None,
+    folder_id: str | None = None,
 ) -> KnowledgeFile:
     """上传知识库原文件并创建独立文件记录。"""
     knowledge_base = await KnowledgeBaseRepository(db).get_for_user(
@@ -90,6 +93,7 @@ async def upload_file(
     )
     if knowledge_base is None:
         raise LookupError(f"知识库不存在：{kb_id}")
+    await KnowledgeWorkspaceRepository(db).folder(kb_id, folder_id)
     if not content:
         raise ValueError("知识文件内容不能为空")
 
@@ -114,6 +118,7 @@ async def upload_file(
             content_type=content_type or "application/octet-stream",
             file_size=len(content),
         )
+        knowledge_file.folder_id = folder_id
         await db.commit()
     except Exception:
         await db.rollback()
@@ -223,6 +228,7 @@ async def index_file(
     if not file_record.markdown_object_name:
         raise ValueError("知识库文件缺少已解析的 Markdown")
 
+    settings = await _workspace_settings(db, uid, kb_id)
     await knowledge_files.update_status(
         file_record,
         status="indexing",
@@ -241,7 +247,7 @@ async def index_file(
             markdown,
             file_name="document.md",
         )
-        chunks = pipeline.chunk_document(document)
+        chunks = pipeline.chunk_document(document, chunker=settings.chunker, title_method=settings.title_method, target_level=settings.target_level, chunk_token_size=settings.chunk_token_size)
         if not chunks:
             raise ValueError("Markdown 分块结果不能为空")
 
@@ -267,7 +273,7 @@ async def index_file(
         binding = await bindings.get(uid=uid, kb_id=kb_id)
         binding_created = binding is None
         embedding, resolved_spec, batch_size = _create_embedding_service(
-            binding.embedding_model_spec if binding is not None else None,
+            binding.embedding_model_spec if binding is not None else settings.embedding_model_spec,
             expected_dimension=(
                 binding.embedding_dimension if binding is not None else None
             ),
@@ -352,10 +358,13 @@ async def search(
     uid: str,
     kb_id: str,
     query: str,
-    limit: int,
+    limit: int | None = None,
     knowledge_type: str = "milvus",
+    min_score: float | None = None,
 ) -> dict[str, Any]:
     """使用绑定 Embedding 初召回，并按配置执行查询时重排。"""
+    settings = await _workspace_settings(db, uid, kb_id)
+    limit = settings.top_k if limit is None else limit
     if limit <= 0:
         raise ValueError("知识库检索 limit 必须大于 0")
 
@@ -366,9 +375,9 @@ async def search(
         batch_size=binding.embedding_batch_size,
     )
     vector = await embedding.embed_query(query)
-    rerank_model_spec = sys_config.rerank_model.strip()
+    rerank_model_spec = sys_config.rerank_model.strip() if settings.rerank else ""
     candidate_limit = (
-        max(limit, sys_config.rerank_candidate_limit)
+        max(limit, settings.candidate_limit)
         if rerank_model_spec
         else limit
     )
@@ -377,8 +386,11 @@ async def search(
         vector=vector,
         limit=candidate_limit,
     )
+    threshold = settings.min_score if min_score is None else min_score
+    if threshold is not None:
+        hits = [hit for hit in hits if (_chunk_hit(hit)["score"] is not None and _chunk_hit(hit)["score"] >= threshold)]
     if not rerank_model_spec:
-        return _binding_result(binding, hits=hits)
+        return _binding_result(binding, hits=hits[:limit])
     if not hits:
         return _binding_result(
             binding,
@@ -1123,13 +1135,19 @@ async def list_file_chunks(
     return {"file_id": file_id, "chunks": chunks, "has_more": has_more}
 
 
+async def _workspace_settings(db, uid: str, kb_id: str) -> KnowledgeSettings:
+    base = await KnowledgeWorkspaceRepository(db).require_base(uid, kb_id)
+    return KnowledgeSettings.model_validate(base.settings)
+
+
 async def search_chunks(
     db: AsyncSession,
     *,
     uid: str,
     kb_id: str,
     query: str,
-    limit: int,
+    limit: int | None = None,
+    min_score: float | None = None,
 ) -> dict[str, Any]:
     """检索知识库分块并归一化 Milvus 命中结构。"""
     result = await search(
@@ -1138,6 +1156,7 @@ async def search_chunks(
         kb_id=kb_id,
         query=query,
         limit=limit,
+        min_score=min_score,
     )
     return {
         "kb_id": kb_id,
