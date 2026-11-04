@@ -122,6 +122,30 @@ const toChatMessage = (message: ThreadMessageResponse): ChatMessage => ({
   payload: { type: "text", event: message },
 });
 
+const toChatMessages = (message: ThreadMessageResponse): ChatMessage[] => {
+  if (message.role === "user") return [toChatMessage(message)];
+  const messages: ChatMessage[] = [];
+  const process = (event: Record<string, unknown>) => messages.push({
+    type: "ai",
+    payload: { type: "tool", event: { ...message, ...event } },
+  });
+  if (message.reasoning_content) {
+    process({ type: "reasoning", content: message.reasoning_content });
+  }
+  if (message.message_type === "agent_state") {
+    if (message.agent_state?.agent_todo.length) {
+      process({ name: "agent_state", agent_state: message.agent_state });
+    }
+    return messages;
+  }
+  if (message.role !== "tool" && message.content) messages.push(toChatMessage(message));
+  for (const tool of message.tool_calls ?? []) {
+    if (tool.name === "ask_user") continue;
+    process({ ...tool, type: "tool_call", activity_id: tool.tool_call_id });
+  }
+  return messages;
+};
+
 const chatMessageEvent = (message: ChatMessage) =>
   isRecord(message.payload.event) ? message.payload.event : null;
 
@@ -195,32 +219,6 @@ export function useThread() {
     [update],
   );
 
-  function mergeHistory(historyMessages: ThreadMessageResponse[]) {
-    const history = historyMessages.map(toChatMessage);
-    const retainedByRun = new Map<string | null, ChatMessage[]>();
-    for (const message of getMessages()) {
-      if (message.type !== "ai" || message.payload.type !== "tool") continue;
-      const runId = chatMessageRunId(message) ?? null;
-      const activities = retainedByRun.get(runId);
-      if (activities) activities.push(message);
-      else retainedByRun.set(runId, [message]);
-    }
-    for (const [runId, activities] of retainedByRun) {
-      const insertAt = history.findIndex(
-        (message) =>
-          message.type === "ai" &&
-          message.payload.type === "text" &&
-          chatMessageRunId(message) === runId,
-      );
-      history.splice(
-        insertAt === -1 ? history.length : insertAt,
-        0,
-        ...activities,
-      );
-    }
-    return history;
-  }
-
   function addOptimisticMessage(message: Omit<ThreadMessageResponse, "message_id">) {
     const messageId = nextOptimisticId.current--;
     updateMessages((previous) => [
@@ -249,14 +247,8 @@ export function useThread() {
       }
     }
     updateMessages((messages) =>
-      messages.filter((message) => {
-        if (message.type !== "ai") return true;
-        const event = chatMessageEvent(message);
-        if (event?.run_id !== runId) return true;
-        return !(
-          message.payload.type === "tool" || event.status === "streaming"
-        );
-      }),
+      // 从 Stream 起点重放当前 Run，先移除它的历史投影，避免与重放内容重复。
+      messages.filter((message) => message.type !== "ai" || chatMessageRunId(message) !== runId),
     );
   }
 
@@ -676,7 +668,7 @@ export function useThread() {
   function setMessages(messages: ThreadMessageResponse[]) {
     update((previous) => ({
       ...previous,
-      messages: mergeHistory(messages),
+      messages: messages.flatMap(toChatMessages),
     }));
   }
 
