@@ -696,7 +696,7 @@ export function AgentMessageComposer({
       aria-label={t("Agent message composer")}
       aria-busy={uploading > 0}
       data-expanded={expanded}
-      className="relative isolate flex w-full flex-col rounded-[1.4rem] border border-border bg-card px-3 pt-[0.8rem] pb-[0.6rem] shadow-[0_2px_8px_rgb(0_0_0/0.05)]"
+      className="relative isolate flex w-full flex-col rounded-2xl border border-input bg-card p-3 shadow-xs transition-shadow duration-200 focus-within:border-ring/30 focus-within:ring-2 focus-within:ring-ring/10"
       onSubmit={onSubmit}
       onDragOver={(event) => event.preventDefault()}
       onDrop={onDrop}
@@ -878,7 +878,7 @@ export function AgentMessageComposer({
 
       <div
         ref={controls}
-        className="relative z-10 grid w-full grid-cols-[30px_minmax(0,1fr)_auto_30px_32px] items-center gap-x-1 gap-y-2"
+        className="relative z-10 flex w-full flex-col gap-2"
       >
         <Input
           ref={fileInput}
@@ -891,48 +891,6 @@ export function AgentMessageComposer({
             event.target.value = "";
           }}
         />
-
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={<Button variant="ghost" size="icon" />}
-            type="button"
-            disabled={disabled}
-            aria-label={t("Action menu")}
-            data-composer-control="actions"
-            className="col-start-1 row-start-2 size-[30px] rounded-lg text-muted-foreground hover:text-foreground"
-          >
-            <PlusIcon className="transition-transform duration-200 group-aria-expanded/button:rotate-45 motion-reduce:transition-none" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            anchor={composer}
-            side={placement}
-            align="start"
-            aria-label={t("Actions menu")}
-            className="p-2"
-          >
-            <DropdownMenuItem
-              className="gap-2 rounded-md px-2 py-1.5"
-              onClick={() => fileInput.current?.click()}
-            >
-              <PaperclipIcon aria-hidden="true" />
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span>{t("Add attachment")}</span>
-                <span className="text-xs text-muted-foreground">
-                  {t("Upload files from your device")}
-                </span>
-              </span>
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled className="gap-2 rounded-md px-2 py-1.5">
-              <PlugIcon aria-hidden="true" />
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span>{t("Connectors")}</span>
-                <span className="text-xs text-muted-foreground">
-                  {t("Not yet available")}
-                </span>
-              </span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
 
         <Textarea
           ref={editor}
@@ -959,70 +917,118 @@ export function AgentMessageComposer({
           aria-label={t("Message")}
           placeholder={listening ? t("Listening…") : t("Ask anything")}
           rows={1}
-          className="col-span-full col-start-1 row-start-1 field-sizing-fixed max-h-[200px] min-h-11 min-w-0 resize-none rounded-none border-0 bg-transparent p-0 text-[15px] leading-[1.5] shadow-none focus-visible:ring-0 disabled:bg-transparent disabled:opacity-60"
+          className="field-sizing-fixed max-h-[200px] min-h-11 min-w-0 resize-none rounded-none border-0 bg-transparent px-1 pt-0.5 pb-1 text-[15px] leading-[1.5] shadow-none focus-visible:ring-0 disabled:bg-transparent disabled:opacity-60 placeholder:text-muted-foreground/60"
         />
 
-        <div
-          data-composer-control="model"
-          className="col-start-3 row-start-2 min-w-0"
-        >
-          <ModelSelector
-            models={models}
-            selectedId={modelId}
-            loading={modelsLoading}
-            disabled={disabled || running}
-            placement={placement}
-            select={onSelectModel}
-          />
-        </div>
+        <div className="flex items-center justify-between gap-2 pt-0.5">
+          <div className="flex items-center gap-1">
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={<Button variant="ghost" size="icon" />}
+                type="button"
+                disabled={disabled}
+                aria-label={t("Action menu")}
+                data-composer-control="actions"
+                className="size-8 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <PlusIcon className="transition-transform duration-200 group-aria-expanded/button:rotate-45 motion-reduce:transition-none" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                anchor={composer}
+                side={placement}
+                align="start"
+                aria-label={t("Actions menu")}
+                className="p-2"
+              >
+                <DropdownMenuItem
+                  className="gap-2 rounded-md px-2 py-1.5"
+                  onClick={() => fileInput.current?.click()}
+                >
+                  <PaperclipIcon aria-hidden="true" />
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span>{t("Add attachment")}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {t("Upload files from your device")}
+                    </span>
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled className="gap-2 rounded-md px-2 py-1.5">
+                  <PlugIcon aria-hidden="true" />
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span>{t("Connectors")}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {t("Not yet available")}
+                    </span>
+                  </span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
 
-        <Tooltip>
-          <TooltipTrigger
-            render={<Button variant="ghost" size="icon" />}
-            type="button"
-            disabled={disabled || running || speechSupported !== true}
-            aria-label={dictationLabel}
-            aria-pressed={listening}
-            data-composer-control="dictation"
-            onClick={toggleDictation}
-            className="col-start-4 row-start-2 size-[30px] rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            {listening ? (
-              <span className="flex h-4 items-center gap-0.5" aria-hidden="true">
-                <span className="agent-composer-wave-bar" />
-                <span className="agent-composer-wave-bar" />
-                <span className="agent-composer-wave-bar" />
-              </span>
-            ) : (
-              <MicIcon />
-            )}
-          </TooltipTrigger>
-          <TooltipContent>{dictationLabel}</TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant={running ? "secondary" : "default"}
-                size="icon"
+          <div className="flex items-center gap-1.5">
+            <div
+              data-composer-control="model"
+              className="min-w-0"
+            >
+              <ModelSelector
+                models={models}
+                selectedId={modelId}
+                loading={modelsLoading}
+                disabled={disabled || running}
+                placement={placement}
+                select={onSelectModel}
               />
-            }
-            type="button"
-            disabled={actionDisabled}
-            aria-label={running ? t("Cancel response") : t("Send message")}
-            data-composer-control="submit"
-            onClick={running ? cancel : submitMessage}
-            className="col-start-5 row-start-2 rounded-full shadow-[0_2px_6px_rgb(0_0_0/0.08)] disabled:shadow-none"
-          >
-            {running ? (
-              <SquareIcon className="size-3.5" fill="currentColor" />
-            ) : (
-              <ArrowUpIcon />
-            )}
-          </TooltipTrigger>
-          <TooltipContent>{running ? t("Cancel") : t("Send")}</TooltipContent>
-        </Tooltip>
+            </div>
+
+            <Tooltip>
+              <TooltipTrigger
+                render={<Button variant="ghost" size="icon" />}
+                type="button"
+                disabled={disabled || running || speechSupported !== true}
+                aria-label={dictationLabel}
+                aria-pressed={listening}
+                data-composer-control="dictation"
+                onClick={toggleDictation}
+                className="size-8 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                {listening ? (
+                  <span className="flex h-4 items-center gap-0.5" aria-hidden="true">
+                    <span className="agent-composer-wave-bar" />
+                    <span className="agent-composer-wave-bar" />
+                    <span className="agent-composer-wave-bar" />
+                  </span>
+                ) : (
+                  <MicIcon />
+                )}
+              </TooltipTrigger>
+              <TooltipContent>{dictationLabel}</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant={running ? "secondary" : "default"}
+                    size="icon"
+                  />
+                }
+                type="button"
+                disabled={actionDisabled}
+                aria-label={running ? t("Cancel response") : t("Send message")}
+                data-composer-control="submit"
+                onClick={running ? cancel : submitMessage}
+                className="size-8 rounded-full shadow-[0_2px_6px_rgb(0_0_0/0.08)] disabled:shadow-none"
+              >
+                {running ? (
+                  <SquareIcon className="size-3.5" fill="currentColor" />
+                ) : (
+                  <ArrowUpIcon />
+                )}
+              </TooltipTrigger>
+              <TooltipContent>{running ? t("Cancel") : t("Send")}</TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
       </div>
     </form>
   );

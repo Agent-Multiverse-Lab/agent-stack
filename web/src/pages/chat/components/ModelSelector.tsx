@@ -96,7 +96,7 @@ export default function ModelSelector({
         disabled={disabled || loading || available.length === 0}
         aria-label={t("Select model")}
         title={triggerLabel}
-        className="flex h-[30px] w-auto min-w-0 max-w-[168px] shrink-0 items-center gap-1 rounded-lg px-2 text-[13px] leading-none font-normal text-muted-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
+        className="flex h-8 w-auto min-w-0 max-w-[168px] shrink-0 items-center gap-1 rounded-lg px-2 text-[13px] leading-none font-normal text-muted-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
       >
         <span className="truncate">{triggerLabel}</span>
         <ChevronDownIcon
