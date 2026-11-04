@@ -80,7 +80,7 @@ export function AppSidebar({
         title: "New chat",
         url: "/",
         icon: <SquarePenIcon />,
-        isActive: location.pathname === "/",
+        isActive: false,
       },
       {
         title: "Knowledge",
