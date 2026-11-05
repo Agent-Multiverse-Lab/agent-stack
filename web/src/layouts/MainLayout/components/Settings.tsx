@@ -17,11 +17,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Field,
-  FieldContent,
   FieldGroup,
   FieldSeparator,
-  FieldTitle,
 } from "@/components/ui/field";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -36,6 +33,7 @@ import {
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -81,12 +79,14 @@ export function Settings({ open, close, user }: SettingsProps) {
     sections.find((item) => item.id === section) ?? sections[0];
 
   const setting = (label: string, control: ReactNode) => (
-    <Field orientation="horizontal" className="min-h-14 py-3">
-      <FieldContent>
-        <FieldTitle>{label}</FieldTitle>
-      </FieldContent>
-      {control}
-    </Field>
+    <div className="flex min-h-10 items-center gap-6 py-2">
+      <span className="w-28 shrink-0 text-[13px] font-medium text-foreground">
+        {label}
+      </span>
+      <div className="flex items-center">
+        {control}
+      </div>
+    </div>
   );
 
   return (
@@ -98,26 +98,31 @@ export function Settings({ open, close, user }: SettingsProps) {
     >
       <DialogContent
         overlayClassName="z-[100]"
-        className="z-[101] top-[5vh] h-[min(84dvh,840px)] w-[90%] max-w-[980px] translate-y-0 [&>[data-slot=dialog-close]]:top-2.5 [&>[data-slot=dialog-close]]:right-auto [&>[data-slot=dialog-close]]:left-3.5 [&>[data-slot=dialog-close]]:size-8 overflow-hidden p-0"
+        className="z-[101] h-[520px] max-h-[85dvh] w-[840px] max-w-[92vw] overflow-hidden p-0 [&>[data-slot=dialog-close]]:top-3 [&>[data-slot=dialog-close]]:right-4 [&>[data-slot=dialog-close]]:size-7 [&_svg]:size-4"
       >
-        <DialogTitle className="sr-only">{t("Settings")}</DialogTitle>
         <DialogDescription className="sr-only">
           {t("Application settings.")}
         </DialogDescription>
 
         <SidebarProvider
-          className="min-h-0 items-start"
+          className="h-full min-h-0 w-full items-stretch"
           style={{ "--sidebar-width": "11rem" } as CSSProperties}
         >
           <Sidebar
             collapsible="none"
             aria-label={t("Settings sections")}
-            className="border-r border-border"
+            className="w-(--sidebar-width) shrink-0 border-r border-border bg-sidebar"
           >
-            <SidebarContent>
-              <SidebarGroup className="px-2.5 pt-[52px] pb-3">
+            <SidebarHeader className="flex h-13 shrink-0 items-center border-b border-border px-4 pt-3 pb-2">
+              <DialogTitle className="text-sm font-semibold text-sidebar-foreground">
+                {t("Settings")}
+              </DialogTitle>
+            </SidebarHeader>
+
+            <SidebarContent className="p-2">
+              <SidebarGroup className="p-0">
                 <SidebarGroupContent>
-                  <SidebarMenu className="gap-2">
+                  <SidebarMenu className="gap-0.5">
                     {sections.map((item) => {
                       const Icon = item.icon;
                       return (
@@ -125,7 +130,7 @@ export function Settings({ open, close, user }: SettingsProps) {
                           <SidebarMenuButton
                             type="button"
                             size="default"
-                            className="h-9 gap-2.5 px-3 py-1.5 text-[15px] [&>svg]:size-[18px]"
+                            className="h-8 gap-2.5 px-2.5 py-1 text-[13px] font-medium [&>svg]:size-4"
                             isActive={section === item.id}
                             aria-current={section === item.id ? "page" : undefined}
                             onClick={() => setSection(item.id)}
@@ -142,90 +147,96 @@ export function Settings({ open, close, user }: SettingsProps) {
             </SidebarContent>
           </Sidebar>
 
-          <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-            <ScrollArea className="min-h-0 flex-1">
-              <section
-                className="p-4"
-                aria-live="polite"
-                aria-labelledby="settings-section-title"
+          <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
+            <div className="flex h-13 shrink-0 items-center px-5 pr-12 pt-3 pb-2">
+              <h2
+                id="settings-section-title"
+                className="text-sm font-semibold text-foreground"
               >
-                <h2
-                  id="settings-section-title"
-                  className="my-3 text-[16px] leading-[1.4] font-medium"
-                >
-                  {currentSection.name}
-                </h2>
+                {currentSection.name}
+              </h2>
+            </div>
 
-                {section === "models" ? (
-                  <SettingsModels />
-                ) : section === "skills" ? (
-                  <Skill key={user?.uid ?? "guest"} />
-                ) : section === "mcp" ? (
-                  <Mcp key={user?.uid ?? "guest"} />
-                ) : section === "general" ? (
-                  <FieldGroup className="max-w-3xl gap-0">
-                    {setting(
-                      t("Theme"),
-                      <Select
-                        value={theme}
-                        onValueChange={(value) => setTheme(value ?? "light")}
-                      >
-                        <SelectTrigger aria-label={t("Theme")}>
-                          <SelectValue>
-                            {t(theme === "dark" ? "Dark" : theme === "system" ? "System" : "Light")}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="light">{t("Light")}</SelectItem>
-                          <SelectItem value="system">{t("System")}</SelectItem>
-                          <SelectItem value="dark">{t("Dark")}</SelectItem>
-                        </SelectContent>
-                      </Select>,
+            <div className="min-h-0 flex-1 px-5 pb-5">
+              <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border bg-secondary/40 shadow-2xs">
+                <ScrollArea className="h-full">
+                  <section
+                    className="p-4.5"
+                    aria-live="polite"
+                    aria-labelledby="settings-section-title"
+                  >
+                    {section === "models" ? (
+                      <SettingsModels />
+                    ) : section === "skills" ? (
+                      <Skill key={user?.uid ?? "guest"} />
+                    ) : section === "mcp" ? (
+                      <Mcp key={user?.uid ?? "guest"} />
+                    ) : section === "general" ? (
+                      <FieldGroup className="max-w-2xl gap-0">
+                        {setting(
+                          t("Theme"),
+                          <Select
+                            value={theme}
+                            onValueChange={(value) => setTheme(value ?? "light")}
+                          >
+                            <SelectTrigger aria-label={t("Theme")} className="h-8 w-[140px] px-2.5 text-xs">
+                              <SelectValue>
+                                {t(theme === "dark" ? "Dark" : theme === "system" ? "System" : "Light")}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="light">{t("Light")}</SelectItem>
+                              <SelectItem value="system">{t("System")}</SelectItem>
+                              <SelectItem value="dark">{t("Dark")}</SelectItem>
+                            </SelectContent>
+                          </Select>,
+                        )}
+                        <FieldSeparator />
+                        {setting(
+                          t("Language"),
+                          <Select
+                            value={
+                              i18n.resolvedLanguage === "zh-CN" ? "zh-CN" : "en"
+                            }
+                            onValueChange={(value) => {
+                              if (value) void i18n.changeLanguage(value);
+                            }}
+                          >
+                            <SelectTrigger aria-label={t("Language")} className="h-8 w-[140px] px-2.5 text-xs">
+                              <SelectValue>
+                                {i18n.resolvedLanguage === "zh-CN" ? "简体中文" : "English"}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="en">English</SelectItem>
+                              <SelectItem value="zh-CN">简体中文</SelectItem>
+                            </SelectContent>
+                          </Select>,
+                        )}
+                      </FieldGroup>
+                    ) : (
+                      <FieldGroup className="max-w-2xl gap-0">
+                        {setting(
+                          t("Status"),
+                          <Badge variant="outline" className="text-xs font-normal px-2.5 py-0.5">
+                            {user
+                              ? user.is_active
+                                ? t("Active")
+                                : t("Inactive")
+                              : t("Not logged in")}
+                          </Badge>,
+                        )}
+                        <FieldSeparator />
+                        {setting(
+                          t("Account"),
+                          <Badge variant="outline" className="text-xs font-normal px-2.5 py-0.5">{user?.email ?? "—"}</Badge>,
+                        )}
+                      </FieldGroup>
                     )}
-                    <FieldSeparator />
-                    {setting(
-                      t("Language"),
-                      <Select
-                        value={
-                          i18n.resolvedLanguage === "zh-CN" ? "zh-CN" : "en"
-                        }
-                        onValueChange={(value) => {
-                          if (value) void i18n.changeLanguage(value);
-                        }}
-                      >
-                        <SelectTrigger aria-label={t("Language")}>
-                          <SelectValue>
-                            {i18n.resolvedLanguage === "zh-CN" ? "简体中文" : "English"}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="en">English</SelectItem>
-                          <SelectItem value="zh-CN">简体中文</SelectItem>
-                        </SelectContent>
-                      </Select>,
-                    )}
-                  </FieldGroup>
-                ) : (
-                  <FieldGroup className="max-w-3xl gap-0">
-                    {setting(
-                      t("Status"),
-                      <Badge variant="outline">
-                        {user
-                          ? user.is_active
-                            ? t("Active")
-                            : t("Inactive")
-                          : t("Not logged in")}
-                      </Badge>,
-                    )}
-                    <FieldSeparator />
-                    {setting(
-                      t("Account"),
-                      <Badge variant="outline">{user?.email ?? "—"}</Badge>,
-                    )}
-                  </FieldGroup>
-                )}
-              </section>
-            </ScrollArea>
+                  </section>
+                </ScrollArea>
+              </div>
+            </div>
           </main>
         </SidebarProvider>
       </DialogContent>

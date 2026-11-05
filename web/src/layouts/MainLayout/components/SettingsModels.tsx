@@ -312,13 +312,13 @@ export default function SettingsModels() {
       </nav>
 
       <FieldGroup
-        className="min-h-[490px] min-w-0 gap-0"
+        className="min-h-[300px] min-w-0 gap-0"
         aria-busy={loading}
       >
-        <Item className="mb-6 flex-nowrap px-0 py-0">
+        <Item className="mb-4 flex-nowrap px-0 py-0">
           <ItemMedia
             variant={provider && providerLogos[provider.provider_id] ? "image" : "icon"}
-            className="size-7"
+            className="size-6"
           >
             {provider ? (
               <ProviderMark providerId={provider.provider_id} />
@@ -327,7 +327,7 @@ export default function SettingsModels() {
             )}
           </ItemMedia>
           <ItemContent>
-            <ItemTitle className="text-lg">
+            <ItemTitle className="text-[15px] font-semibold">
               {provider?.name ?? t("No models available")}
             </ItemTitle>
           </ItemContent>
@@ -407,9 +407,9 @@ export default function SettingsModels() {
 
         </FieldGroup>
 
-        <Separator className="mt-6" />
+        <Separator className="mt-4" />
 
-        <FieldGroup className="gap-4 pt-6">
+        <FieldGroup className="gap-3 pt-4">
           <Item className="px-0 py-0">
             <ItemContent>
               <ItemTitle>{t("Models")}</ItemTitle>
@@ -446,7 +446,7 @@ export default function SettingsModels() {
               ))}
             </ItemGroup>
           ) : (
-            <Empty className="min-h-28 border-0 p-4">
+            <Empty className="min-h-24 border-0 p-3">
               <EmptyHeader>
                 <EmptyMedia variant="icon">
                   <Bot />
@@ -457,7 +457,7 @@ export default function SettingsModels() {
           )}
         </FieldGroup>
 
-        <ItemActions className="mt-auto justify-end pt-6">
+        <ItemActions className="mt-auto justify-end pt-4">
           <Button
             type="button"
             disabled={blocked}
@@ -482,29 +482,30 @@ export default function SettingsModels() {
         }}
       >
         <DialogContent
-          className="z-[1100] max-w-lg"
+          className="z-[1100] max-w-md p-5"
           overlayClassName="z-[1090]"
         >
           <DialogHeader>
-            <DialogTitle>{t("Select chat models")}</DialogTitle>
+            <DialogTitle className="text-sm font-semibold">{t("Select chat models")}</DialogTitle>
             <DialogDescription className="sr-only">
               {t("Select chat models to enable")}
             </DialogDescription>
           </DialogHeader>
-          <InputGroup className="my-4">
+          <InputGroup className="my-3 h-8 text-xs">
             <InputGroupAddon>
-              <Search />
+              <Search className="size-3.5" />
             </InputGroupAddon>
             <InputGroupInput
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               aria-label={t("Search models")}
               placeholder={t("Search models")}
+              className="h-8 text-xs"
             />
           </InputGroup>
-          <ScrollArea className="h-80">
+          <ScrollArea className="h-72">
             {filteredCandidates.length ? (
-              <ItemGroup aria-label={t("Available models")} className="gap-2 pr-3">
+              <ItemGroup aria-label={t("Available models")} className="gap-1.5 pr-2">
                 {filteredCandidates.map((model) => (
                   <SettingsModelOption
                     key={model.model_id}

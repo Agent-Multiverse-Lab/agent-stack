@@ -32,8 +32,9 @@ export function SettingsModelOption({
       aria-disabled={isDisabled || undefined}
       data-selected={onSelectedChange ? isSelected : undefined}
       variant={isSelected ? "muted" : "outline"}
+      size="sm"
       className={cn(
-        "min-w-0 flex-nowrap items-start gap-3 p-3",
+        "min-w-0 flex-nowrap items-start gap-2.5 p-2.5",
         onSelectedChange && "cursor-pointer hover:bg-accent",
         isSelected && "hover:bg-selection",
         isDisabled && "cursor-not-allowed opacity-50",
@@ -46,13 +47,13 @@ export function SettingsModelOption({
           checked={isSelected}
           disabled={isDisabled}
           onCheckedChange={(checked) => onSelectedChange(checked === true)}
-          className="mt-0.5"
+          className="mt-0.5 size-3.5"
         />
       ) : (
-        <Cpu aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <Cpu aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
       )}
-      <ItemContent className="min-w-0 gap-2">
-        <ItemTitle id={titleId} title={model.model_id} className="line-clamp-none block w-full break-all">
+      <ItemContent className="min-w-0 gap-1.5">
+        <ItemTitle id={titleId} title={model.model_id} className="line-clamp-none block w-full text-[13px] leading-tight font-medium break-all">
           {model.model_id}
         </ItemTitle>
         <ModelCapabilities capabilities={model.capabilities} />

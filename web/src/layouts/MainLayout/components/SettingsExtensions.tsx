@@ -51,7 +51,7 @@ function ExtensionSettings({ kind }: { kind: ExtensionKind }) {
 
   if (!isPreview) {
     return (
-      <Empty className="min-h-[390px] justify-center border-0">
+      <Empty className="min-h-[280px] justify-center border-0">
         <EmptyHeader>
           <EmptyMedia variant="icon"><Icon aria-hidden="true" /></EmptyMedia>
           <EmptyTitle>{t("Management unavailable")}</EmptyTitle>
@@ -72,7 +72,7 @@ function ExtensionSettings({ kind }: { kind: ExtensionKind }) {
   });
 
   return (
-    <div className="flex min-h-[390px] min-w-0 flex-col gap-5">
+    <div className="flex min-h-[280px] min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Info aria-hidden="true" className="size-4 shrink-0" />
