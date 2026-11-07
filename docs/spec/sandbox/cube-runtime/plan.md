@@ -37,7 +37,7 @@ docker/cube/manage.py::build_template 显式提交代码镜像构建任务并等
 
 落点：src/agents/backends/sandbox/provider_service.py::SandboxProviderService.acquire。
 
-以 app/uid/thread_id metadata 查找实例。通过标准 Redis Lock 将同会话的查询、connect 和创建
+以 app/scope=user/uid metadata 查找实例。通过标准 Redis Lock 将同用户的查询、connect 和创建
 串行化；进程锁协调本地引用。同一查询出现重复实例立即报错。通过 CubeMaster 的
 `/cube/sandbox/inventory?host_id=<CUBE_NODE_ID>` 严格查询本机节点；仅在 ret_code=200、
 size=1 且 data 为数组时接受结果。普通 CubeAPI 列表会忽略节点连接失败，不用于发现。
@@ -72,7 +72,7 @@ middleware 的每次工具调用 acquire，finally release；async acquire 等�
 这些 close 均不 delete VM。Run 取消不杀共享实例，已开始的远端命令仍受自身期限约束。
 
 落点：provider_service.py::workspace_paths 与 composite_backend.py::create_composite_backend。
-本地 SAVE_DIR/workspaces/<uid>/<thread_id> 和 Cube host-mount 的 /workspace 指向同一宿主目录，
+本地 SAVE_DIR/workspaces/<uid> 和 Cube host-mount 的 /workspace 指向同一宿主目录，
 /skill 只读。校验标识符、路径归属和符号链接。CubeAPI 会将 host-mount 从 metadata 移入
 annotations，列表不返回原始挂载；因此 metadata 同时记录 mounts_sha256，复用前对照配置摘要，
 挂载配置变更时拒绝悄悄复用不同挂载的 VM。
@@ -96,3 +96,16 @@ annotations，列表不返回原始挂载；因此 metadata 同时记录 mounts_
 - [官方 chart](https://github.com/TencentCloud/CubeSandbox/tree/2bbaf74ba7565992ec2a3dbc9928ed5b720639a2/deploy/kubernetes/chart)
 - [组件入口](https://github.com/TencentCloud/CubeSandbox/blob/2bbaf74ba7565992ec2a3dbc9928ed5b720639a2/deploy/kubernetes/images/scripts/component-entrypoint.sh)
 - [Host Mount](https://docs.cubesandbox.com/zh/guide/persistent-storage)
+
+## 7. 当前任务：按用户复用 VM 和工作目录
+
+目标：同一用户跨聊天复用执行环境与文件，空闲暂停后恢复原 VM。
+
+修改：provider 的 metadata、进程索引与 Redis 锁按 uid 组织；Host Mount 和 Composite
+共用 workspaces/<uid>；Cube 生命周期改为 pause，connect 恢复。保留会话 API 的归属校验。
+
+实施步骤：更新 provider/client，增加跨会话并发和用户隔离测试；扩展真实 smoke，验证空闲
+暂停、跨进程恢复及 VM 本地文件保留；同步运行契约与部署说明。
+
+验收：同一用户多个会话只创建一台 VM，不同用户不能借用彼此客户端；旧文件仍可读；真实
+暂停后实例 ID、共享文件与 VM 本地文件保持，显式销毁后共享文件仍在。

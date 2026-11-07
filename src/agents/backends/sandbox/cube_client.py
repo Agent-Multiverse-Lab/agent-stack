@@ -33,7 +33,7 @@ class CubeClient:
             raise RuntimeError("Invalid Cube node inventory")
         matches = [row for row in rows if all((row.get("labels") or {}).get(k) == v for k, v in identity.items())]
         if len(matches) > 1:
-            raise RuntimeError("Multiple Cube sandboxes match this conversation; explicit cleanup is required")
+            raise RuntimeError("Multiple Cube sandboxes match this user; explicit cleanup is required")
         if not matches:
             return None
         row = matches[0]
@@ -54,7 +54,7 @@ class CubeClient:
             json={
                 "templateID": self.config.template_id,
                 "timeout": idle_timeout,
-                "lifecycle": {"onTimeout": "kill"},
+                "lifecycle": {"onTimeout": "pause", "autoResume": False},
                 "metadata": metadata,
             },
         )

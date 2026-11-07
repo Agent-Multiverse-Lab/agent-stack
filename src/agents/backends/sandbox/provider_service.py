@@ -19,18 +19,18 @@ from .cube_client import CubeClient
 
 
 def scope_identity(uid: str, thread_id: str) -> dict[str, str]:
-    """校验会话路径段，并生成 Cube 中可重新发现的身份。"""
+    """校验调用者与会话路径段；VM 按用户发现。"""
     for label, value in (("uid", uid), ("thread_id", thread_id)):
         if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", value):
             raise ValueError(f"Invalid sandbox {label}")
-    return {"app": "agent-stack", "uid": uid, "thread_id": thread_id}
+    return {"app": "agent-stack", "scope": "user", "uid": uid}
 
 
 def workspace_paths(uid: str, thread_id: str, skill_root: str | Path | None = None) -> tuple[Path, Path]:
     """让 Composite 与 Host Mount 使用相同目录，并拒绝路径替换。"""
     scope_identity(uid, thread_id)
     root = Path(config.save_dir).resolve()
-    workspace = root / "workspaces" / uid / thread_id
+    workspace = root / "workspaces" / uid
     skills = Path(skill_root).absolute() if skill_root else root / "skills"
     if ".." in skills.parts or not skills.is_relative_to(root / "skills"):
         raise ValueError("skill_root must be inside SAVE_DIR/skills")
@@ -63,7 +63,7 @@ def _mounts(uid: str, thread_id: str, skill_root: str | Path | None) -> str:
 
 @dataclass
 class SandboxState:
-    key: tuple[str, str]
+    key: str
     backend: object
     mounts: str
     references: int = 1
@@ -92,7 +92,7 @@ class SandboxProviderService:
         self._lock = Lock()
         self._scope_locks = weakref.WeakValueDictionary()
         self._states: dict[str, SandboxState] = {}
-        self._by_scope: dict[tuple[str, str], str] = {}
+        self._by_scope: dict[str, str] = {}
         self._closed = False
 
     def _scope_lock(self, key):
@@ -122,7 +122,7 @@ class SandboxProviderService:
             raise ValueError("CUBE_TEMPLATE_ID is required before using sandbox tools")
         if config.sandbox_idle_timeout_seconds <= config.sandbox_execute_timeout_seconds + 10:
             raise ValueError("Sandbox idle timeout must exceed the command deadline")
-        key = (uid, thread_id)
+        key = uid
         mounts = _mounts(uid, thread_id, skill_root)
         mounts_digest = hashlib.sha256(mounts.encode()).hexdigest()
         with self._scope_lock(key), self._creation_lock(identity) as lease:
@@ -190,10 +190,10 @@ class SandboxProviderService:
         with self._lock:
             if self._closed:
                 raise RuntimeError("Sandbox provider is shut down")
-            sid = sandbox_id or self._by_scope.get((uid, thread_id))
+            sid = sandbox_id or self._by_scope.get(uid)
             state = self._states.get(sid)
             if state is not None:
-                if state.key != (uid, thread_id) or state.mounts != mounts:
+                if state.key != uid or state.mounts != mounts:
                     raise RuntimeError("Cube sandbox identity mismatch")
                 state.references += 1
         if state is None:
@@ -228,10 +228,13 @@ class SandboxProviderService:
         if info is None:
             return False
         metadata = info.get("metadata", {})
-        identity = scope_identity(metadata.get("uid"), metadata.get("thread_id"))
+        identity = scope_identity(metadata.get("uid"), metadata.get("thread_id", "destroy"))
+        if metadata.get("scope") != "user":
+            # 旧版会话实例仍可显式清理，不参与用户级实例发现。
+            identity = {"app": "agent-stack", "uid": identity["uid"], "thread_id": metadata.get("thread_id")}
         if metadata.get("app") != identity["app"]:
             raise ValueError("Sandbox belongs to another application")
-        with self._scope_lock((identity["uid"], identity["thread_id"])), self._creation_lock(identity):
+        with self._scope_lock(identity["uid"]), self._creation_lock(identity):
             self._client.delete(sandbox_id)
         return True
 

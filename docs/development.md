@@ -54,6 +54,10 @@ Gateway 在 Compose 中属于 `gateway` profile，默认不启动。
 
 ## 本地基础设施和服务
 
+本机使用官方 one-click/systemd Cube 节点时，安装、模板和验证步骤见
+[本机 Cube 部署](../docker/cube/HOST-DEPLOYMENT.md)。该模式下 API/Worker 从源码启动，
+只用下面的 Compose 命令启动业务依赖，不启动根 Compose 中的 Cube 服务。
+
 在 WSL 中进行源码开发时，先只启动依赖服务：
 
 ```bash
