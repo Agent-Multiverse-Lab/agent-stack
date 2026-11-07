@@ -162,6 +162,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(thread_service.postgres_manager, "get_async_session_context", fake_session),
             patch.object(thread_service, "save_partial_message", AsyncMock()),
+            patch.object(thread_service, "_persist_agent_state", AsyncMock()),
         ):
             return [
                 json.loads(chunk)

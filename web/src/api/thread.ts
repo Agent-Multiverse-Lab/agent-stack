@@ -24,6 +24,16 @@ export interface ThreadMessageResponse {
   message_id: number;
   role: string;
   content: string;
+  reasoning_content?: string;
+  tool_calls?: {
+    tool_call_id: string;
+    name: string;
+    args: Record<string, unknown>;
+    status: string;
+    output: unknown;
+    error: string | null;
+  }[];
+  agent_state?: { agent_todo: { content: string; status: string }[] } | null;
   image_content: string | null;
   message_type: string;
   status: string;

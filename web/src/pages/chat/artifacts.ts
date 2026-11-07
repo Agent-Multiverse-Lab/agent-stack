@@ -51,7 +51,6 @@ export function isMarkdownArtifact(path: string): boolean {
   return extension !== null && MARKDOWN_EXTENSIONS.has(extension)
 }
 
-/** 与 Yuxi 一致：展示交付文件类型，没有扩展名时退回“交付文件”。 */
 export function artifactMetaLabel(path: string): string {
   const extension = artifactExtension(path)
   return extension ? `交付文件 · ${extension.toUpperCase()}` : "交付文件"
@@ -119,7 +118,6 @@ export function extractArtifactsFromMessages(
   return [...byPath.values()]
 }
 
-/** 与 Yuxi 一致：最新的交付物排在最前。 */
 export function buildArtifactItems(artifacts: PresentedArtifact[]): PresentedArtifact[] {
   const seen = new Set<string>()
   const items: PresentedArtifact[] = []

@@ -29,20 +29,20 @@ export function ModelCapabilities({ capabilities }: { capabilities: ChatCapabili
 
   if (!capabilities.length) {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
-        <CircleHelp aria-hidden="true" className="size-3.5 shrink-0" />
+      <span className="inline-flex items-center gap-1 text-[11px] font-normal text-muted-foreground">
+        <CircleHelp aria-hidden="true" className="size-3 shrink-0" />
         {t("Capabilities not provided")}
       </span>
     );
   }
 
   return (
-    <ul aria-label={t("Model capabilities")} className="flex flex-wrap items-center gap-1.5">
+    <ul aria-label={t("Model capabilities")} className="flex flex-wrap items-center gap-1">
       {capabilities.map((capability) => {
         const { icon: Icon, label } = capabilityDetails[capability];
         return (
           <li key={capability} className="flex">
-            <Badge variant="secondary" className="gap-1.5 font-normal">
+            <Badge variant="secondary" className="gap-1 px-1.5 py-0.5 text-[11px] leading-tight font-normal [&_svg]:size-2.5">
               <Icon aria-hidden="true" />
               {t(label)}
             </Badge>

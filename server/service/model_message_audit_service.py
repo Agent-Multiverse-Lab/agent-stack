@@ -25,6 +25,7 @@ class _ModelOperation:
     operation_id: str
     monotonic_started_at: float | None
     content_parts: list[str] = field(default_factory=list)
+    reasoning_parts: list[str] = field(default_factory=list)
     content_blocks: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -83,6 +84,9 @@ class ModelMessageAuditCollector:
             text = self._text_delta(message)
             if text:
                 operation.content_parts.append(text)
+            delta = message.get("delta") or {}
+            if delta.get("type") == "reasoning-delta" and isinstance(delta.get("reasoning"), str):
+                operation.reasoning_parts.append(delta["reasoning"])
             return
 
         if event_name == "content-block-finish":
@@ -171,6 +175,7 @@ class ModelMessageAuditCollector:
                 metadata={
                     "namespace": namespace,
                     "content": _json_safe(operation.content_blocks),
+                    "reasoning_content": "".join(operation.reasoning_parts),
                     "tool_calls": _json_safe(tool_calls),
                     "finished_sequence": self._sequence(stream_event),
                     "finish_metadata": _json_safe(dict(message.get("metadata") or {})),

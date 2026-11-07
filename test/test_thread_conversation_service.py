@@ -56,6 +56,9 @@ class FakeConversationRepository:
         """返回预设消息页。"""
         return self.messages[: values["limit"]]
 
+    async def list_tool_audit_ids(self, **_values):
+        return set()
+
     async def update_conversation(
         self,
         conversation,
@@ -189,6 +192,8 @@ def make_message(
         agent_run_id=run_id,
         role=role,
         content=f"消息 {message_id}",
+        msg_metadata={},
+        tool_calls=[],
         image_content=None,
         message_type="text",
         status="completed",

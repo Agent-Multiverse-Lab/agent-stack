@@ -1,158 +1,13 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react"
+import { Check, ChevronsUpDown, LoaderCircle, Pause, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { useTranslation } from "@/i18n"
+import { cn } from "@/lib/utils"
+import type { ToolCallBlock, ToolExecutionStatus } from "@/pages/chat/types"
 
-import { Button } from "@/components/ui/button";
-import { useTranslation } from "@/i18n";
-import { cn } from "@/lib/utils";
-import type { ToolExecutionStatus } from "@/pages/chat/types";
-
-const formatValue = (value: unknown) => {
-  if (typeof value === "string") return value;
-  return JSON.stringify(value, null, 2) ?? String(value);
-};
-
-export function TaskSpinnerRing({
-  active = false,
-  children,
-}: {
-  active?: boolean;
-  children?: ReactNode;
-}) {
-  const size = 24;
-  const stroke = 2;
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
-  return (
-    <span className="relative inline-flex size-6 shrink-0 items-center justify-center">
-      <svg
-        width={size}
-        height={size}
-        viewBox={`0 0 ${size} ${size}`}
-        className={cn(
-          "size-6",
-          active && "motion-safe:animate-spin motion-safe:[animation-duration:1s]",
-        )}
-      >
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          stroke="var(--border)"
-          strokeWidth={stroke}
-        />
-        {active && (
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={r}
-            fill="none"
-            stroke="var(--primary)"
-            strokeWidth={stroke}
-            strokeLinecap="round"
-            strokeDasharray={`${c * 0.25} ${c * 0.75}`}
-          />
-        )}
-      </svg>
-      {children !== undefined && (
-        <span className="absolute text-[10.5px] font-semibold tabular-nums text-foreground">
-          {children}
-        </span>
-      )}
-    </span>
-  );
-}
-
-export function TaskStatusBadge({
-  tone,
-  children,
-}: {
-  tone: "green" | "red" | "amber";
-  children: ReactNode;
-}) {
-  const toneClass =
-    tone === "green"
-      ? "bg-success text-white"
-      : tone === "red"
-        ? "bg-destructive text-white"
-        : "bg-warning text-white";
-  return (
-    <span
-      className={cn(
-        "flex size-5.5 shrink-0 items-center justify-center rounded-full",
-        toneClass,
-      )}
-    >
-      {children}
-    </span>
-  );
-}
-
-export const TaskCheckIcon = (
-  <svg
-    width="13"
-    height="13"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="3.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="size-[13px] motion-safe:zoom-in-75"
-  >
-    <path d="M20 6L9 17l-5-5" />
-  </svg>
-);
-
-export const TaskXIcon = (
-  <svg
-    width="12"
-    height="12"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="3.5"
-    strokeLinecap="round"
-    className="size-3"
-  >
-    <path d="M18 6L6 18M6 6l12 12" />
-  </svg>
-);
-
-export const TaskPauseIcon = (
-  <svg
-    width="11"
-    height="11"
-    viewBox="0 0 24 24"
-    fill="currentColor"
-    className="size-[11px]"
-  >
-    <rect x="6" y="5" width="4" height="14" rx="1" />
-    <rect x="14" y="5" width="4" height="14" rx="1" />
-  </svg>
-);
-
-export function TaskChevron({ open }: { open: boolean }) {
-  return (
-    <span
-      aria-hidden="true"
-      className="-ml-1 flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground"
-    >
-      <svg
-        width="15"
-        height="15"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="size-[15px] transition-transform duration-200 motion-reduce:transition-none"
-        style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}
-      >
-        <path d="M6 9l6 6 6-6" />
-      </svg>
-    </span>
-  );
+const formatValue = (value: unknown): string => {
+  if (typeof value === "string") return value
+  return JSON.stringify(value, null, 2) ?? String(value)
 }
 
 const statusLabels: Record<ToolExecutionStatus, string> = {
@@ -163,73 +18,70 @@ const statusLabels: Record<ToolExecutionStatus, string> = {
   cancelled: "Cancelled",
   interrupted: "Interrupted",
   stopped: "Stopped",
-};
+}
 
 const isToolExecutionStatus = (value: string): value is ToolExecutionStatus =>
-  Object.prototype.hasOwnProperty.call(statusLabels, value);
+  Object.prototype.hasOwnProperty.call(statusLabels, value)
 
-export function ToolCall({ event }: { event: Record<string, unknown> }) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const receivedStatus = String(event.status ?? "pending");
-  const status = isToolExecutionStatus(receivedStatus)
-    ? receivedStatus
-    : "pending";
-  const name = typeof event.name === "string" ? event.name : t("Tool");
-  const statusLabel = t(statusLabels[status]);
-  const stepIndex =
-    typeof event.index === "number" && Number.isFinite(event.index)
-      ? event.index + 1
-      : undefined;
+interface ToolCallProps {
+  block?: ToolCallBlock
+  event?: Record<string, unknown>
+}
 
+export function ToolCall({ block, event }: ToolCallProps) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+
+  const rawStatus = block?.status ?? String(event?.status ?? "pending")
+  const status: ToolExecutionStatus = isToolExecutionStatus(rawStatus)
+    ? rawStatus
+    : "pending"
+
+  const name =
+    block?.name ?? (typeof event?.name === "string" ? event.name : t("Tool"))
+  const statusLabel = t(statusLabels[status])
+
+  const rawOutput = block?.output !== undefined ? block.output : event?.output
   const output =
-    typeof event.output === "object" &&
-    event.output !== null &&
-    "content" in event.output
-      ? event.output.content
-      : event.output;
-  const progress = Array.isArray(event.output_deltas)
-    ? event.output_deltas.map(formatValue).join("")
-    : "";
+    typeof rawOutput === "object" && rawOutput !== null && "content" in rawOutput
+      ? (rawOutput as { content: unknown }).content
+      : rawOutput
+
+  const rawProgress =
+    block?.progress !== undefined
+      ? block.progress
+      : Array.isArray(event?.output_deltas)
+        ? event.output_deltas.map(formatValue).join("")
+        : ""
+
+  const error = block?.error ?? event?.error
+  const args = block?.args !== undefined ? block.args : event?.args
 
   const sections = [
-    { label: "Arguments", value: event.args },
-    { label: "Progress", value: progress || undefined },
+    { label: "Arguments", value: args },
+    { label: "Progress", value: rawProgress || undefined },
     { label: "Output", value: output },
-    { label: "Error", value: event.error },
-  ].filter((item) => item.value !== undefined);
+    { label: "Error", value: error },
+  ].filter((item) => item.value !== undefined)
 
-  const renderBadge = () => {
-    if (status === "completed") {
-      return <TaskStatusBadge tone="green">{TaskCheckIcon}</TaskStatusBadge>;
-    }
-    if (status === "error") {
-      return <TaskStatusBadge tone="red">{TaskXIcon}</TaskStatusBadge>;
-    }
-    if (
-      status === "cancelled" ||
-      status === "interrupted" ||
-      status === "stopped"
-    ) {
-      return <TaskStatusBadge tone="amber">{TaskPauseIcon}</TaskStatusBadge>;
-    }
-    return <TaskSpinnerRing active>{stepIndex}</TaskSpinnerRing>;
-  };
-
-  const renderPill = () => {
+  const renderStatusIcon = () => {
     if (status === "completed") {
       return (
-        <span className="inline-flex h-5.5 items-center gap-1.5 rounded-full border border-success-border bg-success-muted px-2 text-[11.5px] font-medium text-success">
-          {statusLabel}
-        </span>
-      );
+        <Check
+          className="size-3.5 motion-safe:zoom-in-75 text-muted-foreground/70"
+          strokeWidth={2.2}
+          aria-hidden="true"
+        />
+      )
     }
     if (status === "error") {
       return (
-        <span className="inline-flex h-5.5 items-center gap-1.5 rounded-full border border-destructive-border bg-destructive-muted px-2 text-[11.5px] font-medium text-destructive">
-          {statusLabel}
-        </span>
-      );
+        <X
+          className="size-3.5 text-destructive/80"
+          strokeWidth={2.2}
+          aria-hidden="true"
+        />
+      )
     }
     if (
       status === "cancelled" ||
@@ -237,47 +89,56 @@ export function ToolCall({ event }: { event: Record<string, unknown> }) {
       status === "stopped"
     ) {
       return (
-        <span className="inline-flex h-5.5 items-center gap-1.5 rounded-full border border-warning-border bg-warning-muted px-2 text-[11.5px] font-medium text-warning">
-          {statusLabel}
-        </span>
-      );
+        <Pause
+          className="size-3.5 text-warning/80"
+          strokeWidth={2.2}
+          aria-hidden="true"
+        />
+      )
     }
     return (
-      <span className="text-[12px] text-muted-foreground">{statusLabel}</span>
-    );
-  };
+      <LoaderCircle
+        className="size-3.5 motion-safe:animate-spin text-muted-foreground/60"
+        strokeWidth={2}
+        aria-hidden="true"
+      />
+    )
+  }
 
   return (
-    <div
-      className="w-full max-w-2xl min-w-0 self-stretch overflow-hidden border border-border bg-card text-card-foreground shadow-sm transition-[border-radius,background-color] duration-200 hover:bg-accent/50"
-      style={{ borderRadius: open ? 14 : 22 }}
-    >
+    <div className="w-full min-w-0">
       <Button
         type="button"
         variant="ghost"
         aria-label={`${name} ${statusLabel}`}
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
-        className="flex h-11 w-full items-center justify-start gap-2.5 rounded-none px-2.5 py-0 text-left font-normal hover:bg-transparent"
+        className="flex h-7 w-full cursor-pointer items-center justify-start gap-2 rounded-none p-0 text-left font-normal hover:bg-transparent hover:text-inherit active:bg-transparent aria-expanded:bg-transparent aria-expanded:text-inherit focus-visible:ring-0 focus-visible:outline-none"
       >
         <span
-          className="flex size-6 shrink-0 items-center justify-center"
+          className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground/60"
           data-tool-status-icon={status}
           aria-hidden="true"
         >
-          {renderBadge()}
+          {renderStatusIcon()}
         </span>
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
+        <span className="truncate text-[13px] font-medium text-muted-foreground/90">
           {name}
         </span>
+        <span className="text-muted-foreground/30 select-none" aria-hidden="true">
+          |
+        </span>
         <span
-          className="shrink-0"
+          className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground/60"
           aria-live="polite"
           aria-atomic="true"
         >
-          {renderPill()}
+          {statusLabel}
         </span>
-        <TaskChevron open={open} />
+        <ChevronsUpDown
+          className="size-3.5 shrink-0 text-muted-foreground/50 ml-auto"
+          aria-hidden="true"
+        />
       </Button>
 
       <div
@@ -289,33 +150,28 @@ export function ToolCall({ event }: { event: Record<string, unknown> }) {
       >
         <div className="overflow-hidden">
           {open && sections.length > 0 && (
-            <div className="mb-2.5 grid grid-cols-[24px_minmax(0,1fr)] gap-2.5 px-2.5 pt-0.5">
-              <span aria-hidden="true" className="mx-auto h-full w-px bg-border" />
-              <div className="flex min-w-0 flex-col gap-2.5">
-                {sections.map((item) => (
-                  <div key={item.label} className="min-w-0">
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="text-[12px] font-medium text-muted-foreground">
-                        {t(item.label)}
-                      </span>
-                    </div>
-                    <pre
-                      className={cn(
-                        "m-0 max-h-60 overflow-auto rounded-md border border-border bg-muted/50 px-2.5 py-1.5 font-mono text-[11.5px] leading-5 whitespace-pre-wrap break-words tabular-nums",
-                        item.label === "Error"
-                          ? "border-destructive-border bg-destructive-muted/40 text-destructive"
-                          : "text-muted-foreground",
-                      )}
-                    >
-                      {formatValue(item.value)}
-                    </pre>
+            <div className="ml-[6.5px] border-l border-muted-foreground/30 hover:border-muted-foreground/70 transition-colors duration-150 pl-3.5 my-1.5 flex w-full min-w-0 flex-col gap-2">
+              {sections.map((item) => (
+                <div key={item.label} className="w-full min-w-0">
+                  <div className="mb-0.5 flex items-center justify-between">
+                    <span className="text-[11.5px] font-medium text-muted-foreground/70">
+                      {t(item.label)}
+                    </span>
                   </div>
-                ))}
-              </div>
+                  <pre
+                    className={cn(
+                      "m-0 max-h-60 w-full overflow-auto rounded-md bg-muted/50 border border-border/40 p-2 font-mono text-[11.5px] leading-5 whitespace-pre-wrap break-words tabular-nums text-foreground/85",
+                      item.label === "Error" && "bg-destructive/10 text-destructive border-destructive/20",
+                    )}
+                  >
+                    {formatValue(item.value)}
+                  </pre>
+                </div>
+              ))}
             </div>
           )}
         </div>
       </div>
     </div>
-  );
+  )
 }

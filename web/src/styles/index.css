@@ -255,6 +255,9 @@
 }
 
 /* Rendering rules for generated chat markdown. */
+.chat-markdown {
+  color: var(--foreground);
+}
 .chat-markdown > :first-child {
   margin-top: 0;
 }
@@ -269,6 +272,15 @@
 .chat-markdown table {
   margin: 0.75rem 0;
 }
+.chat-markdown p,
+.chat-markdown li {
+  color: var(--foreground);
+}
+.chat-markdown strong,
+.chat-markdown b {
+  color: var(--foreground);
+  font-weight: 600;
+}
 .chat-markdown ul {
   list-style: disc;
   padding-left: 1.5rem;
@@ -279,10 +291,14 @@
 }
 .chat-markdown h1,
 .chat-markdown h2,
-.chat-markdown h3 {
+.chat-markdown h3,
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
   margin: 1.1rem 0 0.5rem;
   font-weight: 600;
   line-height: 1.35;
+  color: var(--foreground);
 }
 .chat-markdown h1 {
   font-size: 1.4rem;
@@ -293,6 +309,9 @@
 .chat-markdown h3 {
   font-size: 1.05rem;
 }
+.chat-markdown h4 {
+  font-size: 0.95rem;
+}
 .chat-markdown a {
   color: var(--primary);
   text-decoration: underline;
@@ -302,24 +321,36 @@
 .chat-markdown a:hover {
   color: var(--primary-hover);
 }
+.chat-markdown hr {
+  margin: 1.25rem 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
 .chat-markdown pre {
   overflow-x: auto;
   border-radius: var(--radius);
-  background: var(--muted);
+  background: var(--gray-50);
   border: 1px solid var(--border);
+  color: var(--foreground);
   padding: 0.85rem;
   font-size: 0.85rem;
   line-height: 1.5;
 }
 .chat-markdown :not(pre) > code {
+  color: var(--foreground);
+  font-weight: 500;
   border-radius: calc(var(--radius) - 4px);
-  background: var(--muted);
-  padding: 0.15rem 0.35rem;
+  background: var(--gray-100);
+  border: 1px solid var(--border);
+  padding: 0.125rem 0.35rem;
   font-size: 0.875em;
 }
 .chat-markdown blockquote {
   border-left: 3px solid var(--border);
   padding-left: 0.9rem;
+  color: var(--muted-foreground);
+}
+.chat-markdown blockquote p {
   color: var(--muted-foreground);
 }
 .chat-markdown table {
@@ -334,9 +365,10 @@
   padding: 0.4rem 0.75rem;
 }
 .chat-markdown th {
-  background: var(--muted);
+  background: var(--gray-50);
   text-align: left;
   font-weight: 600;
+  color: var(--foreground);
 }
 
 @keyframes agent-composer-wave {

@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from "vitest"
 import { act, cleanup, renderHook } from "@testing-library/react"
 
 import { useThread } from "@/pages/chat/hooks/useThread"
+import { extractArtifactsFromMessages } from "@/pages/chat/artifacts"
 import type { AgentRunStreamEvent } from "@/api/agent-run"
 import type {
   ThreadDetailResponse,
@@ -9,6 +10,36 @@ import type {
 } from "@/api/thread"
 
 afterEach(() => { cleanup(); vi.useRealTimers() })
+
+it("restores tasks, reasoning, failed tools and artifacts with no in-memory stream", () => {
+  const { result } = renderHook(() => useThread())
+  const history = [
+    { message_id: 1, role: "ai", message_type: "agent_state", content: "", agent_state: {
+      agent_todo: [{ content: "Read", status: "completed" }],
+    } },
+    { message_id: 2, role: "ai", content: "", reasoning_content: "Inspect the file." },
+    { message_id: 3, role: "tool", content: "denied", tool_calls: [
+      { tool_call_id: "call-1", name: "read_file", args: { path: "a" }, status: "error", output: "denied", error: "denied" },
+    ] },
+    { message_id: 4, role: "tool", content: "ok", tool_calls: [
+      { tool_call_id: "call-2", name: "present_artifacts", args: { filepaths: ["/report.md"] }, status: "completed", output: "ok", error: null },
+    ] },
+    { message_id: 5, role: "ai", content: "Here is the report." },
+  ].map(message => ({ ...message, run: { run_id: "run-1", status: "completed" } })) as ThreadMessageResponse[]
+  act(() => result.current.setMessages(history))
+  expect(result.current.state.messages.map(message => message.payload.event)).toMatchObject([
+    { name: "agent_state" }, { type: "reasoning", content: "Inspect the file." },
+    { type: "tool_call", status: "error", error: "denied" },
+    { type: "tool_call", name: "present_artifacts" }, { content: "Here is the report." },
+  ])
+  expect(extractArtifactsFromMessages(result.current.state.messages)).toEqual([
+    { path: "/report.md", name: "report.md", status: "generated" },
+  ])
+  act(() => result.current.setMessages(history))
+  expect(result.current.state.messages).toHaveLength(5)
+  act(() => result.current.clearRunStreamMessages("run-1"))
+  expect(result.current.state.messages).toHaveLength(0)
+})
 
 const optimisticMessage = (
   content: string,
@@ -472,7 +503,7 @@ it.each([
   ])
 })
 
-it("retains tool results and reasoning after reloading persisted messages", () => {
+it("replaces streamed tools and reasoning with persisted history without duplicates", () => {
   const { result } = renderHook(() => useThread())
   act(() => {
     result.current.applyRunMessageEvent(toolEvent("tool-started", { tool_name: "calculator" }), "run-1")
@@ -485,7 +516,10 @@ it("retains tool results and reasoning after reloading persisted messages", () =
       title: "Conversation",
     } as ThreadDetailResponse["thread"])
     result.current.setMessages([
-      { message_id: 10, role: "assistant", content: "3", run: { run_id: "run-1" } },
+      { message_id: 9, role: "tool", content: "3", run: { run_id: "run-1" }, tool_calls: [
+        { tool_call_id: "call-1", name: "calculator", args: {}, status: "completed", output: "3", error: null },
+      ] },
+      { message_id: 10, role: "assistant", content: "3", reasoning_content: "Checked.", run: { run_id: "run-1" } },
     ] as ThreadDetailResponse["messages"])
   })
   expect(result.current.state.messages.map((message) => message.payload.event)).toMatchObject([
@@ -507,6 +541,12 @@ it("restores multiple streamed activities of one Run in their original order aft
     result.current.applyRunMessageEvent(
       toolEvent("tool-finished", { tool_call_id: "call-2", output: "found" }), "run-1")
     result.current.setMessages([
+      { message_id: 8, role: "tool", content: "3", run: { run_id: "run-1" }, tool_calls: [
+        { tool_call_id: "call-1", name: "calculator", args: {}, status: "completed", output: "3", error: null },
+      ] },
+      { message_id: 9, role: "tool", content: "found", run: { run_id: "run-1" }, tool_calls: [
+        { tool_call_id: "call-2", name: "search", args: {}, status: "completed", output: "found", error: null },
+      ] },
       { message_id: 10, role: "assistant", content: "done", run: { run_id: "run-1" } },
     ] as ThreadMessageResponse[])
   })
