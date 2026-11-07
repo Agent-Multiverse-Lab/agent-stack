@@ -3,13 +3,24 @@ import { afterEach, expect, it } from "vitest";
 
 import i18n from "@/i18n";
 import { ChatMessage } from "@/pages/chat/components/ChatMessage";
+import { ToolCall } from "@/pages/chat/components/ToolCall";
 
 afterEach(() => { cleanup(); void i18n.changeLanguage("en"); });
+
+it("localizes live tool blocks and preserves unknown MCP names", async () => {
+  await i18n.changeLanguage("zh-CN");
+  render(<>
+    <ToolCall block={{ kind: "tool_call", messageId: "message-1", toolCallId: "knowledge-1", name: "knowledge_search", status: "running" }} />
+    <ToolCall event={{ name: "mcp_custom_search", status: "completed" }} />
+  </>);
+  expect(screen.getByRole("button", { name: "检索知识库 进行中" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "mcp_custom_search 已完成" })).toBeTruthy();
+});
 
 it("shows a compact tool status before completion and expands arguments and results", () => {
   const event = { type: "tool_call", tool_call_id: "call-1", name: "calculator", status: "running", args: { a: 1, b: 2 } };
   const { rerender } = render(<ChatMessage message={{ type: "ai", payload: { type: "tool", event } }} />);
-  const running = screen.getByRole("button", { name: "calculator In progress" });
+  const running = screen.getByRole("button", { name: "Calculate In progress" });
   const runningSvg = running.querySelector('[data-tool-status-icon="running"] svg');
   expect(runningSvg?.getAttribute("class")).toContain("motion-safe:animate-spin");
   expect(runningSvg?.getAttribute("class")).toContain("size-3.5");
@@ -19,7 +30,7 @@ it("shows a compact tool status before completion and expands arguments and resu
   rerender(<ChatMessage message={{ type: "ai", payload: { type: "tool", event: {
     ...event, status: "completed", output: { content: "3", status: "success" },
   } } }} />);
-  const completed = screen.getByRole("button", { name: "calculator Completed" });
+  const completed = screen.getByRole("button", { name: "Calculate Completed" });
   expect(completed.querySelector('[data-tool-status-icon="completed"] svg')?.getAttribute("class"))
     .toContain("motion-safe:zoom-in-75");
   expect(screen.getByText("3", { exact: true })).toBeTruthy();
@@ -35,7 +46,7 @@ it("renders tool errors and keeps reasoning in a separate expandable block", () 
       type: "reasoning", content: "First, inspect the inputs.\nThen calculate.",
     } } }} />
   </>);
-  const failed = screen.getByRole("button", { name: "execute Failed" });
+  const failed = screen.getByRole("button", { name: "Execute command Failed" });
   expect(failed.querySelector('[data-tool-status-icon="error"] svg')).toBeTruthy();
   expect(failed.querySelectorAll("svg").length).toBe(2);
   fireEvent.click(failed);

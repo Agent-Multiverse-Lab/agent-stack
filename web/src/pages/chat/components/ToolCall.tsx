@@ -3,6 +3,7 @@ import { Check, ChevronsUpDown, LoaderCircle, Pause, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useTranslation } from "@/i18n"
 import { cn } from "@/lib/utils"
+import { toolLabels } from "@/pages/chat/tool-labels"
 import type { ToolCallBlock, ToolExecutionStatus } from "@/pages/chat/types"
 
 const formatValue = (value: unknown): string => {
@@ -37,8 +38,10 @@ export function ToolCall({ block, event }: ToolCallProps) {
     ? rawStatus
     : "pending"
 
-  const name =
+  const rawName =
     block?.name ?? (typeof event?.name === "string" ? event.name : t("Tool"))
+  const label = toolLabels.get(rawName)
+  const name = label ? t(label) : rawName
   const statusLabel = t(statusLabels[status])
 
   const rawOutput = block?.output !== undefined ? block.output : event?.output
