@@ -1,3 +1,4 @@
+import folderIcon from "@/assets/folder.svg";
 import { useRef } from "react";
 import { Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -6,7 +7,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/utils";
-import { FolderFillIcon } from "@/pages/sandbox/components/WorkspaceFileList";
 import type { WorkspaceTreeNode } from "@/pages/sandbox/types";
 
 interface WorkspaceTreeProps {
@@ -92,7 +92,7 @@ export default function WorkspaceTree({
             aria-current={currentPath === "/workspace" ? "page" : undefined}
             onClick={() => onSelect("/workspace")}
           >
-            <FolderFillIcon className="size-4" />
+            <img src={folderIcon} alt="" className="size-4 shrink-0" />
             <span className="truncate">workspace</span>
           </Button>
 
@@ -112,7 +112,7 @@ export default function WorkspaceTree({
                 aria-current={isSelected ? "page" : undefined}
                 onClick={() => onSelect(folder.path)}
               >
-                <FolderFillIcon className="size-4" />
+                <img src={folderIcon} alt="" className="size-4 shrink-0" />
                 <span className="truncate">{folder.name}</span>
               </Button>
             );

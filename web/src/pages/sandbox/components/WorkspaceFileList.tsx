@@ -1,10 +1,7 @@
+import { FileTypeIcon } from "@/components/common/FileTypeIcon";
+import folderIcon from "@/assets/folder.svg";
 import {
-  Braces,
-  FileCode2,
-  FileImage,
   FilePenLine,
-  FileText,
-  Folder,
   MoreHorizontal,
   Pencil,
   Trash2,
@@ -21,17 +18,6 @@ import { Item, ItemActions, ItemGroup, ItemMedia, ItemTitle } from "@/components
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { WorkspaceEntry, WorkspaceFileAction } from "@/pages/sandbox/types";
-
-export function FolderFillIcon({ className }: { className?: string }) {
-  return (
-    <Folder
-      className={cn(
-        "size-5 shrink-0 fill-amber-400 stroke-amber-600 text-amber-600 dark:fill-amber-500 dark:stroke-amber-400",
-        className,
-      )}
-    />
-  );
-}
 
 interface WorkspaceFileListProps {
   entries: WorkspaceEntry[];
@@ -86,15 +72,9 @@ export default function WorkspaceFileList({
                 >
                   <ItemMedia className="text-muted-foreground">
                     {isDir ? (
-                      <FolderFillIcon />
-                    ) : entry.fileType === "image" ? (
-                      <FileImage className="size-5 text-sky-600 dark:text-sky-400" strokeWidth={1.5} />
-                    ) : entry.fileType === "code" ? (
-                      <FileCode2 className="size-5 text-emerald-600 dark:text-emerald-400" strokeWidth={1.5} />
-                    ) : entry.fileType === "data" ? (
-                      <Braces className="size-5 text-orange-600 dark:text-orange-400" strokeWidth={1.5} />
+                      <img src={folderIcon} alt="" className="size-5 shrink-0" />
                     ) : (
-                      <FileText className="size-5 text-muted-foreground" strokeWidth={1.5} />
+                      <FileTypeIcon name={entry.name} />
                     )}
                   </ItemMedia>
                   <ItemTitle className="block truncate font-normal">

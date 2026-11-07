@@ -77,7 +77,10 @@ web/
   再考虑自行实现。
 - 业务页面不重复实现 Button、Input、Dialog、Sheet、DropdownMenu、Select、Tabs、Table 等通用
   交互原语。`web/eslint.config.js` 中的限制是最低强制边界。
-- 图标使用 Lucide；同一操作在不同页面使用同一图标和语义。
+- 操作图标使用 Lucide；同一操作在不同页面使用同一图标和语义。知识库和 Sandbox 的
+  文件夹、文件类型使用 Material Icon Theme SVG：文件夹复用 `assets/folder.svg`，文件类型
+  通过 `components/common/FileTypeIcon.tsx` 按扩展名匹配，资源和许可证位于
+  `assets/material-icons/`。
 - 页面组件负责数据与业务状态，基础组件负责视觉变体和通用交互状态。不要把页面请求或领域逻辑
   放入 `components/ui/`。
 - 新增依赖前先检查现有依赖和组件能否完整满足需求。

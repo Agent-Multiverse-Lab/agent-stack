@@ -1,0 +1,6 @@
+Material Icon Theme
+https://github.com/material-extensions/vscode-material-icon-theme
+Commit: f368264282ef14ee7feb012fd54e825181eff9c3
+License: MIT (see LICENSE)
+SVG files copied from icons/.
+../folder.svg uses the original path from src/core/generator/folderGenerator.ts with color #42a5f5.

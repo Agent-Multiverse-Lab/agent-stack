@@ -1,6 +1,7 @@
+import folderIcon from "@/assets/folder.svg";
 import { Label } from "@/components/ui/label"
 import { useEffect, useState } from "react"
-import { Folder, FolderPlus, Pencil, Trash2 } from "lucide-react"
+import { FolderPlus, Pencil, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { deleteKnowledgeFolder, listKnowledgeFolders, saveKnowledgeFolder } from "@/api/knowledge"
 import type { KnowledgeFolder } from "@/api/knowledge"
@@ -49,7 +50,7 @@ export function KnowledgeFolderSidebar({ kbId, selected, onSelect, onLoaded, ver
   }
   function tree(parent: string | null, depth = 0): React.ReactNode {
     return folders.filter(folder => folder.parent_id === parent).map(folder => <div key={folder.folder_id}>
-      <Button variant={selected === folder.folder_id ? "secondary" : "ghost"} className="h-8 w-full justify-start truncate text-xs" style={{ paddingLeft: 10 + depth * 12 }} onClick={() => onSelect(folder.folder_id)} title={folder.name}><Folder className="size-3.5 shrink-0" /><span className="truncate">{folder.name}</span></Button>
+      <Button variant={selected === folder.folder_id ? "secondary" : "ghost"} className="h-8 w-full justify-start truncate text-xs" style={{ paddingLeft: 10 + depth * 12 }} onClick={() => onSelect(folder.folder_id)} title={folder.name}><img src={folderIcon} alt="" className="size-3.5 shrink-0" /><span className="truncate">{folder.name}</span></Button>
       {tree(folder.folder_id, depth + 1)}
     </div>)
   }

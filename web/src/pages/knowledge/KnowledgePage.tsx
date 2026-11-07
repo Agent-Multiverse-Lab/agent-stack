@@ -1,6 +1,7 @@
+import folderIcon from "@/assets/folder.svg";
 import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router"
-import { ArrowDownAZ, ArrowUpRight, BookOpen, FolderOpen, LayoutGrid, List, Plus, Search, X } from "lucide-react"
+import { ArrowDownAZ, ArrowUpRight, BookOpen, LayoutGrid, List, Plus, Search, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { createKnowledgeBase, listKnowledgeBases } from "@/api/knowledge"
@@ -104,15 +105,7 @@ export default function KnowledgePage() {
                 <li key={base.kb_id} className="min-w-0 rounded-xl border border-border bg-card">
                   <Link to={`/knowledge/${base.kb_id}`} className={`block rounded-xl outline-none transition-colors duration-(--hover-transition-duration) ease-in-out hover:bg-accent/40 focus-visible:bg-accent ${view === "grid" ? "p-3" : "flex min-h-24 items-center gap-5 p-4"}`}>
                     <div aria-hidden="true" className={view === "grid" ? "relative mb-3 flex h-20 items-center justify-center overflow-hidden rounded-lg bg-muted/55" : "grid size-14 shrink-0 place-items-center rounded-lg bg-muted"}>
-                      {view === "grid" ? <>
-                        <div className="relative h-24 w-32 scale-[0.65] text-primary">
-                          <div className="absolute left-5 top-1 h-20 w-24 -rotate-12 rounded-md border border-primary/15 bg-background" />
-                          <div className="absolute left-5 top-1 h-20 w-24 rotate-6 rounded-md border border-primary/20 bg-card px-4 pt-4">
-                            <span className="mb-2 block h-1 w-7 rounded-full bg-primary/25" /><span className="mb-1.5 block h-0.5 w-full bg-border" /><span className="mb-1.5 block h-0.5 w-full bg-border" /><span className="block h-0.5 w-8 bg-border" />
-                          </div>
-                          <div className="absolute bottom-0 left-0 flex h-14 w-32 items-center rounded-md border border-primary/15 bg-selection px-4 text-selection-foreground"><BookOpen className="size-6" strokeWidth={1.35} /></div>
-                        </div>
-                      </> : <FolderOpen className="size-6 text-primary" strokeWidth={1.5} />}
+                      <img src={folderIcon} alt="" className="size-6 shrink-0" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">

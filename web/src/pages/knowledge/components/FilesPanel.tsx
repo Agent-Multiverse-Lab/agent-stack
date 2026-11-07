@@ -1,3 +1,4 @@
+import { FileTypeIcon } from "@/components/common/FileTypeIcon"
 import { Label } from "@/components/ui/label"
 import { useEffect, useRef, useState } from "react"
 import { ArrowUpRight, Check, Download, FileText, Filter, FolderUp, MoreHorizontal, Pencil, Rows3, Search, Sparkles, Trash2, Upload, X } from "lucide-react"
@@ -349,7 +350,7 @@ export function FilesPanel({ kbId, initialFileId }: { kbId: string; initialFileI
                             }}
                           >
                             <span className="grid size-9 shrink-0 place-items-center rounded-md border border-border bg-card text-primary">
-                              <FileText className="size-4" strokeWidth={1.5} />
+                              <FileTypeIcon name={file.original_file_name} className="size-5" />
                             </span>
                             <span className="min-w-0">
                               <span className="block truncate text-[13px] font-medium" title={file.original_file_name}>
