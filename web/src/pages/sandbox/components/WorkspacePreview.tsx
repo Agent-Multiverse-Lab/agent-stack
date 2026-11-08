@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { FilePenLine, FileText, Maximize2, Minimize2, X } from "lucide-react";
+import { FileImage, FilePenLine, FileText, Maximize2, Minimize2, X } from "lucide-react";
 
-import { readSandboxFile, updateSandboxFile } from "@/api/sandbox";
-import { FileContentViewer, isMarkdownPath } from "@/components/common/file-content-viewer";
+import { downloadSandboxFile, readSandboxFile, updateSandboxFile } from "@/api/sandbox";
+import {
+  createImageObjectUrl,
+  FileContentViewer,
+  isImagePath,
+  isMarkdownPath,
+} from "@/components/common/file-content-viewer";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useTranslation } from "@/i18n";
+import WorkspaceImagePreview from "@/pages/sandbox/components/WorkspaceImagePreview";
 import type { WorkspaceEntry } from "@/pages/sandbox/types";
 
 interface WorkspacePreviewProps {
@@ -29,36 +35,107 @@ export default function WorkspacePreview({
 }: WorkspacePreviewProps) {
   const { t } = useTranslation();
   const [viewMode, setViewMode] = useState<"preview" | "source">("preview");
-  const [file, setFile] = useState({ path: "", content: "", error: "", loading: false, truncated: false });
+  const [file, setFile] = useState({
+    path: "",
+    content: "",
+    imageUrl: "",
+    error: "",
+    loading: false,
+    truncated: false,
+  });
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const generation = useRef(0);
+  const objectUrlRef = useRef<string | null>(null);
   const path = entry?.path ?? "";
+  const isImage = Boolean(path && (isImagePath(path) || entry?.fileType === "image"));
+
+  const revokeCurrentObjectUrl = () => {
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+  };
 
   useEffect(() => {
-    if (!path) return;
+    if (!path) {
+      revokeCurrentObjectUrl();
+      return;
+    }
     const loadGeneration = ++generation.current;
+    revokeCurrentObjectUrl();
     setViewMode("preview");
     setSaveError("");
     setDraft("");
-    setFile({ path, content: "", error: "", loading: true, truncated: false });
+    setFile({ path, content: "", imageUrl: "", error: "", loading: true, truncated: false });
+
+    if (isImage) {
+      void downloadSandboxFile(threadId, path)
+        .then((blob) => {
+          if (generation.current !== loadGeneration) return;
+          const url = createImageObjectUrl(blob, path);
+          objectUrlRef.current = url;
+          setFile({
+            path,
+            content: "",
+            imageUrl: url,
+            error: "",
+            loading: false,
+            truncated: false,
+          });
+        })
+        .catch((caught: unknown) => {
+          if (generation.current === loadGeneration) {
+            setFile({
+              path,
+              content: "",
+              imageUrl: "",
+              error: caught instanceof Error ? caught.message : t("Request failed"),
+              loading: false,
+              truncated: false,
+            });
+          }
+        });
+      return () => {
+        generation.current += 1;
+        revokeCurrentObjectUrl();
+      };
+    }
+
     const request = editing ? readSandboxFile(threadId, path, true) : readSandboxFile(threadId, path);
     void request
       .then((response) => {
         if (generation.current === loadGeneration) {
-          setFile({ path, content: response.content, error: "", loading: false, truncated: response.truncated });
+          setFile({
+            path,
+            content: response.content,
+            imageUrl: "",
+            error: "",
+            loading: false,
+            truncated: response.truncated,
+          });
           setDraft(response.content.replace(/\r\n/g, "\n"));
         }
       })
       .catch((caught: unknown) => {
-        if (generation.current === loadGeneration) setFile({ path, content: "", error: caught instanceof Error ? caught.message : t("Request failed"), loading: false, truncated: false });
+        if (generation.current === loadGeneration) {
+          setFile({
+            path,
+            content: "",
+            imageUrl: "",
+            error: caught instanceof Error ? caught.message : t("Request failed"),
+            loading: false,
+            truncated: false,
+          });
+        }
       });
     return () => { generation.current += 1; };
-  }, [path, threadId, editing, t]);
+  }, [path, threadId, editing, isImage, t]);
 
   const current = file.path === path;
-  const canEdit = current && !file.loading && !file.error && !file.truncated;
+  const canEdit = !isImage && current && !file.loading && !file.error && !file.truncated;
+
   async function save() {
     if (!canEdit || saving) return;
     setSaving(true);
@@ -87,7 +164,11 @@ export default function WorkspacePreview({
         className="absolute! inset-0! z-10 h-full! w-full! max-w-none! gap-0 rounded-none border-0 bg-card p-0 shadow-none motion-reduce:transition-none"
       >
         <SheetHeader className="flex h-12 shrink-0 flex-row items-center gap-2 px-5 py-2">
-          <FileText className="size-5 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+          {isImage ? (
+            <FileImage className="size-5 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+          ) : (
+            <FileText className="size-5 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+          )}
           <SheetTitle className="min-w-0 flex-1 truncate text-sm font-medium">
             {entry?.name ?? t("File preview")}
           </SheetTitle>
@@ -133,9 +214,19 @@ export default function WorkspacePreview({
             </div>
           </form>
         ) : <div className="flex min-h-0 flex-1 flex-col overflow-auto">
-          <FileContentViewer path={path} content={current ? file.content : ""}
-            loading={!current || file.loading} error={current ? file.error : ""}
-            truncated={current && file.truncated} viewMode={viewMode} />
+          {isImage ? (
+            <WorkspaceImagePreview
+              key={path}
+              name={entry?.name ?? (path.split("/").pop() || path)}
+              imageUrl={current ? file.imageUrl : ""}
+              loading={!current || file.loading}
+              error={current ? file.error : ""}
+            />
+          ) : (
+            <FileContentViewer path={path} content={current ? file.content : ""}
+              loading={!current || file.loading} error={current ? file.error : ""}
+              truncated={current && file.truncated} viewMode={viewMode} />
+          )}
         </div>}
       </SheetContent>
     </Sheet>

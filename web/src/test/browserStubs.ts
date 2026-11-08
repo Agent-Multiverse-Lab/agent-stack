@@ -23,4 +23,14 @@ export function installBrowserStubs() {
     unobserve() {}
     disconnect() {}
   })
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    writable: true,
+    value: vi.fn(() => "blob:sandbox-preview"),
+  })
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    writable: true,
+    value: vi.fn(),
+  })
 }

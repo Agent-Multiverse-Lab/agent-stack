@@ -25,7 +25,11 @@ import {
   listSandboxWorkspace,
   readSandboxFile,
 } from "@/api/sandbox";
-import { FileContentViewer } from "@/components/common/file-content-viewer";
+import {
+  createImageObjectUrl,
+  FileContentViewer,
+  isImagePath,
+} from "@/components/common/file-content-viewer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -152,6 +156,7 @@ export function ChatWorkspaceSidebar({
     name: string;
     path: string;
     content: string;
+    imageUrl?: string;
     loading: boolean;
     error: string;
     truncated: boolean;
@@ -204,41 +209,85 @@ export function ChatWorkspaceSidebar({
   useEffect(() => {
     if (!open || !previewFile?.path || !threadId) return;
     let mounted = true;
+    let objectUrl = "";
     const targetPath = previewFile.path;
-    void Promise.resolve(readSandboxFile(threadId, targetPath))
-      .then((response) => {
-        if (!mounted) return;
-        setPreviewFile((current) =>
-          current && current.path === targetPath
-            ? {
-                ...current,
-                content: response.content,
-                loading: false,
-                error: "",
-                truncated: response.truncated,
-              }
-            : current,
-        );
-      })
-      .catch((caught: unknown) => {
-        if (!mounted) return;
-        setPreviewFile((current) =>
-          current && current.path === targetPath
-            ? {
-                ...current,
-                content: "",
-                loading: false,
-                error:
-                  caught instanceof Error
-                    ? caught.message
-                    : t("Unable to preview file"),
-                truncated: false,
-              }
-            : current,
-        );
-      });
+    if (isImagePath(targetPath)) {
+      void Promise.resolve(downloadSandboxFile(threadId, targetPath))
+        .then((blob) => {
+          if (!mounted) return;
+          objectUrl = createImageObjectUrl(blob, targetPath);
+          setPreviewFile((current) =>
+            current && current.path === targetPath
+              ? {
+                  ...current,
+                  content: "",
+                  imageUrl: objectUrl,
+                  loading: false,
+                  error: "",
+                  truncated: false,
+                }
+              : current,
+          );
+        })
+        .catch((caught: unknown) => {
+          if (!mounted) return;
+          setPreviewFile((current) =>
+            current && current.path === targetPath
+              ? {
+                  ...current,
+                  content: "",
+                  imageUrl: undefined,
+                  loading: false,
+                  error:
+                    caught instanceof Error
+                      ? caught.message
+                      : t("Unable to preview file"),
+                  truncated: false,
+                }
+              : current,
+          );
+        });
+    } else {
+      void Promise.resolve(readSandboxFile(threadId, targetPath))
+        .then((response) => {
+          if (!mounted) return;
+          setPreviewFile((current) =>
+            current && current.path === targetPath
+              ? {
+                  ...current,
+                  content: response.content,
+                  imageUrl: undefined,
+                  loading: false,
+                  error: "",
+                  truncated: response.truncated,
+                }
+              : current,
+          );
+        })
+        .catch((caught: unknown) => {
+          if (!mounted) return;
+          setPreviewFile((current) =>
+            current && current.path === targetPath
+              ? {
+                  ...current,
+                  content: "",
+                  imageUrl: undefined,
+                  loading: false,
+                  error:
+                    caught instanceof Error
+                      ? caught.message
+                      : t("Unable to preview file"),
+                  truncated: false,
+                }
+              : current,
+          );
+        });
+    }
     return () => {
       mounted = false;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
     };
   }, [open, previewFile?.path, threadId, t]);
 
@@ -605,6 +654,7 @@ export function ChatWorkspaceSidebar({
                 <FileContentViewer
                   path={previewFile.path}
                   content={previewFile.content}
+                  imageUrl={previewFile.imageUrl}
                   loading={previewFile.loading}
                   error={previewFile.error}
                   truncated={previewFile.truncated}

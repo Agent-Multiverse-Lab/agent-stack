@@ -1,4 +1,5 @@
 import { FileTypeIcon } from "@/components/common/FileTypeIcon";
+import { isImagePath } from "@/components/common/file-content-viewer";
 import folderIcon from "@/assets/folder.svg";
 import {
   FilePenLine,
@@ -106,12 +107,14 @@ export default function WorkspaceFileList({
                           <Pencil />
                           {t("Rename")}
                         </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => onAction(entry, "edit")}
-                        >
-                          <FilePenLine />
-                          {t("Edit content")}
-                        </DropdownMenuItem>
+                        {!(entry.fileType === "image" || isImagePath(entry.path)) && (
+                          <DropdownMenuItem
+                            onClick={() => onAction(entry, "edit")}
+                          >
+                            <FilePenLine />
+                            {t("Edit content")}
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem
                           variant="destructive"
                           onClick={() => onAction(entry, "delete")}

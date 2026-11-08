@@ -6,9 +6,24 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTranslation } from "@/i18n";
 
+const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
+  avif: "image/avif",
+  bmp: "image/bmp",
+  gif: "image/gif",
+  ico: "image/x-icon",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  png: "image/png",
+  svg: "image/svg+xml",
+  tif: "image/tiff",
+  tiff: "image/tiff",
+  webp: "image/webp",
+};
+
 export interface FileContentViewerProps {
   path: string;
   content: string;
+  imageUrl?: string;
   loading?: boolean;
   error?: string;
   truncated?: boolean;
@@ -19,9 +34,23 @@ export function isMarkdownPath(path: string) {
   return /\.(md|markdown)$/i.test(path);
 }
 
+export function isImagePath(path: string) {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  return Boolean(ext && Object.prototype.hasOwnProperty.call(IMAGE_MIME_BY_EXTENSION, ext));
+}
+
+export function createImageObjectUrl(blob: Blob, path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  const mime = IMAGE_MIME_BY_EXTENSION[ext];
+  const normalized =
+    mime && blob.type !== mime ? new Blob([blob], { type: mime }) : blob;
+  return URL.createObjectURL(normalized);
+}
+
 export function FileContentViewer({
   path,
   content,
+  imageUrl,
   loading = false,
   error = "",
   truncated = false,
@@ -29,6 +58,7 @@ export function FileContentViewer({
 }: FileContentViewerProps) {
   const { t } = useTranslation();
   const canPreviewMarkdown = isMarkdownPath(path);
+  const canPreviewImage = isImagePath(path);
 
   if (loading) {
     return (
@@ -49,6 +79,19 @@ export function FileContentViewer({
           <AlertTitle>{t("Unable to preview file")}</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
+      </div>
+    );
+  }
+
+  if (canPreviewImage && imageUrl) {
+    const fileName = path.split("/").pop() || path;
+    return (
+      <div className="grid min-h-56 flex-1 place-items-center overflow-auto bg-muted/25 p-4">
+        <img
+          src={imageUrl}
+          alt={fileName}
+          className="max-h-full max-w-full rounded-md object-contain"
+        />
       </div>
     );
   }
