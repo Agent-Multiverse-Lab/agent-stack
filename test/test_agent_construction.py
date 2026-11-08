@@ -351,7 +351,7 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
             self.assertIs(create_agent.call_args.kwargs["model"], model)
             self.assertIs(summary.call_args.kwargs["model"], model)
 
-    async def test_task_and_start_delegate_by_slug_using_created_by_run_identity(self):
+    async def test_start_delegates_by_slug_without_waiting_using_created_by_run_identity(self):
         middleware = SubAgentMiddleware(
             subagents=[{"slug": SEARCH_AGENT.slug, "name": SEARCH_AGENT.name, "description": SEARCH_AGENT.description}],
             parent_context=SubAgentContext(uid="user-1", run_id="parent-1", request_id="request-1"),
@@ -372,18 +372,14 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
             patch(f"{module}._subagent_run_service", return_value=service),
             patch(f"{module}.wait_agent_run_result", AsyncMock(return_value="child result")) as wait,
         ):
-            task = next(tool for tool in middleware.tools if tool.name == "task")
-            result = await task.coroutine(description="verify sources", subagent_slug=SEARCH_AGENT.slug, runtime=runtime)
-            self.assertEqual(result.update["messages"][0].content, "child result")
-            wait.assert_awaited_once_with("child-1", uid="user-1")
             start = next(tool for tool in middleware.tools if tool.name == "subagent_start")
             result = await start.coroutine(description="search", subagent_slug=SEARCH_AGENT.slug, runtime=runtime)
             self.assertEqual(result.update["messages"][0].additional_kwargs["subagent_status"], "pending")
-            self.assertEqual(wait.await_count, 1)
+            wait.assert_not_awaited()
         values = service.create_subagent_record.await_args.kwargs
         self.assertEqual((values["agent_slug"], values["created_by_run_id"], values["uid"]), (SEARCH_AGENT.slug, "parent-1", "user-1"))
 
-    async def test_subagent_start_and_task_reject_parallel_ask_user_call(self):
+    async def test_subagent_start_rejects_parallel_ask_user_call(self):
         middleware = SubAgentMiddleware(
             subagents=[{"slug": SEARCH_AGENT.slug, "name": SEARCH_AGENT.name, "description": SEARCH_AGENT.description}],
             parent_context=SubAgentContext(uid="user-1", run_id="parent-1", request_id="request-1"),
