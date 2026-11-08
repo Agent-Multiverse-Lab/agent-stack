@@ -807,12 +807,12 @@ async def process_agent_run(ctx, run_id: str):
                         strem_agent_chunk,
                         str(thread_id),
                     ) or str(thread_id)
-                    logger.info(
-                        "worker stream content | run_id=%s thread_id=%s chunk=%s",
-                        run_id,
-                        current_thread_id,
-                        strem_agent_chunk,
-                    )
+                    # logger.info(
+                    #     "worker stream content | run_id=%s thread_id=%s chunk=%s",
+                    #     run_id,
+                    #     current_thread_id,
+                    #     strem_agent_chunk,
+                    # )
 
                     status = strem_agent_chunk.get("status") or "some_event"
 

@@ -197,7 +197,7 @@ class BaseAgent:
             context=context,
             **kwargs,
         ) as stream_events:  # ty:ignore[no-matching-overload]
-            async for event in self._stream_agent_events(stream_events):
+            async for event in self._stream_agent_events(stream_events, context=context):
                 yield event
 
         yield "agent_checkpoint", await agent.aget_state(input_config)
@@ -230,12 +230,12 @@ class BaseAgent:
             context=context,
             **kwargs,
         ) as stream_events:
-            async for event in self._stream_agent_events(stream_events):
+            async for event in self._stream_agent_events(stream_events, context=context):
                 yield event
 
         yield "agent_checkpoint", await agent.aget_state(input_config)
 
-    async def _stream_agent_events(self, stream_events):
+    async def _stream_agent_events(self, stream_events, *, context: BaseContext | None = None):
         """统一转换 LangGraph v3 输出事件。"""
         async for stream_event in stream_events:
             stream_method = stream_event.get("method")
@@ -246,10 +246,29 @@ class BaseAgent:
             stream_timestamp = stream_params.get("timestamp")
 
             if stream_method == "values":
+                logger.info(
+                    "当前流式方法=%s | run_id=%s thread_id=%s seq=%s timestamp=%s namespace=%s data=%s",
+                    stream_method,
+                    context.run_id if context is not None else None,
+                    context.thread_id if context is not None else None,
+                    stream_sequence,
+                    stream_timestamp,
+                    stream_namespace,
+                    _json_safe(stream_data),
+                )
                 yield stream_method, stream_data
                 continue
 
             elif stream_method == "messages":
+                logger.info(
+                    "当前流式方法=%s | run_id=%s thread_id=%s seq=%s timestamp=%s namespace=%s",
+                    stream_method,
+                    context.run_id if context is not None else None,
+                    context.thread_id if context is not None else None,
+                    stream_sequence,
+                    stream_timestamp,
+                    stream_namespace,
+                )
                 stream_msg, stream_agent_run_metadata = stream_data
                 stream_agent_run_metadata = dict(
                     stream_agent_run_metadata or {}
@@ -274,6 +293,16 @@ class BaseAgent:
 
             elif stream_method in ["tools", "tasks"]:
                 stream_data = _normalize_tool_event_data(stream_data)
+                logger.info(
+                    "当前流式方法=%s | run_id=%s thread_id=%s seq=%s timestamp=%s namespace=%s data=%s",
+                    stream_method,
+                    context.run_id if context is not None else None,
+                    context.thread_id if context is not None else None,
+                    stream_sequence,
+                    stream_timestamp,
+                    stream_namespace,
+                    _json_safe(stream_data),
+                )
                 tool_event_payload = {
                     "method": stream_method,
                     "namespace": stream_namespace,
