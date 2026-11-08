@@ -15,6 +15,10 @@ python server/main.py
 uv run --no-sync arq server.worker.WorkerSettings
 ```
 
+## 网页搜索
+
+`web_search` 使用 Tavily，读取 `.env` 中的 `TAVILY_API_KEY`，每次返回最多 5 条搜索结果。
+
 ## 业务日志
 
 API 和 Worker 的业务日志默认同时输出到控制台和 `logs/s2c-YYYY-MM-DD.log`，例如

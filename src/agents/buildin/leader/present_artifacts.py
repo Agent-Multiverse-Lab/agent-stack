@@ -5,10 +5,12 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath
 from typing import Annotated
 
-from langchain.tools import InjectedToolCallId, ToolRuntime, tool
+from langchain.tools import InjectedToolCallId, ToolRuntime
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 from pydantic import BaseModel, Field
+
+from src.agents.tool_registry import register
 
 WORKSPACE_VIRTUAL_ROOT = "/workspace"
 ARTIFACTS_VIRTUAL_ROOT = "/workspace/outputs"
@@ -82,10 +84,13 @@ def _normalize_artifact_path(root: Path, filepath: str) -> str:
     return PurePosixPath(WORKSPACE_VIRTUAL_ROOT).joinpath(*relative.parts).as_posix()
 
 
-@tool(
+@register(
     "present_artifacts",
     description=PRESENT_ARTIFACTS_DESCRIPTION,
     args_schema=PresentArtifactsInput,
+    category="builtin",
+    tags=["文件"],
+    display_name="展示交付物",
 )
 def present_artifacts(
     filepaths: list[str],

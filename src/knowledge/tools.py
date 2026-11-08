@@ -1,9 +1,8 @@
-import asyncio
 from typing import Any
 
-from langchain.tools import tool
 from langchain_tavily import TavilySearch
 
+from src.agents.tool_registry import ToolMetadata, register, register_tool
 from src.configs import config as sys_config
 from src.knowledge import KnowledgeFactory, KnowledgeSearch
 from src.knowledge.store.milvus.config import (
@@ -15,44 +14,29 @@ from src.knowledge.store.milvus.config import (
 
 def _build_tavily_tool(max_results: int = 5) -> TavilySearch:
     return TavilySearch(
+        name="web_search",
         max_results=max_results,
         tavily_api_key=sys_config.tavily_api_key or None,
     )
 
 
-@tool(description="Run web search query.")
-async def web_search(query: str) -> Any:
-    search_tool = _build_tavily_tool(max_results=5)
-    return await search_tool.ainvoke({"query": query})
+web_search = register_tool(
+    _build_tavily_tool(max_results=5),
+    ToolMetadata(
+        category="knowledge",
+        tags=["搜索"],
+        display_name="网络搜索",
+        config_guide="在服务端配置 TAVILY_API_KEY。",
+    ),
+)
 
 
-# @tool(description="Run multiple focused web search queries concurrently.")
-# async def web_search_parallel(queries: list[str]) -> list[dict[str, Any]]:
-#     tasks = [web_search_one.ainvoke({"query": query}) for query in queries]
-#     results = await asyncio.gather(*tasks, return_exceptions=True)
-
-#     valid_results = []
-#     for query, result in zip(queries, results, strict=False):
-#         if isinstance(result, Exception):
-#             valid_results.append(
-#                 {
-#                     "query": query,
-#                     "error": str(result),
-#                     "results": [],
-#                 }
-#             )
-#         else:
-#             valid_results.append(
-#                 {
-#                     "query": query,
-#                     "result": result,
-#                 }
-#             )
-
-#     return valid_results
-
-
-@tool(description="Search the local Milvus knowledge base with a dense vector.")
+@register(
+    description="Search the local Milvus knowledge base with a dense vector.",
+    category="knowledge",
+    tags=["知识库"],
+    display_name="知识库检索",
+)
 async def knowledge_search(
     vector: list[float],
     collection_name: str = DEFAULT_COLLECTION_NAME,

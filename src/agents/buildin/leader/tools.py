@@ -1,8 +1,9 @@
 from typing import Annotated
 
-from langchain_core.tools import tool
 from langgraph.types import interrupt
 from pydantic import BaseModel, Field
+
+from src.agents.tool_registry import register
 
 
 class QuestionOption(BaseModel):
@@ -23,13 +24,13 @@ class HumanQuestion(BaseModel):
         description="针对该问题生成的 1～3 个明确且有区分度的可选答案，优先提供 3 个，合理选项不足时不凑数",
     )
 
-@tool
+@register(category="builtin", tags=["计算"], display_name="计算器")
 def calculator(a: Annotated[int, "计算元素a"], b: Annotated[int, "计算元素b"]):
     """计算专用的计算器，当用户有计算需求请调用该工具"""
     return a + b
 
 
-@tool
+@register(category="builtin", tags=["交互"], display_name="向用户提问")
 def ask_user(
     questions: Annotated[
         list[HumanQuestion],
