@@ -35,6 +35,63 @@ export function groupRunMessages(messages: Message[]): Row[] {
   return rows
 }
 
+type RunSegment =
+  | { kind: "text"; key: string; message: Message }
+  | { kind: "process"; key: string; messages: Message[] }
+
+function messageKey(message: Message, index: number): string {
+  const event = record(message.payload.event)
+  return `${event.type ?? event.name ?? message.payload.type}:${event.tool_call_id ?? event.message_id ?? index}`
+}
+
+function isMainThreadText(message: Message, threadId: string | undefined): boolean {
+  if (message.payload.type !== "text") return false
+  const event = record(message.payload.event)
+  const hasText = typeof event.content === "string" && Boolean(event.content.trim())
+  const hasAttachments = Array.isArray(event.attachments) && event.attachments.length > 0
+  if (!hasText && !hasAttachments) return false
+  return !event.thread_id || !threadId || event.thread_id === threadId
+}
+
+function isEmptyText(message: Message): boolean {
+  if (message.payload.type !== "text") return false
+  const event = record(message.payload.event)
+  const hasText = typeof event.content === "string" && Boolean(event.content.trim())
+  const hasAttachments = Array.isArray(event.attachments) && event.attachments.length > 0
+  return !hasText && !hasAttachments
+}
+
+export function segmentRunMessages(
+  messages: Message[],
+  threadId: string | undefined,
+): RunSegment[] {
+  const visibleMessages = messages.filter((message) => !isEmptyText(message))
+  const lastMessage = visibleMessages.at(-1)
+  const hasAnswer = Boolean(
+    lastMessage && isMainThreadText(lastMessage, threadId),
+  )
+  const processMessages = hasAnswer
+    ? visibleMessages.slice(0, -1)
+    : visibleMessages
+  const segments: RunSegment[] = []
+
+  if (processMessages.length > 0) {
+    segments.push({
+      kind: "process",
+      key: `process-${messageKey(processMessages[0], 0)}`,
+      messages: processMessages,
+    })
+  }
+  if (hasAnswer && lastMessage) {
+    segments.push({
+      kind: "text",
+      key: messageKey(lastMessage, visibleMessages.length - 1),
+      message: lastMessage,
+    })
+  }
+  return segments
+}
+
 interface Props {
   messages: Message[]
   threadId: string | undefined
@@ -70,22 +127,13 @@ function RunMessages({ row, ...props }: Props & { row: Row }) {
       .map((message) => record(record(message.payload.event).run))
       .find((run) => run.run_id === row.runId) ?? {}
   const status = current ? props.status : metadata.status
-  const active = current && props.active && !props.waiting
-  const waiting = current && props.waiting
+  const active = Boolean(current && props.active && !props.waiting)
+  const waiting = Boolean(current && props.waiting)
 
-  // Only the last root-thread text stays outside the process; child output never becomes the answer.
-  const last = row.messages.at(-1)
-  const lastEvent = record(last?.payload.event)
-  const hasAnswer =
-    last?.payload.type === "text" &&
-    typeof lastEvent.content === "string" &&
-    Boolean(lastEvent.content.trim()) &&
-    (!lastEvent.thread_id || lastEvent.thread_id === props.threadId)
-  const process = hasAnswer ? row.messages.slice(0, -1) : row.messages
-  const isProcessActive = active && !hasAnswer
-
+  const segments = segmentRunMessages(row.messages, props.threadId)
   const artifacts = extractArtifactsFromMessages(row.messages, props.threadId)
-  const label = waiting
+
+  const terminalStatusLabel = waiting
     ? "Waiting for your response"
     : status === "failed"
       ? "Execution failed"
@@ -93,34 +141,49 @@ function RunMessages({ row, ...props }: Props & { row: Row }) {
         ? "Cancelled"
         : status === "interrupted"
           ? "Interrupted"
-          : isProcessActive
-            ? process.length
-              ? "Working"
-              : "Thinking"
-            : "Execution process"
+          : null
 
-  const showProcess = process.length > 0 || isProcessActive || waiting
+  const showTrailingThinking =
+    (segments.length === 0 && (active || Boolean(terminalStatusLabel))) ||
+    (segments.length > 0 && Boolean(terminalStatusLabel) && segments.at(-1)?.kind !== "process")
 
   return (
     <section className="grid min-w-0 gap-4" data-run-id={row.runId}>
-      {showProcess && (
-        <Thinking
-          label={label}
-          active={isProcessActive}
-        >
-          {process.length > 0 ? (
+      {segments.map((segment, segIndex) => {
+        const isLastSegment = segIndex === segments.length - 1
+        if (segment.kind === "text") {
+          return <ChatMessage key={segment.key} message={segment.message} />
+        }
+        const isProcessActive = active && isLastSegment
+        const processLabel =
+          isLastSegment && terminalStatusLabel
+            ? terminalStatusLabel
+            : isProcessActive
+              ? "Working"
+              : "Execution process"
+        return (
+          <Thinking
+            key={segment.key}
+            label={processLabel}
+            active={isProcessActive}
+          >
             <div className="flex min-w-0 flex-col gap-2">
-              {process.map((message, index) => (
+              {segment.messages.map((message, index) => (
                 <ChatMessage
-                  key={`${record(message.payload.event).type ?? record(message.payload.event).name ?? message.payload.type}:${record(message.payload.event).tool_call_id ?? record(message.payload.event).message_id ?? index}`}
+                  key={messageKey(message, index)}
                   message={message}
                 />
               ))}
             </div>
-          ) : undefined}
-        </Thinking>
+          </Thinking>
+        )
+      })}
+      {showTrailingThinking && (
+        <Thinking
+          label={terminalStatusLabel ?? "Thinking"}
+          active={active && !terminalStatusLabel}
+        />
       )}
-      {hasAnswer && last && <ChatMessage message={last} />}
       {artifacts.length > 0 && <ArtifactList artifacts={artifacts} threadId={props.threadId} />}
     </section>
   )
