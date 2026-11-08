@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   ArrowLeft,
-  Bot,
   CheckCircle2,
   Circle,
   Download,
@@ -20,6 +19,7 @@ import {
 } from "lucide-react";
 
 import type { ThreadMessageAttachmentResponse } from "@/api/attachment";
+import { AgentAvatar } from "@/components/common/AgentAvatar";
 import {
   downloadSandboxFile,
   listSandboxWorkspace,
@@ -368,9 +368,7 @@ export function ChatWorkspaceSidebar({
           <Card size="sm" className="[--card-spacing:--spacing(3)]">
             <CardHeader>
               <div className="flex min-w-0 items-center gap-2.5">
-                <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-border bg-secondary text-secondary-foreground">
-                  <Bot className="size-4" aria-hidden="true" />
-                </span>
+                <AgentAvatar seed={agentId || "LeaderAgent"} />
                 <div className="min-w-0">
                   <CardTitle className="truncate text-xs">
                     {agentId || "LeaderAgent"}
