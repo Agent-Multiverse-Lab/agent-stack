@@ -43,6 +43,13 @@ def _validate_existing_relations() -> None:
 
 
 def upgrade() -> None:
+    op.alter_column(
+        "alembic_version",
+        "version_num",
+        existing_type=sa.String(32),
+        type_=sa.String(64),
+        existing_nullable=False,
+    )
     op.create_table(
         "subagent_conversation_relation",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
@@ -130,11 +137,14 @@ def upgrade() -> None:
 
     op.drop_index("ix_conversation_thread_list", table_name="conversation")
     op.drop_index("ix_conversation_parent_conversation_id", table_name="conversation")
+    parent_foreign_keys = [
+        foreign_key["name"]
+        for foreign_key in sa.inspect(op.get_bind()).get_foreign_keys("conversation")
+        if foreign_key["constrained_columns"] == ["parent_conversation_id"]
+    ]
     with op.batch_alter_table("conversation") as batch_op:
-        batch_op.drop_constraint(
-            "fk_conversation_parent_conversation_id",
-            type_="foreignkey",
-        )
+        for constraint_name in parent_foreign_keys:
+            batch_op.drop_constraint(constraint_name, type_="foreignkey")
         batch_op.drop_column("parent_conversation_id")
     op.create_index(
         "ix_conversation_thread_list",
