@@ -23,7 +23,7 @@ from server.service.tool_message_audit_service import ToolMessageAuditCollector
 from server.utils.auth import AuthenticatedUser
 from server.utils.interrupt_utils import AskHumanPayload, parse_interrupt_questions
 from src.agents import BaseAgent
-from src.agents import CustomAgentState as AgentState
+from src.agents import AgentStateDTO
 from src.agents.base_agent import unpack_data
 from src.database import (
     Agent,
@@ -650,8 +650,8 @@ def _assign_stream_msg_id(
     return message_ids.setdefault(key, str(uuid.uuid4()))
 
 
-def _reslove_agent_state(agent_state: dict):
-    agent_result: AgentState = {"agent_todo": list(agent_state.get("todos") or [])}
+def _reslove_agent_state(agent_state: dict) -> AgentStateDTO:
+    agent_result: AgentStateDTO = {"agent_todo": list(agent_state.get("todos") or [])}
     return agent_result
 
 
@@ -836,7 +836,7 @@ def _make_lc_message_to_standard(
     )
 
 
-def _serialize_agent_state(agent_state: AgentState | None) -> str:
+def _serialize_agent_state(agent_state: AgentStateDTO | None) -> str:
     if not agent_state:
         return ""
     try:
@@ -1352,7 +1352,7 @@ def _build_tool_message_audit_collector(
     )
 
 
-async def _persist_agent_state(run_id: str, worker_id: str, state: AgentState) -> None:
+async def _persist_agent_state(run_id: str, worker_id: str, state: AgentStateDTO) -> None:
     async with postgres_manager.get_async_session_context() as session:
         run = await AgentRunRepository(session).lock_for_output_update(
             run_id, worker_id=worker_id,

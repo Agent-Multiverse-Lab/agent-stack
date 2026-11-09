@@ -27,7 +27,7 @@ def load_message_persistence():
     module = ModuleType("isolated_message_persistence")
     module.__dict__.update(
         Any=Any, AsyncSession=Any, BaseAgent=Any, Message=Message, AgentRun=AgentRun,
-        AgentState=Any, AsyncIterator=AsyncIterator, Callable=Callable,
+        AgentStateDTO=Any, AsyncIterator=AsyncIterator, Callable=Callable,
         ModelMessageAuditCollector=Any, ToolMessageAuditCollector=Any,
         _persist_agent_state=AsyncMock(),
         AIMessage=AIMessage, ToolMessage=ToolMessage, json=json, logger=Mock(),
