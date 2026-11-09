@@ -11,7 +11,6 @@
 | Sandbox | 会话沙盒部署、工具执行与工作目录 | [sandbox/README.md](sandbox/README.md) |
 | Model | 平台供应商管理与运行时连接配置 | [model/README.md](model/README.md) |
 | Product | 产品身份和跨页面体验 | [product/README.md](product/README.md) |
-| Data Platform | 卫星影像多来源目录、空间检索与 Agent 接管 | [data-platform/README.md](data-platform/README.md) |
 
 ## Capability 结构
 

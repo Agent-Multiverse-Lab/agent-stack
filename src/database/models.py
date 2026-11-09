@@ -18,13 +18,6 @@ from sqlalchemy.orm import relationship
 
 from src.database.base import Base
 from src.database.credential_types import EncryptedCredential, EncryptedHeaders
-from src.database.satellite_models import (
-    SatelliteBusinessScene,  # noqa: F401
-    SatelliteCollection,  # noqa: F401
-    SatelliteScene,  # noqa: F401
-    SatelliteSceneAsset,  # noqa: F401
-    SatelliteSource,  # noqa: F401
-)
 
 # 消息审计：Model/Tool 生命周期增量事实使用独立 message_type，
 # 与普通会话历史隔离；只有终态 State 能按 operation_id 证明的 Model 行才在

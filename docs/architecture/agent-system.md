@@ -71,9 +71,8 @@ agent 运行上下文只来自：
 Leader 接收数据库名称、描述和子角色字典；字典仅包含 slug、名称、描述，
 Middleware 通过 slug 创建并入队子 Run，子 Run 执行时重新读取自己的 SQL 配置。
 
-所有子角色共用知识/网络检索、Gateway 目录和 MCP 工具，以及沙箱、文件系统、图片校验和模型重试
+所有子角色共用知识/网络检索和 MCP 工具，以及沙箱、文件系统、图片校验和模型重试
 Middleware。专业 Prompt、报告 Schema 和预设参数放在角色文件；工具是否用于当前任务由角色规则约束。
-Gateway 工具仍通过 Python gRPC 客户端访问目录，不直接连接 PostgreSQL/PostGIS 或 RustFS。
 `src/knowledge/tools.py` 承接知识和网络检索工具。
 `src/agents/middlewares/image_validation_middleware.py` 检查 MCP 工具可用性并反馈调用错误；
 对 MCP 返回的内嵌单帧图片执行有界解码、格式和完整性检查。URL/路径/资产 ID 的文件内容及图像语义

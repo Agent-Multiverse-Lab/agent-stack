@@ -13,7 +13,6 @@ Web/API -> Service -> Worker -> Agent Runtime -> Storage/RAG。
 - **Persistence Domain**：PostgreSQL / Redis / RustFS / Milvus 的状态与存储边界。
 - **Sandbox Domain**：外部能力执行隔离边界。
 - **Model Domain**：管理平台级 Chat 模型供应商预置、全局配置、脱敏模型列表和运行时连接解析。
-- **Data Platform Domain**：卫星来源、集合、场景和波段资产的有界检索。
 
 ## 3. High-level Topology
 
@@ -26,8 +25,6 @@ Web/UI
            -> ARQ Worker (process_agent_run)
               -> Agent Runtime / SubAgent Middleware
                  -> Redis Stream Events
-
-SatelliteAgent -> Python gRPC Client -> Go Gateway -> PostgreSQL/PostGIS
 ```
 
 ## 4. Data Ownership
@@ -59,7 +56,6 @@ SatelliteAgent -> Python gRPC Client -> Go Gateway -> PostgreSQL/PostGIS
 | `src/third_party/` | 外部 SDK 的小型兼容边界 | 应用策略和通用业务工具 |
 | `src/utils/` | 跨子系统复用的无状态通用帮助函数 | 单一子系统的领域逻辑 |
 | `docker/cube/` | CubeSandbox 部署、预检和运行验收 | 应用持久化和 Agent Run 编排 |
-| `gateway/` | 卫星目录 gRPC、空间查询和分页 | 建表、Agent Run、影像算法执行 |
 | `web/` | API 消费、页面状态和展示 | 后端领域规则 |
 | `docker/` | Dockerfile 和 Compose 拓扑 | 应用业务逻辑 |
 | `migrate/` | Alembic 环境和有序 schema revision | 启动、Worker、Agent 和业务 seed |

@@ -15,7 +15,6 @@
 | 状态和存储所有权 | [persistence-system.md](persistence-system.md) | [docs/spec/persistence](../spec/persistence/README.md) |
 | 沙箱与工具执行隔离 | [sandbox-system.md](sandbox-system.md) | [docs/spec/sandbox](../spec/sandbox/README.md) |
 | 模型供应商预置、平台配置和模型列表缓存 | [model-system.md](model-system.md) | [docs/spec/model](../spec/model/README.md) |
-| 卫星影像多源目录 | [data-platform-system.md](data-platform-system.md) | [docs/spec/data-platform](../spec/data-platform/README.md) |
 | 认证和用户身份 | [auth-system.md](auth-system.md) | 暂无独立能力规格 |
 | 跨系统拓扑和目录职责 | [overview.md](overview.md) | — |
 
@@ -35,7 +34,5 @@
   - 模型供应商预置、平台配置真相、Redis 全局模型列表与运行时连接解析。
 - [auth-system.md](auth-system.md)
   - 用户身份、JWT 和受保护路由边界。
-- [data-platform-system.md](data-platform-system.md)
-  - Go Gateway、PostGIS 卫星目录与 SatelliteAgent 的依赖边界。
 
 具体行为以 `docs/spec/` 为准；本目录只保留系统之间的承载关系、依赖方向和所有权边界。

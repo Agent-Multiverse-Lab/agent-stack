@@ -61,8 +61,6 @@ dependencies = [
     "cubesandbox==0.7.0",
     "a2a-sdk>=1.1.0",
     "umap-learn>=0.5.9.post2",
-    "grpcio>=1.84.0",
-    "grpcio-tools>=1.81.1",
     "vane-ai>=0.1.0",
     "duckdb>=1.5.5",
     "langchain-typesafe>=0.0.1a2",
@@ -72,10 +70,4 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
-]
-
-[tool.ruff]
-extend-exclude = [
-    "src/third_party/satellite_gateway/satellite_catalog_pb2.py",
-    "src/third_party/satellite_gateway/satellite_catalog_pb2_grpc.py",
 ]
