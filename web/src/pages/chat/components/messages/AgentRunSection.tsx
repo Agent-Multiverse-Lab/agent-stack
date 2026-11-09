@@ -5,6 +5,8 @@ import { ToolCall } from "@/pages/chat/components/ToolCall"
 import { AgentMarkdownSection } from "./AgentMarkdownSection"
 import { AgentReasoningSection } from "./AgentReasoningSection"
 import { AgentTasksSection } from "./AgentTasksSection"
+import { toolLabels } from "@/pages/chat/tool-labels"
+import { useTranslation } from "@/i18n"
 
 type AgentRunItem = Extract<ChatRenderItem, { kind: "agent_run" }>
 
@@ -32,10 +34,36 @@ export function AgentBlockSwitch({ block }: { block: AgentContentBlock }) {
 }
 
 export function AgentRunSection({ item }: AgentRunSectionProps) {
+  const { t } = useTranslation()
   const hasAnswer = Boolean(item.answerBlock)
   const isProcessActive = item.active && !hasAnswer
+  const toolBlocks = item.processBlocks.filter(
+    (block): block is Extract<AgentContentBlock, { kind: "tool_call" }> =>
+      block.kind === "tool_call",
+  )
+  const hasReasoning = item.processBlocks.some((block) => block.kind === "reasoning")
+  const toolNames = [
+    ...new Set(
+      toolBlocks.map((block) => t(toolLabels.get(block.name) ?? block.name)),
+    ),
+  ]
+  const visibleToolNames = toolNames.slice(0, 3)
+  const toolMeta =
+    toolBlocks.length > 1 && visibleToolNames.length > 0
+      ? `${visibleToolNames.join(" · ")}${toolNames.length > visibleToolNames.length ? ` +${toolNames.length - visibleToolNames.length}` : ""}`
+      : undefined
+  const runningCount = toolBlocks.filter(
+    (block) => block.status === "pending" || block.status === "running",
+  ).length
+  const errorCount = toolBlocks.filter((block) => block.status === "error").length
+  const toolStatus = [
+    errorCount > 0 ? t("{{count}} failed", { count: errorCount }) : "",
+    runningCount > 0 ? t("{{count}} in progress", { count: runningCount }) : "",
+  ]
+    .filter(Boolean)
+    .join(" · ") || undefined
 
-  const label = item.waiting
+  const lifecycleLabel = item.waiting
     ? "Waiting for your response"
     : item.status === "failed"
       ? "Execution failed"
@@ -48,6 +76,16 @@ export function AgentRunSection({ item }: AgentRunSectionProps) {
               ? "Working"
               : "Thinking"
             : "Execution process"
+  const label =
+    toolBlocks.length === 0
+      ? lifecycleLabel
+      : hasReasoning
+        ? t("Reasoning and tool calls · {{count}} tools", {
+            count: toolBlocks.length,
+          })
+        : toolBlocks.length === 1
+          ? t("Calling: {{tool}}", { tool: toolNames[0] })
+          : t("Called {{count}} tools", { count: toolBlocks.length })
 
   const showProcess = item.processBlocks.length > 0 || isProcessActive || item.waiting
 
@@ -56,7 +94,10 @@ export function AgentRunSection({ item }: AgentRunSectionProps) {
       {showProcess && (
         <Thinking
           label={label}
+          meta={toolMeta}
+          status={toolStatus}
           active={isProcessActive}
+          autoExpand={item.active}
         >
           {item.processBlocks.length > 0 ? (
             <div className="flex min-w-0 flex-col gap-2">

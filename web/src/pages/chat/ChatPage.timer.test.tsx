@@ -19,7 +19,6 @@ vi.mock("@/context/ModelContext", () => ({
   useModel: () => ({ models: [], selectedModelId: "model", loading: false, selectModel: () => {} }),
 }));
 vi.mock("@/pages/chat/components/AgentMessageComposer", () => ({ AgentMessageComposer: () => null }));
-vi.mock("@/pages/chat/components/ChatMessage", () => ({ ChatMessage: () => <span>Activity</span> }));
 vi.mock("@/pages/chat/components/AskUser", () => ({ AskUser: () => null }));
 vi.mock("@/api/agent-run", () => ({
   consumeAgentRunStream: mocks.consume,
@@ -100,10 +99,10 @@ it("preserves active status as process activity appears and disappears", async (
   renderChat();
   await waitFor(() => expect(streams).toHaveLength(1));
   await act(() => streams[0].emit(event({ type: "custom", name: "agent_state", agent_state: { agent_todo: [{ content: "Work", status: "in_progress" }] } })));
-  expect(screen.getByText("Activity")).toBeTruthy();
+  expect(screen.getByText("Work")).toBeTruthy();
   expect(screen.getByRole("status").textContent).toMatch(/Thinking|Working/);
   await act(() => streams[0].emit(event({ type: "custom", name: "agent_state", agent_state: { agent_todo: [] } })));
-  expect(screen.queryByText("Activity")).toBeNull();
+  expect(screen.queryByText("Work")).toBeNull();
   expect(screen.getByRole("status").textContent).toMatch(/Thinking|Working/);
 });
 

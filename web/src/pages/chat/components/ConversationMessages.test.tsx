@@ -43,6 +43,36 @@ const reasoning: ChatMessage = { type: "ai", payload: { type: "tool", event: {
   type: "reasoning", content: "Check the sources", run_id: "run", thread_id: "thread",
 } } };
 
+it("keeps expanded tool details mounted between narration and the next tool call", () => {
+  const messages = [toolCall("search-1", "web_search", "completed", { query: "latest" }, "Search results")];
+  const view = render(<ConversationMessages {...props} messages={messages} />);
+  const searchButton = screen.getByRole("button", { name: /Search the web|网络搜索/ });
+  fireEvent.click(searchButton);
+  expect(screen.getByText("Search results")).toBeTruthy();
+
+  view.rerender(<ConversationMessages {...props} messages={[...messages, text("I will verify these results")]} />);
+  expect(screen.getByRole("button", { name: /Search the web|网络搜索/ })).toBe(searchButton);
+  expect(screen.getByText("Search results")).toBeTruthy();
+
+  view.rerender(<ConversationMessages {...props} messages={[
+    ...messages, text("I will verify these results"),
+    toolCall("search-2", "read_file", "running"),
+  ]} />);
+  expect(screen.getByRole("button", { name: /Search the web|网络搜索/ })).toBe(searchButton);
+  expect(screen.getByText("Search results")).toBeTruthy();
+});
+
+it("summarizes multiple tools with their names and live status", () => {
+  render(<ConversationMessages {...props} messages={[
+    toolCall("search-1", "web_search", "completed"),
+    toolCall("read-1", "read_file", "running"),
+  ]} />);
+
+  expect(screen.getByText(/Called 2 tools|已调用 2 个工具/)).toBeTruthy();
+  expect(screen.getByText(/Search the web.*Read file|搜索网页.*读取文件/)).toBeTruthy();
+  expect(screen.getByText(/1 in progress|1 进行中/)).toBeTruthy();
+});
+
 it("keeps only the final main-thread text outside the execution process", () => {
   const step1Messages = [
     text("I will check the sources"),
@@ -55,7 +85,9 @@ it("keeps only the final main-thread text outside the execution process", () => 
   // While a later process event exists, the earlier text belongs to the process.
   expect(screen.getByText("I will check the sources")).toBeTruthy();
   // Process Thinking container is active and expanded while tools are running
-  expect(screen.getByRole("status").textContent).toMatch(/Thinking|Working|正在处理|思考中/);
+  expect(screen.getByRole("status").textContent).toMatch(
+    /Reasoning and tool calls.*2 tools|推理与工具调用.*2 个工具/,
+  );
   expect(screen.getByRole("button", { name: /Search knowledge base|检索知识库/ })).toBeTruthy();
   expect(screen.getByRole("button", { name: /Read file|读取文件/ })).toBeTruthy();
 
@@ -74,8 +106,8 @@ it("keeps only the final main-thread text outside the execution process", () => 
   expect(screen.queryByText("I will check the sources")).toBeNull();
   expect(screen.getByText("The answer is 42")).toBeTruthy();
 
-  // Process Thinking container is collapsed showing "Execution process"
-  expect(screen.getByText(/Execution process|执行过程/)).toBeTruthy();
+  // Process Thinking container is collapsed with its real tool summary.
+  expect(screen.getByText(/Reasoning and tool calls.*2 tools|推理与工具调用.*2 个工具/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Search knowledge base|检索知识库/ })).toBeNull();
 
   // Expanding Thinking reveals reasoning, tools, and their arguments/outputs
@@ -145,7 +177,7 @@ it("renders only the persisted final answer outside and keeps earlier text with 
     messages={[persistedText("Earlier explanation"), persistedTool, persistedText("Saved answer")]} />);
   expect(screen.queryByText("Earlier explanation")).toBeNull();
   expect(screen.getByText("Saved answer")).toBeTruthy();
-  expect(screen.getByText(/Execution process|执行过程/)).toBeTruthy();
+  expect(screen.getByText(/Calling: Calculate|调用：计算/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /Expand thinking details|展开思考/ }));
   expect(screen.getByText("Earlier explanation")).toBeTruthy();
 });

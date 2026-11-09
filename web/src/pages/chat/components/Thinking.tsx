@@ -11,18 +11,24 @@ import { cn } from "@/lib/utils"
 
 export function Thinking({
   label,
+  meta,
+  status,
   children,
   active = true,
+  autoExpand = active,
 }: {
   label?: string
+  meta?: string
+  status?: string
   children?: ReactNode
   active?: boolean
+  autoExpand?: boolean
   startedAt?: number | null
   durationMs?: number | null
 }) {
   const { t } = useTranslation()
-  const [expansion, setExpansion] = useState<{ active: boolean; open: boolean } | null>(null)
-  const expanded = expansion?.active === active ? expansion.open : active
+  const [expansion, setExpansion] = useState<{ autoExpand: boolean; open: boolean } | null>(null)
+  const expanded = expansion?.autoExpand === autoExpand ? expansion.open : autoExpand
 
   const resolvedLabel = label ?? "Thinking"
 
@@ -51,7 +57,7 @@ export function Thinking({
   return (
     <Collapsible
       open={expanded}
-      onOpenChange={(open) => setExpansion({ active, open })}
+      onOpenChange={(open) => setExpansion({ autoExpand, open })}
       className="w-full min-w-0"
     >
       {children ? (
@@ -82,6 +88,19 @@ export function Thinking({
               aria-hidden="true"
             />
             {labelEl}
+            {meta && (
+              <>
+                <span className="text-muted-foreground/30" aria-hidden="true">·</span>
+                <span className="truncate text-[12px] text-muted-foreground/60">
+                  {meta}
+                </span>
+              </>
+            )}
+            {status && (
+              <span className="shrink-0 text-[11px] text-muted-foreground/60">
+                {status}
+              </span>
+            )}
           </div>
           <ChevronsUpDown
             className="size-3.5 shrink-0 text-muted-foreground/50 ml-auto"
@@ -102,6 +121,19 @@ export function Thinking({
             aria-hidden="true"
           />
           {labelEl}
+          {meta && (
+            <>
+              <span className="text-muted-foreground/30" aria-hidden="true">·</span>
+              <span className="truncate text-[12px] text-muted-foreground/60">
+                {meta}
+              </span>
+            </>
+          )}
+          {status && (
+            <span className="shrink-0 text-[11px] text-muted-foreground/60">
+              {status}
+            </span>
+          )}
         </div>
       )}
       {children && (
