@@ -34,39 +34,36 @@ API/Worker 使用 Compose 内的 CubeAPI 地址管理生命周期，使用 CubeP
 Cube 控制接口仅供受信任服务访问。VM 出站策略阻止访问应用数据库、队列和 Cube 管理接口。
 配置一个 SDK API key 本身不等于开启 CubeAPI 鉴权。
 
-### SB-CUBE-003 会话归属与绑定
+### SB-CUBE-003 用户归属与绑定
 
-业务数据库不保存 Cube 实例 ID，也不新增沙盒表。通过 Cube 的 `app=agent-stack`、`uid`、
-`thread_id` metadata 发现会话实例。真实 ID 由 Cube 创建后返回；LangGraph state 和进程缓存
-仅保存可重建引用。Cube 自己拥有 VM 实际运行状态，Agent backend 不访问业务数据库。
+业务数据库不保存 Cube 实例 ID。通过 `app=agent-stack, scope=user, uid` metadata 发现用户
+实例；同一用户的所有会话和子会话复用 VM。LangGraph state 和进程缓存仅保存可重建引用。
+Cube 拥有 VM 状态，Agent backend 不访问业务数据库。
 
-以经过归属校验的 `(uid, thread_id)` 获取实例。跨 API/Worker 获取时，在应用 Redis 的同会话
-锁内查询并重连或创建。锁不保存实例绑定；Redis 不可用时拒绝创建。重复 metadata 匹配或完整
-节点查询无法确认时拒绝自动选择。节点未注册或不可达不能被当作空列表。不同会话互不复用；
-子会话沿用自己的 thread_id。
+工作区 API 保留会话归属校验，再按 uid 获取用户实例。跨 API/Worker 使用同一用户 Redis 锁
+串行化查询、重连与创建；锁不保存实例绑定。重复匹配、节点不可达或查询不完整时拒绝创建。
+旧版带 thread_id 的实例不参与用户级匹配，仍可显式销毁。
 
-只有 Cube 明确返回沙盒不存在才重建；鉴权失败、网络超时、5xx 原样进入错误处理，不能据此
-创建第二个实例。创建结果不确定时本次请求失败，由有限生命周期回收潜在孤儿实例。
+只有 Cube 明确返回不存在才重建；鉴权失败、网络超时和 5xx 不触发第二个实例。
 
 ### SB-CUBE-004 按需获取与恢复
 
-首次需要命令/文件工具时获取实例。应用启动及纯对话不创建 VM。每次工具调用按 metadata
-重新发现并 connect 检查远端可用性；连接失败不把本地缓存视为成功。
-
-API/Worker 重启后能使用原 ID 重连。实例已回收时，新实例重新挂载原工作目录。首次工具执行
-之前可以重建，命令已经发出之后不自动重放，避免重复写文件或产生其他副作用。
+首次使用命令/文件工具时获取实例，应用启动及纯对话不创建 VM。每次工具调用重新发现并
+connect；暂停实例通过 connect 恢复原 ID，API/Worker 重启后同样可以发现它。
+实例被明确销毁后，新实例重新挂载用户工作目录；命令发出后不自动重放。
 
 ### SB-CUBE-005 工作目录
 
-会话工作目录唯一对应宿主机的 `workspaces/<uid>/<thread_id>`，API/Worker 的
-`SAVE_DIR/workspaces/<uid>/<thread_id>` 与 VM 的 `/workspace` 指向相同内容；
-`/workspace/outputs` 为产物目录。技能目录挂载到 `/skill`，在 VM 内只读。
+用户工作目录对应 `SAVE_DIR/workspaces/<uid>`，Host Mount 将
+`CUBE_HOST_SAVE_DIR/workspaces/<uid>` 挂到 VM `/workspace`；所有聊天共享文件，
+产物目录为 `/workspace/outputs`。旧会话文件不搬移，继续位于 `/workspace/<thread_id>`。
+Composite 文件路由、产物解析和工作区 API 使用同一用户根目录。
 
-Host Mount 只接受部署配置允许的共享目录。服务端校验 uid/thread_id 路径段、解析后的路径
-归属及符号链接，禁止请求或模型直接提供宿主机挂载路径。API 文件预览继续验证会话归属与
-`/workspace` 边界。项目对象存储职责继续由 RustFS 承担，工作目录不是对象存储的替代品。
+技能目录在 `/skill` 只读挂载。同一用户必须使用相同技能挂载配置；配置不同则报挂载摘要
+不一致，不能静默替换正在使用的 VM。Host Mount 只接受部署允许的共享目录，校验
+uid/thread_id 路径段与符号链接。不同用户工作目录与 VM 隔离，同一用户聊天不提供文件隔离。
 
-实例销毁保留宿主机工作文件。第一版不隐式共享父子会话目录、不推断旧共享目录文件归属。
+销毁 VM 保留宿主机工作文件；VM 内安装的依赖随暂停保留，显式销毁后需重新安装。
 
 ### SB-CUBE-006 工具协议
 
@@ -79,15 +76,32 @@ Host Mount 只接受部署配置允许的共享目录。服务端校验 uid/thre
 
 ### SB-CUBE-007 生命周期
 
-采用有限空闲超时，第一版使用到期 kill。获取/执行按 Cube 协议刷新活动状态；实例最大单次
-命令时限短于空闲 TTL。release 释放当前进程的使用引用，最后一个使用者退出才关闭本地客户端；
-普通 Agent 结束不销毁远端实例。应用关闭只关闭客户端。
+采用有限空闲超时，到期由 Cube 暂停 VM，生命周期设置为
+`onTimeout=pause, autoResume=false`。应用通过 connect 显式恢复；单次命令时限短于空闲 TTL。
+release 仅释放本地使用引用，最后一个使用者退出才关闭 SDK；Agent 结束或应用关闭不删除 VM。
 
-远端 destroy 与创建按同一会话锁串行执行；销毁失败报告失败，404 可视为远端已销毁。
-实例消失后下一次查询重新创建。超时回收和孤儿清理由 Cube 生命周期组件承担。
+远端 destroy 与创建使用同一用户锁串行执行；404 视为已销毁。下一次获取重新创建并挂载原
+工作目录。Run 取消不杀掉其他聊天使用的 VM，已发出的命令仍受远端进程时限约束。
 
-Run 取消沿用现有业务终态处理；不因取消一个 Run 就杀掉同会话其他调用使用的实例。SDK
-请求超时与远端进程终止分别验证，远端命令必须有自身执行时限。
+### 获取流程
+
+变更前：
+```mermaid
+flowchart LR
+    A[会话 uid + thread_id] --> B[会话 VM]
+    B --> C[会话工作目录]
+    B --> D[空闲销毁]
+```
+
+变更后：
+```mermaid
+flowchart LR
+    A[用户的多个会话] --> B[用户锁与 metadata 发现]
+    B --> C[同一用户 VM]
+    C --> D[共享 workspace]
+    C --> E[空闲暂停]
+    E -->|connect| C
+```
 
 ### SB-CUBE-008 验证边界
 

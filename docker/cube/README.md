@@ -102,13 +102,15 @@ smoke 检查跨进程并发创建/复用、命令退出码和超时、大二进�
 同机源码进程需令 `SAVE_DIR` 与 `CUBE_HOST_SAVE_DIR` 指向同一目录。容器内配置由 Compose 覆盖，
 `SAVE_DIR=/app/save`；只挂载 `workspaces` 和只读 `skills` 子目录。
 
-- 工作文件：`${CUBE_HOST_SAVE_DIR}/workspaces/<uid>/<thread_id>` ↔ VM `/workspace`。
+- 工作文件：`${CUBE_HOST_SAVE_DIR}/workspaces/<uid>` ↔ VM `/workspace`。
 - 技能文件：`${CUBE_HOST_SAVE_DIR}/skills` ↔ VM 只读 `/skill`。
 - Cube 配置/证书/模板制品：`/data/cube-stack/`；节点状态和磁盘：`/data/cubelet` 等官方路径。
 - Cube Redis 使用 DB 1；应用创建锁使用现有应用 Redis DB 0。
-- `release` 只归还本地连接引用；`destroy` 或空闲到期才删除 VM，宿主机工作文件保留。
+- `release` 只归还本地连接引用；空闲到期暂停 VM，connect 恢复，`destroy` 显式删除 VM，宿主机工作文件保留。
 
-实例通过 `app=agent-stack, uid, thread_id` metadata 发现，业务库不保存 `cube_sandbox_id`。
+同一用户的聊天共享工作文件；旧文件保留在 `/workspace/<thread_id>` 子目录中。
+
+实例通过 `app=agent-stack, scope=user, uid` metadata 发现，业务库不保存 `cube_sandbox_id`。
 `CUBE_NODE_ID` 默认 `agent-stack-node`，必须与同机 Cubelet 一致；更换该值前先清理原节点实例。
 发现通过 CubeMaster 的严格单节点 inventory 完成，节点未注册/不可达或响应不完整均拒绝创建。
 发现重复实例或挂载摘要不一致时同样拒绝自动创建；先诊断并明确清理。

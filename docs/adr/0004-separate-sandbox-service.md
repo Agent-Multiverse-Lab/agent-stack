@@ -9,7 +9,7 @@ Accepted
 ## Decision
 使用独立的 CubeSandbox 控制服务和 MicroVM 计算节点。主服务通过 CubeAPI/CubeProxy 交互，
 在 `src/agents/backends/sandbox/` 适配现有工具协议；部署由根 Compose 与 `docker/cube/` 管理。
-FastAPI/Worker 不直接管理 Docker 容器。会话通过 Cube metadata 发现实例，Redis 锁协调创建；
+FastAPI/Worker 不直接管理 Docker 容器。用户通过 Cube metadata 发现共享实例，用户级 Redis 锁协调创建；
 业务库不保存 Cube 实例 ID，Cube 自身状态使用独立数据库。
 
 ## Consequences

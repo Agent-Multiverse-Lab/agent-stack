@@ -65,13 +65,13 @@ def acquire_in_process(uid, thread):
 
 
 def smoke():
-    uid, thread = "cube-smoke", uuid4().hex
+    uid, thread = f"cube-smoke-{uuid4().hex}", uuid4().hex
     provider = SandboxProviderService()
     sid = None
     try:
         # Independent Python processes exercise the actual Redis creation lock.
-        def acquire(_):
-            result = subprocess.run([sys.executable, str(Path(__file__).resolve()), "acquire", uid, thread], check=True, text=True, capture_output=True, timeout=1000)
+        def acquire(index):
+            result = subprocess.run([sys.executable, str(Path(__file__).resolve()), "acquire", uid, f"{thread}-{index}"], check=True, text=True, capture_output=True, timeout=1000)
             return result.stdout.strip().splitlines()[-1]
 
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -99,13 +99,31 @@ def smoke():
         assert backend.edit("/workspace/check.txt", "first", "second").error is None
         assert "second" in backend.read("/workspace/check.txt").file_data["content"]
         assert backend.ls("/workspace").error is None
+        # VM-local state must survive idle pause, not just the host-mounted files.
+        assert backend.execute("printf retained > /tmp/agent-stack-smoke").exit_code == 0
+        provider.release(sid)
+        response = provider._client.http.post(provider._client.path(sid) + "/timeout", json={"timeout": 1})
+        response.raise_for_status()
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            if provider._client.info(sid).get("state", "").lower() == "paused":
+                break
+            time.sleep(1)
+        else:
+            raise TimeoutError("Cube did not pause the idle VM")
+        print("PASS: idle VM paused", flush=True)
+        # New process discovers the paused VM, resumes it and retains its ID.
+        assert acquire("resume") == sid
+        assert provider.acquire(uid, "another-thread") == sid
+        assert provider.get(sid).execute("cat /tmp/agent-stack-smoke").output.strip() == "retained"
+        assert provider.get(sid).download_files([remote])[0].content == content
         provider.release(sid)
         provider.destroy(sid)
         sid = provider.acquire(uid, thread)
         assert sid != ids[0]
         assert provider.get(sid).download_files([remote])[0].content == content
         provider.release(sid)
-        print("PASS: cross-process reuse/concurrency, execute/timeout, binary files, shared paths, recreate")
+        print("PASS: cross-thread/process reuse, execute/timeout, binary files, shared paths, idle pause/resume, recreate")
         print(f"Retained smoke files: {workspace}")
     finally:
         if sid:

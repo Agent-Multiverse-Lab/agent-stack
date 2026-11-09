@@ -63,7 +63,7 @@ class CubeServer:
                 self.inventory
                 if self.inventory is not None
                 else {
-                    "ret": {"ret_code": 0},
+                    "ret": {"ret_code": 200},
                     "size": 1,
                     "data": [{"sandbox_id": row["sandboxID"], "labels": row["metadata"]} for row in self.rows.values()],
                 }
@@ -71,7 +71,7 @@ class CubeServer:
             return httpx.Response(200, json=body)
         if request.method == "POST" and request.url.path == "/sandboxes":
             data = json.loads(request.content)
-            assert data["lifecycle"] == {"onTimeout": "kill"}
+            assert data["lifecycle"] == {"onTimeout": "pause", "autoResume": False}
             self.creates += 1
             sid = f"cube-{self.creates}"
             # Real CubeAPI stores this in annotations, not in list/get metadata.
@@ -130,11 +130,11 @@ def test_discovery_after_restart_and_user_isolation(deployment):
     sdk.close.assert_called_once()
     first.shutdown()
     second = new()
-    assert second.acquire("alice", "thread") == sid
+    assert second.acquire("alice", "another-thread") == sid
     assert second.acquire("bob", "thread") != sid
     assert server.creates == 2
     mounts = json.loads(server.mounts[sid])
-    assert mounts[0]["hostPath"].endswith("/workspaces/alice/thread")
+    assert mounts[0]["hostPath"].endswith("/workspaces/alice")
     assert mounts[1]["mountPath"] == "/skill" and mounts[1]["readOnly"]
 
 
@@ -142,7 +142,7 @@ def test_two_application_providers_create_once(deployment):
     server, new = deployment
     providers = [new(), new()]
     with ThreadPoolExecutor(max_workers=8) as pool:
-        ids = list(pool.map(lambda i: providers[i % 2].acquire("alice", "thread"), range(8)))
+        ids = list(pool.map(lambda i: providers[i % 2].acquire("alice", f"thread-{i}"), range(8)))
     assert len(set(ids)) == 1
     assert server.creates == 1
 
@@ -172,12 +172,38 @@ def test_borrow_keeps_client_alive_after_owner_release(deployment):
     server, new = deployment
     provider = new()
     sid = provider.acquire("alice", "thread")
-    with provider.borrow("alice", "thread") as sdk:
+    with provider.borrow("alice", "another-thread") as sdk:
         provider.release(sid)
         sdk.close.assert_not_called()
     sdk.close.assert_called_once()
     assert provider.get(sid) is None
     assert sid in server.rows
+
+
+def test_shared_workspace_and_old_conversation_files(deployment, tmp_path):
+    _, new = deployment
+    old_file = tmp_path / "workspaces/alice/old-thread/result.txt"
+    old_file.parent.mkdir(parents=True)
+    old_file.write_text("existing")
+    provider = new()
+    sid = provider.acquire("alice", "first")
+    assert provider.acquire("alice", "second") == sid
+    first, _ = service.workspace_paths("alice", "first")
+    second, _ = service.workspace_paths("alice", "second")
+    other, _ = service.workspace_paths("bob", "first")
+    assert first == second and other != first
+    assert (first / "old-thread/result.txt").read_text() == "existing"
+    with pytest.raises(RuntimeError, match="identity mismatch"):
+        with provider.borrow("bob", "first", sandbox_id=sid):
+            pytest.fail("Another user borrowed Alice's VM")
+
+
+def test_old_conversation_vm_is_not_reused(deployment):
+    server, new = deployment
+    server.rows["old"] = {"sandboxID": "old", "metadata": {"app": "agent-stack", "uid": "alice", "thread_id": "thread"}}
+    provider = new()
+    assert provider.acquire("alice", "thread") != "old"
+    assert provider.destroy("old")
 
 
 def test_mount_change_and_duplicate_fail_closed(deployment, monkeypatch):
@@ -201,9 +227,9 @@ def test_mount_change_and_duplicate_fail_closed(deployment, monkeypatch):
     [
         {"ret": {"ret_code": 130404}, "data": []},
         {"ret": {"ret_code": 130500, "ret_msg": "cubelet unreachable"}, "size": 1, "data": []},
-        {"ret": {"ret_code": 0}, "size": 1},
-        {"ret": {"ret_code": 0}, "size": 0, "data": []},
-        {"ret": {"ret_code": 0}, "size": 1, "data": ["invalid"]},
+        {"ret": {"ret_code": 200}, "size": 1},
+        {"ret": {"ret_code": 200}, "size": 0, "data": []},
+        {"ret": {"ret_code": 200}, "size": 1, "data": ["invalid"]},
         {},
     ],
     ids=["unknown-node", "unreachable-node", "missing-data", "no-node", "invalid-row", "invalid-body"],
@@ -268,7 +294,7 @@ def test_explicit_destroy_preserves_host_files(deployment, tmp_path):
     provider = new()
     sid = provider.acquire("alice", "thread")
     provider.release(sid)
-    artifact = tmp_path / "workspaces/alice/thread/outputs/result.txt"
+    artifact = tmp_path / "workspaces/alice/outputs/result.txt"
     artifact.write_text("retained")
     assert provider.destroy(sid)
     assert not server.rows
