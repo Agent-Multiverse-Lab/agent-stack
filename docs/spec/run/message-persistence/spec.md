@@ -185,6 +185,15 @@ Agent Stream 正常结束
 `id`、`created_at` 和 `updated_at` 使用模型的自动生成规则；ORM 关系字段通过对应的
 仓储方法维护。创建消息只 `flush`，事务仍由调用方提交。
 
+### RUN-MP-010 Audit thread ownership
+
+`thread_service` 只有在通过 `uid + thread_id` 查到当前用户拥有且未删除的 Conversation 后，
+并确认 `runtime_metadata.uid/thread_id` 与当前请求参数一致，才允许创建 Model/Tool 审计收集器；
+普通执行和 Resume 使用同一归属规则。审计 Repository
+写入前必须再次校验 `AgentRun.uid/thread_id` 与 `Conversation.uid/thread_id` 均匹配当前用户，
+不得仅依赖调用方传入的 `thread_id`。终态 State 将 Model 审计行转为普通消息时也必须使用
+相同的 `uid + thread_id` 归属条件。
+
 ## 5. Acceptance Criteria
 
 ### 执行过程历史恢复
@@ -216,4 +225,5 @@ Agent Stream 正常结束
 - 保持 Conversation -> Message -> ToolCall 的物理删除级联；
 - 消息事务提交完成后才允许产生 `finished`；
 - 按 Thread 创建消息时，调用方提供的全部可写业务字段进入同一条 Message；
+- 非当前用户拥有的 `thread_id` 不创建、完成或转正任何 Model/Tool 审计消息；
 - 历史与流式展示使用同一组内容语义，刷新后可恢复持久化的执行过程。

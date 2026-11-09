@@ -325,6 +325,13 @@ yield make_agent_stream_event(
 调用只位于 Agent Stream 的正常完成路径。保存或提交失败会沿现有异常路径传播，不发出
 `finished`。
 
+### 5.5 Audit Thread ownership
+
+`thread_service` 在普通执行和 Resume 中都先通过 `uid + thread_id` 获得当前用户拥有的
+Conversation，并确认运行元数据与当前请求的 `uid/thread_id` 一致，再创建 Model/Tool 审计
+收集器。收集器携带 `uid`，Repository 写入前同时核对 AgentRun 与 Conversation 的
+`uid/thread_id`；终态审计转正同样使用该归属条件。
+
 ## 6. Validation
 
 新增一个 `test/test_thread_message_persistence.py` 用例，输入固定为：

@@ -80,6 +80,7 @@ def _serialize_subagent_run_status(run: AgentRun) -> SubAgentRunStatus:
 def _build_record(
     *,
     conversation: Conversation,
+    parent_conversation_id: int,
     message: Message,
     run: AgentRun,
 ) -> SubAgentRunRecord:
@@ -87,7 +88,7 @@ def _build_record(
         "run_id": str(run.id),
         "thread_id": str(conversation.thread_id),
         "conversation_id": int(conversation.id),
-        "parent_conversation_id": int(conversation.parent_conversation_id),
+        "parent_conversation_id": parent_conversation_id,
         "created_by_run_id": str(run.created_by_run_id),
         "trigger_message_id": int(message.id),
         "request_id": str(run.request_id),
@@ -204,7 +205,6 @@ class SubAgentRunService:
                 uid=uid,
                 thread_id=child_thread_id,
                 agent_slug=agent_slug,
-                parent_conversation_id=int(parent_conversation.id),
                 conversation_metadata={"model": model},
             )
             trigger_message = (
@@ -231,6 +231,12 @@ class SubAgentRunService:
                 created_by_run_id=created_by_run_id,
                 run_metadata={"tool_call_id": tool_call_id, "model": model},
             )
+            await self.conversation_repository.create_subagent_relation(
+                uid=uid,
+                parent_conversation=parent_conversation,
+                child_conversation=child_conversation,
+                created_by_run_id=created_by_run_id,
+            )
             trigger_message.agent_run_id = child_run.id
             await self.db.flush()
             await self.db.commit()
@@ -240,6 +246,7 @@ class SubAgentRunService:
 
         return _build_record(
             conversation=child_conversation,
+            parent_conversation_id=int(parent_conversation.id),
             message=trigger_message,
             run=child_run,
         )

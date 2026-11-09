@@ -365,6 +365,7 @@ class AgentRunRepository:
         self,
         run_id: str,
         *,
+        uid: str,
         worker_id: str,
         conversation_thread_id: str,
         request_id: str,
@@ -395,10 +396,24 @@ class AgentRunRepository:
             lease = getattr(run, "lease_expires_at", None)
             if lease is not None and _as_utc(lease) <= _as_utc(datetime.now(UTC)):
                 raise RuntimeError(f"Agent Run 当前执行租约已过期：{run_id}")
-        if run.thread_id != conversation_thread_id or run.request_id != request_id:
-            raise ValueError("AgentRun 输出必须属于同一 thread 和 request")
+        if (
+            run.uid != uid
+            or run.thread_id != conversation_thread_id
+            or run.request_id != request_id
+        ):
+            raise ValueError("AgentRun 输出必须属于当前用户的同一 thread 和 request")
         if run.conversation_id is None:
             raise ValueError("AgentRun 输出缺少 conversation 归属")
+        conversation_result = await self.session.execute(
+            select(Conversation.id).where(
+                Conversation.id == run.conversation_id,
+                Conversation.uid == uid,
+                Conversation.thread_id == conversation_thread_id,
+                Conversation.deleted_at.is_(None),
+            )
+        )
+        if conversation_result.scalar_one_or_none() is None:
+            raise ValueError("AgentRun 输出 thread 不属于当前用户")
         return run
 
     async def close_running_audit_messages(

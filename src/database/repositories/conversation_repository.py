@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
@@ -10,6 +10,7 @@ from src.database.models import (
     AgentRun,
     Conversation,
     Message,
+    SubAgentConversationRelation,
     ToolCall,
 )
 
@@ -58,7 +59,14 @@ class ConversationRepository:
             )
             .where(
                 Conversation.uid == uid,
-                Conversation.parent_conversation_id.is_(None),
+                ~exists(
+                    select(SubAgentConversationRelation.id).where(
+                        SubAgentConversationRelation.child_conversation_id
+                        == Conversation.id,
+                        SubAgentConversationRelation.uid == uid,
+                        SubAgentConversationRelation.deleted_at.is_(None),
+                    )
+                ),
                 Conversation.deleted_at.is_(None),
             )
         )
@@ -105,7 +113,14 @@ class ConversationRepository:
             .where(
                 Conversation.uid == uid,
                 Conversation.thread_id == thread_id,
-                Conversation.parent_conversation_id.is_(None),
+                ~exists(
+                    select(SubAgentConversationRelation.id).where(
+                        SubAgentConversationRelation.child_conversation_id
+                        == Conversation.id,
+                        SubAgentConversationRelation.uid == uid,
+                        SubAgentConversationRelation.deleted_at.is_(None),
+                    )
+                ),
                 Conversation.deleted_at.is_(None),
             )
             .execution_options(populate_existing=True)
@@ -217,9 +232,17 @@ class ConversationRepository:
             .cte("conversation_tree", recursive=True)
         )
         child = aliased(Conversation)
+        relation = aliased(SubAgentConversationRelation)
         tree = tree.union_all(
-            select(child.id).where(
-                child.parent_conversation_id == tree.c.id,
+            select(child.id)
+            .join(
+                relation,
+                relation.child_conversation_id == child.id,
+            )
+            .where(
+                relation.parent_conversation_id == tree.c.id,
+                relation.uid == uid,
+                relation.deleted_at.is_(None),
                 child.uid == uid,
                 child.deleted_at.is_(None),
             )
@@ -237,7 +260,6 @@ class ConversationRepository:
         uid: str,
         thread_id: str,
         agent_slug: str,
-        parent_conversation_id: int | None = None,
         title: str | None = None,
         summary: str | None = None,
         conversation_metadata: dict | None = None,
@@ -247,7 +269,6 @@ class ConversationRepository:
             uid=uid,
             thread_id=thread_id,
             agent_id=agent_slug,
-            parent_conversation_id=parent_conversation_id,
             title=title or "",
             summary=summary,
             conversation_metadata=dict(conversation_metadata or {}),
@@ -255,6 +276,33 @@ class ConversationRepository:
         self.session.add(conversation)
         await self.session.flush()
         return conversation
+
+    async def create_subagent_relation(
+        self,
+        *,
+        uid: str,
+        parent_conversation: Conversation,
+        child_conversation: Conversation,
+        created_by_run_id: str,
+    ) -> SubAgentConversationRelation:
+        """创建父子 Agent 会话关系，并验证双方属于同一用户。"""
+        normalized_uid = str(uid)
+        if str(parent_conversation.uid) != normalized_uid:
+            raise ValueError("父会话不属于当前用户")
+        if str(child_conversation.uid) != normalized_uid:
+            raise ValueError("子会话不属于当前用户")
+        if int(parent_conversation.id) == int(child_conversation.id):
+            raise ValueError("父子会话不能相同")
+
+        relation = SubAgentConversationRelation(
+            uid=normalized_uid,
+            parent_conversation_id=int(parent_conversation.id),
+            child_conversation_id=int(child_conversation.id),
+            created_by_run_id=created_by_run_id,
+        )
+        self.session.add(relation)
+        await self.session.flush()
+        return relation
 
     async def update_conversation(
         self,
@@ -294,6 +342,18 @@ class ConversationRepository:
                 deleted_at=deleted_at,
                 updated_at=deleted_at,
             )
+        )
+        await self.session.execute(
+            update(SubAgentConversationRelation)
+            .where(
+                SubAgentConversationRelation.uid == uid,
+                SubAgentConversationRelation.deleted_at.is_(None),
+                or_(
+                    SubAgentConversationRelation.parent_conversation_id.in_(conversation_ids),
+                    SubAgentConversationRelation.child_conversation_id.in_(conversation_ids),
+                ),
+            )
+            .values(deleted_at=deleted_at)
         )
         await self.session.flush()
 
