@@ -2,6 +2,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
@@ -74,7 +75,6 @@ class Conversation(Base):
         Index(
             "ix_conversation_thread_list",
             "uid",
-            "parent_conversation_id",
             "deleted_at",
             "updated_at",
             "id",
@@ -84,13 +84,6 @@ class Conversation(Base):
     id = Column(Integer, primary_key=True, autoincrement=True, comment="会话表主键")
     uid = Column(String(64), index=True, nullable=False, comment="uid")
     thread_id = Column(String(64), unique=True, index=True, nullable=False, comment="会话的thread_id")
-    parent_conversation_id = Column(
-        Integer,
-        ForeignKey("conversation.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-        comment="父会话ID",
-    )
     agent_id = Column(String(64), index=True, nullable=False, comment="当前会话绑定的agent")
     title = Column(String(255), nullable=False, comment="会话标题")
     summary = Column(Text, nullable=True, comment="会话摘要")
@@ -99,18 +92,56 @@ class Conversation(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), comment="更新时间")
     deleted_at = Column(DateTime(timezone=True), nullable=True, comment="软删除时间")
 
-    parent = relationship(
-        "Conversation",
-        remote_side=[id],
-        back_populates="children",
-    )
-    children = relationship(
-        "Conversation",
-        back_populates="parent",
-        cascade="all, delete-orphan",
-        single_parent=True,
-    )
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at")
+
+
+class SubAgentConversationRelation(Base):
+    """父 Agent 会话与子 Agent 会话之间可审计、可软删除的关系。"""
+
+    __tablename__ = "subagent_conversation_relation"
+    __table_args__ = (
+        CheckConstraint(
+            "parent_conversation_id <> child_conversation_id",
+            name="ck_subagent_conversation_relation_not_self",
+        ),
+        Index(
+            "uq_subagent_conversation_relation_active_child",
+            "child_conversation_id",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+        Index(
+            "ix_subagent_conversation_relation_active_parent",
+            "uid",
+            "parent_conversation_id",
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="子代理会话关系ID")
+    uid = Column(String(64), nullable=False, comment="关系所属用户")
+    parent_conversation_id = Column(
+        Integer,
+        ForeignKey("conversation.id", ondelete="CASCADE"),
+        nullable=False,
+        comment="父 Agent 会话ID",
+    )
+    child_conversation_id = Column(
+        Integer,
+        ForeignKey("conversation.id", ondelete="CASCADE"),
+        nullable=False,
+        comment="子 Agent 会话ID",
+    )
+    created_by_run_id = Column(
+        String(64),
+        ForeignKey("agent_run.id", ondelete="RESTRICT"),
+        nullable=False,
+        comment="创建关系的父 Agent Run ID",
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="关系创建时间")
+    deleted_at = Column(DateTime(timezone=True), nullable=True, comment="关系解除时间")
 
 
 class Message(Base):
@@ -209,7 +240,7 @@ class AgentRun(Base):
     id = Column(String(64), primary_key=True, comment="运行ID")
     thread_id = Column(String(64), index=True, nullable=False, comment="会话ID")
     conversation_id = Column(Integer, ForeignKey("conversation.id", ondelete="CASCADE"), nullable=False, comment="会话ID")
-    uid = Column(String(64), ForeignKey("user.uid", ondelete="CASCADE"), nullable=False, comment="用户ID")
+    uid = Column(String(64), nullable=False, comment="运行发生时的用户归属快照")
     agent_id = Column(String(128), nullable=False, comment="智能体ID")
     run_type = Column(
         String(32),
@@ -249,7 +280,6 @@ class AgentRun(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), comment="更新时间")
 
-    user = relationship("User")
     messages = relationship(
         "Message",
         back_populates="agent_run",

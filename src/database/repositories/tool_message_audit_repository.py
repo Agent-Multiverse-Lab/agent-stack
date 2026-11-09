@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Literal
 
 from sqlalchemy import select
@@ -28,6 +28,7 @@ class ToolMessageAuditRepository:
     async def start(
         self,
         *,
+        uid: str,
         run_id: str,
         request_id: str,
         thread_id: str,
@@ -50,6 +51,7 @@ class ToolMessageAuditRepository:
             raise ValueError("Tool sequence 不能为负数")
 
         run = await self._lock_run(
+            uid=uid,
             run_id=run_id,
             request_id=request_id,
             thread_id=thread_id,
@@ -98,6 +100,7 @@ class ToolMessageAuditRepository:
     async def complete(
         self,
         *,
+        uid: str,
         run_id: str,
         request_id: str,
         thread_id: str,
@@ -111,6 +114,7 @@ class ToolMessageAuditRepository:
     ) -> Message:
         """完成同一 Tool 审计消息（成功）。"""
         return await self._finish(
+            uid=uid,
             run_id=run_id,
             request_id=request_id,
             thread_id=thread_id,
@@ -128,6 +132,7 @@ class ToolMessageAuditRepository:
     async def fail(
         self,
         *,
+        uid: str,
         run_id: str,
         request_id: str,
         thread_id: str,
@@ -142,6 +147,7 @@ class ToolMessageAuditRepository:
     ) -> Message:
         """关闭失败 Tool 审计消息。"""
         return await self._finish(
+            uid=uid,
             run_id=run_id,
             request_id=request_id,
             thread_id=thread_id,
@@ -159,6 +165,7 @@ class ToolMessageAuditRepository:
     async def observe_error(
         self,
         *,
+        uid: str,
         run_id: str,
         request_id: str,
         thread_id: str,
@@ -179,6 +186,7 @@ class ToolMessageAuditRepository:
             raise ValueError("Tool finished_sequence 不能为负数")
 
         run = await self._lock_run(
+            uid=uid,
             run_id=run_id,
             request_id=request_id,
             thread_id=thread_id,
@@ -228,6 +236,7 @@ class ToolMessageAuditRepository:
     async def _finish(
         self,
         *,
+        uid: str,
         run_id: str,
         request_id: str,
         thread_id: str,
@@ -251,6 +260,7 @@ class ToolMessageAuditRepository:
             raise ValueError("Tool finished_sequence 不能为负数")
 
         run = await self._lock_run(
+            uid=uid,
             run_id=run_id,
             request_id=request_id,
             thread_id=thread_id,
@@ -310,6 +320,7 @@ class ToolMessageAuditRepository:
     async def _lock_run(
         self,
         *,
+        uid: str,
         run_id: str,
         request_id: str,
         thread_id: str,
@@ -317,6 +328,7 @@ class ToolMessageAuditRepository:
     ):
         run = await self.run_repo.lock_output_persistence(
             run_id,
+            uid=uid,
             worker_id=worker_id,
             conversation_thread_id=thread_id,
             request_id=request_id,

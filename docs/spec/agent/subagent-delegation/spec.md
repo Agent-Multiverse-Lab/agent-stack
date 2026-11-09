@@ -22,6 +22,12 @@
 子代理包导出、Agent 注册、父代理装配和持久化测试只引用当前存在的 Agent 实现。
 删除子代理实现时，同步清理对应引用与当前架构文档中的能力描述。
 
+### AG-SUB-006
+
+父子 Agent 会话关系由 `subagent_conversation_relation` 独立持久化。关系记录保存所属用户、
+父子 Conversation、创建它的父 Run 以及创建/软删除时间；Conversation 只保存会话自身数据，
+AgentRun 的 `created_by_run_id` 继续作为执行血缘的权威字段。
+
 ## 3. Example
 
 ```python
@@ -34,3 +40,4 @@ await enqueue_agent_run(sub_run_id)
 
 - 所有子代理都可追溯到 parent run
 - 主 run 与子 run 的生命周期一致性可读
+- 父子会话无需依赖 Conversation 自关联字段即可查询和递归软删除

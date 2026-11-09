@@ -14,7 +14,12 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.database.models import MODEL_AUDIT_MESSAGE_TYPE, Message
+from src.database.models import (
+    MODEL_AUDIT_MESSAGE_TYPE,
+    AgentRun,
+    Conversation,
+    Message,
+)
 from src.database.repositories.agent_run_repository import AgentRunRepository
 
 
@@ -28,6 +33,7 @@ class ModelMessageAuditRepository:
     async def start(
         self,
         *,
+        uid: str,
         run_id: str,
         request_id: str,
         thread_id: str,
@@ -45,6 +51,7 @@ class ModelMessageAuditRepository:
             raise ValueError("Model sequence 不能为负数")
 
         run = await self._lock_run(
+            uid=uid,
             run_id=run_id,
             request_id=request_id,
             thread_id=thread_id,
@@ -82,6 +89,7 @@ class ModelMessageAuditRepository:
     async def finish(
         self,
         *,
+        uid: str,
         run_id: str,
         request_id: str,
         thread_id: str,
@@ -101,6 +109,7 @@ class ModelMessageAuditRepository:
             raise ValueError("Model duration_ms 不能为负数")
 
         run = await self._lock_run(
+            uid=uid,
             run_id=run_id,
             request_id=request_id,
             thread_id=thread_id,
@@ -138,6 +147,8 @@ class ModelMessageAuditRepository:
     async def reconcile_to_history(
         self,
         *,
+        uid: str,
+        thread_id: str,
         run_id: str,
         operation_id: str,
         content: str,
@@ -149,7 +160,12 @@ class ModelMessageAuditRepository:
         复用增量事实里已经保存的 started_at / sequence / duration_ms，不覆盖
         进程内已经观察到的生命周期事实。
         """
-        message = await self._get(run_id, operation_id)
+        message = await self._get_owned(
+            uid=uid,
+            thread_id=thread_id,
+            run_id=run_id,
+            operation_id=operation_id,
+        )
         if message is None:
             return None
 
@@ -195,6 +211,7 @@ class ModelMessageAuditRepository:
     async def _lock_run(
         self,
         *,
+        uid: str,
         run_id: str,
         request_id: str,
         thread_id: str,
@@ -202,6 +219,7 @@ class ModelMessageAuditRepository:
     ):
         run = await self.run_repo.lock_output_persistence(
             run_id,
+            uid=uid,
             worker_id=worker_id,
             conversation_thread_id=thread_id,
             request_id=request_id,
@@ -209,6 +227,34 @@ class ModelMessageAuditRepository:
         if run is None:
             raise ValueError(f"AgentRun 不存在: {run_id}")
         return run
+
+    async def _get_owned(
+        self,
+        *,
+        uid: str,
+        thread_id: str,
+        run_id: str,
+        operation_id: str,
+    ) -> Message | None:
+        result = await self.db.execute(
+            select(Message)
+            .join(AgentRun, AgentRun.id == Message.agent_run_id)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(
+                Message.agent_run_id == run_id,
+                Message.operation_id == operation_id,
+                Message.role == "assistant",
+                AgentRun.uid == uid,
+                AgentRun.thread_id == thread_id,
+                AgentRun.conversation_id == Conversation.id,
+                Conversation.uid == uid,
+                Conversation.thread_id == thread_id,
+                Conversation.deleted_at.is_(None),
+            )
+            .order_by(Message.id.asc())
+            .execution_options(populate_existing=True)
+        )
+        return result.scalars().first()
 
     @staticmethod
     def _require_same_owner(

@@ -20,7 +20,16 @@ from src.database.repositories.tool_message_audit_repository import (
 class ToolMessageAuditCollector:
     """按 tools lifecycle 串行提交 ToolMessage 审计短事务。"""
 
-    def __init__(self, *, run_id: str, request_id: str, thread_id: str, worker_id: str):
+    def __init__(
+        self,
+        *,
+        uid: str,
+        run_id: str,
+        request_id: str,
+        thread_id: str,
+        worker_id: str,
+    ):
+        self.uid = uid
         self.run_id = run_id
         self.request_id = request_id
         self.thread_id = thread_id
@@ -58,6 +67,7 @@ class ToolMessageAuditCollector:
         namespace = self._namespace(event)
         async with postgres_manager.get_async_session_context() as db:
             _message, created = await ToolMessageAuditRepository(db).start(
+                uid=self.uid,
                 run_id=self.run_id,
                 request_id=self.request_id,
                 thread_id=self.thread_id,
@@ -119,6 +129,7 @@ class ToolMessageAuditCollector:
             else None
         )
         kwargs = {
+            "uid": self.uid,
             "run_id": self.run_id,
             "request_id": self.request_id,
             "thread_id": self.thread_id,
@@ -134,6 +145,7 @@ class ToolMessageAuditCollector:
             repository = ToolMessageAuditRepository(db)
             if wait_for_run_terminal:
                 await repository.observe_error(
+                    uid=self.uid,
                     run_id=self.run_id,
                     request_id=self.request_id,
                     thread_id=self.thread_id,

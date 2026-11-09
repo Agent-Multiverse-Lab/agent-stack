@@ -45,7 +45,16 @@ def _json_safe(value: Any) -> Any:
 class ModelMessageAuditCollector:
     """按 message lifecycle 串行提交 Model 审计短事务。"""
 
-    def __init__(self, *, run_id: str, request_id: str, thread_id: str, worker_id: str):
+    def __init__(
+        self,
+        *,
+        uid: str,
+        run_id: str,
+        request_id: str,
+        thread_id: str,
+        worker_id: str,
+    ):
+        self.uid = uid
         self.run_id = run_id
         self.request_id = request_id
         self.thread_id = thread_id
@@ -119,6 +128,7 @@ class ModelMessageAuditCollector:
 
         async with postgres_manager.get_async_session_context() as db:
             _message, created = await ModelMessageAuditRepository(db).start(
+                uid=self.uid,
                 run_id=self.run_id,
                 request_id=self.request_id,
                 thread_id=self.thread_id,
@@ -163,6 +173,7 @@ class ModelMessageAuditCollector:
 
         async with postgres_manager.get_async_session_context() as db:
             await ModelMessageAuditRepository(db).finish(
+                uid=self.uid,
                 run_id=self.run_id,
                 request_id=self.request_id,
                 thread_id=self.thread_id,

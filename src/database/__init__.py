@@ -15,6 +15,7 @@ from .models import (
     SatelliteSceneAsset,
     SatelliteSource,
     Skill,
+    SubAgentConversationRelation,
     ToolCall,
     User,
 )
@@ -37,6 +38,7 @@ __all__ = [
     "SatelliteSource",
     "PostgreManger",
     "Skill",
+    "SubAgentConversationRelation",
     "ToolCall",
     "User",
     "get_db",

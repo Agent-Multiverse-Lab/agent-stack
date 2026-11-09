@@ -10,7 +10,11 @@ from unittest import mock
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from server.service import model_message_audit_service, tool_message_audit_service
+from server.service import (
+    model_message_audit_service,
+    thread_service,
+    tool_message_audit_service,
+)
 from server.service.model_message_audit_service import ModelMessageAuditCollector
 from server.service.tool_message_audit_service import ToolMessageAuditCollector
 from src.database.models import (
@@ -68,6 +72,7 @@ class ModelAuditCollectorTest(unittest.IsolatedAsyncioTestCase):
 
         monotonic_values = iter([100.0, 100.321])
         collector = ModelMessageAuditCollector(
+            uid="user-1",
             run_id="run-1",
             request_id="request-1",
             thread_id="thread-1",
@@ -145,6 +150,7 @@ class ModelAuditCollectorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_lifecycle_without_seq_is_rejected(self):
         collector = ModelMessageAuditCollector(
+            uid="user-1",
             run_id="run-1",
             request_id="request-1",
             thread_id="thread-1",
@@ -183,6 +189,7 @@ class ToolAuditCollectorTest(unittest.IsolatedAsyncioTestCase):
 
         monotonic_values = iter([50.0, 50.25])
         collector = ToolMessageAuditCollector(
+            uid="user-1",
             run_id="run-1",
             request_id="request-1",
             thread_id="thread-1",
@@ -232,12 +239,55 @@ class ToolAuditCollectorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_non_tools_event_is_ignored(self):
         collector = ToolMessageAuditCollector(
+            uid="user-1",
             run_id="run-1",
             request_id="request-1",
             thread_id="thread-1",
             worker_id="worker-1",
         )
         await collector.consume({"method": "messages", "data": {}})
+
+
+class AuditThreadOwnershipTest(unittest.TestCase):
+    def test_thread_service_rejects_foreign_thread_before_building_collector(self):
+        conversation = SimpleNamespace(
+            uid="user-2",
+            thread_id="thread-1",
+            deleted_at=None,
+        )
+        with self.assertRaisesRegex(ValueError, "属于当前用户"):
+            thread_service._build_model_message_audit_collector(
+                {
+                    "run_id": "run-1",
+                    "request_id": "request-1",
+                    "worker_id": "worker-1",
+                    "uid": "user-1",
+                    "thread_id": "thread-1",
+                },
+                uid="user-1",
+                thread_id="thread-1",
+                conversation=conversation,
+            )
+
+    def test_thread_service_rejects_runtime_thread_mismatch(self):
+        conversation = SimpleNamespace(
+            uid="user-1",
+            thread_id="thread-1",
+            deleted_at=None,
+        )
+        with self.assertRaisesRegex(ValueError, "runtime uid/thread_id"):
+            thread_service._build_model_message_audit_collector(
+                {
+                    "run_id": "run-1",
+                    "request_id": "request-1",
+                    "worker_id": "worker-1",
+                    "uid": "user-1",
+                    "thread_id": "thread-2",
+                },
+                uid="user-1",
+                thread_id="thread-1",
+                conversation=conversation,
+            )
 
 
 class _RecordingCollector:
@@ -429,6 +479,7 @@ class AuditRepositoryTest(unittest.IsolatedAsyncioTestCase):
 
     async def _start_model(self, sequence: int = 7):
         return await ModelMessageAuditRepository(self.session).start(
+            uid="user-1",
             run_id="run-1",
             request_id="request-1",
             thread_id="thread-1",
@@ -448,6 +499,7 @@ class AuditRepositoryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(message.sequence, 7)
 
         await ModelMessageAuditRepository(self.session).finish(
+            uid="user-1",
             run_id="run-1",
             request_id="request-1",
             thread_id="thread-1",
@@ -481,6 +533,7 @@ class AuditRepositoryTest(unittest.IsolatedAsyncioTestCase):
         self.db.commit()
         repository = ModelMessageAuditRepository(self.session)
         kwargs = dict(
+            uid="user-1",
             run_id="run-1",
             request_id="request-1",
             thread_id="thread-1",
@@ -500,6 +553,7 @@ class AuditRepositoryTest(unittest.IsolatedAsyncioTestCase):
     async def test_other_worker_cannot_write_audit(self):
         with self.assertRaises(RuntimeError):
             await ModelMessageAuditRepository(self.session).start(
+                uid="user-1",
                 run_id="run-1",
                 request_id="request-1",
                 thread_id="thread-1",
@@ -509,12 +563,27 @@ class AuditRepositoryTest(unittest.IsolatedAsyncioTestCase):
                 started_at=datetime.now(UTC),
             )
 
+    async def test_other_user_cannot_write_audit_for_thread(self):
+        with self.assertRaisesRegex(ValueError, "当前用户"):
+            await ModelMessageAuditRepository(self.session).start(
+                uid="user-2",
+                run_id="run-1",
+                request_id="request-1",
+                thread_id="thread-1",
+                worker_id="worker-1",
+                operation_id="foreign-operation",
+                sequence=1,
+                started_at=datetime.now(UTC),
+            )
+        self.assertEqual(self._messages(), [])
+
     async def test_reconcile_converts_audit_row_and_keeps_timing(self):
         message, _ = await self._start_model()
         self.db.commit()
         started_at = message.started_at
         repository = ModelMessageAuditRepository(self.session)
         await repository.finish(
+            uid="user-1",
             run_id="run-1",
             request_id="request-1",
             thread_id="thread-1",
@@ -528,6 +597,8 @@ class AuditRepositoryTest(unittest.IsolatedAsyncioTestCase):
         self.db.commit()
 
         reconciled = await repository.reconcile_to_history(
+            uid="user-1",
+            thread_id="thread-1",
             run_id="run-1",
             operation_id="lc_run--1",
             content="final",
@@ -547,6 +618,7 @@ class AuditRepositoryTest(unittest.IsolatedAsyncioTestCase):
     async def test_tool_audit_lifecycle_and_failure(self):
         repository = ToolMessageAuditRepository(self.session)
         await repository.start(
+            uid="user-1",
             run_id="run-1",
             request_id="request-1",
             thread_id="thread-1",
@@ -559,6 +631,7 @@ class AuditRepositoryTest(unittest.IsolatedAsyncioTestCase):
         )
         self.db.commit()
         await repository.complete(
+            uid="user-1",
             run_id="run-1",
             request_id="request-1",
             thread_id="thread-1",
@@ -587,6 +660,8 @@ class AuditRepositoryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([message.message_type for message in history], [])
 
         await ModelMessageAuditRepository(self.session).reconcile_to_history(
+            uid="user-1",
+            thread_id="thread-1",
             run_id="run-1",
             operation_id="lc_run--1",
             content="final",
@@ -601,13 +676,13 @@ class AuditRepositoryTest(unittest.IsolatedAsyncioTestCase):
     async def test_history_includes_finished_tool_audit(self):
         repository = ToolMessageAuditRepository(self.session)
         await repository.start(
-            run_id="run-1", request_id="request-1", thread_id="thread-1", worker_id="worker-1",
+            uid="user-1", run_id="run-1", request_id="request-1", thread_id="thread-1", worker_id="worker-1",
             tool_call_id="call-1", tool_name="read_file", tool_input={"path": "a"},
             sequence=1, started_at=datetime.now(UTC),
         )
         self.db.commit()
         await repository.fail(
-            run_id="run-1", request_id="request-1", thread_id="thread-1", worker_id="worker-1",
+            uid="user-1", run_id="run-1", request_id="request-1", thread_id="thread-1", worker_id="worker-1",
             tool_call_id="call-1", output={"content": "denied", "status": "error"}, content="denied",
             error_message="denied", finished_at=datetime.now(UTC), duration_ms=10, finished_sequence=2,
         )
@@ -649,6 +724,7 @@ class AuditRepositoryTest(unittest.IsolatedAsyncioTestCase):
     async def test_terminal_close_preserves_observed_finish_time(self):
         repository = ToolMessageAuditRepository(self.session)
         await repository.start(
+            uid="user-1",
             run_id="run-1",
             request_id="request-1",
             thread_id="thread-1",
@@ -662,6 +738,7 @@ class AuditRepositoryTest(unittest.IsolatedAsyncioTestCase):
         self.db.commit()
         observed = datetime(2026, 8, 3, 10, 0, tzinfo=UTC)
         await repository.observe_error(
+            uid="user-1",
             run_id="run-1",
             request_id="request-1",
             thread_id="thread-1",

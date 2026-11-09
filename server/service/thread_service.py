@@ -884,6 +884,7 @@ async def save_partial_message(
                 raise ValueError("持久化 AgentRun 部分输出需要当前 worker 和 request")
             locked_run = await run_repo.lock_output_persistence(
                 run_id,
+                uid=uid,
                 worker_id=worker_id,
                 conversation_thread_id=thread_id,
                 request_id=request_id,
@@ -1001,6 +1002,8 @@ async def save_ai_message(
         # 终态 reconcile：流式期间已落库的审计行按 operation_id 复用，转为普通
         # 输出，保留真实的 started_at / sequence / duration_ms / usage。
         saved_ai_message = await ModelMessageAuditRepository(db).reconcile_to_history(
+            uid=user_id,
+            thread_id=thread_id,
             run_id=agent_run_id,
             operation_id=langgraph_message_id,
             content=ai_content,
@@ -1286,16 +1289,47 @@ def _has_audit_stream_event(metadata: dict | None) -> bool:
     )
 
 
+def _require_audit_thread_owner(
+    *,
+    conversation: Conversation,
+    runtime_metadata: dict,
+    uid: str,
+    thread_id: str,
+) -> None:
+    """校验运行元数据、请求参数和 Conversation 的 Thread 归属一致。"""
+    runtime_uid = str(runtime_metadata.get("uid") or "").strip()
+    runtime_thread_id = str(runtime_metadata.get("thread_id") or "").strip()
+    if runtime_uid != str(uid) or runtime_thread_id != str(thread_id):
+        raise ValueError("消息审计的 runtime uid/thread_id 与当前请求不一致")
+    if (
+        str(conversation.uid) != str(uid)
+        or str(conversation.thread_id) != str(thread_id)
+        or conversation.deleted_at is not None
+    ):
+        raise ValueError("消息审计只能处理属于当前用户的 thread_id")
+
+
 def _build_model_message_audit_collector(
-    runtime_metadata: dict, thread_id: str
+    runtime_metadata: dict,
+    *,
+    thread_id: str,
+    uid: str,
+    conversation: Conversation,
 ) -> ModelMessageAuditCollector | None:
     """仅为具备完整 AgentRun 因果归属的 Worker 流创建 Model 审计器。"""
+    _require_audit_thread_owner(
+        conversation=conversation,
+        runtime_metadata=runtime_metadata,
+        uid=uid,
+        thread_id=thread_id,
+    )
     run_id = str(runtime_metadata.get("run_id") or "").strip()
     request_id = str(runtime_metadata.get("request_id") or "").strip()
     worker_id = str(runtime_metadata.get("worker_id") or "").strip()
     if not run_id or not request_id or not worker_id:
         return None
     return ModelMessageAuditCollector(
+        uid=uid,
         run_id=run_id,
         request_id=request_id,
         thread_id=thread_id,
@@ -1310,6 +1344,7 @@ def _build_tool_message_audit_collector(
     if model_audit is None:
         return None
     return ToolMessageAuditCollector(
+        uid=model_audit.uid,
         run_id=model_audit.run_id,
         request_id=model_audit.request_id,
         thread_id=model_audit.thread_id,
@@ -1500,7 +1535,12 @@ async def stream_agent_response(
     agent_context.update_context(agent_runtime_context)
     accumulated_msg: list[str] = []
     # 执行期间每条消息/lifecycle 边界独立提交审计短事务。
-    model_audit = _build_model_message_audit_collector(runtime_metadata, thread_id)
+    model_audit = _build_model_message_audit_collector(
+        runtime_metadata,
+        thread_id=thread_id,
+        uid=current_user.uid,
+        conversation=conversation,
+    )
     tool_audit = _build_tool_message_audit_collector(model_audit)
 
     try:
@@ -1637,8 +1677,6 @@ async def resume_agent_response(
     runtime_metadata = dict(runtime_metadata or {})
     run_id = runtime_metadata.get("run_id")
     accumulated_msg: list[str] = []
-    model_audit = _build_model_message_audit_collector(runtime_metadata, thread_id)
-    tool_audit = _build_tool_message_audit_collector(model_audit)
 
     def make_agent_resume_event(
         status: str | None = None,
@@ -1683,6 +1721,13 @@ async def resume_agent_response(
                 run_type="resume",
                 model=runtime_metadata.get("model"),
             )
+        model_audit = _build_model_message_audit_collector(
+            runtime_metadata,
+            thread_id=thread_id,
+            uid=current_user.uid,
+            conversation=conversation,
+        )
+        tool_audit = _build_tool_message_audit_collector(model_audit)
         runtime_metadata.update({"thread_id": thread_id, "uid": current_user.uid})
         agent_runtime_context = await _build_agent_runtime_context(
             uid=current_user.uid,

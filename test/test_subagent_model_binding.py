@@ -18,6 +18,7 @@ class SubAgentModelBindingTest(unittest.IsolatedAsyncioTestCase):
         self.conversations = SimpleNamespace(
             get_conversation_by_id=AsyncMock(return_value=SimpleNamespace(id=1, uid="user-1")),
             create_conversation=AsyncMock(), create_agent_input_message=AsyncMock(),
+            create_subagent_relation=AsyncMock(),
         )
 
         async def conversation(**values):
@@ -67,6 +68,10 @@ class SubAgentModelBindingTest(unittest.IsolatedAsyncioTestCase):
                          {"model": "deepseek/deepseek-v4-flash"})
         self.assertEqual(self.runs.create_run.await_args.kwargs["run_metadata"],
                          {"model": "deepseek/deepseek-v4-flash", "tool_call_id": "tool-1"})
+        self.conversations.create_subagent_relation.assert_awaited_once()
+        relation = self.conversations.create_subagent_relation.await_args.kwargs
+        self.assertEqual(relation["uid"], "user-1")
+        self.assertEqual(relation["created_by_run_id"], "parent-run")
         self.db.commit.assert_awaited_once()
         self.enqueue.assert_awaited_once_with(record["run_id"])
 

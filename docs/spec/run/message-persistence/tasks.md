@@ -10,6 +10,7 @@
 | MP-004 | RUN-MP-003/004/005/006 | `server/service/thread_service.py` | 显式接收顶层 Run ID，从 checkpoint 读取 Message，按 `type` 调用两个 save 函数 |
 | MP-005 | RUN-MP-008 | `server/service/thread_service.py:stream_agent_response` | 在 `finished` 前保存并提交 Message/ToolCall |
 | MP-006 | RUN-MP-001/002/003/004/005/006/007/008 | `test/test_thread_message_persistence.py` | 用固定 state 验证完整持久化、输出指针和删除级联 |
+| MP-007 | RUN-MP-010 | `server/service/thread_service.py`, audit services/repositories | 审计器创建和消息写入均校验当前用户拥有 `thread_id`，并核对运行元数据一致性 |
 
 ## Ordered work
 
@@ -18,6 +19,7 @@
 3. 在 AgentRun Repository 内完成输出 Message 指针更新。
 4. 完成 Thread Service 的三个 save 函数和正常完成调用点。
 5. 增加一个 Message 遍历闭环测试并运行定向检查。
+6. 验证非当前用户不能创建、完成或转正指定 Thread 的审计消息。
 
 ## Done Conditions
 
@@ -33,4 +35,5 @@
 - Conversation 物理删除时，Message 和 ToolCall 由外键按层级级联删除；
 - 数据库事务完成后才产生 `finished`；
 - 没有 fallback、幂等扩展或其他事件链路修改；
+- 普通执行与 Resume 只有在 `uid + thread_id` 归属校验通过后才创建审计器；
 - 定向 unittest、compileall、migration 和 diff check 通过并如实报告。
