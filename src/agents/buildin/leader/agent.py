@@ -29,6 +29,7 @@ from src.agents.middlewares.subagent_middlware import create_subagent_middleware
 from src.agents.middlewares.summary_middleware import (
     create_summary_middleware_from_context,
 )
+from src.knowledge.tools import web_search
 
 
 class LeaderAgent(BaseAgent):
@@ -72,7 +73,7 @@ class LeaderAgent(BaseAgent):
         chat_model = await load_chat_model(runtime_context.model)
         return await self._build_agent(
             runtime_context,
-            tools=[*mcp_tools, ask_user, calculator, present_artifacts],
+            tools=[*mcp_tools, ask_user, calculator, present_artifacts, web_search],
             chat_model=chat_model,
         )
 

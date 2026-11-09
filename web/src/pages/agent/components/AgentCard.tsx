@@ -1,9 +1,10 @@
 import { useId, useRef, useState } from "react"
 import type { FormEvent } from "react"
-import { ArrowRight, Bot, Network, Save, X } from "lucide-react"
+import { ChevronRight, MoreHorizontal, Save, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { updateAgent } from "@/api/agent"
+import { AgentAvatar } from "@/components/common/AgentAvatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
@@ -42,7 +43,6 @@ export function AgentCard({
   const [enabled, setEnabled] = useState(agent.enabled)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
-  const Icon = agent.is_subagent ? Network : Bot
   const agentType = agent.is_subagent
     ? t("Sub agent")
     : agent.id === "LeaderAgent" ? t("Main agent") : t("Agent")
@@ -80,28 +80,31 @@ export function AgentCard({
   return (
     <article aria-label={agent.name} className="h-full">
       <Sheet open={open} onOpenChange={handleOpenChange}>
-        <Card className="relative h-full cursor-pointer gap-2 [--card-spacing:--spacing(3)] hover:border-input hover:bg-muted">
-          <CardHeader>
-            <div className="flex min-w-0 items-center gap-2.5">
-              <span className="grid size-8 shrink-0 place-items-center rounded-[7px] border border-border bg-secondary text-secondary-foreground">
-                <Icon className="size-4" aria-hidden />
-              </span>
-              <div className="min-w-0 space-y-0.5">
-                <h3 className="truncate text-sm font-semibold">{agent.name}</h3>
-                <p className="text-xs text-muted-foreground">{agentType}</p>
+        <Card className="relative h-full cursor-pointer gap-3 rounded-lg p-4 hover:border-input hover:bg-muted">
+          <CardHeader className="p-0">
+            <div className="flex min-w-0 items-start justify-between gap-2.5">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <AgentAvatar seed={agent.id} />
+                <div className="min-w-0 space-y-0.5">
+                  <h3 className="truncate text-sm font-semibold">{agent.name}</h3>
+                  <p className="truncate text-xs text-muted-foreground">{agent.id}</p>
+                </div>
               </div>
+              <span aria-hidden className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground">
+                <MoreHorizontal className="size-4" />
+              </span>
             </div>
           </CardHeader>
-          <CardContent className="flex flex-1 flex-col gap-2">
+          <CardContent className="flex flex-1 flex-col gap-3 p-0">
             <p className="line-clamp-2 min-h-[2.8em] break-words text-[13px] leading-[1.4] text-muted-foreground">
               {agent.description || t("No description")}
             </p>
             <div className="mt-auto flex items-center justify-between gap-3">
-              <Badge variant={agent.enabled ? "success" : "default"}>
-                {t(agent.enabled ? "Enabled" : "Disabled")}
+              <Badge variant={agent.is_subagent ? "default" : "secondary"}>
+                {t(agent.is_subagent ? "Internal" : "Public")}
               </Badge>
-              <span aria-hidden className="inline-flex h-6 items-center gap-1 rounded-sm border border-input bg-card px-2 text-xs">
-                {t("View details")} <ArrowRight className="size-3.5" />
+              <span aria-hidden className="inline-flex items-center gap-0.5 text-xs text-muted-foreground transition-colors group-hover/card:text-foreground">
+                {t("Go to chat")} <ChevronRight className="size-3.5" />
               </span>
             </div>
           </CardContent>

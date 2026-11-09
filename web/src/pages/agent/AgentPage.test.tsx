@@ -2,11 +2,22 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 import { listAgents, getAgentContext, updateAgent } from "@/api/agent"
+import { getModelProvider, listModelProviders } from "@/api/model"
 import AgentPage from "@/pages/agent/AgentPage"
 import { installBrowserStubs } from "@/test/browserStubs"
 import type { Agent } from "@/types/agent"
 
 vi.mock("@/api/agent", () => ({ listAgents: vi.fn(), getAgentContext: vi.fn(), updateAgent: vi.fn() }))
+vi.mock("@/api/model", () => ({
+  discoverProviderModels: vi.fn(),
+  getModelProvider: vi.fn(),
+  listModelProviders: vi.fn(),
+  saveModelProvider: vi.fn(),
+  testProviderConnection: vi.fn(),
+}))
+vi.mock("@/context/AuthContext", () => ({
+  useAuth: () => ({ accessToken: "test-token" }),
+}))
 
 const agentList: Agent[] = [
   {
@@ -47,6 +58,23 @@ beforeEach(() => {
     summary_keep_messages: 8, summary_tool_result_token_limit: 250, summary_prompt: "Summarize findings",
     tools: ["search"], mcps: ["documents"], skill_root: "/skills",
   })
+  vi.mocked(listModelProviders).mockResolvedValue([
+    {
+      provider_id: "deepseek",
+      name: "DeepSeek",
+      is_enabled: true,
+      has_api_key: true,
+    },
+  ])
+  vi.mocked(getModelProvider).mockResolvedValue({
+    provider_id: "deepseek",
+    name: "DeepSeek",
+    base_url: "https://api.deepseek.com/v1",
+    protocol: "openai_compatible",
+    is_enabled: true,
+    has_api_key: true,
+    enabled_models: [],
+  })
 })
 
 afterEach(() => {
@@ -74,14 +102,15 @@ it("shows database names and descriptions with the leader before separate agent 
     .toEqual(["DB research", "DB offline"])
   expect(agents.getByText("Research description from the database")).toBeTruthy()
   expect(agents.queryByRole("article", { name: "DB specialist" })).toBeNull()
-  expect(within(agents.getByRole("article", { name: "DB offline" })).getByText("Disabled")).toBeTruthy()
-  expect(within(agents.getByRole("article", { name: "DB research" })).queryByText("Disabled")).toBeNull()
+  expect(within(agents.getByRole("article", { name: "DB offline" })).getByText("offline-agent")).toBeTruthy()
+  expect(within(agents.getByRole("article", { name: "DB research" })).getByText("Public")).toBeTruthy()
 
   const subagents = within(screen.getByRole("region", { name: /^Sub agents/ }))
   expect(subagents.getAllByRole("article")).toEqual([
     subagents.getByRole("article", { name: "DB specialist" }),
   ])
   expect(subagents.getByText("Specialist description from the database")).toBeTruthy()
+  expect(within(subagents.getByRole("article", { name: "DB specialist" })).getByText("Internal")).toBeTruthy()
 })
 
 it("shows a failed request and retries to load the agents", async () => {
@@ -244,7 +273,7 @@ it("saves edited fields, prevents closing while saving, and reopens the updated 
   const main = within(screen.getByRole("region", { name: "Main agent" }))
   const updatedCard = main.getByRole("article", { name: "Saved coordinator" })
   expect(within(updatedCard).getByText(updated.description)).toBeTruthy()
-  expect(within(updatedCard).getByText("Disabled")).toBeTruthy()
+  expect(within(updatedCard).getByText("Public")).toBeTruthy()
   expect(screen.queryByRole("article", { name: "DB coordinator" })).toBeNull()
 
   fireEvent.click(screen.getByRole("button", { name: "View Saved coordinator details" }))
@@ -355,16 +384,42 @@ it("rejects a whitespace-only name and lets a disabled agent be enabled and save
     description: "Disabled description from the database",
     enabled: true,
   })
-  expect(within(screen.getByRole("article", { name: "DB offline" })).queryByText("Disabled"))
-    .toBeNull()
+  expect(within(screen.getByRole("article", { name: "DB offline" })).getByText("Public"))
+    .toBeTruthy()
 })
 
-it("renders the top header with the Agent title and refresh action", async () => {
+it("renders the top header with the Agent title, switches between Agents and Models tabs, and refreshes agents", async () => {
   render(<AgentPage />)
   await screen.findByRole("article", { name: "DB coordinator" })
   expect(screen.getByRole("heading", { name: "Agent", level: 1 })).toBeTruthy()
   expect(screen.getByRole("main", { name: "Agent" })).toBeTruthy()
+
+  const agentsButton = screen.getByRole("button", { name: "Agents" })
+  const modelsButton = screen.getByRole("button", { name: "Models" })
+  expect(agentsButton.getAttribute("aria-pressed")).toBe("true")
+  expect(agentsButton.className).toContain("bg-selection")
+  expect(modelsButton.getAttribute("aria-pressed")).toBe("false")
+  expect(modelsButton.className).not.toContain("bg-selection")
+
   fireEvent.click(screen.getByRole("button", { name: "Refresh agents" }))
   await waitFor(() => expect(listAgents).toHaveBeenCalledTimes(2))
   expect(await screen.findByRole("heading", { name: "Main agent" })).toBeTruthy()
+
+  fireEvent.click(modelsButton)
+  expect(modelsButton.getAttribute("aria-pressed")).toBe("true")
+  expect(modelsButton.className).toContain("bg-selection")
+  expect(agentsButton.getAttribute("aria-pressed")).toBe("false")
+  expect(agentsButton.className).not.toContain("bg-selection")
+  expect(screen.queryByRole("button", { name: "Refresh agents" })).toBeNull()
+  const providerCard = await screen.findByRole("article", { name: "DeepSeek" })
+  expect(within(providerCard).getByText("Enabled")).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "DeepSeek" }))
+  const providerDialog = await screen.findByRole("dialog", { name: "DeepSeek" })
+  expect(within(providerDialog).getByLabelText("API Key")).toBeTruthy()
+  fireEvent.click(within(providerDialog).getByRole("button", { name: "Cancel" }))
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+  fireEvent.click(agentsButton)
+  expect(agentsButton.getAttribute("aria-pressed")).toBe("true")
+  expect(await screen.findByRole("article", { name: "DB coordinator" })).toBeTruthy()
 })

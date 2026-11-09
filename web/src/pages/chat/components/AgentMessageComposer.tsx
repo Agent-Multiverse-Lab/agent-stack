@@ -9,7 +9,6 @@ import type {
 import {
   ArrowUpIcon,
   BookOpenIcon,
-  BotIcon,
   FileTextIcon,
   FolderIcon,
   LoaderCircleIcon,
@@ -36,6 +35,7 @@ import { listAgents } from "@/api/agent";
 import type { UploadedAttachmentResponse } from "@/api/attachment";
 import { listKnowledgeBases } from "@/api/knowledge";
 import { listSandboxWorkspace } from "@/api/sandbox";
+import { AgentAvatar } from "@/components/common/AgentAvatar";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -149,7 +149,7 @@ function MentionItemIcon({ item }: { item: MentionItem }) {
     return <BookOpenIcon className="size-4 shrink-0 text-primary" />;
   }
   if (item.type === "agent") {
-    return <BotIcon className="size-4 shrink-0 text-primary" />;
+    return <AgentAvatar seed={item.value} className="size-4 rounded-[4px]" />;
   }
   if (item.type === "skill") {
     return <WandSparklesIcon className="size-4 shrink-0 text-primary" />;

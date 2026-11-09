@@ -3,7 +3,7 @@
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Any
 
 from deepagents.middleware._utils import append_to_system_message
 from langchain.agents.middleware.types import (
@@ -29,30 +29,21 @@ from src.agents.base_context import BaseContext
 from src.database.repositories.agent_repository import AgentRepository
 from src.database.session import session_context
 
-TASK_SYSTEM_PROMPT = """## 子智能体委派
+SUBAGENT_SYSTEM_PROMPT = """## 子智能体
 
-你可以把复杂、独立的子任务交给已配置的子智能体处理。子智能体只返回最终结果，你看不到它的中间步骤。
+你可以把复杂、独立的子任务交给子智能体处理。子智能体只返回最终结果，你看不到它的中间步骤。
+使用 `subagent_start` 启动子智能体任务，`subagent_status` 查询状态，`subagent_cancel` 取消任务，`subagent_await` 等待结果。
 
-使用原则：
-- 任务目标明确、足够复杂、可以独立完成或需要隔离上下文时才委派；任务方向尚未确定或只需少量直接工具调用时不要委派。
-- 多个互不依赖的子任务可以并行委派。
-- 委派时说明清楚任务目标、已知背景、边界和期望输出，不要通过命令行或网络请求间接调用子智能体。
+- 不可直接访问或者调用子智能体的内部状态、文件系统、知识库或工具
+- 子智能体的运行状态和进度通过 `subagent_status` 查询，最终结果可通过 `subagent_status` 查询或 `subagent_await` 等待
+- 输入的 description 需写清楚目标，包含完整的上下文和期望输出
 
-调用方式：
-- 短任务且后续步骤必须立刻依赖结果时，使用 `task` 同步等待结果。
-- 耗时长或多个可并行的独立子任务，优先使用 `subagent_start` 在后台启动，后续按需使用 `subagent_status` 查询进度、`subagent_await` 等待结果或 `subagent_cancel` 取消。
-- 收到子智能体结果后，检查其完整性和一致性，不要直接拼接未经整理或互相冲突的结果。"""
-
-TASK_TOOL_DESCRIPTION = """启动一个已配置的子智能体处理独立任务，并等待其最终结果。
-
-可用子智能体：
-{available_agents}
-
-使用 `subagent_slug` 选择一个可用子智能体，并在 `description` 中提供完整的任务说明。"""
+"""
 
 SUBAGENT_START_DESCRIPTION = """在后台启动一个已配置的子智能体任务。
 
-立即返回用于状态、取消和结果查询的 run_id，以及标识子智能体会话的 thread_id。适合长时间运行或可并行的任务。"""
+立即返回用于状态、取消和结果查询的 run_id，以及标识子智能体会话的 thread_id。所有子智能体任务都通过此工具启动。
+使用 `subagent_slug` 选择可用子智能体，并在 `description` 中提供完整的任务说明。"""
 
 SUBAGENT_STATUS_DESCRIPTION = "查询子智能体运行状态、最近进度和已完成结果。"
 SUBAGENT_CANCEL_DESCRIPTION = "取消一个正在运行的子智能体任务。"
@@ -63,7 +54,7 @@ SUBAGENT_SLUG_ARG = "要调用的子智能体 slug，必须是工具描述中列
 SUBAGENT_RUN_ID_ARG = "子智能体运行 ID，由 subagent_start 返回。"
 
 
-class TaskInput(BaseModel):
+class SubAgentStartInput(BaseModel):
     description: str = Field(description=TASK_DESCRIPTION_ARG)
     subagent_slug: str = Field(description=SUBAGENT_SLUG_ARG)
 
@@ -99,7 +90,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
         *,
         subagents: Sequence[Mapping[str, str]],
         parent_context: BaseContext,
-        system_prompt: str | None = TASK_SYSTEM_PROMPT,
+        system_prompt: str | None = SUBAGENT_SYSTEM_PROMPT,
     ) -> None:
         super().__init__()
         if not subagents:
@@ -119,60 +110,11 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
 
     def _build_subagent_tools(self) -> list[BaseTool]:
         return [
-            self._create_task_tool(),
             self._create_start_tool(),
             self._create_status_tool(),
             self._create_cancel_tool(),
             self._create_await_tool(),
         ]
-
-    def _create_task_tool(self) -> StructuredTool:
-        async def atask(
-            description: Annotated[str, TASK_DESCRIPTION_ARG],
-            subagent_slug: Annotated[str, SUBAGENT_SLUG_ARG],
-            runtime: ToolRuntime,
-        ) -> Command:
-            subagent_run_record, error = await self._start_run(
-                task_description=description,
-                subagent_slug=subagent_slug,
-                runtime=runtime,
-                tool_name="task",
-            )
-            if error is not None:
-                return error
-
-            run_id = str(subagent_run_record["run_id"])  # ty:ignore[not-subscriptable]
-            try:
-                result = await wait_agent_run_result(run_id, uid=self.parent_context.uid)
-            except Exception as exc:
-                return self._result(
-                    runtime=runtime,
-                    tool_name="task",
-                    subagent_slug=subagent_slug,
-                    content=f"子智能体运行未能返回结果：{exc}",
-                    record={**subagent_run_record, "status": "failed"},  # ty:ignore[invalid-argument-type]
-                    status="failed",
-                    error=True,
-                )
-
-            return self._result(
-                runtime=runtime,
-                tool_name="task",
-                subagent_slug=subagent_slug,
-                content=result or "子智能体已完成，但没有返回文本结果。",
-                record={**subagent_run_record, "status": "completed"},
-                status="completed",
-            )
-
-        return StructuredTool.from_function(
-            name="task",
-            coroutine=atask,
-            description=TASK_TOOL_DESCRIPTION.format(
-                available_agents=self._available_agents()
-            ),
-            args_schema=TaskInput,
-            infer_schema=False,
-        )
 
     def _create_start_tool(self) -> StructuredTool:
         async def subagent_start(
@@ -194,7 +136,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
                 f"{SUBAGENT_START_DESCRIPTION}\n\n"
                 f"可用子智能体：\n{self._available_agents()}"
             ),
-            args_schema=TaskInput,
+            args_schema=SubAgentStartInput,
             infer_schema=False,
         )
 
@@ -554,7 +496,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
 async def create_subagent_middleware(
     *,
     parent_context: BaseContext,
-    system_prompt: str | None = TASK_SYSTEM_PROMPT,
+    system_prompt: str | None = SUBAGENT_SYSTEM_PROMPT,
 ) -> SubAgentMiddleware | None:
     """查询可委派角色，创建绑定当前 Context 的子智能体中间件。"""
     async with session_context() as db:

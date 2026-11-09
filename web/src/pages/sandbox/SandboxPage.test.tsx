@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { listThreads } from "@/api/thread";
-import { deleteSandboxFile, listSandboxWorkspace, readSandboxFile, renameSandboxFile, updateSandboxFile, uploadSandboxFile } from "@/api/sandbox";
+import { deleteSandboxFile, downloadSandboxFile, listSandboxWorkspace, readSandboxFile, renameSandboxFile, updateSandboxFile, uploadSandboxFile } from "@/api/sandbox";
 import SandboxPage from "@/pages/sandbox/SandboxPage";
 import { installBrowserStubs } from "@/test/browserStubs";
 
@@ -10,6 +10,7 @@ vi.mock("@/api/thread", () => ({ listThreads: vi.fn() }));
 vi.mock("@/api/sandbox", () => ({
   listSandboxWorkspace: vi.fn(),
   readSandboxFile: vi.fn(),
+  downloadSandboxFile: vi.fn(),
   renameSandboxFile: vi.fn(),
   deleteSandboxFile: vi.fn(),
   updateSandboxFile: vi.fn(),
@@ -27,6 +28,7 @@ beforeEach(() => {
   vi.mocked(renameSandboxFile).mockResolvedValue({ path: "/workspace/renamed.md" });
   vi.mocked(deleteSandboxFile).mockResolvedValue(undefined);
   vi.mocked(updateSandboxFile).mockResolvedValue(undefined);
+  vi.mocked(downloadSandboxFile).mockResolvedValue(new Blob(["png-bytes"], { type: "image/png" }));
   vi.mocked(uploadSandboxFile).mockResolvedValue({
     name: "new-doc.md",
     path: "/workspace/new-doc.md",
@@ -80,6 +82,7 @@ beforeEach(() => {
           { name: "outputs", path: "/workspace/outputs", kind: "directory", size: null, modified_at: "2026-09-21T00:00:00Z" },
           { name: "notes.txt", path: "/workspace/notes.txt", kind: "file", size: 8, modified_at: "2026-09-21T00:00:00Z", file_type: "document" },
           { name: "README.md", path: "/workspace/README.md", kind: "file", size: 10, modified_at: "2026-09-21T00:00:00Z", file_type: "document" },
+          { name: "chart.png", path: "/workspace/chart.png", kind: "file", size: 2048, modified_at: "2026-09-21T00:00:00Z", file_type: "image" },
           { name: "scripts", path: "/workspace/scripts", kind: "directory", size: null, modified_at: "2026-09-21T00:00:00Z" },
           { name: "docs", path: "/workspace/docs", kind: "directory", size: null, modified_at: "2026-09-21T00:00:00Z" },
         ],
@@ -339,4 +342,23 @@ it("does not discard a different file's editor when a previous save finishes", a
   await waitFor(() => expect(screen.getByRole("textbox", { name: "File content" })).toHaveProperty("value", "# Sandbox readme\n\nHello **world**."));
   await act(async () => finish());
   expect(screen.getByRole("textbox", { name: "File content" })).toHaveProperty("value", "# Sandbox readme\n\nHello **world**.");
+});
+
+it("previews an image file without requesting UTF-8 text or offering text editing", async () => {
+  render(<SandboxPage />);
+  fireEvent.click(await screen.findByRole("button", { name: "chart.png" }));
+
+  const image = await screen.findByRole("img", { name: "chart.png" });
+  expect(image.getAttribute("src")).toBe("blob:sandbox-preview");
+  expect(downloadSandboxFile).toHaveBeenCalledWith("thread-1", "/workspace/chart.png");
+  expect(readSandboxFile).not.toHaveBeenCalled();
+
+  const dialog = screen.getByRole("dialog", { name: "chart.png" });
+  expect(within(dialog).queryByRole("button", { name: "Edit content" })).toBeNull();
+  expect(within(dialog).queryByRole("button", { name: "Zoom in" })).toBeNull();
+  expect(within(dialog).queryByRole("button", { name: "Rotate image" })).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "File actions: chart.png" }));
+  expect(await screen.findByRole("menuitem", { name: "Rename" })).toBeTruthy();
+  expect(screen.queryByRole("menuitem", { name: "Edit content" })).toBeNull();
 });

@@ -8,10 +8,15 @@ import { Empty, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
 import { useTranslation } from "@/i18n"
 import { AgentCard } from "@/pages/agent/components/AgentCard"
+import { ModelProviderCards } from "@/pages/agent/components/ModelProviderCards"
 import type { Agent } from "@/types/agent"
+
+type AgentPageTab = "agents" | "models"
+const CARD_GRID_CLASS = "grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr))]"
 
 export default function AgentPage() {
   const { t } = useTranslation()
+  const [activeTab, setActiveTab] = useState<AgentPageTab>("agents")
   const [allAgents, setAllAgents] = useState<Agent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -50,22 +55,51 @@ export default function AgentPage() {
 
   return (
     <main className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-background text-foreground" aria-label={t("Agent")}>
-      <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-(--page-padding)">
-        <div className="flex min-w-0 items-center gap-2.5">
+      <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-[14px] sm:px-(--page-padding)">
+        <div className="flex min-w-0 items-center gap-3">
           <h1 className="truncate text-sm font-medium">{t("Agent")}</h1>
-          {!loading && !error && (
-            <Badge variant="secondary" className="rounded-md tabular-nums">
-              {allAgents.length}
-            </Badge>
-          )}
+          <div className="flex items-center gap-1" role="group" aria-label={t("Agent")}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-pressed={activeTab === "agents"}
+              className={
+                activeTab === "agents"
+                  ? "h-7 rounded-md bg-selection px-2.5 text-xs font-medium text-selection-foreground hover:bg-selection hover:text-selection-foreground"
+                  : "h-7 rounded-md px-2.5 text-xs text-muted-foreground hover:text-foreground"
+              }
+              onClick={() => setActiveTab("agents")}
+            >
+              {t("Agents")}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-pressed={activeTab === "models"}
+              className={
+                activeTab === "models"
+                  ? "h-7 rounded-md bg-selection px-2.5 text-xs font-medium text-selection-foreground hover:bg-selection hover:text-selection-foreground"
+                  : "h-7 rounded-md px-2.5 text-xs text-muted-foreground hover:text-foreground"
+              }
+              onClick={() => setActiveTab("models")}
+            >
+              {t("Models")}
+            </Button>
+          </div>
         </div>
-        <Button variant="ghost" size="icon-sm" className="rounded-md" onClick={refresh} disabled={loading} aria-label={t("Refresh agents")}>
-          <RefreshCw className={loading ? "size-4 animate-spin motion-reduce:animate-none" : "size-4"} aria-hidden />
-        </Button>
+        {activeTab === "agents" && (
+          <Button variant="ghost" size="icon-sm" className="rounded-md" onClick={refresh} disabled={loading} aria-label={t("Refresh agents")}>
+            <RefreshCw className={loading ? "size-4 animate-spin motion-reduce:animate-none" : "size-4"} aria-hidden />
+          </Button>
+        )}
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-(--page-padding)">
-        {loading ? (
+      <div className="min-h-0 flex-1 overflow-y-auto px-[14px] py-(--page-padding) sm:px-(--page-padding)">
+        {activeTab === "models" ? (
+          <ModelProviderCards />
+        ) : loading ? (
           <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground" role="status">
             <Spinner className="size-5" />
             {t("Loading...")}
@@ -86,7 +120,7 @@ export default function AgentPage() {
             {leader && (
               <section className="space-y-3" aria-labelledby="main-agent-heading">
                 <h2 id="main-agent-heading" className="text-sm font-medium">{t("Main agent")}</h2>
-                <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr))]">
+                <div className={CARD_GRID_CLASS}>
                   <AgentCard agent={leader} onUpdated={handleAgentUpdated} />
                 </div>
               </section>
@@ -97,7 +131,7 @@ export default function AgentPage() {
                 <h2 id="agents-heading" className="flex items-center gap-2 text-sm font-medium">
                   {t("Agents")} <Badge>{agents.length}</Badge>
                 </h2>
-                <ul className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr))]">
+                <ul className={CARD_GRID_CLASS}>
                   {agents.map((agent) => <li key={agent.id}><AgentCard agent={agent} onUpdated={handleAgentUpdated} /></li>)}
                 </ul>
               </section>
@@ -108,7 +142,7 @@ export default function AgentPage() {
                 {t("Sub agents")} <Badge>{subagents.length}</Badge>
               </h2>
               {subagents.length > 0 ? (
-                <ul className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr))]">
+                <ul className={CARD_GRID_CLASS}>
                   {subagents.map((agent) => <li key={agent.id}><AgentCard agent={agent} onUpdated={handleAgentUpdated} /></li>)}
                 </ul>
               ) : (

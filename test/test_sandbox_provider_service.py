@@ -250,6 +250,22 @@ def test_unrelated_null_metadata_does_not_block_discovery(deployment):
     assert new().acquire("alice", "thread") == "cube-1"
 
 
+def test_inventory_error_reports_node_and_upstream_reason(deployment):
+    server, new = deployment
+    server.inventory = {
+        "ret": {"ret_code": 130595, "ret_msg": "list sandbox failed: cubelet unreachable"},
+        "size": 1,
+        "data": [],
+    }
+    with pytest.raises(RuntimeError) as error:
+        new().acquire("alice", "thread")
+    message = str(error.value)
+    assert "host_id='agent-stack-node'" in message
+    assert "ret_code=130595" in message
+    assert "list sandbox failed: cubelet unreachable" in message
+    assert server.creates == 0
+
+
 @pytest.mark.parametrize("uid,thread", [("..", "thread"), ("alice", "../other"), ("a/b", "thread")])
 def test_invalid_workspace_identity_rejected(deployment, uid, thread):
     server, new = deployment

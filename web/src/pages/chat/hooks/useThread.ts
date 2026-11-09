@@ -138,7 +138,12 @@ const toChatMessages = (message: ThreadMessageResponse): ChatMessage[] => {
     }
     return messages;
   }
-  if (message.role !== "tool" && message.content) messages.push(toChatMessage(message));
+  if (
+    message.role !== "tool" &&
+    (message.content.trim() || (message.attachments && message.attachments.length > 0))
+  ) {
+    messages.push(toChatMessage(message));
+  }
   for (const tool of message.tool_calls ?? []) {
     if (tool.name === "ask_user") continue;
     process({ ...tool, type: "tool_call", activity_id: tool.tool_call_id });

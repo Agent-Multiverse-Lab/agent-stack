@@ -119,7 +119,7 @@ class Config(BaseSettings):
     # ---------- JWT ----------
     jwt_secret: str = Field(default="", description="JWT 签名密钥")
     jwt_algorithm: str = Field(default="HS256", description="JWT 加密算法")
-    jwt_expire_minutes: int = Field(default=60, description="Token 有效期（分钟）")
+    jwt_expire_minutes: int = Field(default=10080, description="Token 有效期（分钟），默认 7 天")
     admin_emails: str = Field(
         default="",
         description="以逗号分隔的平台管理员邮箱",

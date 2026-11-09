@@ -24,8 +24,17 @@ class CubeClient:
         response = self.http.get(self.inventory_url, params={"host_id": self.node_id})
         response.raise_for_status()
         body = response.json()
-        if not isinstance(body, dict) or not isinstance(body.get("ret"), dict) or body["ret"].get("ret_code") != 200:
-            raise RuntimeError("Cube node inventory failed; refusing to create another sandbox")
+        ret = body.get("ret") if isinstance(body, dict) else None
+        if not isinstance(ret, dict) or ret.get("ret_code") != 200:
+            details = (
+                f"ret_code={ret.get('ret_code')!r}, ret_msg={ret.get('ret_msg')!r}"
+                if isinstance(ret, dict)
+                else "missing or invalid ret"
+            )
+            raise RuntimeError(
+                f"Cube node inventory failed (host_id={self.node_id!r}, {details}); "
+                "refusing to create another sandbox"
+            )
         rows = body.get("data")
         if body.get("size") != 1 or not isinstance(rows, list):
             raise RuntimeError("Cube node inventory is incomplete; refusing to create another sandbox")
