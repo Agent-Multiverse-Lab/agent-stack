@@ -10,7 +10,7 @@
 - [请求持久化与派发](../spec/run/request-dispatch/spec.md)
 - [Run Cancellation Spec](../spec/run/cancellation/spec.md)
 - [Agent Run Event Streaming Spec](../spec/run/event-streaming/spec.md)
-- [Run 执行尝试与租约](run-attempt-schema.md)：attempt 持有执行权、心跳、租约与结束事实
+- [Run 执行记录与租约](run-execution-schema.md)：execution 持有执行权、心跳、租约与结束事实
 
 ## 2. Core Components
 

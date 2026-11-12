@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import configure_mappers
 
 from server.entities.thread import ThreadMessageResponse
-from src.database.models import AgentRun, AgentRunAttempt, Conversation, Message, ToolCall, User
+from src.database.models import AgentRun, AgentRunExecution, Conversation, Message, ToolCall, User
 from src.database.repositories.agent_run_repository import AgentRunRepository
 from src.database.repositories.conversation_repository import (
     ConversationRepository,
@@ -515,7 +515,7 @@ class MessagePersistenceSchemaTest(unittest.TestCase):
             User.__table__,
             Conversation.__table__,
             AgentRun.__table__,
-            AgentRunAttempt.__table__,
+            AgentRunExecution.__table__,
             Message.__table__,
             ToolCall.__table__,
         ):

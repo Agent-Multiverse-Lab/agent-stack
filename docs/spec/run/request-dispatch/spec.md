@@ -140,7 +140,7 @@ Run 创建事务提交后，Service 调用 `enqueue_agent_run(run_id)`：
 - Job ID：`run:{run_id}`。
 - 队列名称：`config.arq_queue_name`。
 
-Run 创建由 Service 执行；Run 加载、认领、attempt 创建、输入重建和执行由 `process_agent_run` 处理。
+Run 创建由 Service 执行；Run 加载、认领、execution 创建、输入重建和执行由 `process_agent_run` 处理。
 
 ### RUN-RD-004 重复请求
 

@@ -21,7 +21,7 @@ from src.database.base import Base
 from src.database.models import (
     Agent,
     AgentRun,
-    AgentRunAttempt,
+    AgentRunExecution,
     AgentRunRequest,
     Attachment,
     Conversation,
@@ -171,7 +171,7 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         async with self.engine.begin() as connection:
             await connection.run_sync(lambda db: Base.metadata.create_all(db, tables=[
                 model.__table__ for model in (
-                    User, Agent, Conversation, Message, AgentRun, AgentRunAttempt,
+                    User, Agent, Conversation, Message, AgentRun, AgentRunExecution,
                     Attachment, MessageAttachment, ToolCall,
                 )
             ]))

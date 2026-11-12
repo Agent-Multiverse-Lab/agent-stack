@@ -9,7 +9,7 @@ from sqlalchemy.orm import aliased
 
 from src.database.models import AUDIT_MESSAGE_TYPES, AgentRun, Conversation, Message
 
-from .agent_run_attempt_repository import AgentRunAttemptRepository
+from .agent_run_execution_repository import AgentRunExecutionRepository
 
 AGENT_RUN_TERMINAL_STATUSES = frozenset(
     {"completed", "failed", "cancelled", "interrupted"}
@@ -29,13 +29,13 @@ DEFAULT_RUN_DISPATCH_TIMEOUT_SECONDS = 900.0
 class RunStopState:
     """当前 worker 持有的 Run 是否应停止执行。
 
-    `reason` 是稳定分类：not_found/terminal/cancel_requested/attempt_missing/
+    `reason` 是稳定分类：not_found/terminal/cancel_requested/execution_missing/
     owner_mismatch/lease_expired。controller 只把非取消类原因视为 lease 丢失。
     """
 
     stopped: bool
     reason: str | None = None
-    attempt_id: str | None = None
+    execution_id: str | None = None
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -55,7 +55,7 @@ def _audit_terminal_status(run_status: str) -> str:
 class AgentRunRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
-        self.attempts = AgentRunAttemptRepository(session)
+        self.agent_run_execution_repo = AgentRunExecutionRepository(session)
         self.last_cascaded_signal_run_ids: list[str] = []
 
     async def get_by_id(self, run_id: str) -> AgentRun | None:
@@ -267,15 +267,15 @@ class AgentRunRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_open_attempt(
+    async def get_open_execution(
         self,
         run_id: str,
         *,
         worker_id: str | None = None,
         for_update: bool = False,
     ):
-        """读取 Run 当前开放的 attempt；供 worker/管理路径复用。"""
-        return await self.attempts.open(
+        """读取 Run 当前开放的 execution；供 worker/管理路径复用。"""
+        return await self.agent_run_execution_repo.open(
             run_id,
             worker_id=worker_id,
             for_update=for_update,
@@ -290,8 +290,8 @@ class AgentRunRepository:
     ) -> RunStopState:
         """判断当前 worker 持有的 Run 是否已经停止或失去执行权。
 
-        判定顺序：Run 不存在/终态 -> 没有开放 attempt -> owner 不一致 ->
-        attempt 租约过期 -> 用户已请求取消。`cancel_requested` 不是终态，但
+        判定顺序：Run 不存在/终态 -> 没有开放 execution -> owner 不一致 ->
+        execution 租约过期 -> 用户已请求取消。`cancel_requested` 不是终态，但
         worker 必须停止；调用方据此区分取消和 lease 丢失。
         """
 
@@ -303,15 +303,15 @@ class AgentRunRepository:
             return RunStopState(True, "not_found")
         if str(run.agent_status) in AGENT_RUN_TERMINAL_STATUSES:
             return RunStopState(True, "terminal")
-        attempt = await self.attempts.open(run_id)
-        if attempt is None:
-            return RunStopState(True, "attempt_missing")
-        if run.worker_id != worker_id or attempt.worker_id != worker_id:
-            return RunStopState(True, "owner_mismatch", attempt.id)
-        if attempt.lease_expires_at is None or _as_utc(attempt.lease_expires_at) <= _as_utc(current_time):
-            return RunStopState(True, "lease_expired", attempt.id)
+        execution = await self.agent_run_execution_repo.open(run_id)
+        if execution is None:
+            return RunStopState(True, "execution_missing")
+        if run.worker_id != worker_id or execution.worker_id != worker_id:
+            return RunStopState(True, "owner_mismatch", execution.id)
+        if execution.lease_expires_at is None or _as_utc(execution.lease_expires_at) <= _as_utc(current_time):
+            return RunStopState(True, "lease_expired", execution.id)
         if str(run.agent_status) == "cancel_requested":
-            return RunStopState(True, "cancel_requested", attempt.id)
+            return RunStopState(True, "cancel_requested", execution.id)
         if str(getattr(run, "run_type", "chat")) == "subagent":
             created_by_run_id = getattr(run, "created_by_run_id", None)
             parent_run = (
@@ -322,8 +322,8 @@ class AgentRunRepository:
             if parent_run is None or str(parent_run.agent_status) in (
                 AGENT_RUN_TERMINAL_STATUSES | {"cancel_requested"}
             ):
-                return RunStopState(True, "cancel_requested", attempt.id)
-        return RunStopState(False, None, attempt.id)
+                return RunStopState(True, "cancel_requested", execution.id)
+        return RunStopState(False, None, execution.id)
 
     async def is_run_stopped(
         self,
@@ -338,7 +338,7 @@ class AgentRunRepository:
     async def lock_for_output_update(
         self, run_id: str, *, worker_id: str
     ) -> AgentRun:
-        """在消息事务内锁定 Run，只允许仍持有效 attempt 租约的 owner 保存输出。"""
+        """在消息事务内锁定 Run，只允许仍持有效 execution 租约的 owner 保存输出。"""
         run = await self._lock_update(run_id)
         if run is None:
             raise LookupError(f"Agent Run 不存在：{run_id}")
@@ -346,15 +346,15 @@ class AgentRunRepository:
             "running", "cancel_requested"
         }:
             raise RuntimeError(f"Agent Run 当前执行归属不匹配：{run_id}")
-        attempt = await self.attempts.open(run_id, worker_id=worker_id, for_update=True)
-        if attempt is not None:
+        execution = await self.agent_run_execution_repo.open(run_id, worker_id=worker_id, for_update=True)
+        if execution is not None:
             if (
-                attempt.lease_expires_at is None
-                or _as_utc(attempt.lease_expires_at) <= _as_utc(datetime.now(UTC))
+                execution.lease_expires_at is None
+                or _as_utc(execution.lease_expires_at) <= _as_utc(datetime.now(UTC))
             ):
                 raise RuntimeError(f"Agent Run 当前执行租约已过期：{run_id}")
         else:
-            # 兼容迁移前已认领的 Run：新认领一定会创建 attempt，旧 Run 只校验
+            # 兼容迁移前已认领的 Run：新认领一定会创建 execution，旧 Run 只校验
             # Run 级租约，避免滚动升级窗口内误伤正在收尾的执行。
             lease = getattr(run, "lease_expires_at", None)
             if lease is not None and _as_utc(lease) <= _as_utc(datetime.now(UTC)):
@@ -370,9 +370,9 @@ class AgentRunRepository:
         conversation_thread_id: str,
         request_id: str,
     ) -> AgentRun | None:
-        """在审计写入前锁定并校验当前 attempt 的完整因果边界。
+        """在审计写入前锁定并校验当前 execution 的完整因果边界。
 
-        输出持久化前必须确认：Run 仍由当前 attempt 的 owner 持有、attempt
+        输出持久化前必须确认：Run 仍由当前 execution 的 owner 持有、execution
         租约未过期，且 thread/request 与本 Run 的归属一致。
         """
         if not worker_id.strip():
@@ -385,11 +385,11 @@ class AgentRunRepository:
             "cancel_requested",
         }:
             raise RuntimeError(f"Agent Run 当前执行归属不匹配：{run_id}")
-        attempt = await self.attempts.open(run_id, worker_id=worker_id, for_update=True)
-        if attempt is not None:
+        execution = await self.agent_run_execution_repo.open(run_id, worker_id=worker_id, for_update=True)
+        if execution is not None:
             if (
-                attempt.lease_expires_at is None
-                or _as_utc(attempt.lease_expires_at) <= _as_utc(datetime.now(UTC))
+                execution.lease_expires_at is None
+                or _as_utc(execution.lease_expires_at) <= _as_utc(datetime.now(UTC))
             ):
                 raise RuntimeError(f"Agent Run 当前执行租约已过期：{run_id}")
         else:
@@ -536,10 +536,10 @@ class AgentRunRepository:
         lease_seconds: float = DEFAULT_RUN_LEASE_SECONDS,
         now: datetime | None = None,
     ) -> AgentRun | None:
-        """在行锁内认领 Run，并为本次执行创建 attempt。
+        """在行锁内认领 Run，并为本次执行创建 execution。
 
         认领在 AgentRun 上留下当前 owner 快照，真正的执行权、心跳和租约写入
-        `agent_run_attempt`；Worker 执行期间必须周期性调用 `renew_lease`。
+        `agent_run_execution`；Worker 执行期间必须周期性调用 `renew_lease`。
         """
 
         if not worker_id.strip():
@@ -572,19 +572,19 @@ class AgentRunRepository:
                 current_status = "cancel_requested"
                 run.agent_status = "cancel_requested"
 
-        # 正常路径不应存在开放 attempt；若存在，说明上次执行没有正常收口，
-        # 先以 lease_expired 结束它，再创建新 attempt。
-        stale = await self.attempts.open(run_id, for_update=True)
+        # 正常路径不应存在开放 execution；若存在，说明上次执行没有正常收口，
+        # 先以 lease_expired 结束它，再创建新 execution。
+        stale = await self.agent_run_execution_repo.open(run_id, for_update=True)
         if stale is not None:
-            await self.attempts.close(
+            await self.agent_run_execution_repo.close(
                 stale,
                 status="lease_expired",
-                error="Attempt was still open when a new owner claimed the run",
+                error="Execution was still open when a new owner claimed the run",
                 error_type="LeaseExpired",
                 now=current_time,
             )
 
-        attempt = await self.attempts.claim(
+        execution = await self.agent_run_execution_repo.claim(
             run_id,
             worker_id=worker_id,
             lease_seconds=lease_seconds,
@@ -594,8 +594,8 @@ class AgentRunRepository:
         if current_status != "cancel_requested":
             run.agent_status = "running"
         run.started_at = run.started_at or current_time
-        run.heartbeat_at = attempt.heartbeat_at
-        run.lease_expires_at = attempt.lease_expires_at
+        run.heartbeat_at = execution.heartbeat_at
+        run.lease_expires_at = execution.lease_expires_at
         run.error = None
         run.error_type = None
         await self.session.flush()
@@ -609,10 +609,10 @@ class AgentRunRepository:
         lease_seconds: float = DEFAULT_RUN_LEASE_SECONDS,
         now: datetime | None = None,
     ) -> bool:
-        """续租当前开放 attempt；AgentRun 上的时间只做查询快照镜像。
+        """续租当前开放 execution；AgentRun 上的时间只做查询快照镜像。
 
-        续租以 attempt 的 owner 和到期时间为准；Run 级心跳/到期时间同步更新，
-        便于现有查询与过期扫描使用。attempt 不存在或不是当前 owner 时返回
+        续租以 execution 的 owner 和到期时间为准；Run 级心跳/到期时间同步更新，
+        便于现有查询与过期扫描使用。execution 不存在或不是当前 owner 时返回
         False，调用方必须停止执行。
         """
 
@@ -633,18 +633,18 @@ class AgentRunRepository:
         if _as_utc(run.lease_expires_at) <= _as_utc(current_time):
             return False
 
-        attempt = await self.attempts.open(run_id, worker_id=worker_id, for_update=True)
-        if attempt is None:
+        execution = await self.agent_run_execution_repo.open(run_id, worker_id=worker_id, for_update=True)
+        if execution is None:
             return False
-        if not await self.attempts.renew(
-            attempt.id,
+        if not await self.agent_run_execution_repo.renew(
+            execution.id,
             worker_id=worker_id,
             lease_seconds=lease_seconds,
             now=current_time,
         ):
             return False
-        run.heartbeat_at = attempt.heartbeat_at
-        run.lease_expires_at = attempt.lease_expires_at
+        run.heartbeat_at = execution.heartbeat_at
+        run.lease_expires_at = execution.lease_expires_at
         await self.session.flush()
         return True
 
@@ -666,18 +666,18 @@ class AgentRunRepository:
 
         has_live_owner = False
         if not terminate_claimed:
-            open_attempt = await self.attempts.open(child_id, for_update=True)
+            open_execution = await self.agent_run_execution_repo.open(child_id, for_update=True)
             has_live_owner = (
-                open_attempt is not None
-                and open_attempt.lease_expires_at is not None
-                and _as_utc(open_attempt.lease_expires_at) > _as_utc(current_time)
+                open_execution is not None
+                and open_execution.lease_expires_at is not None
+                and _as_utc(open_execution.lease_expires_at) > _as_utc(current_time)
             )
 
         if has_live_owner:
             child_run.agent_status = "cancel_requested"
             return child_run, str(child_run.id)
 
-        await self.attempts.close_open(
+        await self.agent_run_execution_repo.close_open(
             child_id,
             status="cancelled",
             now=current_time,
@@ -755,7 +755,7 @@ class AgentRunRepository:
         now: datetime | None = None,
         terminate_active: bool = False,
     ) -> list[AgentRun]:
-        """把租约过期的开放 attempt / Run 收敛为失败或取消终态，并级联清理孤儿子 Run。
+        """把租约过期的开放 execution / Run 收敛为失败或取消终态，并级联清理孤儿子 Run。
 
         `terminate_active=True` 用于 Worker 启动（重部署/重启），将所有仍在执行中的
         主 Agent 及子 Agent 立即终止收口，不等待租约自然到期。
@@ -764,7 +764,7 @@ class AgentRunRepository:
         current_time = now or datetime.now(UTC)
         self.last_cascaded_signal_run_ids = []
         if terminate_active:
-            candidate_ids = set(await self.attempts.list_open_run_ids())
+            candidate_ids = set(await self.agent_run_execution_repo.list_open_run_ids())
             active = await self.session.execute(
                 select(AgentRun.id).where(
                     AgentRun.agent_status.in_(tuple(AGENT_RUN_LEASED_STATUSES))
@@ -773,7 +773,7 @@ class AgentRunRepository:
             candidate_ids.update(str(run_id) for run_id in active.scalars().all())
         else:
             candidate_ids = set(
-                await self.attempts.list_expired_run_ids(now=current_time)
+                await self.agent_run_execution_repo.list_expired_run_ids(now=current_time)
             )
             legacy = await self.session.execute(
                 select(AgentRun.id).where(
@@ -802,33 +802,33 @@ class AgentRunRepository:
                 continue
             current_status = str(run.agent_status)
             if current_status in AGENT_RUN_TERMINAL_STATUSES:
-                await self.attempts.close_open(
+                await self.agent_run_execution_repo.close_open(
                     run_id,
                     status="orphaned",
-                    error="Run was already terminal while its attempt was open",
-                    error_type="OrphanedAttempt",
+                    error="Run was already terminal while its execution was open",
+                    error_type="OrphanedExecution",
                     now=current_time,
                 )
                 continue
 
-            open_attempt = await self.attempts.open(run_id)
+            open_execution = await self.agent_run_execution_repo.open(run_id)
             if not terminate_active:
-                # 候选是锁外查询得到的；锁到 Run 后复查 attempt/lease，避免把
+                # 候选是锁外查询得到的；锁到 Run 后复查 execution/lease，避免把
                 # 刚续租成功的执行误判为过期。
                 if (
-                    open_attempt is not None
-                    and open_attempt.lease_expires_at is not None
-                    and _as_utc(open_attempt.lease_expires_at) > _as_utc(current_time)
+                    open_execution is not None
+                    and open_execution.lease_expires_at is not None
+                    and _as_utc(open_execution.lease_expires_at) > _as_utc(current_time)
                 ):
                     continue
                 if (
-                    open_attempt is None
+                    open_execution is None
                     and run.lease_expires_at is not None
                     and _as_utc(run.lease_expires_at) > _as_utc(current_time)
                 ):
                     continue
                 if (
-                    open_attempt is None
+                    open_execution is None
                     and run.worker_id is None
                     and current_status != "cancel_requested"
                 ):
@@ -843,7 +843,7 @@ class AgentRunRepository:
                 if terminate_active
                 else "Worker lease expired before the run finished"
             )
-            await self.attempts.close_open(
+            await self.agent_run_execution_repo.close_open(
                 run_id,
                 status="cancelled" if cancelled else "lease_expired",
                 error=None if cancelled else failure_reason,
@@ -931,8 +931,8 @@ class AgentRunRepository:
                 or run.worker_id is not None
             ):
                 continue
-            open_attempt = await self.attempts.open(run_id)
-            if open_attempt is not None:
+            open_execution = await self.agent_run_execution_repo.open(run_id)
+            if open_execution is not None:
                 continue
 
             if str(getattr(run, "run_type", "chat")) == "subagent":
@@ -980,7 +980,7 @@ class AgentRunRepository:
         return requeue_runs, timed_out_runs
 
     async def release_for_retry(self, run_id: str, *, worker_id: str) -> bool:
-        """仅当前 attempt 可以释放归属，供 ARQ 下一次重试重新领取。"""
+        """仅当前 execution 可以释放归属，供 ARQ 下一次重试重新领取。"""
 
         run = await self._lock_update(run_id)
         if run is None or run.worker_id != worker_id:
@@ -989,10 +989,10 @@ class AgentRunRepository:
             return False
 
         current_time = datetime.now(UTC)
-        attempt = await self.attempts.open(run_id, worker_id=worker_id, for_update=True)
-        if attempt is not None:
-            await self.attempts.close(
-                attempt,
+        execution = await self.agent_run_execution_repo.open(run_id, worker_id=worker_id, for_update=True)
+        if execution is not None:
+            await self.agent_run_execution_repo.close(
+                execution,
                 status="retry_released",
                 now=current_time,
             )
@@ -1013,9 +1013,9 @@ class AgentRunRepository:
         error_type: str | None = None,
         worker_id: str | None = None,
     ) -> tuple[AgentRun | None, bool]:
-        """写入 Run 终态，并关闭当前 attempt。
+        """写入 Run 终态，并关闭当前 execution。
 
-        有 attempt 时以 attempt 的 owner 和租约作为 fencing；没有 attempt 的
+        有 execution 时以 execution 的 owner 和租约作为 fencing；没有 execution 的
         旧 Run（迁移前已认领）退回 Run 级 owner/租约校验，保证滚动升级窗口。
         """
 
@@ -1028,11 +1028,11 @@ class AgentRunRepository:
             return None, False
         current_status = str(run.agent_status)
         if current_status in AGENT_RUN_TERMINAL_STATUSES:
-            await self.attempts.close_open(
+            await self.agent_run_execution_repo.close_open(
                 run_id,
                 status="orphaned",
-                error="Run was already terminal while its attempt was open",
-                error_type="OrphanedAttempt",
+                error="Run was already terminal while its execution was open",
+                error_type="OrphanedExecution",
                 now=current_time,
             )
             return run, False
@@ -1044,17 +1044,17 @@ class AgentRunRepository:
         ):
             return run, False
 
-        attempt = None
+        execution = None
         if worker_id is not None:
-            attempt = await self.attempts.open(
+            execution = await self.agent_run_execution_repo.open(
                 run_id,
                 worker_id=worker_id,
                 for_update=True,
             )
-            if attempt is not None:
+            if execution is not None:
                 if (
-                    attempt.lease_expires_at is None
-                    or _as_utc(attempt.lease_expires_at) <= _as_utc(current_time)
+                    execution.lease_expires_at is None
+                    or _as_utc(execution.lease_expires_at) <= _as_utc(current_time)
                 ):
                     return run, False
             else:
@@ -1077,16 +1077,16 @@ class AgentRunRepository:
         # 终态即释放租约，避免过期收敛重复处理同一个 Run。
         run.heartbeat_at = None  # ty: ignore[invalid-assignment]
         run.lease_expires_at = None  # ty: ignore[invalid-assignment]
-        if attempt is not None:
-            await self.attempts.close(
-                attempt,
+        if execution is not None:
+            await self.agent_run_execution_repo.close(
+                execution,
                 status=status,
                 error=error,
                 error_type=error_type,
                 now=current_time,
             )
         else:
-            await self.attempts.close_open(
+            await self.agent_run_execution_repo.close_open(
                 run_id,
                 status=status,
                 error=error,
