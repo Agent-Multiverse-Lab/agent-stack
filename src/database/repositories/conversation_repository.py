@@ -156,7 +156,7 @@ class ConversationRepository:
             Conversation.deleted_at.is_(None),
         )
         if for_update:
-            statement = statement.with_for_update()
+            statement = statement.with_for_update().execution_options(populate_existing=True)
         result = await self.session.execute(statement)
         return result.scalar_one_or_none()
 
@@ -377,6 +377,18 @@ class ConversationRepository:
             request_id=request_id,
             msg_metadata=msg_metadata,
         )
+
+    async def bind_input_message_to_run(self, run: AgentRun) -> None:
+        """在 Run 创建事务内关联已接收的输入消息。"""
+        await self.session.execute(
+            update(Message)
+            .where(
+                Message.id == run.trigger_message_id,
+                Message.conversation_id == run.conversation_id,
+            )
+            .values(agent_run_id=run.id)
+        )
+        await self.session.flush()
 
     async def create_agent_output_message(
         self,

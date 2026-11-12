@@ -216,6 +216,25 @@ class ToolCall(Base):
     message = relationship("Message", back_populates="tool_calls")
 
 
+class AgentRunRequest(Base):
+    """已接收的聊天请求；输入由 trigger_message_id 指向的 Message 持有。"""
+
+    __tablename__ = "agent_run_request"
+
+    request_id = Column(String(128), primary_key=True)
+    uid = Column(String(64), nullable=False)
+    conversation_id = Column(
+        Integer, ForeignKey("conversation.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    thread_id = Column(String(64), nullable=False)
+    agent_id = Column(String(128), nullable=False)
+    trigger_message_id = Column(
+        Integer, ForeignKey("message.id", ondelete="CASCADE"), nullable=False,
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class AgentRun(Base):
     __tablename__ = "agent_run"
     __table_args__ = (

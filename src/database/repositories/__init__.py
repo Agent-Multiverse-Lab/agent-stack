@@ -1,6 +1,7 @@
 from .agent_repository import AgentRepository
 from .agent_run_attempt_repository import AgentRunAttemptRepository
 from .agent_run_repository import AgentRunRepository
+from .agent_run_request_repository import AgentRunRequestRepository
 from .attachment_repository import AttachmentRepository
 from .conversation_repository import ConversationRepository
 from .knowledge_repository import (
@@ -17,6 +18,7 @@ __all__ = [
     "AgentRepository",
     "AgentRunAttemptRepository",
     "AgentRunRepository",
+    "AgentRunRequestRepository",
     "AttachmentRepository",
     "ConversationRepository",
     "KnowledgeBaseRepository",

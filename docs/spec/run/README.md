@@ -5,6 +5,7 @@ Run Domain 处理 `AgentRun` 生命周期与可观察性。先选一个能力并
 
 | Capability | 当前契约 | 职责 |
 | --- | --- | --- |
+| request-dispatch | [spec.md](request-dispatch/spec.md) | 请求持久化、会话活动 Run 判断、Run 提交后入队 |
 | lifecycle | [spec.md](lifecycle/spec.md) | 状态流转、终态落库、异常映射 |
 | cancellation | [spec.md](cancellation/spec.md) | 取消请求、信号与 Worker 中断 |
 | event-streaming | [spec.md](event-streaming/spec.md) | Redis Stream 与 SSE 事件契约 |

@@ -8,7 +8,6 @@ from server.entities.agent import (
     AgentContext,
     AgentResponse,
     AgentRunCreateRequest,
-    AgentRunResumeRequest,
     AgentUpdateRequest,
 )
 from server.service.agent_run_service import (
@@ -92,7 +91,7 @@ async def create_agent_run(
     current_user: AuthenticatedUser,
     db: AsyncSession = Depends(get_db),
 ):
-    """创建持久化 Agent Run，并在事务提交后入队。"""
+    """先保存请求与输入，再按会话状态创建 Run，提交后入队。"""
     if not config.enable_run_queue:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -106,9 +105,8 @@ async def create_agent_run(
             query=agentrun_request.query,
             agent_id=agentrun_request.agent_id,
             thread_id=agentrun_request.thread_id,
-            thread_metadata=agentrun_request.thread_metadata,
+            request_metadata=agentrun_request.request_metadata,
             image_content=agentrun_request.image_content,
-            msg_metadata=agentrun_request.msg_metadata,
         )
     except LookupError as exc:
         raise HTTPException(
@@ -140,7 +138,7 @@ async def create_agent_run(
 @agent_router.post("/runs/{interrupted_run_id}/resume")
 async def resume_agent_run(
     interrupted_run_id: str,
-    resume_request: AgentRunResumeRequest,
+    resume_request: AgentRunCreateRequest,
     current_user: AuthenticatedUser,
     db: AsyncSession = Depends(get_db),
 ):
@@ -156,8 +154,9 @@ async def resume_agent_run(
             db=db,
             current_user=current_user,
             interrupted_run_id=interrupted_run_id,
+            agent_id=resume_request.agent_id,
             thread_id=resume_request.thread_id,
-            thread_metadata=resume_request.thread_metadata,
+            request_metadata=resume_request.request_metadata,
         )
     except LookupError as exc:
         raise HTTPException(

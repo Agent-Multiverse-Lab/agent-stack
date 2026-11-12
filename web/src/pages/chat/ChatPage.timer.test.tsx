@@ -19,7 +19,11 @@ vi.mock("@/context/ModelContext", () => ({
   useModel: () => ({ models: [], selectedModelId: "model", loading: false, selectModel: () => {} }),
 }));
 vi.mock("@/pages/chat/components/AgentMessageComposer", () => ({ AgentMessageComposer: () => null }));
-vi.mock("@/pages/chat/components/AskUser", () => ({ AskUser: () => null }));
+vi.mock("@/pages/chat/components/AskUser", () => ({
+  AskUser: ({ submit }: { submit: (answers: Record<string, string>) => void }) => (
+    <Button onClick={() => submit({ database: "postgresql" })}>Answer question</Button>
+  ),
+}));
 vi.mock("@/api/agent-run", () => ({
   consumeAgentRunStream: mocks.consume,
   createAgentRun: mocks.create,
@@ -77,6 +81,37 @@ beforeEach(() => {
   });
 });
 afterEach(cleanup);
+
+it("submits resume answers with the current agent and unified request metadata", async () => {
+  mocks.getThreadDetail.mockResolvedValue({
+    ...detail("A"),
+    active_run: null,
+    pending_interaction: {
+      name: "ask_user",
+      created_by_run_id: "parent-run",
+      questions: [{
+        question_id: "database", question: "Database?",
+        options: [{ label: "PostgreSQL", value: "postgresql" }],
+      }],
+    },
+  });
+  mocks.resume.mockResolvedValue({
+    run_id: "resume-run", thread_id: "A", status: "pending",
+    stream_url: "/runs/resume-run/events",
+  });
+  renderChat();
+  fireEvent.click(await screen.findByRole("button", { name: "Answer question" }));
+  await waitFor(() => expect(mocks.resume).toHaveBeenCalledWith("parent-run", {
+    agent_id: "LeaderAgent",
+    thread_id: "A",
+    request_metadata: {
+      type: "resume", request_id: expect.any(String),
+      resume: { answers: { database: "postgresql" } },
+    },
+  }));
+  await waitFor(() => expect(streams).toHaveLength(1));
+  expect(mocks.consume.mock.calls[0][0]).toBe("/runs/resume-run/events");
+});
 
 it("maintains active status after A to B to A while reconnecting the same Run", async () => {
   renderChat();

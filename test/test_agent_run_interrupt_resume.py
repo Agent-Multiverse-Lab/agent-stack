@@ -12,12 +12,10 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
-from pydantic import ValidationError
 
-from server import worker
-from server.entities.agent import AgentRunResumeRequest
+from server.entities.agent import AgentRunCreateRequest
 from server.entities.thread import InteractionRequired
-from server.service import agent_run_service, thread_service
+from server.service import agent_run_service
 from test.test_ask_user_tool import ask_user
 
 QUESTIONS = [
@@ -55,15 +53,13 @@ class ResumeRepository:
 
 class ResumeRequestTest(unittest.TestCase):
     def test_answers_request_and_thread_response(self):
-        request = AgentRunResumeRequest(thread_id="thread-1", thread_metadata={"resume": {"answers": ANSWERS}})
-        self.assertEqual(request.thread_metadata["resume"], {"answers": ANSWERS})
+        request = AgentRunCreateRequest(
+            agent_id="LeaderAgent", thread_id="thread-1",
+            request_metadata={"type": "resume", "resume": {"answers": ANSWERS}},
+        )
+        self.assertEqual(request.request_metadata["resume"], {"answers": ANSWERS})
         response = InteractionRequired(name="ask_user", created_by_run_id="parent-run", questions=QUESTIONS)
         self.assertEqual(response.model_dump()["questions"], QUESTIONS)
-
-    def test_invalid_answer_types_and_old_answer_rejected(self):
-        for resume in ({"answer": "postgresql"}, {"answers": {}}, {"answers": []}, {"answers": {"database": 1}}):
-            with self.subTest(resume=resume), self.assertRaises(ValidationError):
-                AgentRunResumeRequest(thread_id="thread-1", thread_metadata={"resume": resume})
 
 
 class ResumeServiceTest(unittest.IsolatedAsyncioTestCase):
@@ -78,11 +74,12 @@ class ResumeServiceTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.repo_patch.stop)
         self.addCleanup(self.enqueue_patch.stop)
 
-    async def submit(self, answers=None, uid="user-1", thread_id="thread-1", request_id="request-1"):
+    async def submit(self, answers=None, uid="user-1", thread_id="thread-1", request_id="request-1", agent_id="LeaderAgent"):
         return await agent_run_service.create_resume_agent_run_service(
             db=self.db, current_user=SimpleNamespace(uid=uid), interrupted_run_id="parent-run",
-            thread_id=thread_id, thread_metadata={"request_id": request_id, "model": "injected-model",
-                                                "resume": {"answers": ANSWERS if answers is None else answers}},
+            agent_id=agent_id, thread_id=thread_id,
+            request_metadata={"type": "resume", "request_id": request_id, "model": "injected-model",
+                              "resume": {"answers": ANSWERS if answers is None else answers}},
         )
 
     async def test_new_run_preserves_parent_identity_and_model(self):
@@ -101,6 +98,15 @@ class ResumeServiceTest(unittest.IsolatedAsyncioTestCase):
         self.repo.parent.run_metadata.pop("model")
         await self.submit()
         self.assertNotIn("model", self.repo.create_arguments["run_metadata"])
+
+    async def test_resume_endpoint_rejects_chat_type(self):
+        with self.assertRaisesRegex(ValueError, "request_metadata.type"):
+            await agent_run_service.create_resume_agent_run_service(
+                db=self.db, current_user=SimpleNamespace(uid="user-1"), interrupted_run_id="parent-run",
+                agent_id="LeaderAgent", thread_id="thread-1", request_metadata={"type": "chat"},
+            )
+        self.assertIsNone(self.repo.create_arguments)
+        self.enqueue.assert_not_awaited()
 
     async def test_missing_extra_and_invalid_answers(self):
         for answers in ({}, {"database": "postgresql"}, {**ANSWERS, "extra": "x"},
@@ -121,6 +127,8 @@ class ResumeServiceTest(unittest.IsolatedAsyncioTestCase):
             await self.submit(uid="another-user")
         with self.assertRaises(agent_run_service.AgentRunConflictError):
             await self.submit(thread_id="another-thread")
+        with self.assertRaises(agent_run_service.AgentRunConflictError):
+            await self.submit(agent_id="another-agent")
         self.repo.parent.agent_status = "completed"
         with self.assertRaises(agent_run_service.AgentRunConflictError):
             await self.submit()
@@ -179,6 +187,8 @@ class ResumeStreamTest(unittest.IsolatedAsyncioTestCase):
         return graph
 
     async def asyncSetUp(self):
+        from server.service import thread_service
+
         self.config = {"configurable": {"thread_id": "thread-1", "uid": "user-1"}}
         self.saved = AsyncMock()
         self.require = AsyncMock(return_value=SimpleNamespace(conversation_metadata={}))
@@ -188,6 +198,8 @@ class ResumeStreamTest(unittest.IsolatedAsyncioTestCase):
             self.addCleanup(p.stop)
 
     async def consume(self, agent, **overrides):
+        from server.service import thread_service
+
         values = dict(resume_input=ANSWERS, thread_id="thread-1",
                       runtime_metadata={"worker_id": "owner-1", "run_id": "resume-run", "request_id": "request-1"},
                       current_user=SimpleNamespace(uid="user-1"), db=SimpleNamespace())
@@ -248,6 +260,8 @@ class ResumeStreamTest(unittest.IsolatedAsyncioTestCase):
                                       error_type="resume_error")])
 
     async def test_save_failure_reports_output_persistence_error(self):
+        from server.service import thread_service
+
         graph = await self.graph()
         self.saved.side_effect = RuntimeError("checkpoint save failed")
         @asynccontextmanager
@@ -266,6 +280,8 @@ class ResumeStreamTest(unittest.IsolatedAsyncioTestCase):
 
 class NormalStreamFinalizationTest(unittest.IsolatedAsyncioTestCase):
     async def consume(self, interrupted, save_error=None):
+        from server.service import thread_service
+
         order = []
         async def events(*_args, **_kwargs):
             return
@@ -325,6 +341,8 @@ class NormalStreamFinalizationTest(unittest.IsolatedAsyncioTestCase):
 
 class ResumeWorkerTest(unittest.IsolatedAsyncioTestCase):
     async def run_stream(self, chunks, cancelled=False):
+        from server import worker
+
         run = SimpleNamespace(agent_status="pending", uid="user-1", agent_id="LeaderAgent",
                               request_id="request-1", thread_id="thread-1", run_type="resume",
                               trigger_message_id=None, created_by_run_id="parent-run",

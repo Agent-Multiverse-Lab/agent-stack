@@ -4,6 +4,7 @@ from .models import (
     Agent,
     AgentRun,
     AgentRunAttempt,
+    AgentRunRequest,
     Attachment,
     Conversation,
     Knowledge,
@@ -24,6 +25,7 @@ from .session import get_db, get_engine, get_session_maker, session_context
 __all__ = [
     "AgentRun",
     "AgentRunAttempt",
+    "AgentRunRequest",
     "Agent",
     "Attachment",
     "Base",

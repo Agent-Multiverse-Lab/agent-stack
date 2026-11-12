@@ -50,6 +50,23 @@ class FakeConversationRepository:
         conversation.conversation_metadata = values["conversation_metadata"]
         return conversation
 
+    async def bind_input_message_to_run(self, run):
+        self.events.append("bind_message")
+
+
+class FakeAgentRunRequestRepository:
+    def __init__(self, events):
+        self.events = events
+        self.requests = {}
+
+    async def get_by_request_id(self, request_id):
+        return self.requests.get(request_id)
+
+    async def create_request(self, **values):
+        self.events.append("request")
+        request = SimpleNamespace(**values)
+        self.requests[request.request_id] = request
+        return request
 
 class FakeAgentRunRepository:
     def __init__(self, events) -> None:
@@ -117,6 +134,7 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
         self.db = FakeSession(self.events)
         self.conversations = FakeConversationRepository(self.events)
         self.runs = FakeAgentRunRepository(self.events)
+        self.requests = FakeAgentRunRequestRepository(self.events)
         self.links = FakeMessageAttachmentRepository(self.events)
         self.agent = SimpleNamespace(agent_config={"model": "dashscope/qwen3.8-max"})
         self.agents = SimpleNamespace(get_by_slug_for_run_type=AsyncMock(return_value=self.agent))
@@ -150,6 +168,7 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
             self.events.append(("delete_targets", copied_objects))
 
         patches = (
+            patch.object(agent_run_service, "AgentRunRequestRepository", return_value=self.requests),
             patch.object(agent_run_service, "AgentRepository", return_value=self.agents),
             patch.object(
                 agent_run_service,
@@ -192,8 +211,9 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
             "query": "分析附件",
             "agent_id": "leaderagent",
             "thread_id": "thread-1",
-            "thread_metadata": {"request_id": "request-1"},
-            "msg_metadata": {
+            "request_metadata": {
+                "type": "chat",
+                "request_id": "request-1",
                 "attachment_file_ids": [str(FILE_ID_1), str(FILE_ID_2)],
                 "source": "web",
             },
@@ -229,10 +249,12 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
                 "prepare",
                 "message",
                 "links",
-                "run",
-                "flush",
+                "request",
                 "commit",
                 ("delete_sources", self.copied_objects),
+                "run",
+                "bind_message",
+                "commit",
                 ("enqueue", str(run.id)),
             ],
             self.events,
@@ -253,9 +275,11 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
                 "prepare",
                 "message",
                 "links",
+                "request",
+                "commit",
+                ("delete_sources", self.copied_objects),
                 "run",
                 "rollback",
-                ("delete_targets", self.copied_objects),
             ],
             self.events,
         )
@@ -272,7 +296,7 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(agent_run_service.logger, "exception"),
         ):
-            run = await self.create_run(msg_metadata={})
+            run = await self.create_run(request_metadata={"type": "chat"})
 
         self.assertEqual("failed", run.agent_status)
         self.assertIn("redis unavailable", run.error)
@@ -282,10 +306,12 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
                 "prepare",
                 "message",
                 "links",
-                "run",
-                "flush",
+                "request",
                 "commit",
                 ("delete_sources", []),
+                "run",
+                "bind_message",
+                "commit",
                 ("enqueue", str(run.id)),
                 ("set_agent_terminal", str(run.id), "failed"),
                 "commit",
@@ -303,7 +329,7 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
         ):
             await self.create_run(
                 query=None,
-                msg_metadata={"attachment_file_ids": [str(FILE_ID_1)]},
+                request_metadata={"type": "chat", "attachment_file_ids": [str(FILE_ID_1)]},
             )
 
         self.assertEqual(
@@ -323,7 +349,7 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
             "server.service.agent_run_service.enqueue_agent_run",
             side_effect=enqueue,
         ):
-            await self.create_run(msg_metadata=metadata)
+            await self.create_run(request_metadata={"type": "chat", **metadata})
 
         self.assertEqual(
             [str(FILE_ID_1)],
@@ -341,10 +367,10 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_attachment_file_id_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "UUID4"):
             await self.create_run(
-                msg_metadata={"attachment_file_ids": ["opaque-file-id"]},
+                request_metadata={"type": "chat", "attachment_file_ids": ["opaque-file-id"]},
             )
 
-        self.assertEqual([], self.events)
+        self.assertEqual(["rollback", ("delete_targets", [])], self.events)
 
     async def test_selected_model_is_persisted_in_run_metadata(self):
         async def enqueue(_):
@@ -355,7 +381,8 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
             side_effect=enqueue,
         ):
             await self.create_run(
-                thread_metadata={
+                request_metadata={
+                    "type": "chat",
                     "request_id": "request-1",
                     "model": "dashscope/qwen3.8-max",
                 }
@@ -366,6 +393,13 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
             self.runs.arguments["run_metadata"]["model"],
         )
         self.assertEqual("dashscope/qwen3.8-max", self.conversations.conversation.conversation_metadata["model"])
+        self.assertEqual({}, self.conversations.message_arguments["msg_metadata"])
+        self.assertEqual(self.runs.arguments["request_id"], "request-1")
+
+    async def test_chat_endpoint_rejects_resume_type_before_writes(self):
+        with self.assertRaisesRegex(ValueError, "request_metadata.type"):
+            await self.create_run(request_metadata={"type": "resume", "resume": {"answers": {"q": "a"}}})
+        self.assertEqual([], self.events)
 
     async def test_existing_conversation_binding_overrides_agent_configuration(self):
         self.conversations.conversation.conversation_metadata = {"model": "deepseek/deepseek-v4-flash", "workspace": "research"}
@@ -379,7 +413,7 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
     async def test_explicit_model_switch_updates_binding_and_snapshot(self):
         self.conversations.conversation.conversation_metadata = {"model": "dashscope/qwen3.8-max", "workspace": "research"}
         with patch.object(agent_run_service, "enqueue_agent_run", AsyncMock()):
-            await self.create_run(thread_metadata={"model": "deepseek/deepseek-v4-flash"})
+            await self.create_run(request_metadata={"type": "chat", "model": "deepseek/deepseek-v4-flash"})
         self.assertEqual(self.runs.arguments["run_metadata"]["model"], "deepseek/deepseek-v4-flash")
         self.assertEqual(self.conversations.conversation.conversation_metadata, {"model": "deepseek/deepseek-v4-flash", "workspace": "research"})
 
@@ -388,7 +422,7 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
             self.agent.agent_config = agent_config
             self.conversations.conversation.conversation_metadata = {}
             with self.subTest(agent_config=agent_config), patch.object(agent_run_service, "enqueue_agent_run", AsyncMock()):
-                await self.create_run(thread_metadata={"model": ""})
+                await self.create_run(request_metadata={"type": "chat", "model": ""})
             expected = agent_config.get("model", "dashscope/qwen3.8-max")
             self.assertEqual(self.runs.arguments["run_metadata"]["model"], expected)
             self.assertEqual(self.conversations.conversation.conversation_metadata["model"], expected)
@@ -397,12 +431,13 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
         self.resolve_model.side_effect = ValueError("模型供应商已停用")
         with self.assertRaisesRegex(ValueError, "模型供应商已停用"):
             await self.create_run(
-                thread_metadata={
+                request_metadata={
+                    "type": "chat",
                     "model": "unavailable/model",
                 }
             )
 
-        self.assertEqual([], self.events)
+        self.assertEqual(["rollback", ("delete_targets", [])], self.events)
 
     async def test_duplicate_request_id_returns_existing_run_without_new_message(self):
         existing = SimpleNamespace(
@@ -418,7 +453,7 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(agent_run_service, "enqueue_agent_run", AsyncMock()) as enqueue:
             run = await self.create_run()
         self.assertIs(run, existing)
-        self.assertEqual([], self.events)
+        self.assertEqual(["commit", ("delete_sources", [])], self.events)
         enqueue.assert_not_awaited()
 
     async def test_duplicate_request_id_from_another_thread_raises_conflict(self):
@@ -436,7 +471,7 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
             "request_id 已被其他请求使用",
         ):
             await self.create_run()
-        self.assertEqual([], self.events)
+        self.assertEqual(["rollback", ("delete_targets", [])], self.events)
 
     async def test_active_run_on_same_thread_raises_conflict(self):
         self.runs.active_run = SimpleNamespace(
@@ -452,13 +487,56 @@ class AgentRunCreateTest(unittest.IsolatedAsyncioTestCase):
             "当前会话有正在执行的任务",
         ):
             await self.create_run()
-        self.assertEqual([], self.events)
+        self.assertEqual(
+            ["prepare", "message", "links", "request", "commit",
+             ("delete_sources", self.copied_objects), "rollback"],
+            self.events,
+        )
+        self.assertEqual(21, self.requests.requests["request-1"].trigger_message_id)
         self.assertTrue(self.conversations.lookup_arguments.get("for_update"))
 
 
+    async def test_busy_request_retry_reuses_input_and_reads_current_conversation_model(self):
+        self.runs.active_run = SimpleNamespace(id="blocking-run")
+        with self.assertRaises(agent_run_service.AgentRunConflictError):
+            await self.create_run()
+        original_input = dict(self.conversations.message_arguments)
+        self.runs.active_run = None
+        self.conversations.conversation.conversation_metadata["model"] = "test/changed"
+        with patch.object(agent_run_service, "enqueue_agent_run", AsyncMock()) as enqueue:
+            await self.create_run(
+                query="新的正文", image_content="new-image",
+                request_metadata={"type": "chat", "request_id": "request-1", "model": "test/ignored"},
+            )
+        self.assertEqual(self.conversations.message_arguments, original_input)
+        self.assertEqual(self.events.count("message"), 1)
+        self.assertEqual(self.events.count("request"), 1)
+        self.assertEqual(self.runs.arguments["trigger_message_id"], 21)
+        self.assertEqual(self.runs.arguments["run_metadata"]["model"], "test/changed")
+        enqueue.assert_awaited_once()
+
+    async def test_reception_failure_cleans_only_uncommitted_attachment_target(self):
+        with patch.object(self.requests, "create_request", AsyncMock(side_effect=RuntimeError("request failed"))):
+            with self.assertRaisesRegex(RuntimeError, "request failed"):
+                await self.create_run()
+        self.assertNotIn("commit", self.events)
+        self.assertNotIn("run", self.events)
+        self.assertEqual(self.events[-2:], ["rollback", ("delete_targets", self.copied_objects)])
+
+    async def test_pending_interaction_preserves_received_request(self):
+        with patch.object(self.runs, "get_pending_interaction_run", AsyncMock(return_value=object())):
+            with self.assertRaisesRegex(agent_run_service.AgentRunConflictError, "待回答的问题"):
+                await self.create_run()
+        self.assertEqual(self.events.count("commit"), 1)
+        self.assertEqual(len(self.requests.requests), 1)
+        self.assertNotIn("run", self.events)
+
+
 class AgentRunEventTest(unittest.IsolatedAsyncioTestCase):
-    def test_request_uses_message_metadata_without_attachment_field(self):
-        self.assertIn("msg_metadata", AgentRunCreateRequest.model_fields)
+    def test_request_uses_unified_metadata(self):
+        self.assertIn("request_metadata", AgentRunCreateRequest.model_fields)
+        self.assertNotIn("thread_metadata", AgentRunCreateRequest.model_fields)
+        self.assertNotIn("msg_metadata", AgentRunCreateRequest.model_fields)
         self.assertNotIn("attachment_ids", AgentRunCreateRequest.model_fields)
         self.assertNotIn("is_resume", AgentRunCreateRequest.model_fields)
         self.assertNotIn("created_by_run_id", AgentRunCreateRequest.model_fields)
