@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import configure_mappers
 
 from server.entities.thread import ThreadMessageResponse
-from src.database.models import AgentRun, AgentRunAttempt, Conversation, Message, ToolCall, User
+from src.database.models import AgentRun, AgentRunExecution, Conversation, Message, Project, ToolCall, User
 from src.database.repositories.agent_run_repository import AgentRunRepository
 from src.database.repositories.conversation_repository import (
     ConversationRepository,
@@ -27,7 +27,7 @@ def load_message_persistence():
     module = ModuleType("isolated_message_persistence")
     module.__dict__.update(
         Any=Any, AsyncSession=Any, BaseAgent=Any, Message=Message, AgentRun=AgentRun,
-        AgentState=Any, AsyncIterator=AsyncIterator, Callable=Callable,
+        AgentStateDTO=Any, AsyncIterator=AsyncIterator, Callable=Callable,
         ModelMessageAuditCollector=Any, ToolMessageAuditCollector=Any,
         _persist_agent_state=AsyncMock(),
         AIMessage=AIMessage, ToolMessage=ToolMessage, json=json, logger=Mock(),
@@ -513,9 +513,10 @@ class MessagePersistenceSchemaTest(unittest.TestCase):
 
         for table in (
             User.__table__,
+            Project.__table__,
             Conversation.__table__,
             AgentRun.__table__,
-            AgentRunAttempt.__table__,
+            AgentRunExecution.__table__,
             Message.__table__,
             ToolCall.__table__,
         ):

@@ -9,6 +9,7 @@ from src.database.models import (
     AgentRun,
     Conversation,
     Message,
+    Project,
     SubAgentConversationRelation,
 )
 from src.database.repositories.conversation_repository import ConversationRepository
@@ -38,6 +39,7 @@ class SubagentConversationRelationTest(unittest.IsolatedAsyncioTestCase):
         self.engine = create_engine("sqlite://")
         event.listen(self.engine, "connect", lambda connection, _record: connection.execute("PRAGMA foreign_keys=ON"))
         self.addCleanup(self.engine.dispose)
+        Project.__table__.create(self.engine)
         Conversation.__table__.create(self.engine)
         AgentRun.__table__.create(self.engine)
         Message.__table__.create(self.engine)

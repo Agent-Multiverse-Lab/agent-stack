@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { listThreads, renameThread } from "@/api/thread"
+import { listProjects } from "@/api/project"
 import { NavProjects } from "@/components/nav-projects"
 import { AppSidebar } from "@/components/app-sidebar"
 import { SidebarProvider } from "@/components/ui/sidebar"
@@ -13,7 +14,10 @@ vi.mock("@/api/thread", () => ({
   listThreads: vi.fn(),
   renameThread: vi.fn(),
   deleteThread: vi.fn(),
+  updateThread: vi.fn(),
 }))
+
+vi.mock("@/api/project", () => ({ listProjects: vi.fn().mockResolvedValue([]) }))
 
 vi.mock("@/context/AuthContext", () => ({
   useAuth: () => ({ accessToken: "test-token", user: null, logout: vi.fn() }),
@@ -28,6 +32,9 @@ afterEach(() => {
 const thread: ThreadMetadataResponse = {
   thread_id: "thread-1",
   title: "Old title",
+  project_id: null,
+  pinned: false,
+  pinned_at: null,
   summary: null,
   agent_id: "agent",
   metadata: {},
@@ -115,11 +122,12 @@ it("renames a conversation from the shadcn sidebar", async () => {
 
 it("opens conversation search dialog from the sidebar header search button", async () => {
   installBrowserStubs()
-  vi.mocked(listThreads).mockResolvedValue({
-    items: [thread, { ...thread, thread_id: "thread-2", title: "Release plan" }],
+  vi.mocked(listProjects).mockResolvedValue([])
+  vi.mocked(listThreads).mockImplementation(async (options) => ({
+    items: options?.pinned ? [] : [thread, { ...thread, thread_id: "thread-2", title: "Release plan" }],
     has_more: false,
     next_cursor: null,
-  })
+  }))
   const onSearch = vi.fn()
 
   render(

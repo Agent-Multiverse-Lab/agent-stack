@@ -69,9 +69,28 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), comment="更新时间")
 
 
+class Project(Base):
+    """当前用户的会话归组。"""
+
+    __tablename__ = "project"
+    __table_args__ = (
+        Index("ix_project_user_list", "uid", "deleted_at", "pinned_at", "updated_at", "id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(String(64), unique=True, index=True, nullable=False)
+    uid = Column(String(64), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    pinned_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class Conversation(Base):
     __tablename__ = "conversation"
     __table_args__ = (
+        Index("ix_conversation_project_list", "uid", "deleted_at", "project_id", "pinned_at", "updated_at", "id"),
         Index(
             "ix_conversation_thread_list",
             "uid",
@@ -87,6 +106,8 @@ class Conversation(Base):
     agent_id = Column(String(64), index=True, nullable=False, comment="当前会话绑定的agent")
     title = Column(String(255), nullable=False, comment="会话标题")
     summary = Column(Text, nullable=True, comment="会话摘要")
+    project_id = Column(String(64), ForeignKey("project.project_id", ondelete="SET NULL"), nullable=True, index=True)
+    pinned_at = Column(DateTime(timezone=True), nullable=True)
     conversation_metadata = Column(JSON, nullable=False, default=dict, comment="会话元数据")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), comment="更新时间")
@@ -216,6 +237,25 @@ class ToolCall(Base):
     message = relationship("Message", back_populates="tool_calls")
 
 
+class AgentRunRequest(Base):
+    """已接收的聊天请求；输入由 trigger_message_id 指向的 Message 持有。"""
+
+    __tablename__ = "agent_run_request"
+
+    request_id = Column(String(128), primary_key=True)
+    uid = Column(String(64), nullable=False)
+    conversation_id = Column(
+        Integer, ForeignKey("conversation.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    thread_id = Column(String(64), nullable=False)
+    agent_id = Column(String(128), nullable=False)
+    trigger_message_id = Column(
+        Integer, ForeignKey("message.id", ondelete="CASCADE"), nullable=False,
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class AgentRun(Base):
     __tablename__ = "agent_run"
     __table_args__ = (
@@ -287,20 +327,20 @@ class AgentRun(Base):
     )
 
 
-class AgentRunAttempt(Base):
-    """Run 执行尝试：执行所有权、租约与结束事实的唯一来源。
+class AgentRunExecution(Base):
+    """Run 执行记录：执行所有权、租约与结束事实的唯一来源。
 
-    每次 worker 取得 Run 执行所有权时创建一条 attempt；同一 Run 只允许一条
-    `finished_at IS NULL` 的开放 attempt。AgentRun 只保留面向业务查询的聚合
+    每次 worker 取得 Run 执行所有权时创建一条 execution；同一 Run 只允许一条
+    `finished_at IS NULL` 的开放 execution。AgentRun 只保留面向业务查询的聚合
     状态和当前 owner 快照，续租以本表的心跳/租约为准。
     """
 
-    __tablename__ = "agent_run_attempt"
+    __tablename__ = "agent_run_execution"
     __table_args__ = (
-        UniqueConstraint("run_id", "attempt_no", name="uq_agent_run_attempt_run_no"),
-        Index("ix_agent_run_attempt_run_alive", "run_id", "finished_at"),
+        UniqueConstraint("run_id", "execution_no", name="uq_agent_run_execution_run_no"),
+        Index("ix_agent_run_execution_run_alive", "run_id", "finished_at"),
         Index(
-            "uq_agent_run_attempt_one_open",
+            "uq_agent_run_execution_one_open",
             "run_id",
             unique=True,
             postgresql_where=text("finished_at IS NULL"),
@@ -308,21 +348,21 @@ class AgentRunAttempt(Base):
         ),
     )
 
-    id = Column(String(64), primary_key=True, comment="执行尝试ID")
+    id = Column(String(64), primary_key=True, comment="执行记录ID")
     run_id = Column(
         String(64),
-        ForeignKey("agent_run.id", ondelete="CASCADE", name="fk_agent_run_attempt_run"),
+        ForeignKey("agent_run.id", ondelete="CASCADE", name="fk_agent_run_execution_run"),
         nullable=False,
         comment="所属Run ID",
     )
-    attempt_no = Column(Integer, nullable=False, comment="Run内尝试序号，从1递增")
+    execution_no = Column(Integer, nullable=False, comment="Run内执行序号，从1递增")
     worker_id = Column(String(128), nullable=False, comment="执行Worker标识")
-    status = Column(String(32), nullable=False, comment="执行尝试状态 running/completed/failed/cancelled/interrupted/retry_released/lease_expired/orphaned")
+    status = Column(String(32), nullable=False, comment="执行状态 running/completed/failed/cancelled/interrupted/retry_released/lease_expired/orphaned")
     started_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), comment="开始时间"
     )
-    heartbeat_at = Column(DateTime(timezone=True), nullable=True, comment="本 attempt 最近一次续租时间")
-    lease_expires_at = Column(DateTime(timezone=True), nullable=True, comment="本 attempt 租约到期时间")
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True, comment="本 execution 最近一次续租时间")
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True, comment="本 execution 租约到期时间")
     finished_at = Column(DateTime(timezone=True), nullable=True, comment="结束时间")
     error = Column(Text, nullable=True, comment="错误信息")
     error_type = Column(String(64), nullable=True, comment="错误信息类型")

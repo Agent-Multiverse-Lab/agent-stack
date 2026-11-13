@@ -117,7 +117,7 @@ class AgentRunController:
 
         stop = await _check_run_stopped(self.run_id, self.worker_id)
         if stop.stopped:
-            # 用户取消和终态不是 lease 丢失；其余原因（owner/租约/attempt
+            # 用户取消和终态不是 lease 丢失；其余原因（owner/租约/execution
             # 不一致）都意味着当前 worker 已无权继续执行。
             if stop.reason not in {"cancel_requested", "terminal"}:
                 self.lease_lost = True
@@ -379,7 +379,7 @@ async def _get_agent_run(run_id: str):
 
 
 async def _check_run_stopped(run_id: str, worker_id: str):
-    """用 repository 的 attempt/lease 判定当前 worker 是否仍可执行。"""
+    """用 repository 的 execution/lease 判定当前 worker 是否仍可执行。"""
 
     async with postgres_manager.get_async_session_context() as db:
         return await AgentRunRepository(db).check_run_stopped(

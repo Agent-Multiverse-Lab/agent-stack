@@ -19,7 +19,11 @@ vi.mock("@/context/ModelContext", () => ({
   useModel: () => ({ models: [], selectedModelId: "model", loading: false, selectModel: () => {} }),
 }));
 vi.mock("@/pages/chat/components/AgentMessageComposer", () => ({ AgentMessageComposer: () => null }));
-vi.mock("@/pages/chat/components/AskUser", () => ({ AskUser: () => null }));
+vi.mock("@/pages/chat/components/AskUser", () => ({
+  AskUser: ({ submit }: { submit: (answers: Record<string, string>) => void }) => (
+    <Button onClick={() => submit({ database: "postgresql" })}>Answer question</Button>
+  ),
+}));
 vi.mock("@/api/agent-run", () => ({
   consumeAgentRunStream: mocks.consume,
   createAgentRun: mocks.create,
@@ -42,7 +46,7 @@ const streams: { signal: AbortSignal; finish: () => void; emit: (event: AgentRun
 
 function detail(id: string, startedAt: string | null = start): ThreadDetailResponse {
   return {
-    thread: { thread_id: id, title: id, summary: null, agent_id: "LeaderAgent", metadata: {}, created_at: start, updated_at: start },
+    thread: { thread_id: id, title: id, project_id: null, pinned: false, pinned_at: null, summary: null, agent_id: "LeaderAgent", metadata: {}, created_at: start, updated_at: start },
     messages: [],
     active_run: { run_id: `run-${id}`, run_type: "chat", status: startedAt ? "running" : "pending", started_at: startedAt, finished_at: null, created_by_run_id: null, metadata: {} },
     pending_interaction: null,
@@ -77,6 +81,37 @@ beforeEach(() => {
   });
 });
 afterEach(cleanup);
+
+it("submits resume answers with the current agent and unified request metadata", async () => {
+  mocks.getThreadDetail.mockResolvedValue({
+    ...detail("A"),
+    active_run: null,
+    pending_interaction: {
+      name: "ask_user",
+      created_by_run_id: "parent-run",
+      questions: [{
+        question_id: "database", question: "Database?",
+        options: [{ label: "PostgreSQL", value: "postgresql" }],
+      }],
+    },
+  });
+  mocks.resume.mockResolvedValue({
+    run_id: "resume-run", thread_id: "A", status: "pending",
+    stream_url: "/runs/resume-run/events",
+  });
+  renderChat();
+  fireEvent.click(await screen.findByRole("button", { name: "Answer question" }));
+  await waitFor(() => expect(mocks.resume).toHaveBeenCalledWith("parent-run", {
+    agent_id: "LeaderAgent",
+    thread_id: "A",
+    request_metadata: {
+      type: "resume", request_id: expect.any(String),
+      resume: { answers: { database: "postgresql" } },
+    },
+  }));
+  await waitFor(() => expect(streams).toHaveLength(1));
+  expect(mocks.consume.mock.calls[0][0]).toBe("/runs/resume-run/events");
+});
 
 it("maintains active status after A to B to A while reconnecting the same Run", async () => {
   renderChat();

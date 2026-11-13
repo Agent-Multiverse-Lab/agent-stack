@@ -54,6 +54,9 @@ beforeEach(() => {
     items: [{
       thread_id: "thread-1",
       title: "Sandbox conversation",
+      project_id: null,
+      pinned: false,
+      pinned_at: null,
       summary: null,
       agent_id: "leader",
       metadata: {},

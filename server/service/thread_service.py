@@ -22,8 +22,7 @@ from server.service.model_service import build_model_list, load_chat_model, reso
 from server.service.tool_message_audit_service import ToolMessageAuditCollector
 from server.utils.auth import AuthenticatedUser
 from server.utils.interrupt_utils import AskHumanPayload, parse_interrupt_questions
-from src.agents import BaseAgent
-from src.agents import CustomAgentState as AgentState
+from src.agents import AgentStateDTO, BaseAgent
 from src.agents.base_agent import unpack_data
 from src.database import (
     Agent,
@@ -40,6 +39,7 @@ from src.database.repositories import (
     AgentRunRepository,
     ConversationRepository,
     MessageAttachmentRepository,
+    ProjectRepository,
     UserRepository,
 )
 from src.database.repositories.model_message_audit_repository import (
@@ -50,7 +50,7 @@ from src.storage import get_storage
 from src.storage.minio import ATTACHMENT_BUCKET_NAME
 from src.utils import logger
 
-_THREAD_CURSOR_VERSION = 1
+_THREAD_CURSOR_VERSION = 2
 _SYSTEM_THREAD_METADATA_KEYS = frozenset({"backend_id"})
 
 
@@ -90,11 +90,14 @@ async def create_thread(
     title: str | None,
     summary: str | None,
     metadata: dict[str, Any] | None,
+    project_id: str | None = None,
 ) -> Conversation:
     """创建当前用户绑定顶层 Agent 的对话。"""
     user = await UserRepository(db).get_by_uid(uid)
     if user is None:
         raise LookupError("用户不存在")
+    if project_id is not None:
+        await ProjectRepository(db).require_for_user(uid, project_id, for_update=True)
 
     agent = await AgentRepository(db).get_by_slug_for_run_type(
         slug=agent_id,
@@ -120,6 +123,7 @@ async def create_thread(
         title=title_text,
         summary=summary_text,
         conversation_metadata=thread_metadata,
+        project_id=project_id,
     )
 
 
@@ -130,8 +134,18 @@ async def list_threads(
     limit: int,
     cursor: str | None = None,
     query: str | None = None,
+    project_id: str | None = None,
+    unassigned: bool = False,
+    pinned: bool | None = None,
 ) -> dict[str, Any]:
     """分页列出或搜索当前用户的顶层对话。"""
+    if project_id is not None:
+        if unassigned:
+            raise ValueError("不能同时筛选指定项目与未归组会话")
+        project_id = project_id.strip()
+        if not project_id:
+            raise ValueError("项目 ID 不能为空")
+        await ProjectRepository(db).require_for_user(uid, project_id)
     query_text = None
     if query is not None:
         query_text = query.strip()
@@ -140,8 +154,9 @@ async def list_threads(
 
     before_activity_at = None
     before_id = None
+    before_pinned_at = None
     if cursor is not None:
-        before_activity_at, before_id = _decode_cursor(cursor)
+        before_activity_at, before_id, before_pinned_at = _decode_cursor(cursor)
 
     rows = await ConversationRepository(db).list_top_level_for_user(
         uid=uid,
@@ -149,6 +164,10 @@ async def list_threads(
         query=query_text,
         before_activity_at=before_activity_at,
         before_id=before_id,
+        before_pinned_at=before_pinned_at,
+        project_id=project_id,
+        unassigned=unassigned,
+        pinned=pinned,
     )
     has_more = len(rows) > limit
     page = rows[:limit]
@@ -158,6 +177,7 @@ async def list_threads(
         next_cursor = _encode_cursor(
             last_activity_at,
             int(conversation.id),
+            conversation.pinned_at,
         )
 
     return {
@@ -320,9 +340,11 @@ async def update_thread(
     title: str | None,
     summary: str | None,
     metadata: dict[str, Any] | None,
+    project_id: str | None = None,
+    pinned: bool | None = None,
 ) -> dict[str, Any]:
     """更新当前用户对话的可变字段。"""
-    allowed_fields = {"title", "summary", "metadata"}
+    allowed_fields = {"title", "summary", "metadata", "project_id", "pinned"}
     if not fields or not fields.issubset(allowed_fields):
         raise ValueError("未提供可更新的对话字段")
 
@@ -358,11 +380,22 @@ async def update_thread(
             else:
                 thread_metadata.pop(key, None)
 
+    organization = {}
+    if "project_id" in fields:
+        if project_id is not None:
+            await ProjectRepository(db).require_for_user(uid, project_id, for_update=True)
+        organization["project_id"] = project_id
+    if "pinned" in fields:
+        if pinned is None:
+            raise ValueError("置顶状态不能为 null")
+        organization["pinned"] = pinned
+
     conversation = await conversations.update_conversation(
         conversation,
         title=title_text,
         summary=summary_text,
         conversation_metadata=thread_metadata,
+        organization=organization,
     )
     return _thread_summary(conversation)
 
@@ -414,6 +447,9 @@ def _thread_summary(
     """构建对话列表和详情共用字段。"""
     return {
         "thread_id": str(conversation.thread_id),
+        "project_id": conversation.project_id,
+        "pinned": conversation.pinned_at is not None,
+        "pinned_at": conversation.pinned_at,
         "title": str(conversation.title),
         "summary": (
             str(conversation.summary) if conversation.summary is not None else None
@@ -475,13 +511,14 @@ def _run_response(run: AgentRun | None) -> dict[str, Any] | None:
     }
 
 
-def _encode_cursor(activity_at: datetime, conversation_id: int) -> str:
+def _encode_cursor(activity_at: datetime, conversation_id: int, pinned_at: datetime | None = None) -> str:
     """编码稳定且不透明的对话列表游标。"""
     payload = json.dumps(
         {
             "version": _THREAD_CURSOR_VERSION,
             "activity_at": activity_at.isoformat(),
             "conversation_id": conversation_id,
+            "pinned_at": pinned_at.isoformat() if pinned_at is not None else None,
         },
         ensure_ascii=False,
         separators=(",", ":"),
@@ -489,7 +526,7 @@ def _encode_cursor(activity_at: datetime, conversation_id: int) -> str:
     return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
 
-def _decode_cursor(cursor: str) -> tuple[datetime, int]:
+def _decode_cursor(cursor: str) -> tuple[datetime, int, datetime | None]:
     """校验并解码对话列表游标。"""
     try:
         padding = "=" * (-len(cursor) % 4)
@@ -509,7 +546,10 @@ def _decode_cursor(cursor: str) -> tuple[datetime, int]:
         conversation_id = int(payload["conversation_id"])
         if activity_at.tzinfo is None or conversation_id <= 0:
             raise ValueError
-        return activity_at, conversation_id
+        pinned_at = datetime.fromisoformat(payload["pinned_at"]) if payload["pinned_at"] is not None else None
+        if pinned_at is not None and pinned_at.tzinfo is None:
+            raise ValueError
+        return activity_at, conversation_id, pinned_at
     except (
         binascii.Error,
         KeyError,
@@ -650,8 +690,8 @@ def _assign_stream_msg_id(
     return message_ids.setdefault(key, str(uuid.uuid4()))
 
 
-def _reslove_agent_state(agent_state: dict):
-    agent_result: AgentState = {"agent_todo": list(agent_state.get("todos") or [])}
+def _reslove_agent_state(agent_state: dict) -> AgentStateDTO:
+    agent_result: AgentStateDTO = {"agent_todo": list(agent_state.get("todos") or [])}
     return agent_result
 
 
@@ -836,7 +876,7 @@ def _make_lc_message_to_standard(
     )
 
 
-def _serialize_agent_state(agent_state: AgentState | None) -> str:
+def _serialize_agent_state(agent_state: AgentStateDTO | None) -> str:
     if not agent_state:
         return ""
     try:
@@ -1352,7 +1392,7 @@ def _build_tool_message_audit_collector(
     )
 
 
-async def _persist_agent_state(run_id: str, worker_id: str, state: AgentState) -> None:
+async def _persist_agent_state(run_id: str, worker_id: str, state: AgentStateDTO) -> None:
     async with postgres_manager.get_async_session_context() as session:
         run = await AgentRunRepository(session).lock_for_output_update(
             run_id, worker_id=worker_id,
