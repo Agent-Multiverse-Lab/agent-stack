@@ -6,6 +6,21 @@ const supportedLanguages = ["en", "zh-CN"] as const;
 type Language = (typeof supportedLanguages)[number];
 
 const translations = {
+  "Pinned": "置顶",
+  "Projects": "项目",
+  "Pin": "置顶",
+  "Unpin": "取消置顶",
+  "Unpin {{name}}": "取消置顶 {{name}}",
+  "New project": "新建项目",
+  "Rename project": "重命名项目",
+  "Delete project": "删除项目",
+  "Project name": "项目名称",
+  "Project conversations": "项目会话",
+  "Project actions: {{name}}": "项目操作：{{name}}",
+  "No projects": "暂无项目",
+  "Add to project": "添加到项目",
+  "Remove from project": "移出项目",
+  "Delete {{name}}? Its conversations will remain in your history.": "删除 {{name}}？其中的会话将保留在会话历史中。",
   "Calculate": "计算",
   "Ask user": "询问用户",
   "Present artifacts": "展示成果",

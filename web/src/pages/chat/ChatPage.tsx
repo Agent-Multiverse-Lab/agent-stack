@@ -530,7 +530,7 @@ export default function ChatPage() {
             const element = event.currentTarget;
             setShowScroll(
               element.scrollHeight - element.scrollTop - element.clientHeight >
-                48,
+              48,
             );
           }}
         >
@@ -552,11 +552,10 @@ export default function ChatPage() {
         </div>
 
         <footer
-          className={`inset-x-0 ${
-            docked
+          className={`inset-x-0 ${docked
               ? "shrink-0 bg-card px-3.5 pt-3.5 pb-[max(1rem,env(safe-area-inset-bottom))]"
               : "absolute top-[45%] mx-auto w-[90%] max-w-[800px] -translate-y-1/2 px-0"
-          } ${pending ? "max-h-full overflow-y-auto overscroll-contain" : ""}`}
+            } ${pending ? "max-h-full overflow-y-auto overscroll-contain" : ""}`}
         >
           <div className="relative mx-auto grid w-full max-w-[800px] gap-2">
             {!docked && !loading && (

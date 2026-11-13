@@ -145,6 +145,9 @@ const detail: ThreadDetailResponse = {
   thread: {
     thread_id: "thread",
     title: "Thread",
+    project_id: null,
+    pinned: false,
+    pinned_at: null,
     summary: null,
     agent_id: "LeaderAgent",
     metadata: {},

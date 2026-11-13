@@ -9,6 +9,9 @@ import type { Agent } from "@/types/agent";
 export interface ThreadMetadataResponse {
   thread_id: string;
   title: string;
+  project_id: string | null;
+  pinned: boolean;
+  pinned_at: string | null;
   summary: string | null;
   agent_id: string;
   metadata: Record<string, unknown>;
@@ -67,6 +70,7 @@ export interface ThreadListResponse {
 
 interface CreateThreadRequest {
   agent_id: string;
+  project_id?: string;
   metadata: Record<string, unknown>;
 }
 
@@ -79,11 +83,17 @@ export const listThreads = (options?: {
   query?: string;
   cursor?: string;
   limit?: number;
+  project_id?: string;
+  unassigned?: boolean;
+  pinned?: boolean;
 }) => {
   const params = new URLSearchParams();
   if (options?.query) params.set("q", options.query);
   if (options?.cursor) params.set("cursor", options.cursor);
   if (options?.limit) params.set("limit", String(options.limit));
+  if (options?.project_id !== undefined) params.set("project_id", options.project_id);
+  if (options?.unassigned) params.set("unassigned", "true");
+  if (options?.pinned !== undefined) params.set("pinned", String(options.pinned));
   const queryString = params.toString();
   const path = queryString
     ? `/api/chat/thread?${queryString}`
@@ -93,9 +103,9 @@ export const listThreads = (options?: {
   });
 };
 
-export const renameThread = async (
+export const updateThread = async (
   threadId: string,
-  title: string,
+  fields: { title?: string; project_id?: string | null; pinned?: boolean },
 ): Promise<ThreadMetadataResponse> => {
   const response = await apiClient.apiFetch(
     `/api/chat/thread/${encodeURIComponent(threadId)}`,
@@ -103,11 +113,13 @@ export const renameThread = async (
       method: "PATCH",
       requiresAuth: true,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title }),
+      body: JSON.stringify(fields),
     },
   );
   return response.json();
 };
+
+export const renameThread = (threadId: string, title: string) => updateThread(threadId, { title });
 
 export const generateThreadTitle = (threadId: string, query: string) =>
   apiClient.apiPost<{ title: string }, { query: string }>(
@@ -121,10 +133,10 @@ export const deleteThread = (threadId: string) =>
     requiresAuth: true,
   });
 
-export const createThread = (agentId: string, modelId?: string) =>
+export const createThread = (agentId: string, modelId?: string, projectId?: string) =>
   apiClient.apiPost<ThreadResponse, CreateThreadRequest>(
     "/api/chat/thread",
-    { agent_id: agentId, metadata: modelId ? { model: modelId } : {} },
+    { agent_id: agentId, metadata: modelId ? { model: modelId } : {}, project_id: projectId },
     { requiresAuth: true },
   );
 

@@ -46,7 +46,7 @@ const streams: { signal: AbortSignal; finish: () => void; emit: (event: AgentRun
 
 function detail(id: string, startedAt: string | null = start): ThreadDetailResponse {
   return {
-    thread: { thread_id: id, title: id, summary: null, agent_id: "LeaderAgent", metadata: {}, created_at: start, updated_at: start },
+    thread: { thread_id: id, title: id, project_id: null, pinned: false, pinned_at: null, summary: null, agent_id: "LeaderAgent", metadata: {}, created_at: start, updated_at: start },
     messages: [],
     active_run: { run_id: `run-${id}`, run_type: "chat", status: startedAt ? "running" : "pending", started_at: startedAt, finished_at: null, created_by_run_id: null, metadata: {} },
     pending_interaction: null,
