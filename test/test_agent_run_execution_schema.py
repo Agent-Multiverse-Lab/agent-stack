@@ -17,7 +17,7 @@ from sqlalchemy.orm import configure_mappers
 
 from src.database import AgentRunExecution
 from src.database.base import Base
-from src.database.models import AgentRun, Conversation, Message, User
+from src.database.models import AgentRun, Conversation, Message, Project, User
 
 POSTGRES_URL = os.environ.get("AGENT_STACK_SCHEMA_TEST_POSTGRES_URL")
 MIGRATION_PATH = (
@@ -59,7 +59,7 @@ class RunExecutionSchemaTest(DatabaseTestCase):
         super().setUp()
         configure_mappers()
         Base.metadata.create_all(self.db, tables=[
-            User.__table__, Conversation.__table__, Message.__table__,
+            User.__table__, Project.__table__, Conversation.__table__, Message.__table__,
             AgentRun.__table__, AgentRunExecution.__table__,
         ])
         self.run = AgentRun.__table__

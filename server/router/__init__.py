@@ -6,6 +6,7 @@ from .knowledge_router import router as knowledge_router
 from .knowledge_workspace_router import router as knowledge_workspace_router
 from .library_router import router as library_router
 from .model_router import router as model_router
+from .project_router import router as project_router
 from .sandbox_router import router as sandbox_router
 from .thread_router import router as thread_router
 from .tool_router import router as tool_router
@@ -17,6 +18,7 @@ api_router.include_router(knowledge_router)
 api_router.include_router(knowledge_workspace_router)
 api_router.include_router(library_router)
 api_router.include_router(model_router)
+api_router.include_router(project_router)
 api_router.include_router(sandbox_router)
 api_router.include_router(thread_router)
 api_router.include_router(tool_router)

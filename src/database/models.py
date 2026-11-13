@@ -69,9 +69,28 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), comment="更新时间")
 
 
+class Project(Base):
+    """当前用户的会话归组。"""
+
+    __tablename__ = "project"
+    __table_args__ = (
+        Index("ix_project_user_list", "uid", "deleted_at", "pinned_at", "updated_at", "id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(String(64), unique=True, index=True, nullable=False)
+    uid = Column(String(64), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    pinned_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class Conversation(Base):
     __tablename__ = "conversation"
     __table_args__ = (
+        Index("ix_conversation_project_list", "uid", "deleted_at", "project_id", "pinned_at", "updated_at", "id"),
         Index(
             "ix_conversation_thread_list",
             "uid",
@@ -87,6 +106,8 @@ class Conversation(Base):
     agent_id = Column(String(64), index=True, nullable=False, comment="当前会话绑定的agent")
     title = Column(String(255), nullable=False, comment="会话标题")
     summary = Column(Text, nullable=True, comment="会话摘要")
+    project_id = Column(String(64), ForeignKey("project.project_id", ondelete="SET NULL"), nullable=True, index=True)
+    pinned_at = Column(DateTime(timezone=True), nullable=True)
     conversation_metadata = Column(JSON, nullable=False, default=dict, comment="会话元数据")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), comment="更新时间")

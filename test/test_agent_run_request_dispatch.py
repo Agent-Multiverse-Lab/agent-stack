@@ -27,6 +27,7 @@ from src.database.models import (
     Conversation,
     Message,
     MessageAttachment,
+    Project,
     ToolCall,
     User,
 )
@@ -51,7 +52,7 @@ class AgentRunRequestRepositoryTest(unittest.IsolatedAsyncioTestCase):
         with self.engine.begin() as connection:
             connection.exec_driver_sql("PRAGMA foreign_keys=ON")
             Base.metadata.create_all(connection, tables=[
-                model.__table__ for model in (Conversation, Message, AgentRun)
+                model.__table__ for model in (Project, Conversation, Message, AgentRun)
             ])
             self.migrate(connection, "upgrade")
         self.db = Session(self.engine, expire_on_commit=False)
@@ -171,7 +172,7 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         async with self.engine.begin() as connection:
             await connection.run_sync(lambda db: Base.metadata.create_all(db, tables=[
                 model.__table__ for model in (
-                    User, Agent, Conversation, Message, AgentRun, AgentRunExecution,
+                    User, Agent, Project, Conversation, Message, AgentRun, AgentRunExecution,
                     Attachment, MessageAttachment, ToolCall,
                 )
             ]))

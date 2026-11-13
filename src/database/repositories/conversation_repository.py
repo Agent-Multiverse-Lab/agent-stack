@@ -29,6 +29,10 @@ class ConversationRepository:
         query: str | None = None,
         before_activity_at: datetime | None = None,
         before_id: int | None = None,
+        before_pinned_at: datetime | None = None,
+        project_id: str | None = None,
+        unassigned: bool = False,
+        pinned: bool | None = None,
     ) -> list[tuple[Conversation, datetime]]:
         """按最近活动时间倒序列出当前用户的顶层对话。"""
         if limit <= 0:
@@ -71,27 +75,37 @@ class ConversationRepository:
             )
         )
 
+        if project_id is not None:
+            statement = statement.where(Conversation.project_id == project_id)
+        if unassigned:
+            statement = statement.where(Conversation.project_id.is_(None))
+        if pinned is not None:
+            statement = statement.where(
+                Conversation.pinned_at.is_not(None) if pinned else Conversation.pinned_at.is_(None)
+            )
         if query is not None:
             pattern = f"%{query}%"
-            statement = statement.where(
-                or_(
-                    Conversation.title.ilike(pattern),
-                    Conversation.summary.ilike(pattern),
-                )
-            )
+            statement = statement.where(or_(
+                Conversation.title.ilike(pattern),
+                Conversation.summary.ilike(pattern),
+            ))
         if before_activity_at is not None and before_id is not None:
-            statement = statement.where(
-                or_(
-                    last_activity_at < before_activity_at,
-                    and_(
-                        last_activity_at == before_activity_at,
-                        Conversation.id < before_id,
-                    ),
-                )
+            activity_after = or_(
+                last_activity_at < before_activity_at,
+                and_(last_activity_at == before_activity_at, Conversation.id < before_id),
             )
+            if before_pinned_at is None:
+                statement = statement.where(Conversation.pinned_at.is_(None), activity_after)
+            else:
+                statement = statement.where(or_(
+                    Conversation.pinned_at.is_(None),
+                    Conversation.pinned_at < before_pinned_at,
+                    and_(Conversation.pinned_at == before_pinned_at, activity_after),
+                ))
 
         result = await self.session.execute(
             statement.order_by(
+                Conversation.pinned_at.desc().nulls_last(),
                 last_activity_at.desc(),
                 Conversation.id.desc(),
             ).limit(limit)
@@ -263,6 +277,7 @@ class ConversationRepository:
         title: str | None = None,
         summary: str | None = None,
         conversation_metadata: dict | None = None,
+        project_id: str | None = None,
     ) -> Conversation:
         """创建对话并刷新数据库生成字段。"""
         conversation = Conversation(
@@ -272,6 +287,7 @@ class ConversationRepository:
             title=title or "",
             summary=summary,
             conversation_metadata=dict(conversation_metadata or {}),
+            project_id=project_id,
         )
         self.session.add(conversation)
         await self.session.flush()
@@ -311,11 +327,17 @@ class ConversationRepository:
         title: str,
         summary: str | None,
         conversation_metadata: dict,
+        organization: dict | None = None,
     ) -> Conversation:
         """更新允许修改的对话字段。"""
         conversation.title = title
         conversation.summary = summary
         conversation.conversation_metadata = dict(conversation_metadata)
+        if organization is not None:
+            if "project_id" in organization:
+                conversation.project_id = organization["project_id"]
+            if "pinned" in organization:
+                conversation.pinned_at = datetime.now(UTC) if organization["pinned"] else None
         conversation.updated_at = datetime.now(UTC)
         await self.session.flush()
         return conversation
