@@ -117,7 +117,12 @@ export const createAgentRun = (
     { requiresAuth: true }
   )
 
-/** 根据会话详情中的 Run ID 和会话 ID，重建已有 Run 的 SSE 订阅地址。 */
+/**
+ * 根据会话详情中的 Run ID 和会话 ID，重建已有 Run 的 SSE 订阅地址。
+ * @param runId Run 唯一标识。
+ * @param threadId 所属会话 ID。
+ * @returns 用于订阅该 Run 事件流的请求路径。
+ */
 export const buildAgentRunStreamUrl = (runId: string, threadId: string) =>
   `/api/agent/runs/${encodeURIComponent(runId)}/events?thread_id=${encodeURIComponent(threadId)}`
 
@@ -138,7 +143,11 @@ export const resumeAgentRun = (
     { requiresAuth: true }
   )
 
-/** 解析完整 SSE 数据块并提取事件 ID；缺少 data 或 type 时返回 null，非法 JSON 抛出异常。 */
+/**
+ * 解析完整 SSE 数据块并提取事件 ID；缺少 data 或 type 时返回 null，非法 JSON 抛出异常。
+ * @param block 以空行分隔的单个 SSE 文本块。
+ * @returns 解析后的事件对象，无效事件返回 null。
+ */
 const readSSEBlock = (block: string): AgentRunStreamEvent | null => {
   const lines = block.split(/\r?\n/)
   const data = lines
@@ -209,7 +218,11 @@ export const consumeAgentRunStream = async (
   throw new Error(i18n.t("Agent Run event stream ended before a terminal status"))
 }
 
-/** 请求取消指定 Run，返回后端当前状态；cancel_requested 仍需等待最终取消结果。 */
+/**
+ * 请求取消指定 Run，返回后端当前状态；cancel_requested 仍需等待最终取消结果。
+ * @param runId 需要取消的 Run 唯一标识。
+ * @returns 取消请求后的 Run 状态信息。
+ */
 export const cancelAgentRun = (runId: string) =>
   apiClient.apiPost<AgentRunCancelResponse>(
     `/api/agent/runs/${encodeURIComponent(runId)}/cancel`,
