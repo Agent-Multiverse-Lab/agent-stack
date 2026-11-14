@@ -17,7 +17,10 @@ vi.mock("@/api/thread", () => ({
   updateThread: vi.fn(),
 }))
 
-vi.mock("@/api/project", () => ({ listProjects: vi.fn().mockResolvedValue([]) }))
+vi.mock("@/api/project", () => ({
+  createProject: vi.fn(),
+  listProjects: vi.fn().mockResolvedValue([]),
+}))
 
 vi.mock("@/context/AuthContext", () => ({
   useAuth: () => ({ accessToken: "test-token", user: null, logout: vi.fn() }),

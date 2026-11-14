@@ -8,6 +8,7 @@ import {
   MoreHorizontalIcon,
   PinIcon,
   PinOffIcon,
+  PlusIcon,
   FolderInputIcon,
   FolderMinusIcon,
   Trash2Icon,
@@ -15,7 +16,7 @@ import {
 import { Link, useNavigate, useParams } from "react-router"
 
 import { deleteThread, listThreads, renameThread, updateThread } from "@/api/thread"
-import type { ProjectResponse } from "@/api/project"
+import { createProject, type ProjectResponse } from "@/api/project"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -55,11 +56,12 @@ export interface NavProjectsProps {
   projects?: ProjectResponse[]
   revision?: number
   onChanged?: () => void
+  onOpenProject?: (projectId: string) => void
   leading?: ReactNode
   hasLeading?: boolean
 }
 
-export function NavProjects({ onSearch, query = "", projectId, pinnedOnly = false, projects = [], revision = 0, onChanged, leading, hasLeading = false }: NavProjectsProps) {
+export function NavProjects({ onSearch, query = "", projectId, pinnedOnly = false, projects = [], revision = 0, onChanged, onOpenProject, leading, hasLeading = false }: NavProjectsProps) {
   const { t } = useTranslation()
   const { threadId } = useParams()
   const navigate = useNavigate()
@@ -70,7 +72,7 @@ export function NavProjects({ onSearch, query = "", projectId, pinnedOnly = fals
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [selected, setSelected] = useState<ThreadMetadataResponse | null>(null)
-  const [action, setAction] = useState<"rename" | "delete">("rename")
+  const [action, setAction] = useState<"rename" | "delete" | "create-project">("rename")
   const [title, setTitle] = useState("")
   const [saving, setSaving] = useState(false)
   const [actionError, setActionError] = useState("")
@@ -156,16 +158,16 @@ export function NavProjects({ onSearch, query = "", projectId, pinnedOnly = fals
 
   function openAction(
     thread: ThreadMetadataResponse,
-    nextAction: "rename" | "delete",
+    nextAction: "rename" | "delete" | "create-project",
   ) {
     setSelected(thread)
     setAction(nextAction)
-    setTitle(thread.title)
+    setTitle(nextAction === "create-project" ? "" : thread.title)
     setActionError("")
   }
 
   async function submit() {
-    if (!selected || saving || (action === "rename" && !title.trim())) return
+    if (!selected || saving || (action !== "delete" && !title.trim())) return
     setSaving(true)
     setActionError("")
     try {
@@ -176,6 +178,10 @@ export function NavProjects({ onSearch, query = "", projectId, pinnedOnly = fals
             item.thread_id === selected.thread_id ? updated : item,
           ),
         )
+      } else if (action === "create-project") {
+        const created = await createProject(title.trim())
+        await updateThread(selected.thread_id, { project_id: created.project_id })
+        onOpenProject?.(created.project_id)
       } else {
         await deleteThread(selected.thread_id)
         setThreads((previous) =>
@@ -185,6 +191,7 @@ export function NavProjects({ onSearch, query = "", projectId, pinnedOnly = fals
       }
       setSelected(null)
       onChanged?.()
+      if (!onChanged && action === "create-project") void load()
     } catch (cause) {
       setActionError(
         cause instanceof Error
@@ -272,15 +279,21 @@ export function NavProjects({ onSearch, query = "", projectId, pinnedOnly = fals
                     <span>{t(item.pinned ? "Unpin" : "Pin")}</span>
                   </DropdownMenuItem>
                   <DropdownMenuSub>
-                    <DropdownMenuSubTrigger disabled={saving || !projects.length}>
+                    <DropdownMenuSubTrigger disabled={saving}>
                       <FolderInputIcon /><span>{t("Add to project")}</span>
                     </DropdownMenuSubTrigger>
                     <DropdownMenuSubContent>
                       {projects.map((project) => (
                         <DropdownMenuItem key={project.project_id} disabled={item.project_id === project.project_id} onClick={() => void organize(item, { project_id: project.project_id })}>
-                          {project.name}
+                          <FolderIcon />
+                          <span>{project.name}</span>
                         </DropdownMenuItem>
                       ))}
+                      {projects.length > 0 && <DropdownMenuSeparator />}
+                      <DropdownMenuItem onClick={() => openAction(item, "create-project")}>
+                        <PlusIcon />
+                        <span>{t("New project")}</span>
+                      </DropdownMenuItem>
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
                   {item.project_id !== null && <DropdownMenuItem disabled={saving} onClick={() => void organize(item, { project_id: null })}>
@@ -368,17 +381,21 @@ export function NavProjects({ onSearch, query = "", projectId, pinnedOnly = fals
             <DialogTitle>
               {action === "rename"
                 ? t("Rename conversation")
-                : t("Delete conversation")}
+                : action === "create-project"
+                  ? t("New project")
+                  : t("Delete conversation")}
             </DialogTitle>
             <DialogDescription
-              className={action === "rename" ? "sr-only" : "break-words"}
+              className={action !== "delete" ? "sr-only" : "break-words"}
             >
               {action === "rename"
                 ? t("Enter a new conversation title")
-                : t(
-                    "Delete {{title}}? This conversation will be removed from your history.",
-                    { title: selected?.title },
-                  )}
+                : action === "create-project"
+                  ? t("Project name")
+                  : t(
+                      "Delete {{title}}? This conversation will be removed from your history.",
+                      { title: selected?.title },
+                    )}
             </DialogDescription>
           </DialogHeader>
           <form
@@ -387,11 +404,12 @@ export function NavProjects({ onSearch, query = "", projectId, pinnedOnly = fals
               void submit()
             }}
           >
-            {action === "rename" && (
+            {action !== "delete" && (
               <Input
                 autoFocus
+                maxLength={action === "create-project" ? 255 : undefined}
                 value={title}
-                aria-label={t("Conversation title")}
+                aria-label={t(action === "create-project" ? "Project name" : "Conversation title")}
                 disabled={saving}
                 onChange={(event) => setTitle(event.target.value)}
               />
@@ -413,11 +431,11 @@ export function NavProjects({ onSearch, query = "", projectId, pinnedOnly = fals
               <Button
                 variant={action === "delete" ? "destructive" : "default"}
                 type="submit"
-                disabled={saving || (action === "rename" && !title.trim())}
+                disabled={saving || (action !== "delete" && !title.trim())}
               >
                 {saving
                   ? t("Processing...")
-                  : action === "rename"
+                  : action !== "delete"
                     ? t("Save")
                     : t("Delete")}
               </Button>

@@ -167,7 +167,7 @@ export function AppSidebar({
             document.getElementById(`project-${id}`)?.focus();
           }} />
           <NavProjectList projects={projects} revision={revision} onChanged={changed} expandedProject={expandedProject} onExpand={setExpandedProject} loading={projectLoading} error={projectError} onRetry={changed} />
-          <NavProjects projects={projects} revision={revision} onChanged={changed} />
+          <NavProjects projects={projects} revision={revision} onChanged={changed} onOpenProject={setExpandedProject} />
         </>}
       </SidebarContent>
       <SidebarFooter className="px-2 pt-0 pb-1.5">

@@ -30,7 +30,7 @@ beforeEach(() => {
     return threads.find((thread) => thread.thread_id === id)!
   })
   vi.mocked(createProject).mockImplementation(async (name) => {
-    const project = { ...projects[0], project_id: "proj-2", name }
+    const project: ProjectResponse = { project_id: "proj-2", name, pinned: false, pinned_at: null, created_at: now, updated_at: now }
     projects = [...projects, project]
     return project
   })
@@ -57,7 +57,8 @@ async function menu(name: string) {
 it("creates and renames projects, then deletes a project without deleting its conversations", async () => {
   threads[0].project_id = "proj-1"
   mount()
-  await menu("New project")
+  await menu("Project actions")
+  fireEvent.click(await screen.findByRole("menuitem", { name: "New project" }))
   fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), { target: { value: "Release" } })
   fireEvent.click(screen.getByRole("button", { name: "Save" }))
   expect(await screen.findByRole("button", { name: "Release", expanded: true })).toBeTruthy()
@@ -72,6 +73,35 @@ it("creates and renames projects, then deletes a project without deleting its co
   fireEvent.click(screen.getByRole("button", { name: "Delete" }))
   expect(await screen.findByRole("link", { name: "Analysis" })).toBeTruthy()
   await waitFor(() => expect(screen.queryByRole("button", { name: "Research" })).toBeNull())
+})
+
+it("hides the project list when empty and collapses or expands projects like conversations", async () => {
+  projects = []
+  mount()
+  expect(await screen.findByRole("link", { name: "Analysis" })).toBeTruthy()
+  const group = screen.getByRole("button", { name: "Projects" }).closest('[aria-label="Projects"]') as HTMLElement
+  expect(within(group).queryByRole("list")).toBeNull()
+  expect(screen.queryByText("No projects")).toBeNull()
+
+  await menu("Project actions")
+  fireEvent.click(await screen.findByRole("menuitem", { name: "New project" }))
+  fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), { target: { value: "Roadmap" } })
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  expect(await screen.findByRole("button", { name: "Roadmap", expanded: true })).toBeTruthy()
+
+  const toggle = screen.getByRole("button", { name: "Projects" })
+  const actionsButton = screen.getByRole("button", { name: "Project actions" })
+  expect(toggle.parentElement).toBe(actionsButton.parentElement)
+  expect(actionsButton.className).toContain("opacity-0")
+  expect(actionsButton.className).toContain("group-hover/menu-item:opacity-100")
+
+  expect(toggle.getAttribute("aria-expanded")).toBe("true")
+  fireEvent.click(toggle)
+  expect(toggle.getAttribute("aria-expanded")).toBe("false")
+  expect(screen.queryByRole("button", { name: "Roadmap" })).toBeNull()
+  fireEvent.click(toggle)
+  expect(toggle.getAttribute("aria-expanded")).toBe("true")
+  expect(screen.getByRole("button", { name: "Roadmap" })).toBeTruthy()
 })
 
 it("synchronizes project and conversation pins and keeps them after remount", async () => {
@@ -94,20 +124,33 @@ it("synchronizes project and conversation pins and keeps them after remount", as
   await waitFor(() => expect(screen.queryByRole("button", { name: "Pinned" })).toBeNull())
 })
 
-it("moves conversations between the unassigned list and project list", async () => {
+it("moves conversations between the unassigned list and project list, and allows creating a project from Add to project when empty", async () => {
+  projects = []
   mount()
-  await menu("Conversation actions: Analysis")
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Add to project" }))
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Research" }))
-  await waitFor(() => expect(screen.queryByRole("link", { name: "Analysis" })).toBeNull())
-  await menu("Research")
   expect(await screen.findByRole("link", { name: "Analysis" })).toBeTruthy()
-  expect(listThreads).toHaveBeenCalledWith(expect.objectContaining({ project_id: "proj-1", unassigned: false }))
+  await menu("Conversation actions: Analysis")
+  const addTrigger = await screen.findByRole("menuitem", { name: "Add to project" })
+  expect(addTrigger.getAttribute("aria-disabled")).not.toBe("true")
+  fireEvent.click(addTrigger)
+  fireEvent.click(await screen.findByRole("menuitem", { name: "New project" }))
+  fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), { target: { value: "Research" } })
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  expect(await screen.findByRole("button", { name: "Research", expanded: true })).toBeTruthy()
+  expect(await screen.findByRole("link", { name: "Analysis" })).toBeTruthy()
+  expect(listThreads).toHaveBeenCalledWith(expect.objectContaining({ project_id: "proj-2", unassigned: false }))
   await menu("Conversation actions: Analysis")
   fireEvent.click(await screen.findByRole("menuitem", { name: "Remove from project" }))
   await waitFor(() => {
     const history = screen.getByRole("button", { name: "Conversations" }).closest('[aria-label="Conversation history"]') as HTMLElement
     expect(within(history).getByRole("link", { name: "Analysis" })).toBeTruthy()
+  })
+  await menu("Conversation actions: Analysis")
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Add to project" }))
+  expect(await screen.findByRole("menuitem", { name: "New project" })).toBeTruthy()
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Research" }))
+  await waitFor(() => {
+    const projectThreads = document.getElementById("project-threads-proj-2") as HTMLElement
+    expect(within(projectThreads).getByRole("link", { name: "Analysis" })).toBeTruthy()
   })
 })
 

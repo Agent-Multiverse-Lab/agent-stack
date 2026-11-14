@@ -30,9 +30,9 @@ export function NavPinned({ projects, revision, onChanged, onOpenProject }: {
     }
   }
 
-  return <NavProjects pinnedOnly projects={projects} revision={revision} onChanged={onChanged} hasLeading={pinned.length > 0 || Boolean(error)} leading={<>
+  return <NavProjects pinnedOnly projects={projects} revision={revision} onChanged={onChanged} onOpenProject={onOpenProject} hasLeading={pinned.length > 0 || Boolean(error)} leading={<>
     {pinned.map((project) => <SidebarMenuItem key={project.project_id}>
-      <SidebarMenuButton onClick={() => onOpenProject(project.project_id)} title={project.name} className="text-[13px]">
+      <SidebarMenuButton onClick={() => onOpenProject(project.project_id)} title={project.name} className="px-2 text-[13px]">
         <FolderIcon /><span>{project.name}</span>
       </SidebarMenuButton>
       <SidebarMenuAction disabled={saving} onClick={() => void unpin(project)} aria-label={t("Unpin {{name}}", { name: project.name })}>

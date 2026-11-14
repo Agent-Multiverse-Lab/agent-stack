@@ -1,5 +1,15 @@
-import { useState } from "react"
-import { ChevronRightIcon, FolderIcon, MoreHorizontalIcon, PencilIcon, PinIcon, PinOffIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import { useId, useState } from "react"
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  FolderIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  PinIcon,
+  PinOffIcon,
+  PlusIcon,
+  Trash2Icon,
+} from "lucide-react"
 
 import { createProject, deleteProject, updateProject, type ProjectResponse } from "@/api/project"
 import { NavProjects } from "@/components/nav-projects"
@@ -9,6 +19,67 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from "@/components/ui/input"
 import { SidebarGroup, SidebarGroupLabel, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar"
 import { useTranslation } from "@/i18n"
+
+type ProjectActionMenuProps =
+  | {
+      project?: undefined
+      onCreate: () => void
+    }
+  | {
+      project: ProjectResponse
+      saving: boolean
+      onRename: () => void
+      onTogglePin: () => void
+      onDelete: () => void
+    }
+
+export function ProjectActionMenu(props: ProjectActionMenuProps) {
+  const { t } = useTranslation()
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <SidebarMenuAction
+            showOnHover
+            className="aria-expanded:bg-sidebar-accent aria-expanded:text-sidebar-accent-foreground"
+          />
+        }
+        aria-label={
+          props.project
+            ? t("Project actions: {{name}}", { name: props.project.name })
+            : t("Project actions")
+        }
+      >
+        <MoreHorizontalIcon />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-fit" side="right" align="start">
+        {!props.project ? (
+          <DropdownMenuItem onClick={props.onCreate}>
+            <PlusIcon />
+            <span>{t("New project")}</span>
+          </DropdownMenuItem>
+        ) : (
+          <>
+            <DropdownMenuItem onClick={props.onRename}>
+              <PencilIcon />
+              <span>{t("Rename")}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={props.saving} onClick={props.onTogglePin}>
+              {props.project.pinned ? <PinOffIcon /> : <PinIcon />}
+              <span>{t(props.project.pinned ? "Unpin" : "Pin")}</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onClick={props.onDelete}>
+              <Trash2Icon />
+              <span>{t("Delete project")}</span>
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
 
 export function NavProjectList({ projects, revision, onChanged, expandedProject, onExpand, loading, error, onRetry }: {
   projects: ProjectResponse[]
@@ -21,6 +92,8 @@ export function NavProjectList({ projects, revision, onChanged, expandedProject,
   onRetry: () => void
 }) {
   const { t } = useTranslation()
+  const [expanded, setExpanded] = useState(true)
+  const listId = useId()
   const [dialog, setDialog] = useState<{ action: "create" | "rename" | "delete"; project?: ProjectResponse } | null>(null)
   const [name, setName] = useState("")
   const [saving, setSaving] = useState(false)
@@ -39,6 +112,7 @@ export function NavProjectList({ projects, revision, onChanged, expandedProject,
     try {
       if (dialog.action === "create") {
         const created = await createProject(name.trim())
+        setExpanded(true)
         onExpand(created.project_id)
       } else if (dialog.project) {
         if (dialog.action === "rename") await updateProject(dialog.project.project_id, { name: name.trim() })
@@ -69,35 +143,49 @@ export function NavProjectList({ projects, revision, onChanged, expandedProject,
     }
   }
 
+  const hasList = loading || Boolean(error) || (!dialog && Boolean(actionError)) || projects.length > 0
+
   return <>
-    <SidebarGroup className="shrink-0 pt-1 group-data-[collapsible=icon]:hidden" aria-label={t("Projects")}>
-      <SidebarGroupLabel className="justify-between">
-        <span>{t("Projects")}</span>
-        <Button variant="ghost" size="icon-sm" aria-label={t("New project")} onClick={() => open("create")}><PlusIcon /></Button>
+    <SidebarGroup className="min-h-0 shrink-0 pt-1 group-data-[collapsible=icon]:hidden" aria-label={t("Projects")}>
+      <SidebarGroupLabel className="group/menu-item relative mb-1 px-0 font-medium">
+        <Button
+          type="button"
+          variant="ghost"
+          aria-expanded={expanded}
+          aria-controls={hasList ? listId : undefined}
+          onClick={() => setExpanded((value) => !value)}
+          className="h-full w-full justify-start gap-1.5 rounded-md px-2 pr-8 text-left text-xs font-medium text-sidebar-foreground/70 group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-foreground has-[+[aria-expanded=true]]:bg-sidebar-accent has-[+[aria-expanded=true]]:text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+        >
+          <ChevronDownIcon className={`size-4 shrink-0 transition-transform ${expanded ? "" : "-rotate-90"}`} />
+          <span>{t("Projects")}</span>
+        </Button>
+        <ProjectActionMenu onCreate={() => open("create")} />
       </SidebarGroupLabel>
-      <SidebarMenu>
-        {loading && <SidebarMenuItem><p role="status" className="px-2 text-xs text-muted-foreground">{t("Loading…")}</p></SidebarMenuItem>}
-        {error && <SidebarMenuItem><p role="alert" className="px-2 text-xs text-destructive">{error}</p><Button variant="ghost" size="sm" onClick={onRetry}>{t("Retry")}</Button></SidebarMenuItem>}
-        {!dialog && actionError && <SidebarMenuItem><p role="alert" className="px-2 text-xs text-destructive">{actionError}</p></SidebarMenuItem>}
-        {!loading && !error && !projects.length && <SidebarMenuItem><p className="px-2 text-xs text-muted-foreground">{t("No projects")}</p></SidebarMenuItem>}
-        {projects.map((project) => <SidebarMenuItem key={project.project_id}>
-          <SidebarMenuButton id={`project-${project.project_id}`} aria-expanded={expandedProject === project.project_id} aria-controls={`project-threads-${project.project_id}`} onClick={() => onExpand(expandedProject === project.project_id ? null : project.project_id)} title={project.name} className="text-[13px]">
-            <ChevronRightIcon className={expandedProject === project.project_id ? "rotate-90" : ""} /><FolderIcon /><span>{project.name}</span>
-          </SidebarMenuButton>
-          <DropdownMenu>
-            <DropdownMenuTrigger render={<SidebarMenuAction showOnHover />} aria-label={t("Project actions: {{name}}", { name: project.name })}><MoreHorizontalIcon /></DropdownMenuTrigger>
-            <DropdownMenuContent side="right" align="start">
-              <DropdownMenuItem onClick={() => open("rename", project)}><PencilIcon />{t("Rename")}</DropdownMenuItem>
-              <DropdownMenuItem disabled={saving} onClick={() => void pin(project)}>{project.pinned ? <PinOffIcon /> : <PinIcon />}{t(project.pinned ? "Unpin" : "Pin")}</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onClick={() => open("delete", project)}><Trash2Icon />{t("Delete project")}</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {expandedProject === project.project_id && <div id={`project-threads-${project.project_id}`} className="ml-3">
-            <NavProjects projectId={project.project_id} projects={projects} revision={revision} onChanged={onChanged} />
-          </div>}
-        </SidebarMenuItem>)}
-      </SidebarMenu>
+      {hasList && (
+        <SidebarMenu id={listId} style={expanded ? undefined : { display: "none" }} className="min-h-0 flex-1 overflow-y-auto gap-1">
+          {loading && <SidebarMenuItem><p role="status" className="px-2 py-1 text-xs text-muted-foreground">{t("Loading…")}</p></SidebarMenuItem>}
+          {error && <SidebarMenuItem><p role="alert" className="px-2 py-1 text-xs text-destructive">{error}</p><Button variant="ghost" size="sm" onClick={onRetry}>{t("Retry")}</Button></SidebarMenuItem>}
+          {!dialog && actionError && <SidebarMenuItem><p role="alert" className="px-2 py-1 text-xs text-destructive">{actionError}</p></SidebarMenuItem>}
+          {projects.map((project) => <SidebarMenuItem key={project.project_id}>
+            <SidebarMenuButton id={`project-${project.project_id}`} aria-expanded={expandedProject === project.project_id} aria-controls={`project-threads-${project.project_id}`} onClick={() => onExpand(expandedProject === project.project_id ? null : project.project_id)} title={project.name} className="px-2 text-[13px]">
+              <ChevronRightIcon className={expandedProject === project.project_id ? "rotate-90" : ""} /><FolderIcon /><span>{project.name}</span>
+            </SidebarMenuButton>
+            <ProjectActionMenu
+              project={project}
+              saving={saving}
+              onRename={() => open("rename", project)}
+              onTogglePin={() => void pin(project)}
+              onDelete={() => open("delete", project)}
+            />
+            {expandedProject === project.project_id && <div id={`project-threads-${project.project_id}`} className="ml-3">
+              <NavProjects projectId={project.project_id} projects={projects} revision={revision} onChanged={onChanged} onOpenProject={(id) => {
+                setExpanded(true)
+                onExpand(id)
+              }} />
+            </div>}
+          </SidebarMenuItem>)}
+        </SidebarMenu>
+      )}
     </SidebarGroup>
     <Dialog open={dialog !== null} onOpenChange={(isOpen) => { if (!isOpen && !saving) setDialog(null) }}>
       <DialogContent showCloseButton={!saving}>
