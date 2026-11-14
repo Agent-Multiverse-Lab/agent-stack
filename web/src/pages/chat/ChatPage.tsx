@@ -27,6 +27,7 @@ import { useThread } from "@/pages/chat/hooks/useThread";
 import { useModel } from "@/context/ModelContext";
 import { useTranslation } from "@/i18n";
 
+/** 识别切换会话或卸载页面时主动中断请求产生的异常。 */
 const isAbortError = (caught: unknown) =>
   caught instanceof DOMException && caught.name === "AbortError";
 
@@ -37,8 +38,10 @@ interface ChatSubmission {
   optimisticMessageId: number;
 }
 
+/** 编排当前会话的消息展示、用户发送、Run 订阅及提问恢复。 */
 export default function ChatPage() {
   const { t } = useTranslation();
+  /** 提取可展示的异常消息，未知异常使用统一提示。 */
   const errorText = (caught: unknown) =>
     caught instanceof Error ? caught.message : t("Request failed");
   const { threadId } = useParams();
@@ -66,10 +69,12 @@ export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<ChatSidebarTab>("state");
 
+  /** 中断当前页面的事件订阅并释放控制器引用。 */
   const abortStream = () => {
     controller.current?.abort();
     controller.current = null;
   };
+  /** 使旧会话及附件上传的在途操作失效，重置流合并状态并断开旧订阅。 */
   const invalidate = () => {
     operation.current++;
     attachments.invalidate();
@@ -77,6 +82,7 @@ export default function ChatPage() {
     abortStream();
   };
 
+  /** 加载会话和持久化消息；仅在操作版本仍匹配时更新页面，并返回活动 Run。 */
   async function loadThreadDetail(id: string, expected: number) {
     const detail = await getThreadDetail(id);
     if (operation.current !== expected) return null;
@@ -85,6 +91,10 @@ export default function ChatPage() {
     return run.restoreRunFromThread(detail);
   }
 
+  /**
+   * 持续订阅指定会话的当前 Run，将流事件交给 useThread 合并到消息列表。
+   * 断流后读取会话状态，仍在运行则间隔一秒重连；终态后重新加载持久化消息。
+   */
   async function monitorRun(id: string, expected: number) {
     const monitoredRunId = run.getState().runId;
     if (!monitoredRunId || !run.getState().streamUrl || !run.isActive()) return;
@@ -122,7 +132,7 @@ export default function ChatPage() {
         try {
           await loadThreadDetail(id, expected);
         } catch {
-          // Keep the known Run state and retry the stream.
+          // 会话详情读取失败时保留已知 Run 状态，继续尝试订阅。
         }
         if (
           operation.current !== expected ||
@@ -160,6 +170,7 @@ export default function ChatPage() {
     }
   }
 
+  /** 切换到指定会话，重置本地输入和 Run 状态，加载详情后接续已有活动 Run。 */
   async function loadThread(id: string) {
     const expected = ++operation.current;
     attachments.reset();
@@ -184,6 +195,7 @@ export default function ChatPage() {
     }
   }
 
+  /** 根据路由进入新会话空白页，或加载被打开的已有会话。 */
   const onRouteChange = useEffectEvent((id?: string) => {
     if (!id) {
       invalidate();
@@ -199,6 +211,7 @@ export default function ChatPage() {
       void loadThread(id);
     }
   });
+  /** 页面卸载时使在途操作失效，并关闭当前事件订阅。 */
   const onUnmount = useEffectEvent(() => invalidate());
   const boundModelId = thread.state.thread?.metadata.model;
   useEffect(() => {
@@ -217,6 +230,7 @@ export default function ChatPage() {
     }
   }, [thread.state.messages, run.state.pendingInteraction]);
 
+  /** 将当前会话标题复制到编辑草稿，并打开标题编辑框。 */
   function startTitleEdit() {
     const current = thread.getState().thread;
     if (!current) return;
@@ -224,6 +238,7 @@ export default function ChatPage() {
     setEditingTitle(true);
   }
 
+  /** 保存非空且已修改的标题，成功后通知会话导航刷新标题。 */
   async function saveTitle() {
     const current = thread.getState().thread;
     const next = titleDraft.trim();
@@ -238,6 +253,10 @@ export default function ChatPage() {
     }
   }
 
+  /**
+   * 检查输入和附件上传状态，插入临时用户消息并清空输入框。
+   * 返回用于提交及失败恢复的正文、附件和草稿快照；不能提交时返回 null。
+   */
   function beginSubmission(): ChatSubmission | null {
     const attachmentState = attachments.getState();
     const query = draft.trim();
@@ -287,12 +306,17 @@ export default function ChatPage() {
     };
   }
 
+  /** 创建 Run 未成功返回时移除临时消息，并恢复本次提交的草稿和附件。 */
   function rollbackSubmission(submission: ChatSubmission) {
     thread.removeOptimisticMessage(submission.optimisticMessageId);
     setDraft(submission.draft);
     attachments.setAttachments(submission.attachments);
   }
 
+  /**
+   * 处理普通发送：需要时先创建会话，再提交 chat Run、刷新消息并订阅事件。
+   * 首条文本消息触发标题生成；创建 Run 未成功返回时恢复本地输入。
+   */
   async function submit() {
     if (run.isActive() || run.getState().pendingInteraction) return;
     const isFirstMessage = thread.getState().messages.length === 0;
@@ -355,6 +379,7 @@ export default function ChatPage() {
     }
   }
 
+  /** 根据首条正文生成并保存会话标题，再通知导航刷新；失败记录到控制台。 */
   async function updateTitle(id: string, query: string) {
     try {
       const { title } = await generateThreadTitle(id, query);
@@ -369,6 +394,7 @@ export default function ChatPage() {
     }
   }
 
+  /** 将停止操作交给 Run Hook，取消请求失败时在页面展示错误。 */
   async function cancel() {
     setError("");
     try {
@@ -378,6 +404,10 @@ export default function ChatPage() {
     }
   }
 
+  /**
+   * 将提问组件提交的 question_id → 选项 value 字典放入 request_metadata.resume。
+   * 携带当前会话和 Agent、type=resume 及新请求 ID，成功后订阅新的 Resume Run。
+   */
   async function submitResume(answers: Record<string, string>) {
     const interaction = run.getState().pendingInteraction;
     const currentThread = thread.getState().thread;
@@ -387,8 +417,10 @@ export default function ChatPage() {
     setError("");
     try {
       await run.resumeRun(interaction.created_by_run_id, {
+        agent_id: currentThread.agent_id,
         thread_id: currentThread.thread_id,
-        thread_metadata: {
+        request_metadata: {
+          type: "resume",
           request_id: crypto.randomUUID(),
           resume: { answers },
         },
@@ -498,7 +530,7 @@ export default function ChatPage() {
             const element = event.currentTarget;
             setShowScroll(
               element.scrollHeight - element.scrollTop - element.clientHeight >
-                48,
+              48,
             );
           }}
         >
@@ -520,11 +552,10 @@ export default function ChatPage() {
         </div>
 
         <footer
-          className={`inset-x-0 ${
-            docked
+          className={`inset-x-0 ${docked
               ? "shrink-0 bg-card px-3.5 pt-3.5 pb-[max(1rem,env(safe-area-inset-bottom))]"
               : "absolute top-[45%] mx-auto w-[90%] max-w-[800px] -translate-y-1/2 px-0"
-          } ${pending ? "max-h-full overflow-y-auto overscroll-contain" : ""}`}
+            } ${pending ? "max-h-full overflow-y-auto overscroll-contain" : ""}`}
         >
           <div className="relative mx-auto grid w-full max-w-[800px] gap-2">
             {!docked && !loading && (

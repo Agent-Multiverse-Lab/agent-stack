@@ -9,7 +9,7 @@
 ## 2. Storage by Responsibility
 
 ### PostgreSQL (Source of Truth)
-- `User / Agent / Conversation / Message / Attachment / AgentRun / KnowledgeFile` 等业务状态。
+- `User / Agent / Conversation / Message / Attachment / AgentRunRequest / AgentRun / KnowledgeFile` 等业务状态。
 - 平台级 `ModelProvider` 连接配置、启用状态和 Chat 模型清单。
 - 卫星目录的 `Source / Collection / Scene / SceneAsset`；空间范围由 PostGIS 保存和索引。
 - 状态变更要求事务可见、可幂等、可追溯。
@@ -43,6 +43,10 @@
 | `Conversation.thread_id` | PostgreSQL | 对外会话/运行时标识 |
 | `SubAgentConversationRelation` | PostgreSQL | 父子 Agent 会话关系及其创建、软删除事实 |
 | `Message.id` | PostgreSQL | 持久化消息标识 |
+| `Message.content/image_content/msg_metadata` | PostgreSQL | 请求输入内容，通过 trigger_message_id 读取 |
+| `Conversation.conversation_metadata` | PostgreSQL | 会话当前配置，创建 Run 时读取并保存为运行快照 |
+| `AgentRunRequest.request_id` | PostgreSQL | 已接收请求的唯一标识，通过相同 request_id 关联 Run |
+| `AgentRunRequest.trigger_message_id` | PostgreSQL | 已接收输入的 Message ID，Run 创建失败或忙碌时仍保留 |
 | `AgentRun.trigger_message_id` | PostgreSQL | Worker 根据 Run 重建输入 |
 | `AgentRun.run_type` | PostgreSQL | `chat` 或 `subagent` 执行类型 |
 | `AgentRun.uid` | PostgreSQL | Run 创建时的用户归属快照，不以外键绑定 `User` 生命周期 |

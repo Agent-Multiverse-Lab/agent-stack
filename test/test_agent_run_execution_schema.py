@@ -1,4 +1,4 @@
-"""执行尝试的结构、外键及迁移验证；不测试尚未接入的运行流程。"""
+"""执行记录的结构、外键及迁移验证。"""
 
 import importlib.util
 import io
@@ -15,9 +15,9 @@ from alembic.operations import Operations
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import configure_mappers
 
-from src.database import AgentRunAttempt
+from src.database import AgentRunExecution
 from src.database.base import Base
-from src.database.models import AgentRun, Conversation, Message, User
+from src.database.models import AgentRun, Conversation, Message, Project, User
 
 POSTGRES_URL = os.environ.get("AGENT_STACK_SCHEMA_TEST_POSTGRES_URL")
 MIGRATION_PATH = (
@@ -54,16 +54,16 @@ class DatabaseTestCase(unittest.TestCase):
             self.db.execute(statement)
 
 
-class RunAttemptSchemaTest(DatabaseTestCase):
+class RunExecutionSchemaTest(DatabaseTestCase):
     def setUp(self):
         super().setUp()
         configure_mappers()
         Base.metadata.create_all(self.db, tables=[
-            User.__table__, Conversation.__table__, Message.__table__,
-            AgentRun.__table__, AgentRunAttempt.__table__,
+            User.__table__, Project.__table__, Conversation.__table__, Message.__table__,
+            AgentRun.__table__, AgentRunExecution.__table__,
         ])
         self.run = AgentRun.__table__
-        self.attempt = AgentRunAttempt.__table__
+        self.execution = AgentRunExecution.__table__
         self.db.execute(User.__table__.insert().values(
             uid="user-1", email="user@example.test", password_hash="unused",
         ))
@@ -76,37 +76,37 @@ class RunAttemptSchemaTest(DatabaseTestCase):
             for run_id in ("run-1", "run-2")
         ])
 
-    def insert_attempt(self, attempt_id="attempt-1", run_id="run-1", attempt_no=1, **changes):
-        self.db.execute(self.attempt.insert().values(
-            id=attempt_id, run_id=run_id, attempt_no=attempt_no, worker_id="worker-1", status="running", **changes,
+    def insert_execution(self, execution_id="execution-1", run_id="run-1", execution_no=1, **changes):
+        self.db.execute(self.execution.insert().values(
+            id=execution_id, run_id=run_id, execution_no=execution_no, worker_id="worker-1", status="running", **changes,
         ))
 
     def test_old_run_insert_leaves_worker_null_and_no_history(self):
         self.assertNotIn("current_attempt_id", self.run.c)
         self.assertNotIn("owner_worker_id", self.run.c)
         self.assertEqual(self.db.execute(sa.select(self.run.c.worker_id)).all(), [(None,), (None,)])
-        self.assertEqual(self.db.scalar(sa.select(sa.func.count()).select_from(self.attempt)), 0)
+        self.assertEqual(self.db.scalar(sa.select(sa.func.count()).select_from(self.execution)), 0)
 
-    def test_attempt_numbers_are_unique_within_each_run(self):
-        self.insert_attempt()
-        self.assert_integrity_error(self.attempt.insert().values(
-            id="duplicate", run_id="run-1", attempt_no=1, worker_id="worker-1", status="running",
+    def test_execution_numbers_are_unique_within_each_run(self):
+        self.insert_execution()
+        self.assert_integrity_error(self.execution.insert().values(
+            id="duplicate", run_id="run-1", execution_no=1, worker_id="worker-1", status="running",
         ))
-        # 同一 Run 只允许一条开放 attempt；先结束第一条，再创建下一条。
-        self.db.execute(self.attempt.update().where(
-            self.attempt.c.id == "attempt-1"
+        # 同一 Run 只允许一条开放 execution；先结束第一条，再创建下一条。
+        self.db.execute(self.execution.update().where(
+            self.execution.c.id == "execution-1"
         ).values(finished_at=datetime.now(UTC), status="completed"))
-        self.insert_attempt("attempt-2", attempt_no=2)
-        self.insert_attempt("attempt-3", run_id="run-2")
-        rows = self.db.execute(sa.select(self.attempt).order_by(self.attempt.c.id)).mappings().all()
-        self.assertEqual([row["attempt_no"] for row in rows], [1, 2, 1])
+        self.insert_execution("execution-2", execution_no=2)
+        self.insert_execution("execution-3", run_id="run-2")
+        rows = self.db.execute(sa.select(self.execution).order_by(self.execution.c.id)).mappings().all()
+        self.assertEqual([row["execution_no"] for row in rows], [1, 2, 1])
         self.assertEqual({row["worker_id"] for row in rows}, {"worker-1"})
         self.assertTrue(all(row["started_at"] is not None for row in rows))
 
-    def test_only_one_open_attempt_per_run(self):
-        self.insert_attempt()
-        self.assert_integrity_error(self.attempt.insert().values(
-            id="second-open", run_id="run-1", attempt_no=2,
+    def test_only_one_open_execution_per_run(self):
+        self.insert_execution()
+        self.assert_integrity_error(self.execution.insert().values(
+            id="second-open", run_id="run-1", execution_no=2,
             worker_id="worker-2", status="running",
         ))
 
@@ -124,32 +124,32 @@ class RunAttemptSchemaTest(DatabaseTestCase):
             thread_id="thread-run-1", agent_id="agent", agent_status="interrupted",
         ))
 
-    def test_attempt_requires_existing_run_and_required_fields(self):
-        self.assert_integrity_error(self.attempt.insert().values(
-            id="orphan", run_id="missing", attempt_no=1, worker_id="worker-1", status="running",
+    def test_execution_requires_existing_run_and_required_fields(self):
+        self.assert_integrity_error(self.execution.insert().values(
+            id="orphan", run_id="missing", execution_no=1, worker_id="worker-1", status="running",
         ))
-        for field in ("run_id", "attempt_no", "worker_id", "status", "started_at"):
-            values = dict(id="invalid", run_id="run-1", attempt_no=1, worker_id="worker-1", status="running")
+        for field in ("run_id", "execution_no", "worker_id", "status", "started_at"):
+            values = dict(id="invalid", run_id="run-1", execution_no=1, worker_id="worker-1", status="running")
             values[field] = None
             with self.subTest(field=field):
-                self.assert_integrity_error(self.attempt.insert().values(**values))
+                self.assert_integrity_error(self.execution.insert().values(**values))
 
-    def test_attempt_can_be_deleted_without_updating_run(self):
-        self.insert_attempt()
-        self.db.execute(self.attempt.delete().where(self.attempt.c.id == "attempt-1"))
+    def test_execution_can_be_deleted_without_updating_run(self):
+        self.insert_execution()
+        self.db.execute(self.execution.delete().where(self.execution.c.id == "execution-1"))
         self.assertEqual(self.db.scalar(sa.select(sa.func.count()).select_from(self.run)), 2)
 
     def test_run_delete_cascades_own_history(self):
-        self.insert_attempt()
-        self.insert_attempt("attempt-2", "run-2")
+        self.insert_execution()
+        self.insert_execution("execution-2", "run-2")
         self.db.execute(self.run.delete().where(self.run.c.id == "run-1"))
-        self.assertEqual(self.db.execute(sa.select(self.attempt.c.id)).scalars().all(), ["attempt-2"])
+        self.assertEqual(self.db.execute(sa.select(self.execution.c.id)).scalars().all(), ["execution-2"])
         self.db.execute(Conversation.__table__.delete().where(Conversation.__table__.c.id == 1))
-        self.assertEqual(self.db.scalar(sa.select(sa.func.count()).select_from(self.attempt)), 0)
+        self.assertEqual(self.db.scalar(sa.select(sa.func.count()).select_from(self.execution)), 0)
 
 
 @unittest.skipUnless(POSTGRES_URL, "未配置独立 PostgreSQL 结构测试数据库")
-class PostgresRunAttemptSchemaTest(RunAttemptSchemaTest):
+class PostgresRunExecutionSchemaTest(RunExecutionSchemaTest):
     database_url = POSTGRES_URL
 
 
@@ -201,11 +201,11 @@ class RunAttemptMigrationTest(DatabaseTestCase):
         columns = {item["name"]: item for item in inspector.get_columns("agent_run_attempt")}
         self.assertEqual(
             set(columns),
-            set(AgentRunAttempt.__table__.c.keys())
-            - {"attempt_no", "heartbeat_at", "lease_expires_at"},
+            set(AgentRunExecution.__table__.c.keys())
+            - {"execution_no", "heartbeat_at", "lease_expires_at"},
         )
-        for column in AgentRunAttempt.__table__.c:
-            if column.name in {"attempt_no", "heartbeat_at", "lease_expires_at"}:
+        for column in AgentRunExecution.__table__.c:
+            if column.name in {"execution_no", "heartbeat_at", "lease_expires_at"}:
                 continue
             with self.subTest(column=column.name):
                 self.assertEqual(columns[column.name]["nullable"], column.nullable)
@@ -234,7 +234,8 @@ class RunAttemptMigrationTest(DatabaseTestCase):
 
     def test_downgrade_with_current_attempt_preserves_legacy_data(self):
         self.migrate()
-        self.db.execute(AgentRunAttempt.__table__.insert().values(
+        legacy_attempt = sa.Table("agent_run_attempt", sa.MetaData(), autoload_with=self.db)
+        self.db.execute(legacy_attempt.insert().values(
             id="attempt-1", run_id="run-0", worker_id="worker-1", status="running",
         ))
         self.db.execute(sa.text(
@@ -358,6 +359,101 @@ class RunAttemptNumberMigrationTest(RunAttemptMigrationTest):
 @unittest.skipUnless(POSTGRES_URL, "未配置独立 PostgreSQL 结构测试数据库")
 class PostgresRunAttemptNumberMigrationTest(RunAttemptNumberMigrationTest):
     database_url = POSTGRES_URL
+
+
+lease_spec = importlib.util.spec_from_file_location(
+    "agent_run_attempt_lease_migration", MIGRATION_PATH.with_name("0022_agent_run_attempt_lease.py"),
+)
+lease_migration = importlib.util.module_from_spec(lease_spec)
+lease_spec.loader.exec_module(lease_migration)
+execution_spec = importlib.util.spec_from_file_location(
+    "agent_run_execution_migration", MIGRATION_PATH.with_name("0029_agent_run_execution.py"),
+)
+execution_migration = importlib.util.module_from_spec(execution_spec)
+execution_spec.loader.exec_module(execution_migration)
+
+
+class RunExecutionRenameMigrationTest(DatabaseTestCase):
+    def setUp(self):
+        super().setUp()
+        sa.Table("agent_run", sa.MetaData(), sa.Column("id", sa.String(64), primary_key=True)).create(self.db)
+        self.operations = Operations(MigrationContext.configure(self.db))
+        for version in (migration, number_migration, lease_migration):
+            with patch.object(version, "op", self.operations):
+                version.upgrade()
+        self.db.execute(sa.text("INSERT INTO agent_run (id) VALUES ('run-1'), ('run-2')"))
+        legacy = sa.Table("agent_run_attempt", sa.MetaData(), autoload_with=self.db)
+        now = datetime(2026, 11, 12, tzinfo=UTC)
+        self.db.execute(legacy.insert(), [
+            dict(id="execution-1", run_id="run-1", attempt_no=1, worker_id="worker-1:1",
+                 status="retry_released", started_at=now, heartbeat_at=now, lease_expires_at=now,
+                 finished_at=now, error="preparation failed", error_type="RuntimeError"),
+            dict(id="execution-2", run_id="run-1", attempt_no=2, worker_id="worker-1:2",
+                 status="running", started_at=now, heartbeat_at=now, lease_expires_at=now,
+                 finished_at=None, error=None, error_type=None),
+            dict(id="execution-3", run_id="run-2", attempt_no=1, worker_id="worker-2:1",
+                 status="running", started_at=now, heartbeat_at=now, lease_expires_at=now,
+                 finished_at=None, error=None, error_type=None),
+        ])
+        self.original = [dict(row) for row in self.db.execute(sa.select(legacy).order_by(legacy.c.id)).mappings()]
+
+    def rename(self, direction="upgrade"):
+        with patch.object(execution_migration, "op", self.operations):
+            getattr(execution_migration, direction)()
+
+    def test_roundtrip_preserves_execution_history_and_lease_fields(self):
+        self.rename()
+        inspector = sa.inspect(self.db)
+        self.assertNotIn("agent_run_attempt", inspector.get_table_names())
+        table = AgentRunExecution.__table__
+        expected = [{("execution_no" if key == "attempt_no" else key): value for key, value in row.items()}
+                    for row in self.original]
+        self.assertEqual(self.db.execute(sa.select(table).order_by(table.c.id)).mappings().all(), expected)
+        self.assertEqual(inspector.get_foreign_keys(table.name)[0]["name"], "fk_agent_run_execution_run")
+        self.assertEqual(inspector.get_unique_constraints(table.name)[0]["name"], "uq_agent_run_execution_run_no")
+        self.assertEqual({index["name"] for index in inspector.get_indexes(table.name)}, {
+            "ix_agent_run_execution_run_started", "ix_agent_run_execution_lease", "uq_agent_run_execution_one_open",
+        })
+        self.rename("downgrade")
+        self.assertNotIn("agent_run_execution", sa.inspect(self.db).get_table_names())
+        legacy = sa.Table("agent_run_attempt", sa.MetaData(), autoload_with=self.db)
+        self.assertEqual(self.db.execute(sa.select(legacy).order_by(legacy.c.id)).mappings().all(), self.original)
+        self.rename()
+        self.assertEqual(self.db.scalar(sa.select(sa.func.count()).select_from(table)), 3)
+
+    def test_renamed_constraints_keep_uniqueness_and_cascade(self):
+        self.rename()
+        table = AgentRunExecution.__table__
+        values = dict(id="new", run_id="run-1", worker_id="worker-new", status="running")
+        self.assert_integrity_error(table.insert().values(**values, execution_no=1, finished_at=datetime.now(UTC)))
+        self.assert_integrity_error(table.insert().values(**values, execution_no=3))
+        self.assert_integrity_error(table.insert().values(**{**values, "run_id": "missing"}, execution_no=1))
+        self.db.execute(sa.text("DELETE FROM agent_run WHERE id='run-1'"))
+        self.assertEqual(self.db.execute(sa.select(table.c.id)).scalars().all(), ["execution-3"])
+
+
+@unittest.skipUnless(POSTGRES_URL, "未配置独立 PostgreSQL 结构测试数据库")
+class PostgresRunExecutionRenameMigrationTest(RunExecutionRenameMigrationTest):
+    database_url = POSTGRES_URL
+
+
+class RunExecutionRenamePostgresDDLTest(unittest.TestCase):
+    def test_postgres_renames_without_rebuilding_or_rewriting_rows(self):
+        buffer = io.StringIO()
+        operations = Operations(MigrationContext.configure(
+            dialect_name="postgresql", opts={"as_sql": True, "output_buffer": buffer},
+        ))
+        with patch.object(execution_migration, "op", operations):
+            execution_migration.upgrade()
+            execution_migration.downgrade()
+        sql = buffer.getvalue()
+        self.assertIn("ALTER TABLE agent_run_attempt RENAME TO agent_run_execution", sql)
+        self.assertIn("RENAME attempt_no TO execution_no", sql)
+        self.assertIn("RENAME execution_no TO attempt_no", sql)
+        self.assertIn("RENAME CONSTRAINT fk_agent_run_attempt_run TO fk_agent_run_execution_run", sql)
+        self.assertIn("ALTER INDEX IF EXISTS uq_agent_run_attempt_one_open RENAME TO uq_agent_run_execution_one_open", sql)
+        for forbidden in ("DROP TABLE", "CREATE TABLE", "INSERT INTO", "UPDATE ", "DELETE FROM"):
+            self.assertNotIn(forbidden, sql)
 
 
 if __name__ == "__main__":

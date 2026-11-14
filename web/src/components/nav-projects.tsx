@@ -1,16 +1,21 @@
 "use client"
 
-import { useEffect, useEffectEvent, useId, useRef, useState } from "react"
+import { useEffect, useEffectEvent, useId, useRef, useState, type ReactNode } from "react"
 import {
   ArrowRightIcon,
   ChevronDownIcon,
   FolderIcon,
   MoreHorizontalIcon,
+  PinIcon,
+  PinOffIcon,
+  FolderInputIcon,
+  FolderMinusIcon,
   Trash2Icon,
 } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router"
 
-import { deleteThread, listThreads, renameThread } from "@/api/thread"
+import { deleteThread, listThreads, renameThread, updateThread } from "@/api/thread"
+import type { ProjectResponse } from "@/api/project"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -25,6 +30,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
@@ -39,7 +47,19 @@ import {
 import { useTranslation } from "@/i18n"
 import type { ThreadMetadataResponse } from "@/api/thread"
 
-export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; query?: string }) {
+export interface NavProjectsProps {
+  onSearch?: () => void
+  query?: string
+  projectId?: string
+  pinnedOnly?: boolean
+  projects?: ProjectResponse[]
+  revision?: number
+  onChanged?: () => void
+  leading?: ReactNode
+  hasLeading?: boolean
+}
+
+export function NavProjects({ onSearch, query = "", projectId, pinnedOnly = false, projects = [], revision = 0, onChanged, leading, hasLeading = false }: NavProjectsProps) {
   const { t } = useTranslation()
   const { threadId } = useParams()
   const navigate = useNavigate()
@@ -73,6 +93,9 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
       const result = await listThreads({
         limit: 50,
         cursor: next ?? undefined,
+        project_id: projectId,
+        unassigned: !pinnedOnly && projectId === undefined,
+        pinned: pinnedOnly ? true : undefined,
       })
       if (current !== version.current) return
       setThreads((previous) =>
@@ -114,7 +137,22 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
     return () => {
       requestVersion.current++
     }
-  }, [threadId])
+  }, [threadId, revision, projectId, pinnedOnly])
+
+  async function organize(item: ThreadMetadataResponse, fields: { pinned?: boolean; project_id?: string | null }) {
+    if (saving) return
+    setSaving(true)
+    setError("")
+    try {
+      await updateThread(item.thread_id, fields)
+      onChanged?.()
+      if (!onChanged) void load()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("Operation failed. Please try again."))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   function openAction(
     thread: ThreadMetadataResponse,
@@ -146,6 +184,7 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
         if (threadId === selected.thread_id) navigate("/")
       }
       setSelected(null)
+      onChanged?.()
     } catch (cause) {
       setActionError(
         cause instanceof Error
@@ -157,13 +196,15 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
     }
   }
 
+  if (pinnedOnly && !threads.length && !hasLeading && !loading && !error) return null
+
   return (
     <>
       <SidebarGroup
-        className="min-h-0 flex-1 pt-1 group-data-[collapsible=icon]:hidden"
-        aria-label={t("Conversation history")}
+        className="min-h-0 shrink-0 pt-1 group-data-[collapsible=icon]:hidden"
+        aria-label={t(pinnedOnly ? "Pinned" : projectId === undefined ? "Conversation history" : "Project conversations")}
       >
-        <SidebarGroupLabel className="mb-1 px-0 font-medium">
+        {projectId === undefined && <SidebarGroupLabel className="mb-1 px-0 font-medium">
           <Button
             type="button"
             variant="ghost"
@@ -173,10 +214,11 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
             className="h-full w-full justify-start gap-1.5 rounded-md px-2 text-left text-xs font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
           >
             <ChevronDownIcon className={`size-4 shrink-0 transition-transform ${expanded ? "" : "-rotate-90"}`} />
-            <span>{t("Conversations")}</span>
+            <span>{t(pinnedOnly ? "Pinned" : "Conversations")}</span>
           </Button>
-        </SidebarGroupLabel>
+        </SidebarGroupLabel>}
         <SidebarMenu id={listId} style={expanded ? undefined : { display: "none" }} className="min-h-0 flex-1 overflow-y-auto gap-1">
+          {leading}
           {visibleThreads.map((item) => (
             <SidebarMenuItem key={item.thread_id}>
               <SidebarMenuButton
@@ -194,6 +236,7 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
               >
                 <span>{item.title}</span>
               </SidebarMenuButton>
+              {pinnedOnly && <SidebarMenuAction className="right-7" disabled={saving} aria-label={t("Unpin {{name}}", { name: item.title })} onClick={() => void organize(item, { pinned: false })}><PinOffIcon /></SidebarMenuAction>}
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
@@ -224,6 +267,25 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
                     <ArrowRightIcon />
                     <span>{t("Rename")}</span>
                   </DropdownMenuItem>
+                  <DropdownMenuItem disabled={saving} onClick={() => void organize(item, { pinned: !item.pinned })}>
+                    {item.pinned ? <PinOffIcon /> : <PinIcon />}
+                    <span>{t(item.pinned ? "Unpin" : "Pin")}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger disabled={saving || !projects.length}>
+                      <FolderInputIcon /><span>{t("Add to project")}</span>
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      {projects.map((project) => (
+                        <DropdownMenuItem key={project.project_id} disabled={item.project_id === project.project_id} onClick={() => void organize(item, { project_id: project.project_id })}>
+                          {project.name}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                  {item.project_id !== null && <DropdownMenuItem disabled={saving} onClick={() => void organize(item, { project_id: null })}>
+                    <FolderMinusIcon /><span>{t("Remove from project")}</span>
+                  </DropdownMenuItem>}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     variant="destructive"
@@ -258,7 +320,7 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
               </p>
             </SidebarMenuItem>
           )}
-          {!error && !loading && !threads.length && (
+          {!error && !loading && !threads.length && !pinnedOnly && (
             <SidebarMenuItem>
               <p className="px-2 py-1 text-xs text-muted-foreground">
                 {t("No conversations")}
@@ -284,15 +346,14 @@ export function NavProjects({ onSearch, query = "" }: { onSearch: () => void; qu
               </SidebarMenuButton>
             </SidebarMenuItem>
           )}
-          <SidebarMenuItem>
+          {onSearch && <SidebarMenuItem>
             <SidebarMenuButton
               className="text-sidebar-foreground/70"
               onClick={onSearch}
             >
-              {/* <MoreHorizontalIcon className="text-sidebar-foreground/70" /> */}
-              {/* <span>{t("More")}</span> */}
+              <span>{t("Search conversations")}</span>
             </SidebarMenuButton>
-          </SidebarMenuItem>
+          </SidebarMenuItem>}
         </SidebarMenu>
       </SidebarGroup>
 

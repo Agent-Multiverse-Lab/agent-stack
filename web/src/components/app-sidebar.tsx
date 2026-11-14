@@ -15,6 +15,9 @@ import { useLocation, useNavigate } from "react-router";
 import logoUrl from "@/assets/logo.svg";
 import { NavMain } from "@/components/nav-main";
 import { NavProjects } from "@/components/nav-projects";
+import { NavPinned } from "@/components/nav-pinned";
+import { NavProjectList } from "@/components/nav-project-list";
+import { listProjects, type ProjectResponse } from "@/api/project";
 import { NavUser } from "@/components/nav-user";
 import { TeamSwitcher } from "@/components/team-switcher";
 import { Button } from "@/components/ui/button";
@@ -46,6 +49,22 @@ export function AppSidebar({
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
+  const [projects, setProjects] = React.useState<ProjectResponse[]>([]);
+  const [revision, setRevision] = React.useState(0);
+  const [expandedProject, setExpandedProject] = React.useState<string | null>(null);
+  const [projectLoading, setProjectLoading] = React.useState(false);
+  const [projectError, setProjectError] = React.useState("");
+  const changed = () => setRevision((value) => value + 1);
+  React.useEffect(() => {
+    if (!accessToken) return;
+    let active = true;
+    setProjectLoading(true);
+    setProjectError("");
+    listProjects().then((items) => { if (active) setProjects(items); })
+      .catch((cause: unknown) => { if (active) setProjectError(cause instanceof Error ? cause.message : t("Operation failed. Please try again.")); })
+      .finally(() => { if (active) setProjectLoading(false); });
+    return () => { active = false; };
+  }, [accessToken, revision, t]);
 
   const data = {
     user: {
@@ -141,7 +160,15 @@ export function AppSidebar({
         {accessToken && (
           <SidebarSeparator className="mx-2.5 my-1 group-data-[collapsible=icon]:hidden" />
         )}
-        {accessToken && <NavProjects onSearch={onSearch} />}
+        {accessToken && <>
+          <NavPinned projects={projects} revision={revision} onChanged={changed} onOpenProject={(id) => {
+            setExpandedProject(id);
+            document.getElementById(`project-${id}`)?.scrollIntoView({ block: "nearest" });
+            document.getElementById(`project-${id}`)?.focus();
+          }} />
+          <NavProjectList projects={projects} revision={revision} onChanged={changed} expandedProject={expandedProject} onExpand={setExpandedProject} loading={projectLoading} error={projectError} onRetry={changed} />
+          <NavProjects projects={projects} revision={revision} onChanged={changed} />
+        </>}
       </SidebarContent>
       <SidebarFooter className="px-2 pt-0 pb-1.5">
         <NavUser

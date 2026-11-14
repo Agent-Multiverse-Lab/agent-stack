@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, NotRequired, TypedDict
+from typing import Annotated, Literal, NotRequired, TypedDict
 
 from langchain.agents import AgentState
 
@@ -15,5 +15,23 @@ class BaseState(AgentState):
     artifacts: NotRequired[Annotated[list[str], merge_artifacts]]
 
 
-class CustomAgentState(TypedDict):
-    todos: list # todo middlware的开放字段，用于前端传输
+class AgentTodoDTO(TypedDict):
+    """传给前端的待办项。"""
+
+    content: str
+    status: Literal["pending", "in_progress", "completed"]
+
+
+class SubagentRunDTO(TypedDict):
+    """传给前端的子 Agent 运行摘要。"""
+
+    run_id: str
+    agent_slug: str
+    status: str
+
+
+class AgentStateDTO(TypedDict):
+    """Service 层输出的 Agent 状态传输对象。"""
+
+    agent_todo: list[AgentTodoDTO]
+    subagent_runs: NotRequired[list[SubagentRunDTO]]

@@ -101,6 +101,7 @@ async def create_thread(
             title=thread.title,
             summary=thread.summary,
             metadata=thread.metadata,
+            project_id=thread.project_id,
         )
     except LookupError as exc:
         raise HTTPException(
@@ -116,6 +117,9 @@ async def create_thread(
     return ThreadResponse(
         thread_id=str(conversation.thread_id),
         uid=str(conversation.uid),
+        project_id=conversation.project_id,
+        pinned=conversation.pinned_at is not None,
+        pinned_at=conversation.pinned_at,
         agent_id=str(conversation.agent_id),
         title=str(conversation.title),
         summary=(
@@ -135,6 +139,9 @@ async def list_threads(
     limit: int = 20,
     cursor: str | None = None,
     q: str | None = None,
+    project_id: str | None = None,
+    unassigned: bool = False,
+    pinned: bool | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> ThreadListResponse:
     """分页列出或搜索当前用户的顶层对话。"""
@@ -145,8 +152,13 @@ async def list_threads(
             limit=limit,
             cursor=cursor,
             query=q,
+            project_id=project_id,
+            unassigned=unassigned,
+            pinned=pinned,
         )
         return ThreadListResponse(**result)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -215,6 +227,8 @@ async def update_thread(
             title=payload.title,
             summary=payload.summary,
             metadata=payload.metadata,
+            project_id=payload.project_id,
+            pinned=payload.pinned,
         )
         return ThreadSummaryResponse(**result)
     except LookupError as exc:

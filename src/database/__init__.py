@@ -3,12 +3,14 @@ from .manger import PostgreManger, postgres_manager
 from .models import (
     Agent,
     AgentRun,
-    AgentRunAttempt,
+    AgentRunExecution,
+    AgentRunRequest,
     Attachment,
     Conversation,
     Knowledge,
     Message,
     MessageAttachment,
+    Project,
     SatelliteBusinessScene,
     SatelliteCollection,
     SatelliteScene,
@@ -23,7 +25,8 @@ from .session import get_db, get_engine, get_session_maker, session_context
 
 __all__ = [
     "AgentRun",
-    "AgentRunAttempt",
+    "AgentRunExecution",
+    "AgentRunRequest",
     "Agent",
     "Attachment",
     "Base",
@@ -31,6 +34,7 @@ __all__ = [
     "Knowledge",
     "Message",
     "MessageAttachment",
+    "Project",
     "SatelliteBusinessScene",
     "SatelliteCollection",
     "SatelliteScene",

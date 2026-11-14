@@ -1,6 +1,7 @@
 from .agent_repository import AgentRepository
-from .agent_run_attempt_repository import AgentRunAttemptRepository
+from .agent_run_execution_repository import AgentRunExecutionRepository
 from .agent_run_repository import AgentRunRepository
+from .agent_run_request_repository import AgentRunRequestRepository
 from .attachment_repository import AttachmentRepository
 from .conversation_repository import ConversationRepository
 from .knowledge_repository import (
@@ -11,12 +12,14 @@ from .knowledge_repository import (
 )
 from .message_attachment_repository import MessageAttachmentRepository
 from .model_repository import ModelRepository
+from .project_repository import ProjectRepository
 from .user_repository import UserRepository
 
 __all__ = [
     "AgentRepository",
-    "AgentRunAttemptRepository",
+    "AgentRunExecutionRepository",
     "AgentRunRepository",
+    "AgentRunRequestRepository",
     "AttachmentRepository",
     "ConversationRepository",
     "KnowledgeBaseRepository",
@@ -25,5 +28,6 @@ __all__ = [
     "KnowledgeRepository",
     "MessageAttachmentRepository",
     "ModelRepository",
+    "ProjectRepository",
     "UserRepository",
 ]

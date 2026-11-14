@@ -13,6 +13,7 @@ class ThreadRequest(BaseModel):
     summary: str | None = None
     agent_id: str
     metadata: dict[str, Any] | None = None
+    project_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class ThreadTitleRequest(BaseModel):
@@ -32,6 +33,9 @@ class ThreadSummaryResponse(BaseModel):
 
     thread_id: str
     title: str
+    project_id: str | None = None
+    pinned: bool = False
+    pinned_at: datetime | None = None
     summary: str | None
     agent_id: str
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -132,6 +136,8 @@ class ThreadUpdateRequest(BaseModel):
     """更新当前用户拥有的对话。"""
 
     title: str | None = Field(default=None, max_length=255)
+    project_id: str | None = Field(default=None, min_length=1, max_length=64)
+    pinned: bool | None = None
     summary: str | None = None
     metadata: dict[str, Any] | None = None
 

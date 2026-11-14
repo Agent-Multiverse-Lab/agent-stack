@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from src.database.models import AgentRun, AgentRunAttempt, Conversation, Message
+from src.database.models import AgentRun, AgentRunExecution, Conversation, Message
 from src.database.repositories.model_message_audit_repository import (
     ModelMessageAuditRepository,
 )
@@ -36,7 +36,7 @@ class AuditThreadOwnershipTest(unittest.IsolatedAsyncioTestCase):
         Conversation.__table__.create(self.engine)
         AgentRun.__table__.create(self.engine)
         Message.__table__.create(self.engine)
-        AgentRunAttempt.__table__.create(self.engine)
+        AgentRunExecution.__table__.create(self.engine)
         self.session = Session(self.engine, expire_on_commit=False)
         self.addCleanup(self.session.close)
         self.session.add(

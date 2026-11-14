@@ -145,6 +145,9 @@ const detail: ThreadDetailResponse = {
   thread: {
     thread_id: "thread",
     title: "Thread",
+    project_id: null,
+    pinned: false,
+    pinned_at: null,
     summary: null,
     agent_id: "LeaderAgent",
     metadata: {},
@@ -188,8 +191,10 @@ it.each(["create", "resume"])(
         });
       } else {
         await result.current.resumeRun("old-run", {
+          agent_id: "LeaderAgent",
           thread_id: "thread",
-          thread_metadata: {
+          request_metadata: {
+            type: "resume",
             request_id: "request",
             resume: { answers: { question: "answer" } },
           },

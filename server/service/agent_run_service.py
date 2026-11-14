@@ -4,6 +4,7 @@ import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -32,6 +33,7 @@ from src.database.models import AgentRun, User
 from src.database.repositories import (
     AgentRepository,
     AgentRunRepository,
+    AgentRunRequestRepository,
     ConversationRepository,
     MessageAttachmentRepository,
 )
@@ -41,6 +43,19 @@ from src.utils import logger
 
 _TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "interrupted"}
 SUBAGENT_PROGRESS_EVENT_COUNT = 5
+
+
+@dataclass(frozen=True)
+class AgentRunRequestInput:
+    """Run 创建业务接收的已保存请求及当前会话配置。"""
+
+    request_id: str
+    uid: str
+    conversation_id: int
+    thread_id: str
+    agent_id: str
+    trigger_message_id: int
+    conversation_metadata: dict[str, Any]
 
 
 class AgentRunConflictError(RuntimeError):
@@ -54,168 +69,199 @@ async def create_agent_run_service(
     query: str | None,
     agent_id: str,
     thread_id: str,
-    thread_metadata: dict[str, Any],
+    request_metadata: dict[str, Any],
     image_content: str | None,
-    msg_metadata: dict[str, Any],
 ) -> AgentRun:
-    """原子创建用户消息和 Agent Run，提交后入队。"""
+    """先提交请求与输入，再锁定会话创建 Run，提交后入队。"""
     if not thread_id:
         raise ValueError("会话 ID 不能为空")
+    if request_metadata.get("type", "chat") != "chat":
+        raise ValueError("普通创建接口要求 request_metadata.type 为 chat")
 
-    run_metadata = dict(thread_metadata)
-    model_id = run_metadata.get("model")
-    if model_id is not None and model_id != "" and not isinstance(model_id, str):
-        raise ValueError("所选模型必须是字符串")
-
-    file_ids = attachment_file_ids(msg_metadata)
-    input_message = build_agent_input_msg(
-        query=query or "",
-        image_content=image_content,
-        msg_metadata=msg_metadata,
-    )
-
-    conversation_repository = ConversationRepository(db)
-    conversation = await conversation_repository.get_conversation_by_thread_id_for_user(
-        thread_id=thread_id,
-        user_id=str(current_user.uid),
-        for_update=True,
-    )
-    if conversation is None:
-        raise LookupError("当前会话不存在或已删除")
-    if conversation.agent_id != agent_id:
-        raise ValueError("当前会话未绑定所选智能体")
-    agent = await AgentRepository(db).get_by_slug_for_run_type(slug=agent_id, run_type="chat")
-    if agent is None:
-        raise LookupError("智能体不存在或已停用")
-    conversation_metadata = dict(conversation.conversation_metadata or {})
-    model_id = resolve_chat_model_selection(
-        model=model_id,
-        conversation_model=conversation_metadata.get("model"),
-        agent_model=(agent.agent_config or {}).get("model"),
-    )
-    await resolve_runtime_model(db, model_id)
-    run_metadata["model"] = model_id
-
-    run_repository = AgentRunRepository(db)
-    raw_request_id = run_metadata.get("request_id")
-    request_id = str(raw_request_id or uuid.uuid4())
-    if raw_request_id and hasattr(run_repository, "get_by_request_id"):
-        existing_run = await run_repository.get_by_request_id(request_id)
-        if existing_run is not None:
-            if (
-                str(existing_run.uid) == str(current_user.uid)
-                and str(existing_run.thread_id) == thread_id
-                and str(existing_run.agent_id) == agent_id
-                and str(existing_run.run_type) == "chat"
-            ):
-                return existing_run
-            raise AgentRunConflictError("request_id 已被其他请求使用")
-
-    if (
-        await run_repository.get_pending_interaction_run(
-            uid=str(current_user.uid),
-            thread_id=thread_id,
-        )
-        is not None
-    ):
-        raise AgentRunConflictError("当前会话有待回答的问题")
-
-    if hasattr(run_repository, "get_latest_active_for_thread") and (
-        await run_repository.get_latest_active_for_thread(
-            uid=str(current_user.uid),
-            thread_id=thread_id,
-        )
-        is not None
-    ):
-        raise AgentRunConflictError("当前会话有正在执行的任务")
-
-    run_id = str(uuid.uuid4())
+    uid = str(current_user.uid)
+    user_id = int(current_user.id)
+    request_id = str(request_metadata.get("request_id") or uuid.uuid4())
+    conversation_repo = ConversationRepository(db)
+    agent_run_request_repo = AgentRunRequestRepository(db)
+    agent_run_repo = AgentRunRepository(db)
     copied_objects: list[tuple[str, str]] = []
 
+    # 接收事务：Message 持有输入，Request 只保存标识和输入关联。
     try:
-        if conversation_metadata.get("model") != model_id:
-            conversation_metadata["model"] = model_id
-            await conversation_repository.update_conversation(
-                conversation,
-                title=conversation.title,
-                summary=conversation.summary,
-                conversation_metadata=conversation_metadata,
+        conversation = await conversation_repo.get_conversation_by_thread_id_for_user(
+            thread_id=thread_id, user_id=uid, for_update=True,
+        )
+        if conversation is None:
+            raise LookupError("当前会话不存在或已删除")
+        if conversation.agent_id != agent_id:
+            raise ValueError("当前会话未绑定所选智能体")
+
+        request = await agent_run_request_repo.get_by_request_id(request_id)
+        existing_run = await agent_run_repo.get_by_request_id(request_id)
+        for record in (request, existing_run):
+            if record is not None and (
+                str(record.uid) != uid
+                or str(record.thread_id) != thread_id
+                or str(record.agent_id) != agent_id
+            ):
+                raise AgentRunConflictError("request_id 已被其他请求使用")
+        if existing_run is not None and str(existing_run.run_type) != "chat":
+            raise AgentRunConflictError("request_id 已被其他请求使用")
+
+        if request is None and existing_run is None:
+            model_id = request_metadata.get("model")
+            if model_id is not None and model_id != "" and not isinstance(model_id, str):
+                raise ValueError("所选模型必须是字符串")
+            # 控制字段由 Run/Conversation 持有，其余输入属性归 Message。
+            msg_metadata = {
+                key: value for key, value in request_metadata.items()
+                if key not in {"type", "model", "request_id", "resume"}
+            }
+            file_ids = attachment_file_ids(msg_metadata)
+            input_message = build_agent_input_msg(
+                query=query or "", image_content=image_content, msg_metadata=msg_metadata,
             )
-        attachments, copied_objects = await prepare_message_attachments(
-            db,
-            user_id=int(current_user.id),
-            thread_id=thread_id,
-            file_ids=file_ids,
-        )
-        message = await conversation_repository.create_agent_input_message(
-            conversation_id=int(conversation.id),
-            content=input_message.content,
-            image_content=input_message.image_content,
-            message_type=input_message.msg_type,
-            request_id=request_id,
-            msg_metadata=input_message.msg_metadata,
-        )
-        await MessageAttachmentRepository(db).create_links(
-            message_id=int(message.id),
-            attachments=attachments,
-        )
-        run = await run_repository.create_run(
-            run_id=run_id,
-            thread_id=thread_id,
-            conversation_id=int(conversation.id),
-            uid=str(current_user.uid),
-            agent_slug=agent_id,
-            request_id=request_id,
-            trigger_message_id=int(message.id),
-            run_type="chat",
-            run_metadata=run_metadata,
-        )
-        message.agent_run_id = run.id
-        await db.flush()
+            agent = await AgentRepository(db).get_by_slug_for_run_type(slug=agent_id, run_type="chat")
+            if agent is None:
+                raise LookupError("智能体不存在或已停用")
+            conversation_metadata = dict(conversation.conversation_metadata or {})
+            model_id = resolve_chat_model_selection(
+                model=model_id,
+                conversation_model=conversation_metadata.get("model"),
+                agent_model=(agent.agent_config or {}).get("model"),
+            )
+            await resolve_runtime_model(db, model_id)
+            if conversation_metadata.get("model") != model_id:
+                conversation_metadata["model"] = model_id
+                await conversation_repo.update_conversation(
+                    conversation,
+                    title=conversation.title,
+                    summary=conversation.summary,
+                    conversation_metadata=conversation_metadata,
+                )
+            attachments, copied_objects = await prepare_message_attachments(
+                db, user_id=user_id, thread_id=thread_id, file_ids=file_ids,
+            )
+            message = await conversation_repo.create_agent_input_message(
+                conversation_id=int(conversation.id),
+                content=input_message.content,
+                image_content=input_message.image_content,
+                message_type=input_message.msg_type,
+                request_id=request_id,
+                msg_metadata=input_message.msg_metadata,
+            )
+            await MessageAttachmentRepository(db).create_links(
+                message_id=int(message.id), attachments=attachments,
+            )
+            request = await agent_run_request_repo.create_request(
+                request_id=request_id,
+                uid=uid,
+                conversation_id=int(conversation.id),
+                thread_id=thread_id,
+                agent_id=agent_id,
+                trigger_message_id=int(message.id),
+            )
         await db.commit()
     except IntegrityError:
         await db.rollback()
         await delete_copied_targets(copied_objects)
-        if raw_request_id and hasattr(run_repository, "get_by_request_id"):
-            existing_run = await run_repository.get_by_request_id(request_id)
-            if existing_run is not None:
-                if (
-                    str(existing_run.uid) == str(current_user.uid)
-                    and str(existing_run.thread_id) == thread_id
-                    and str(existing_run.agent_id) == agent_id
-                    and str(existing_run.run_type) == "chat"
+        copied_objects = []
+        # 不同会话不共用行锁；主键冲突后检查已提交请求的归属。
+        try:
+            request = await agent_run_request_repo.get_by_request_id(request_id)
+            existing_run = await agent_run_repo.get_by_request_id(request_id)
+            for record in (request, existing_run):
+                if record is not None and (
+                    str(record.uid) != uid
+                    or str(record.thread_id) != thread_id
+                    or str(record.agent_id) != agent_id
                 ):
-                    return existing_run
-                raise AgentRunConflictError("request_id 已被其他请求使用") from None
-        if hasattr(run_repository, "get_latest_active_for_thread") and (
-            await run_repository.get_latest_active_for_thread(
-                uid=str(current_user.uid),
-                thread_id=thread_id,
-            )
-            is not None
-        ):
-            raise AgentRunConflictError("当前会话有正在执行的任务") from None
-        raise
+                    raise AgentRunConflictError("request_id 已被其他请求使用")
+            if existing_run is not None and str(existing_run.run_type) != "chat":
+                raise AgentRunConflictError("request_id 已被其他请求使用")
+            if request is None and existing_run is None:
+                raise
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
     except Exception:
         await db.rollback()
         await delete_copied_targets(copied_objects)
         raise
 
     await delete_copied_sources(copied_objects)
+    if existing_run is not None:
+        return existing_run
+
+    # Run 创建事务：重复请求优先于忙碌判断，配置从会话表重新读取。
+    try:
+        conversation = await conversation_repo.get_conversation_by_thread_id_for_user(
+            thread_id=thread_id, user_id=uid, for_update=True,
+        )
+        if conversation is None:
+            raise LookupError("当前会话不存在或已删除")
+        if conversation.agent_id != agent_id:
+            raise ValueError("当前会话未绑定所选智能体")
+
+        request = await agent_run_request_repo.get_by_request_id(request_id)
+        existing_run = await agent_run_repo.get_by_request_id(request_id)
+        for record in (request, existing_run):
+            if record is not None and (
+                str(record.uid) != uid
+                or str(record.thread_id) != thread_id
+                or str(record.agent_id) != agent_id
+            ):
+                raise AgentRunConflictError("request_id 已被其他请求使用")
+        if existing_run is not None and str(existing_run.run_type) != "chat":
+            raise AgentRunConflictError("request_id 已被其他请求使用")
+
+        if existing_run is not None:
+            await db.commit()
+            return existing_run
+        if await agent_run_repo.get_pending_interaction_run(uid=uid, thread_id=thread_id) is not None:
+            raise AgentRunConflictError("当前会话有待回答的问题")
+        if await agent_run_repo.get_latest_active_for_thread(uid=uid, thread_id=thread_id) is not None:
+            raise AgentRunConflictError("当前会话有正在执行的任务")
+        if request is None:
+            raise LookupError("请求输入不存在或会话已删除")
+        dispatch = AgentRunRequestInput(
+            request_id=str(request.request_id),
+            uid=str(request.uid),
+            conversation_id=int(request.conversation_id),
+            thread_id=str(request.thread_id),
+            agent_id=str(request.agent_id),
+            trigger_message_id=int(request.trigger_message_id),
+            conversation_metadata=dict(conversation.conversation_metadata or {}),
+        )
+        run_metadata = {**dispatch.conversation_metadata, "request_id": dispatch.request_id}
+        await resolve_runtime_model(db, run_metadata.get("model"))
+        run = await agent_run_repo.create_run(
+            run_id=str(uuid.uuid4()),
+            thread_id=dispatch.thread_id,
+            conversation_id=dispatch.conversation_id,
+            uid=dispatch.uid,
+            agent_slug=dispatch.agent_id,
+            request_id=dispatch.request_id,
+            trigger_message_id=dispatch.trigger_message_id,
+            run_type="chat",
+            run_metadata=run_metadata,
+        )
+        await conversation_repo.bind_input_message_to_run(run)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
     try:
         await enqueue_agent_run(str(run.id))
     except Exception as exc:
         logger.exception("Agent Run 入队失败：run_id=%s", run.id)
-        terminal_result = await AgentRunRepository(db).set_agent_terminal(
+        failed_run, _ = await agent_run_repo.set_agent_terminal(
             str(run.id),
             status="failed",
             error=f"Agent Run 入队失败：{exc}",
             error_type=type(exc).__name__,
-        )
-        failed_run = (
-            terminal_result[0]
-            if isinstance(terminal_result, tuple)
-            else terminal_result
         )
         if failed_run is not None:
             run = failed_run
@@ -228,28 +274,32 @@ async def create_resume_agent_run_service(
     db: AsyncSession,
     current_user: User,
     interrupted_run_id: str,
+    agent_id: str,
     thread_id: str,
-    thread_metadata: dict[str, Any],
+    request_metadata: dict[str, Any],
 ) -> AgentRun:
     if not thread_id:
         raise AgentRunConflictError("恢复请求的会话 ID 不能为空")
+    if request_metadata.get("type") != "resume":
+        raise ValueError("恢复接口要求 request_metadata.type 为 resume")
 
-    run_metadata = dict(thread_metadata)
+    run_metadata = dict(request_metadata)
+    run_metadata.pop("type")
     resume = run_metadata.get("resume")
     if not isinstance(resume, dict):
-        raise ValueError("thread_metadata.resume 必须是对象")
+        raise ValueError("request_metadata.resume 必须是对象")
     answers = resume.get("answers")
     if not isinstance(answers, dict) or not answers or not all(
         isinstance(key, str) and key and isinstance(value, str)
         for key, value in answers.items()
     ):
-        raise ValueError("thread_metadata.resume.answers 必须是非空回答字典")
+        raise ValueError("request_metadata.resume.answers 必须是非空回答字典")
     run_metadata["resume"] = {"answers": dict(answers)}
     request_id = str(run_metadata.get("request_id") or uuid.uuid4())
     run_metadata["request_id"] = request_id
 
-    run_repository = AgentRunRepository(db)
-    owned_parent = await run_repository.get_by_id_for_user(
+    agent_run_repo = AgentRunRepository(db)
+    owned_parent = await agent_run_repo.get_by_id_for_user(
         run_id=interrupted_run_id,
         uid=str(current_user.uid),
     )
@@ -257,8 +307,10 @@ async def create_resume_agent_run_service(
         raise LookupError("被打断的 Agent Run 不存在或不属于当前用户")
     if str(owned_parent.thread_id) != thread_id:
         raise AgentRunConflictError("恢复请求与父 Run 的会话不匹配")
+    if str(owned_parent.agent_id) != agent_id:
+        raise AgentRunConflictError("恢复请求与父 Run 的智能体不匹配")
 
-    parent = await run_repository.get_for_resume_for_update(
+    parent = await agent_run_repo.get_for_resume_for_update(
         run_id=interrupted_run_id,
         uid=str(current_user.uid),
         thread_id=thread_id,
@@ -302,7 +354,7 @@ async def create_resume_agent_run_service(
     if set(answers) != question_ids:
         raise ValueError("回答必须覆盖父 Run 的全部问题，且不能包含多余问题")
 
-    existing = await run_repository.get_resume_child(interrupted_run_id)
+    existing = await agent_run_repo.get_resume_child(interrupted_run_id)
     if existing is not None:
         if str(existing.request_id) == request_id:
             if dict(existing.run_metadata or {}).get("resume", {}).get("answers") != answers:
@@ -317,7 +369,7 @@ async def create_resume_agent_run_service(
     if "model" in parent_metadata:
         run_metadata["model"] = parent_metadata["model"]
 
-    resume_run = await run_repository.create_run(
+    resume_run = await agent_run_repo.create_run(
         run_id=str(uuid.uuid4()),
         thread_id=str(parent.thread_id),
         conversation_id=int(parent.conversation_id),
@@ -335,7 +387,7 @@ async def create_resume_agent_run_service(
         await enqueue_agent_run(str(resume_run.id))
     except Exception as exc:
         logger.exception("Resume Agent Run 入队失败：run_id=%s", resume_run.id)
-        failed_run, _ = await run_repository.set_agent_terminal(
+        failed_run, _ = await agent_run_repo.set_agent_terminal(
             str(resume_run.id),
             status="failed",
             error=f"Resume Agent Run 入队失败：{exc}",

@@ -6,7 +6,7 @@ __all__ = [
     "BaseAgent",
     "BaseContext",
     "LeaderAgent",
-    "CustomAgentState"
+    "AgentStateDTO",
 ]
 
 
@@ -24,8 +24,8 @@ def __getattr__(name: str) -> Any:
         from src.agents.buildin.leader.agent import LeaderAgent
 
         return LeaderAgent
-    if name == "CustomAgentState":
-            from src.agents.base_state import CustomAgentState
-    
-            return CustomAgentState
+    if name == "AgentStateDTO":
+        from src.agents.base_state import AgentStateDTO
+
+        return AgentStateDTO
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

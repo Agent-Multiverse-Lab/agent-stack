@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from src.database.models import AgentRun, AgentRunAttempt, Conversation, Message, User
+from src.database.models import AgentRun, AgentRunExecution, Conversation, Message, User
 from src.database.repositories.agent_run_repository import AgentRunRepository
 
 
@@ -156,7 +156,7 @@ class AgentRunOwnershipTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(engine.dispose)
         AgentRun.metadata.create_all(engine, tables=[
             User.__table__, Conversation.__table__, Message.__table__, AgentRun.__table__,
-            AgentRunAttempt.__table__,
+            AgentRunExecution.__table__,
         ])
         self.db = Session(engine, expire_on_commit=False)
         self.addCleanup(self.db.close)

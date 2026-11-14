@@ -7,34 +7,43 @@
 行为规格入口：
 
 - [Run Lifecycle Spec](../spec/run/lifecycle/spec.md)
+- [请求持久化与派发](../spec/run/request-dispatch/spec.md)
 - [Run Cancellation Spec](../spec/run/cancellation/spec.md)
 - [Agent Run Event Streaming Spec](../spec/run/event-streaming/spec.md)
-- [Run 执行尝试与租约](run-attempt-schema.md)：attempt 持有执行权、心跳、租约与结束事实
+- [Run 执行记录与租约](run-execution-schema.md)：execution 持有执行权、心跳、租约与结束事实
 
 ## 2. Core Components
 
 - `server/router/agent_router.py`：对外入口（创建 run、取消、SSE 读取）。
-- `server/service/agent_run_service.py`：run 及事件流的服务层入口。
+- `server/service/agent_run_service.py`：Run 及事件流的服务层入口，定义并组装创建 Run 所需的 `AgentRunRequestInput`。
 - `server/service/arq_queue_servcie.py`：ARQ/Redis 运行时协作层。
 - `server/worker.py`：实际执行 worker，消费 `process_agent_run`。
 - `src/database/repositories/agent_run_repository.py`：状态原子更新。
+- `src/database/repositories/agent_run_request_repository.py`：请求关联持久化和 ORM 记录查询。
 
 ## 3. State Model
 
-`pending -> queued -> running -> (completed | failed | cancelled)`  
+`pending -> running -> (completed | failed | cancelled | interrupted)`
 `cancel_requested` 作为中间态，专门承接中断意图。
 
 ## 4. Lifecycle Flow
 
 ```text
 POST /api/agent/runs
-  -> create run + persist message
+  -> lock conversation, persist input Message + attachments + AgentRunRequest, commit
+  -> lock conversation again, return existing Run or check active Run / pending interaction
+  -> Service assembles AgentRunRequestInput from Request and locked Conversation
+  -> create pending Run, bind Message.agent_run_id, commit
   -> enqueue run_id to ARQ
 ARQ: process_agent_run(run_id)
   -> set running
   -> stream agent output
   -> end -> set terminal status + write end event
 ```
+
+活动 Run 或待回答问题阻止创建时，返回 409，已提交的请求与输入保留。同一 `request_id`
+重试复用原输入；创建 Run 时使用会话表当前配置。Request 只保存标识与 `trigger_message_id`，
+正文、图片和消息元数据由 Message 持有；Run 状态由 AgentRun 持有。
 
 ## 5. Event Flow
 
@@ -58,7 +67,8 @@ ARQ: process_agent_run(run_id)
 | 能力 | 承载位置 | 责任边界 |
 | --- | --- | --- |
 | HTTP 创建、取消和 SSE 入口 | `server/router/agent_router.py` | 鉴权、参数校验和响应整形，不执行 Agent |
-| Run 服务编排 | `server/service/agent_run_service.py` | 创建 Run、持久化输入、授权校验和事件读取编排 |
+| Run 服务编排 | `server/service/agent_run_service.py` | 请求接收与 Run 创建的两次事务、授权校验、提交后入队和事件读取编排 |
+| 请求持久化 | `src/database/repositories/agent_run_request_repository.py` | 保存请求及输入关联，查询并返回请求 ORM 记录 |
 | ARQ/Redis 适配 | `server/service/arq_queue_servcie.py` | 队列、Stream、取消 key/Pub/Sub 和事件信封，不决定业务终态 |
 | Run 执行 | `server/worker.py` | 重载输入、执行 Agent、发布事件和收口终态 |
 | Run 持久化 | `src/database/repositories/agent_run_repository.py` | 在事务和行锁内决定状态转换 |

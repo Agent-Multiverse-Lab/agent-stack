@@ -41,6 +41,8 @@ class FakeConversationRepository:
             conversation_metadata=values["conversation_metadata"],
             created_at=NOW,
             updated_at=NOW,
+            project_id=values.get("project_id"),
+            pinned_at=None,
         )
 
     async def list_top_level_for_user(self, **values):
@@ -66,11 +68,17 @@ class FakeConversationRepository:
         title,
         summary,
         conversation_metadata,
+        organization=None,
     ):
         """在内存中更新对话。"""
         conversation.title = title
         conversation.summary = summary
         conversation.conversation_metadata = conversation_metadata
+        if organization:
+            if "project_id" in organization:
+                conversation.project_id = organization["project_id"]
+            if "pinned" in organization:
+                conversation.pinned_at = NOW if organization["pinned"] else None
         conversation.updated_at = NOW
         return conversation
 
@@ -169,6 +177,8 @@ def make_conversation(
     """构造测试 Conversation。"""
     return SimpleNamespace(
         id=conversation_id,
+        project_id=None,
+        pinned_at=None,
         uid="user-1",
         thread_id=f"thread-{conversation_id}",
         agent_id="leaderagent",
@@ -316,11 +326,12 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(["thread-2"], [item["thread_id"] for item in result["items"]])
         self.assertIsNotNone(result["next_cursor"])
-        activity_at, conversation_id = thread_service._decode_cursor(
+        activity_at, conversation_id, pinned_at = thread_service._decode_cursor(
             result["next_cursor"]
         )
         self.assertEqual(NOW + timedelta(minutes=2), activity_at)
         self.assertEqual(2, conversation_id)
+        self.assertIsNone(pinned_at)
         self.assertEqual("检索", self.conversations.list_arguments["query"])
 
     def test_list_cursor_rejects_non_object_payload(self) -> None:
