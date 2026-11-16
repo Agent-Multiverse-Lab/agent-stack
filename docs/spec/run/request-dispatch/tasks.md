@@ -1,34 +1,25 @@
-# 请求持久化与派发任务
+# Agent Run 分发策略与等待区调度任务
 
-## 实施
+## 持久化与接口
 
-- [x] 添加只保存标识与输入关联的 `AgentRunRequest`、Repository 和 `0028_agent_run_request` 迁移。
-- [x] 在 `server/service/agent_run_service.py` 定义并组装 `AgentRunRequestInput`，复用 Request 和锁定后的 Conversation，DAO 返回 ORM 记录。
-- [x] 拆分接收与 Run 创建事务，在两次事务中分别锁定会话。
-- [x] 接入重复请求复用、忙碌与待回答问题返回 409、输入消息关联及提交后入队。
-- [x] 按事务边界保留请求、消息和附件，复用已有入队失败终态写入。
-- [x] 核对 Router 响应并同步设计、Run 架构和持久化所有权文档。
+- [ ] 为 `AgentRunRequest` 移除冗余 `conversation_id` 列并保留索引化 `thread_id`（无外键），新增 `dispatch_policy`、`status`、`queue_seq` 字段与部分索引 `ix_agent_run_request_thread_queued`，编写 Alembic 迁移。
+- [ ] 在 `AgentRunRequestRepository` 移除 `create_request` 的 `conversation_id` 参数，并实现 `list_queued_for_thread`、`has_queued_steer_for_thread`、`pop_next_queued_for_thread`、`mark_dispatched`、`cancel_queued_request`。
+- [ ] 调整 `ConversationRepository` 会话历史查询过滤 `Message.status == "queued"`，在 `ThreadDetailResponse` 暴露 `queued_requests`。
+- [ ] 更新 `create_agent_run_service` 支持 `reject`（忙碌不落盘直接 409）、`queue`（入等待区返回 202）与 `steer`（入等待区返回 202，不写额外队列信号）。
+- [ ] 新增 `DELETE /api/agent/runs/requests/{request_id}`，在会话锁下移除 `queued` 请求或对已晋升请求返回 409 + `run_id`。
 
-## 验证
+## 运行时与 Steer 调度
 
-- [x] 46 项本地测试通过：Service、Run Repository、请求 Repository、附件与 SQLite 迁移升级/回退。
-- [x] Ruff 和 `git diff --check` 通过。
-- [x] 使用 Python `compile(..., 'exec')` 完成 208 个后端、迁移和测试文件的语法编译检查。
-- [ ] PostgreSQL 跨会话可见性、并发锁竞争及迁移集成测试：连接阶段断开，用户确认暂缓。
+- [ ] 实现 `SteerStopMiddleware`（`before_model(can_jump_to=["end"])`）并接入 `LeaderAgent`，在检测到当前会话存在 `status == "queued"` 且 `dispatch_policy == "steer"` 的 `AgentRunRequest` 时跳转 `END`。
+- [ ] 更新 `server/worker.py`：识别 Turn 边界转向退出并写回 Run 终态，在 `_finalize_run` 与租约过期回收收敛终态后调用 `dispatch_next_queued_request` 晋升并执行 `enqueue_agent_run`。
 
-本地验证命令：
+## 消息保存收敛
 
-```powershell
-.\.venv\Scripts\python.exe -m unittest test.test_agent_run_service test.test_agent_run_repository test.test_agent_run_request_dispatch.AgentRunRequestRepositoryTest test.test_attachment_service -q
-```
+- [ ] 更新 `server/service/thread_service.py`：异常/取消收敛先执行 `save_message_from_langgraph_state` 同步已提交 checkpoint。
+- [ ] 统一未进 checkpoint 的 `accumulated_msg` 收敛逻辑，优先 reconcile 已有 `model_audit` 行；为 `resume_agent_response` 补传 `full_msg`。
+- [ ] 为 Turn 边界 `steer` 退出保留 `stop_reason` 元数据，保证前端准确展示工具已完成但回答被转向的状态。
 
-数据库配置可用后执行：
+## 前端与验证
 
-```powershell
-$env:RUN_REQUEST_DISPATCH_TEST = '1'
-.\.venv\Scripts\python.exe -m unittest test.test_agent_run_request_dispatch.AgentRunRequestDispatchTest -v
-```
-
-集成测试只创建并清理随机命名的独立 schema。业务库尚未执行迁移。
-`compileall` 的缓存写入因本机目录权限失败，改用不写缓存的内存编译验证；
-包含 Worker 导入的扩大回归在导入阶段耗时未完成，未计入通过数量。
+- [ ] 更新 `web/` 的 Run 请求类型、等待区列表渲染、删除排队请求交互与终态切流逻辑。
+- [ ] 补充策略分发、并发晋升/删除竞争、Turn 边界 `jump_to="end"`、`save` 收敛的单元与集成测试，完成编译、Lint 与迁移验证。

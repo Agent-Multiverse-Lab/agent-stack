@@ -1,40 +1,61 @@
-# Agent Run 请求持久化与触发规格
+# Agent Run 分发策略与等待区调度规格
 
 ## 1. 能力与职责
 
-`POST /api/agent/runs` 先保存 `AgentRunRequest`，再根据会话中的 Run 状态决定是否创建 `chat` Run。
+`POST /api/agent/runs` 先按 `dispatch_policy` 接收并持久化 `AgentRunRequest`，再根据会话中的 Run 状态决定立即创建 `AgentRun`、进入等待区排队、转向当前活跃 Run 或拒绝请求。
 
-- PostgreSQL：保存 `AgentRunRequest`、输入消息和 `AgentRun`。
-- ARQ：按 `run_id` 派发已提交的 Run。
-- Worker：通过 `process_agent_run(run_id)` 加载并执行 Run。
+- **PostgreSQL**：持有 `AgentRunRequest`（等待区与派发状态）、输入 `Message` 与 `AgentRun`；`uq_agent_run_one_executing_per_thread` 继续保证同一 `thread_id` 至多存在一个执行中 `AgentRun`。
+- **ARQ**：只派发已晋升为 `AgentRun(agent_status="pending")` 的任务，`enqueue_agent_run(run_id)` 契约保持不变。
+- **Worker / Runtime**：执行 Run、响应软停止（Turn 边界 `jump_to="end"`）与硬取消，收敛输出消息与 Run 终态后，触发下一条等待区请求晋升。
 
-HTTP 请求模型为 `server/entities/agent.py:AgentRunCreateRequest`，数据库模型为 `src/database/models.py:AgentRunRequest`。请求保存和 Run 创建由 `server/service/agent_run_service.py` 编排。恢复请求归 `interrupt-resume`，子代理请求归委派路径。
+HTTP 请求模型为 `server/entities/agent.py:AgentRunCreateRequest`，数据库模型为 `src/database/models.py:AgentRunRequest`。请求保存、策略分发与等待区移除由 `server/service/agent_run_service.py` 编排；Turn 边界停机与消息收敛由 `src/agents/middlewares/`、`server/service/thread_service.py` 与 `server/worker.py` 协作完成。
 
 ## 2. 数据契约
 
-### 2.1 AgentRunRequest
+### 2.1 HTTP 请求模型：`AgentRunCreateRequest`
 
-字段定义：
+```python
+class AgentRunCreateRequest(BaseModel):
+    query: str | None = Field(default=None, description="问题")
+    agent_id: str = Field(default=..., description="Agent 标识")
+    thread_id: str = Field(default=..., description="对话 thread_id")
+    dispatch_policy: Literal["reject", "queue", "steer"] = Field(
+        default="reject",
+        description="会话忙碌时的分发策略：reject 拒绝、queue 等待当前 Run 结束、steer 转向当前 Run",
+    )
+    request_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="请求元数据：type（chat/resume）、model、request_id、attachment_file_ids、resume.answers",
+    )
+    image_content: str | None = Field(default=None, description="图像文件")
+```
+
+### 2.2 数据库模型：`AgentRunRequest` 与 `Message`
 
 ```python
 class AgentRunRequest(Base):
     __tablename__ = "agent_run_request"
+    __table_args__ = (
+        Index(
+            "ix_agent_run_request_thread_queued",
+            "thread_id",
+            "queue_seq",
+            postgresql_where=text("status = 'queued'"),
+        ),
+    )
 
     request_id = Column(String(128), primary_key=True)
     uid = Column(String(64), nullable=False)
-    conversation_id = Column(
-        Integer,
-        ForeignKey("conversation.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    thread_id = Column(String(64), nullable=False)
+    thread_id = Column(String(64), nullable=False, index=True)
     agent_id = Column(String(128), nullable=False)
     trigger_message_id = Column(
         Integer,
         ForeignKey("message.id", ondelete="CASCADE"),
         nullable=False,
     )
+    dispatch_policy = Column(String(16), nullable=False, server_default="reject")
+    status = Column(String(16), nullable=False, server_default="dispatched")
+    queue_seq = Column(Integer, nullable=True)
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -42,132 +63,121 @@ class AgentRunRequest(Base):
 
 字段语义：
 
-- `request_id` 取 `request_metadata.request_id`；该值为空时生成 UUID。
-- `uid` 取认证用户 UID，`conversation_id` 取该用户所属会话的主键。
-- `thread_id`、`agent_id` 保存请求归属。
-- 正文、图片和消息元数据分别由 `Message.content`、`Message.image_content`、`Message.msg_metadata` 持有，通过 `trigger_message_id` 读取。
-- 会话配置由 `Conversation.conversation_metadata` 持有。接收新请求时，模型选择由 `resolve_chat_model_selection` 解析并由 `resolve_runtime_model` 校验，更新会话的模型字段。
-- 创建 Run 时读取会话表当前的元数据与模型，并加入当前 `request_id` 写入 `AgentRun.run_metadata`。请求已保存但尚未创建 Run 时，切换会话模型后重试使用新模型；已创建 Run 的元数据保持其创建时快照。
-- `trigger_message_id` 指向接收事务保存的用户输入消息，附件通过 `MessageAttachment` 关联到该消息。
-- 请求通过 `request_id` 与 `AgentRun.request_id` 关联。`AgentRun.request_id` 的唯一约束限制每个请求最多关联一个 Run。
-- Run 状态从 `AgentRun.agent_status` 读取。
+- `thread_id`：逻辑对应 `Conversation.thread_id`（不建跨表外键，由 Service 层持会话锁校验归属与 `deleted_at IS NULL`）；会话物理删除时通过 `trigger_message_id -> message.id (ON DELETE CASCADE)` 自动级联清除。
+- `dispatch_policy`：取自请求的 `reject | queue | steer`。
+- `status`：请求在等待区中的状态，仅允许 `queued | dispatched | cancelled`：
+  - `queued`：已持久化在等待区，尚未生成 `AgentRun`。
+  - `dispatched`：已绑定 1:1 `AgentRun`（`AgentRun.request_id == AgentRunRequest.request_id`）。
+  - `cancelled`：在未晋升前被用户从等待区删除。
+- `queue_seq`：仅当请求进入等待区时按同一 `thread_id` 单调递增分配，决定晋升顺序（`queue_seq ASC`）。
+- `trigger_message_id` 对应的用户输入 `Message`：
+  - 立即执行（`dispatched`）时，`Message.status = "completed"` 并绑定 `agent_run_id = run.id`。
+  - 进入等待区（`queued`）时，`Message.status = "queued"`、`Message.agent_run_id = None`；主消息历史查询过滤 `status = "queued"` 的记录，由 `ThreadDetailResponse.queued_requests` 单独返回。晋升为 `AgentRun` 时再将 `Message.status` 置为 `"completed"`、重新分配当前最大 `sequence` 并绑定 `agent_run_id`。
+  - 从等待区删除（`cancelled`）时，同步软删除或物理删除该未绑定的 `Message`。
 
-通过 Alembic 创建表。`conversation_id` 和 `trigger_message_id` 的外键使用 `ON DELETE CASCADE`。Service 查询会话时检查用户归属与 `Conversation.deleted_at IS NULL`。
+### 2.3 Repository 接口
 
-### 2.2 Repository 接口
-
-在 `src/database/repositories/agent_run_request_repository.py` 定义以下类，并从 `src.database.repositories` 导出：
+`src/database/repositories/agent_run_request_repository.py:AgentRunRequestRepository` 提供：
 
 ```python
 class AgentRunRequestRepository:
     def __init__(self, session: AsyncSession): ...
 
-    async def get_by_request_id(
-        self, request_id: str
-    ) -> AgentRunRequest | None: ...
+    async def get_by_request_id(self, request_id: str) -> AgentRunRequest | None: ...
 
     async def create_request(
         self,
         *,
         request_id: str,
         uid: str,
-        conversation_id: int,
         thread_id: str,
         agent_id: str,
         trigger_message_id: int,
+        dispatch_policy: str,
+        status: str,
+        queue_seq: int | None = None,
     ) -> AgentRunRequest: ...
 
+    async def list_queued_for_thread(
+        self, thread_id: str, *, uid: str
+    ) -> list[AgentRunRequest]: ...
+
+    async def has_queued_steer_for_thread(self, thread_id: str) -> bool: ...
+
+    async def pop_next_queued_for_thread(
+        self, thread_id: str
+    ) -> AgentRunRequest | None: ...
+
+    async def mark_dispatched(self, request_id: str) -> None: ...
+
+    async def cancel_queued_request(
+        self, request_id: str, *, uid: str
+    ) -> AgentRunRequest | None: ...
 ```
 
-Repository 执行查询、插入和 flush；Service 提交事务。Run 的查询、创建及终态写入由 `AgentRunRepository` 执行。
+## 3. 分发策略与状态规则
 
-### 2.3 Service 输入对象
+### RUN-RD-001 请求接收与策略路由
 
-`server/service/agent_run_service.py` 定义 `AgentRunRequestInput`，承载创建 Run 业务所需的数据。
-Service 从 Repository 返回的 Request 和已锁定的 Conversation 组装该对象：
+Service 在持有用户所属 `Conversation` 行锁（`for_update=True`）后执行 `request_id` 幂等检查（RUN-RD-004）。新请求按以下规则处理：
 
-```python
-@dataclass(frozen=True)
-class AgentRunRequestInput:
-    request_id: str
-    uid: str
-    conversation_id: int
-    thread_id: str
-    agent_id: str
-    trigger_message_id: int
-    conversation_metadata: dict[str, Any]
-```
+1. 查询 `get_pending_interaction_run(thread_id)`：若存在未回答的 `ask_user` 中断 Run，所有策略均返回 HTTP 409（`detail: 当前会话有待回答的问题`），**不**提交孤立的 user `Message`。
+2. 查询 `get_latest_active_for_thread(thread_id)`：
+   - **会话空闲（无活动 Run）**：保存 `Message(status="completed")`、`MessageAttachment`、`AgentRunRequest(status="dispatched")`，提交接收事务后进入 RUN-RD-002 创建 `AgentRun` 并调用 `enqueue_agent_run(run.id)`。
+   - **会话忙碌且 `dispatch_policy == "reject"`**：不写入 `Message` 与 `AgentRunRequest`，直接返回 HTTP 409（`detail: 当前会话有正在执行的任务`）。
+   - **会话忙碌且 `dispatch_policy == "queue"`**：保存 `Message(status="queued")` 与 `AgentRunRequest(status="queued", dispatch_policy="queue", queue_seq=next_seq)`，提交后返回 HTTP 202（`status="queued"`），不创建 `AgentRun` 也不调用 `enqueue_agent_run`。
+   - **会话忙碌且 `dispatch_policy == "steer"`**：保存 `Message(status="queued")` 与 `AgentRunRequest(status="queued", dispatch_policy="steer", queue_seq=next_seq)`，提交后返回 HTTP 202（`status="queued"`、`steering_run_id=active_run.id`），不写额外的队列信号。
 
-前六个字段来自 `AgentRunRequest`，`conversation_metadata` 来自关联的、未删除的 `Conversation`。
-Service 在持有会话行锁时组装输入并创建 Run；Repository 返回 ORM 记录，不依赖 Service 类型。
-`ConversationRepository.bind_input_message_to_run`
-将 `Message.agent_run_id` 写为新 Run ID。Worker 仍按 `AgentRun.trigger_message_id` 读取 Message，
-重建 `AgentInputMsg`。HTTP 请求继续使用 `AgentRunCreateRequest`，表实体与传输对象分别命名。
+### RUN-RD-002 Run 创建与终态晋升
 
-## 3. 接收与触发规则
+1. **直接创建**：会话空闲时创建 `AgentRun(agent_status="pending")`、回绑 `Message.agent_run_id`，提交后调用 `enqueue_agent_run(run.id)`。
+2. **终态晋升（`dispatch_next_queued_request(thread_id)`）**：
+   - 在 `server/worker.py` 将活跃 `AgentRun` 收敛为 `completed | failed | cancelled` 终态（含租约过期回收器收敛 `LeaseExpired`）**之后**调用。
+   - 持有 `Conversation(thread_id)` `FOR UPDATE` 行锁，确认 `get_pending_interaction_run` 与 `get_latest_active_for_thread` 均为 `None`。
+   - 取出 `queue_seq` 最小的一条 `AgentRunRequest(status="queued")`（若同队列内有多个请求，优先晋升 `steer` 或严格按 `queue_seq ASC` 顺序出队）。
+   - 将关联 `Message` 置为 `status="completed"`、更新为新 `sequence`，创建 `AgentRun(agent_status="pending")` 并绑定 `agent_run_id`，将 `AgentRunRequest.status` 更新为 `"dispatched"`，提交事务后调用 `enqueue_agent_run(run.id)`。
 
-### RUN-RD-001 请求先提交
+### RUN-RD-003 Steer 优雅停机（Turn 边界 `jump_to="end"`）
 
-Service 按认证用户锁定会话，确定请求 ID，并按 RUN-RD-004 查询请求与 Run。请求 ID 在两张表中均不存在时，在该事务内执行：
+1. **核心边界**：活跃 Run 正在执行 `model` 流式输出或 `tools` 调用时，不强行向进行中节点注入 `HumanMessage`，也不直接硬杀正常工具调用；等当前轮的 `model -> tools` Superstep 闭环并提交 checkpoint 后，在下一轮 `before_model` 节点完成退出。
+2. **单一事实来源（无需额外信号）**：直接复用 PostgreSQL `AgentRunRequest` 表作为唯一状态来源，不向 Redis 写入 `run:steer:{run_id}` 额外信号。若用户通过 `DELETE /api/agent/runs/requests/{request_id}` 撤销该 `steer` 请求，转向条件自动消失，无需双端同步。
+3. **Graph 退出路径**：`LeaderAgent` 装配 `SteerStopMiddleware`（`before_model(can_jump_to=["end"])`）。进入下一轮 `before_model` 前查询当前会话是否存在 `status == "queued"` 且 `dispatch_policy == "steer"` 的 `AgentRunRequest`；命中时返回 `{"jump_to": "end"}`，图路由至 `after_agent -> END`，完整保留上一个 `AIMessage(tool_calls)` 与 `ToolMessage` 配对。
+4. **终态收敛与硬取消兜底**：
+   - 图跳至 `END` 正常结束 `astream_events` 后，先执行消息保存收敛，再由 Worker 结合 `has_queued_steer_for_thread(thread_id)` 将当前 Run 收敛为 `cancelled`（标记被转向的终止原因），随后调用 `dispatch_next_queued_request(thread_id)` 晋升新请求。
+   - 若工具执行耗时超过宽限阈值或用户点击显式强停，仍由 `_cancellable_stream` 触发 `asyncio.CancelledError` 硬取消兜底。
 
-1. 检查用户、会话、Agent、模型和附件，确定模型选择。
-2. 保存用户输入消息及附件关联。
-3. 保存 `AgentRunRequest` 并关联输入消息。
-4. 提交事务。
+### RUN-RD-004 非正常 / Steer 消息保存收敛
 
-输入消息的 `agent_run_id` 此时为空。附件复制或接收事务失败时回滚事务，清理复制目标；事务提交后清理复制源。
+取消或转向退出时，`server/service/thread_service.py` 的消息持久化遵循单一收敛顺序：
 
-活动 Run 判断在接收事务提交后进行。因活动 Run 返回 409 时，请求和输入已经提交。
+1. 先执行 `save_message_from_langgraph_state`，将当前 Run 内**已提交进 LangGraph checkpoint** 的全部 `AIMessage`（通过 `ModelMessageAuditRepository.reconcile_to_history` 转正流式审计行）与 `ToolMessage`（更新 `ToolCall` 结果）落库。
+2. 仅当硬取消或异常中断发生在流式半途中、存在尚未进入 checkpoint 的 `accumulated_msg` 时（`stream_agent_response` 与 `resume_agent_response` 均须传入 `full_msg`），优先按当前 `operation_id` 对 `model_audit` 行执行 reconcile 并附加中断元数据；不存在对应审计行时才写入截断消息。
+3. 若因 `before_model` 跳 `END` 退出且最后一条 `AIMessage` 仅为工具调用前置消息，在 Run/Message 元数据保留 `stop_reason="steered"`，不重复插入多余文本消息。
 
-### RUN-RD-002 在会话锁内创建 Run
+### RUN-RD-005 等待区请求删除
 
-进入第二个事务，取得该用户所属会话的行锁：
+`DELETE /api/agent/runs/requests/{request_id}` 仅操作尚未晋升为 `AgentRun` 的等待区请求：
 
-1. 按 `request_id` 查询 Run；存在且通过 RUN-RD-004 的归属检查时返回该 Run。
-2. 调用 `get_pending_interaction_run`；存在待回答问题时保留请求，返回 409。
-3. 调用 `get_latest_active_for_thread`；存在活动 Run 时保留请求，返回 409。
-4. 两项查询均未命中时，用已查询的 Request 和锁定后的 Conversation 组装 `AgentRunRequestInput`，校验会话当前模型，通过 `create_run` 创建状态为 `pending` 的 Run，使用已保存的输入消息 ID 和会话当前元数据。
-5. 将输入消息的 `agent_run_id` 设为该 Run ID，提交事务。
+1. 校验用户身份并持有所属 `Conversation` `FOR UPDATE` 行锁（与 Worker 晋升互斥）。
+2. 查询 `AgentRunRequest`：
+   - `status == "queued"`：置为 `status = "cancelled"`，清理未绑定的触发 `Message`，提交后返回 HTTP 200。
+   - `status == "dispatched"`（已与晋升并发生成 `AgentRun`）：返回 HTTP 409 并附带 `run_id`，前端改走 `POST /api/agent/runs/{run_id}/cancel`。
+   - `status == "cancelled"`：幂等返回 HTTP 200。
 
-活动 Run 指 `agent_status` 不在 `completed/failed/cancelled/interrupted` 集合中的 Run。待回答问题由 `get_pending_interaction_run` 查询。会话行锁覆盖以上步骤，事务提交或回滚时释放。
+### RUN-RD-006 重复请求幂等
 
-### RUN-RD-003 提交 Run 后入队
+按 `request_id` 查询 `AgentRunRequest` 与 `AgentRun`，核对 `uid`、`thread_id`、`agent_id`：
 
-Run 创建事务提交后，Service 调用 `enqueue_agent_run(run_id)`：
-
-- ARQ 函数：`process_agent_run`。
-- 参数：`run_id`。
-- Job ID：`run:{run_id}`。
-- 队列名称：`config.arq_queue_name`。
-
-Run 创建由 Service 执行；Run 加载、认领、execution 创建、输入重建和执行由 `process_agent_run` 处理。
-
-### RUN-RD-004 重复请求
-
-按 `request_id` 查询请求与 Run，检查记录中的 `uid`、`thread_id`、`agent_id` 是否与提交方及请求参数相同；查询到 Run 时，还需检查 `run_type == "chat"`。
-
-- 归属检查通过且 Run 存在：返回该 Run。
-- 归属检查通过且只有请求存在：复用保存的请求及输入，进入 RUN-RD-002。
-- 归属检查未通过：返回 409，`detail` 为 `request_id 已被其他请求使用`。
-
-重复提交复用首次保存的输入消息，忽略重发的正文、图片、消息元数据和模型选择；尚无 Run 时从会话表读取当前配置。同一会话的请求保存和 Run 创建分别在会话行锁内执行；请求表主键限制每个请求 ID 只能有一条记录，`AgentRun.request_id` 唯一约束限制每个请求最多关联一个 Run。
-
-### RUN-RD-005 失败边界
-
-| 失败位置 | 已提交的数据 | 处理 |
-| --- | --- | --- |
-| 接收事务失败 | 本次请求和输入均未提交 | 回滚并传播错误，清理本次复制目标 |
-| 活动 Run 或待回答问题阻止创建 | 请求、输入和附件关联 | 保留数据，返回 409 |
-| Run 创建事务失败 | 请求及输入 | 回滚 Run 创建事务，传播错误 |
-| 入队失败 | 请求、输入和 Run | 调用 `set_agent_terminal(status="failed")`，写入 `error/error_type` 并提交 |
-
-入队失败的终态写入只作用于尚未认领且状态为 `pending/queued` 的 Run。Run 创建事务回滚或入队失败时，已提交的请求、输入和附件关联保留。
+- 已绑定 `AgentRun`：返回该 Run（HTTP 200）。
+- 状态为 `queued`：返回当前排队态（HTTP 202、`queue_position`）。
+- 状态为 `cancelled`：返回 HTTP 409（`detail: 请求已从等待区取消`）。
+- 归属校验失败：返回 HTTP 409（`detail: request_id 已被其他请求使用`）。
 
 ## 4. HTTP 接口
 
-请求结构为 `AgentRunCreateRequest`，接口地址为 `POST /api/agent/runs`。
+### 4.1 提交请求：`POST /api/agent/runs`
 
-创建 Run 或查到请求关联的 Run 时，HTTP 200 响应为：
+- **立即创建或已关联 Run（HTTP 200）**：
 
 ```json
 {
@@ -179,14 +189,29 @@ Run 创建由 Service 执行；Run 加载、认领、execution 创建、输入�
 }
 ```
 
-会话阻止 Run 创建时，返回 HTTP 409：
+- **进入等待区排队或转向（HTTP 202）**：
 
-| 条件 | `detail` |
-| --- | --- |
-| 存在活动 Run | `当前会话有正在执行的任务` |
-| 存在待回答问题 | `当前会话有待回答的问题` |
+```json
+{
+  "run_id": null,
+  "thread_id": "<request.thread_id>",
+  "status": "queued",
+  "dispatch_policy": "queue",
+  "request_id": "<request.request_id>",
+  "queue_position": 1,
+  "steering_run_id": null,
+  "stream_url": null
+}
+```
 
-以上两个分支返回时，请求和输入已提交，该请求尚未关联 Run。响应只包含 `detail`。
+### 4.2 删除等待区请求：`DELETE /api/agent/runs/requests/{request_id}`
+
+- 成功移除返回 HTTP 200：`{"request_id": "<id>", "status": "cancelled"}`。
+- 已晋升为 Run 返回 HTTP 409：`{"detail": "请求已开始执行", "run_id": "<run.id>"}`。
+
+### 4.3 会话详情扩展：`GET /api/chat/thread/{thread_id}`
+
+`ThreadDetailResponse` 增加 `queued_requests: list[QueuedRunRequestItem]`，按 `queue_seq ASC` 返回当前会话 `status == "queued"` 的请求摘要（`request_id`、`dispatch_policy`、`queue_seq`、`content`、`created_at`）。
 
 ## 5. 流程图
 
@@ -194,43 +219,45 @@ Run 创建由 Service 执行；Run 加载、认领、execution 创建、输入�
 
 ```mermaid
 flowchart TD
-    A[POST /api/agent/runs] --> B[锁定会话并校验输入]
-    B --> C{request_id 已关联 Run?}
-    C -->|是| D[返回该 Run]
-    C -->|否| E{存在活动 Run 或待回答问题?}
-    E -->|有| F[返回 409]
-    E -->|无| G[创建输入消息、附件关联和 AgentRun]
-    G --> H[提交事务]
-    H --> I[按 run_id 入队]
-    I --> J[process_agent_run 加载并执行 Run]
+    A[POST /api/agent/runs] --> B[TX1: 保存 Request 与 Input Message 并提交]
+    B --> C[TX2: 锁定会话检查活跃 Run]
+    C -->|有活跃 Run / 待回答问题| D[保留 Request/Message, 返回 409]
+    C -->|空闲| E[创建 AgentRun pending 并入队]
+    E --> F[Worker 执行 Run]
+    F -->|硬取消 CancelledError| G[save_partial_message 直接另插 assistant 消息]
 ```
 
 ### 改动后
 
 ```mermaid
 flowchart TD
-    A[POST /api/agent/runs] --> B[锁定会话并校验请求归属]
-    B --> C{request_id 已关联 Run?}
-    C -->|是| D[返回该 Run]
-    C -->|否| E[保存或复用请求、输入和附件关联]
-    E --> F[提交接收事务]
-    F --> G[重新锁定会话]
-    G --> H{request_id 已关联 Run?}
-    H -->|是| D
-    H -->|否| I{存在活动 Run 或待回答问题?}
-    I -->|有| J[保留请求与输入，返回 409]
-    I -->|无| K[创建 AgentRun 并关联输入消息]
-    K --> L[提交 Run 创建事务]
-    L --> M[按 run_id 入队]
-    M --> N[process_agent_run 加载并执行 Run]
+    A[POST /api/agent/runs] --> B[锁定会话校验幂等与待回答问题]
+    B -->|有待回答问题| C[不落盘脏消息, 返回 409]
+    B -->|空闲| D[保存 Request dispatched + 创建 AgentRun pending]
+    D --> E[enqueue_agent_run]
+    B -->|忙碌且 policy=reject| F[不落盘脏消息, 返回 409]
+    B -->|忙碌且 policy=queue| G[保存 Request queued, 返回 202]
+    B -->|忙碌且 policy=steer| H[保存 Request queued steer, 返回 202]
+
+    H --> I[Worker 当前轮 model/tools 跑完]
+    I --> J[before_model 查到 queued steer Request -> jump_to=end]
+    J --> K[先 save_message_from_langgraph_state 同步 checkpoint]
+    K --> L[Worker 收敛 Run 终态]
+    E --> M[Worker 正常/取消执行完成并收敛 Run 终态]
+    L --> N[dispatch_next_queued_request 锁会话晋升队首]
+    M --> N
+    N --> O[创建新 AgentRun pending 并调用 enqueue_agent_run]
+
+    P[DELETE /api/agent/runs/requests/request_id] --> Q[锁会话检查状态]
+    Q -->|queued| R[置为 cancelled 并清理未绑定 Message]
+    Q -->|dispatched| S[返回 409 + run_id]
 ```
 
 ## 6. 验收标准
 
-- Run 创建事务回滚或入队失败后，按 `request_id` 能查到请求及输入消息。
-- 调用 `enqueue_agent_run` 时，另一个数据库会话能读取请求、Run 及其输入消息。
-- 存在活动 Run 或待回答问题时返回 409；该请求的记录数为 1，关联 Run 数为 0，入队调用次数为 0。
-- 同一请求重复提交后，请求记录数为 1，输入消息数为 1，关联 Run 数最多为 1。
-- 同一会话并发触发时，Run 创建事务通过会话锁串行执行；因活动 Run 返回 409 的请求记录保留。
-- 入队失败时，尚未认领的 Run 写入 `failed` 和 `error/error_type`；ARQ Job 参数为 `run_id`。
-- 迁移升级创建请求表，回退删除请求表；Run 的查询与执行不依赖请求表记录。
+- `dispatch_policy="reject"` 在会话忙碌时返回 409 且不产生孤立 `Message` 与 `AgentRunRequest`。
+- `dispatch_policy="queue"` 在会话忙碌时返回 202，主消息历史不提前出现排队消息；当前 Run 收敛终态后自动晋升队首请求并入队执行。
+- `dispatch_policy="steer"` 在当前轮 `tools` 执行完进入下一轮 `before_model` 时通过 `jump_to="end"` 优雅停机，checkpoint 内 `AIMessage` 与 `ToolMessage` 完整配对，随后自动晋升执行新请求。
+- 非正常退出（Turn 边界停机或硬取消）均先同步已提交 checkpoint 的消息与 `ToolCall` 结果，半截流式输出优先 reconcile 已有 `model_audit` 行，且 `resume_agent_response` 保留部分输出。
+- `DELETE /api/agent/runs/requests/{request_id}` 在会话锁下移除 `queued` 请求及触发消息；并发已被晋升时返回 409 并附带 `run_id`。
+- `enqueue_agent_run(run_id)` 契约保持不变，仅在 `AgentRun` 创建提交后被调用。
