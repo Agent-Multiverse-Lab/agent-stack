@@ -30,20 +30,20 @@
 
 ```text
 POST /api/agent/runs
-  -> lock conversation, persist input Message + attachments + AgentRunRequest, commit
-  -> lock conversation again, return existing Run or check active Run / pending interaction
-  -> Service assembles AgentRunRequestInput from Request and locked Conversation
-  -> create pending Run, bind Message.agent_run_id, commit
-  -> enqueue run_id to ARQ
+  -> lock conversation, check request_id / pending interaction / active Run
+  -> reject busy input, or persist queued Request + Message
+  -> when idle: persist Request + Message + pending Run in the same transaction
+  -> commit, then enqueue run_id to ARQ
 ARQ: process_agent_run(run_id)
   -> set running
   -> stream agent output
   -> end -> set terminal status + write end event
 ```
 
-活动 Run 或待回答问题阻止创建时，返回 409，已提交的请求与输入保留。同一 `request_id`
-重试复用原输入；创建 Run 时使用会话表当前配置。Request 只保存标识与 `trigger_message_id`，
-正文、图片和消息元数据由 Message 持有；Run 状态由 AgentRun 持有。
+待回答问题阻止接收新输入；活动 Run 按 `reject | queue | steer` 决定拒收或进入等待区。
+同一 `request_id` 重试复用已接收输入。Request 持有输入关联、策略、等待区状态和顺序；
+正文、图片和消息元数据由 Message 持有，执行状态由 AgentRun 持有。Worker 在终态提交后
+晋升队首，创建 Run 时使用会话当前配置；Steer 在下一轮 model 前结束当前图。
 
 ## 5. Event Flow
 
@@ -67,7 +67,7 @@ ARQ: process_agent_run(run_id)
 | 能力 | 承载位置 | 责任边界 |
 | --- | --- | --- |
 | HTTP 创建、取消和 SSE 入口 | `server/router/agent_router.py` | 鉴权、参数校验和响应整形，不执行 Agent |
-| Run 服务编排 | `server/service/agent_run_service.py` | 请求接收与 Run 创建的两次事务、授权校验、提交后入队和事件读取编排 |
+| Run 服务编排 | `server/service/agent_run_service.py` | 会话锁内的策略路由、请求接收与 Run 创建事务、授权校验、提交后入队和事件读取编排 |
 | 请求持久化 | `src/database/repositories/agent_run_request_repository.py` | 保存请求及输入关联，查询并返回请求 ORM 记录 |
 | ARQ/Redis 适配 | `server/service/arq_queue_servcie.py` | 队列、Stream、取消 key/Pub/Sub 和事件信封，不决定业务终态 |
 | Run 执行 | `server/worker.py` | 重载输入、执行 Agent、发布事件和收口终态 |
