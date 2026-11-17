@@ -19,8 +19,8 @@
 
 - 在左侧边栏 [app-sidebar.tsx](../../../../web/src/components/app-sidebar.tsx) 的 `SidebarContent` 中按“导航 → Pinned 区域 → Projects 区域 → Conversations 区域”插入专属组件；折叠侧栏（`group-data-[collapsible=icon]:hidden`）时同步隐藏。
 - **Pinned 区域组件（`NavPinned`）**：集中展示已置顶的会话与已置顶的 Project（无置顶项时不占位渲染），支持直接跳转与一键取消置顶。
-- **Projects 区域组件（`NavProjectList`）**：展示当前用户的 Project 列表，支持新建、重命名、置顶/取消置顶、删除（确认弹窗），并支持展开查看或切换该 Project 下的会话。
-- **Conversations 区域（[nav-projects.tsx](../../../../web/src/components/nav-projects.tsx)）**：展示未归属 Project 的会话列表，行内操作菜单补充 `Pin / Unpin` 与 `添加到 / 移出 Project`；在执行置顶、归组、重命名或删除后，与 Pinned、Projects 区域同步状态。
+- **Projects 区域组件（`NavProjectList`）**：与底部 Conversations 区域保持一致的可折叠标题栏；标题栏右侧与项目行悬停操作菜单统一封装为 `ProjectActionMenu` 组件（标题栏菜单提供新建入口，项目行菜单提供重命名、置顶/取消置顶、删除确认弹窗），支持展开查看或切换该 Project 下的会话；无项目且无加载/错误状态时不渲染列表与空状态占位。
+- **Conversations 区域（[nav-projects.tsx](../../../../web/src/components/nav-projects.tsx)）**：展示未归属 Project 的会话列表，行内操作菜单补充 `Pin / Unpin` 与 `添加到 / 移出 Project`（`Add to project` 子菜单同时列出已有项目并提供 `New project` 按钮，无项目时仍可打开并直接新建项目归组）；在执行置顶、归组、重命名或删除后，与 Pinned、Projects 区域同步状态。
 - 所有弹窗、菜单、按钮与图标复用现有 `web/src/components/ui/` 原语与 Lucide 图标，遵循 [docs/frontend/README.md](../../../frontend/README.md)。
 
 ## 数据模型与接口契约
