@@ -80,7 +80,7 @@ type AgentMessageComposerProps = {
   selectModel: (id: string) => void;
   upload: (files: File[]) => void;
   removeAttachment: (id: string) => void;
-  submit: () => void;
+  submit: (policy?: "queue" | "steer") => void;
   cancel: () => void;
 };
 
@@ -186,6 +186,7 @@ export function AgentMessageComposer({
   const recognition = useRef<SpeechRecognitionLike | null>(null);
   const dictationBase = useRef("");
   const setDraftRef = useRef(setDraft);
+  const [dispatchPolicy, setDispatchPolicy] = useState<"queue" | "steer">("queue");
   const [composing, setComposing] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [speechSupported, setSpeechSupported] = useState<boolean | null>(null);
@@ -552,7 +553,7 @@ export function AgentMessageComposer({
     stopDictation();
     setDismissedMentionStart(null);
     setCaretOffset(null);
-    submit();
+    submit(running ? dispatchPolicy : undefined);
   };
 
   const toggleDictation = () => {
@@ -661,13 +662,13 @@ export function AgentMessageComposer({
       !composing
     ) {
       event.preventDefault();
-      if (!actionDisabled && !running) submitMessage();
+      if (!actionDisabled && (draft.trim() || attachments.length)) submitMessage();
     }
   };
 
   const onSubmit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!actionDisabled && !running) submitMessage();
+    if (!actionDisabled && (draft.trim() || attachments.length)) submitMessage();
   };
 
   const onSelectModel = (id: string) => {
@@ -1004,6 +1005,20 @@ export function AgentMessageComposer({
               <TooltipContent>{dictationLabel}</TooltipContent>
             </Tooltip>
 
+            {running && (draft.trim() || attachments.length > 0) && (
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger render={<Button variant="ghost" size="sm" />} disabled={disabled} aria-label={t("Dispatch policy")}>
+                    {t(dispatchPolicy === "queue" ? "Queue message" : "Steer response")}
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem onClick={() => setDispatchPolicy("queue")}>{t("Queue message")}</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setDispatchPolicy("steer")}>{t("Steer response")}</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button type="button" size="icon" disabled={disabled || uploading > 0} aria-label={t("Send message")} onClick={submitMessage}><ArrowUpIcon /></Button>
+              </>
+            )}
             <Tooltip>
               <TooltipTrigger
                 render={

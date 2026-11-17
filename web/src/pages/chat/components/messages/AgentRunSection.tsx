@@ -91,6 +91,7 @@ export function AgentRunSection({ item }: AgentRunSectionProps) {
 
   return (
     <section className="grid min-w-0 gap-4" data-run-id={item.runId}>
+      {item.stopReason === "steered" && <p className="m-0 text-xs text-muted-foreground">{t("Response redirected to the next request")}</p>}
       {showProcess && (
         <Thinking
           label={label}

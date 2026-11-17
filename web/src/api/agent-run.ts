@@ -23,7 +23,10 @@ export interface InteractionRequiredResponse {
   questions: HumanQuestionResponse[]
 }
 
+export type DispatchPolicy = "reject" | "steer"
+
 export interface AgentRunCreateRequest {
+  dispatch_policy?: DispatchPolicy
   query?: string | null
   agent_id: string
   thread_id: string
@@ -43,6 +46,16 @@ export interface AgentRunCreateResponse {
   status: string
   request_id: string | null
   stream_url: string
+}
+
+export interface QueuedAgentRunResponse {
+  run_id: null
+  thread_id: string
+  status: "queued"
+  dispatch_policy: "steer"
+  request_id: string
+  steering_run_id: string | null
+  stream_url: null
 }
 
 export interface AgentRunResumeResponse extends AgentRunCreateResponse {
@@ -100,12 +113,14 @@ export const createAgentRun = (
   agentId: string,
   threadId: string,
   attachmentFileIds: string[],
-  modelId?: string
+  modelId?: string,
+  dispatchPolicy: DispatchPolicy = "reject",
 ) =>
-  apiClient.apiPost<AgentRunCreateResponse, AgentRunCreateRequest>(
+  apiClient.apiPost<AgentRunCreateResponse | QueuedAgentRunResponse, AgentRunCreateRequest>(
     "/api/agent/runs",
     {
       query,
+      dispatch_policy: dispatchPolicy,
       agent_id: agentId,
       thread_id: threadId,
       request_metadata: {

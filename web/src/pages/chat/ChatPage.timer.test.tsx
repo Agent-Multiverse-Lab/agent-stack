@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import ChatPage from "./ChatPage";
 import type { AgentRunStreamEvent } from "@/api/agent-run";
@@ -18,7 +19,27 @@ vi.mock("@/i18n", () => ({ useTranslation: () => ({ t: (value: string) => value 
 vi.mock("@/context/ModelContext", () => ({
   useModel: () => ({ models: [], selectedModelId: "model", loading: false, selectModel: () => {} }),
 }));
-vi.mock("@/pages/chat/components/AgentMessageComposer", () => ({ AgentMessageComposer: () => null }));
+vi.mock("@/pages/chat/components/AgentMessageComposer", () => ({
+  AgentMessageComposer: ({
+    draft,
+    setDraft,
+    submit,
+  }: {
+    draft: string;
+    setDraft: (value: string) => void;
+    submit: (policy?: "queue" | "steer") => void;
+  }) => (
+    <div>
+      <Input
+        aria-label="Message"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+      <Button onClick={() => submit("queue")}>Queue</Button>
+      <Button onClick={() => submit("steer")}>Steer now</Button>
+    </div>
+  ),
+}));
 vi.mock("@/pages/chat/components/AskUser", () => ({
   AskUser: ({ submit }: { submit: (answers: Record<string, string>) => void }) => (
     <Button onClick={() => submit({ database: "postgresql" })}>Answer question</Button>
@@ -164,4 +185,43 @@ it("removes Thinking status indicator after a terminal event", async () => {
   mocks.getThreadDetail.mockResolvedValue({ ...detail("A"), active_run: null });
   await act(() => streams[0].finish());
   await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+});
+
+it("holds queued messages locally with instant removal, steers on demand, and auto-sends after completion", async () => {
+  renderChat();
+  await waitFor(() => expect(streams).toHaveLength(1));
+
+  fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Drop me" } });
+  fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+  expect(screen.getByText("Drop me")).toBeTruthy();
+  expect(mocks.create).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+  expect(screen.queryByText("Drop me")).toBeNull();
+  expect(mocks.create).not.toHaveBeenCalled();
+
+  fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Next question" } });
+  fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+  expect(screen.getByText("Next question")).toBeTruthy();
+  expect(mocks.create).not.toHaveBeenCalled();
+
+  mocks.create.mockResolvedValueOnce({
+    run_id: "next-run",
+    thread_id: "A",
+    status: "pending",
+    request_id: "req-next",
+    stream_url: "/runs/next-run/events?thread=A",
+  });
+  mocks.getThreadDetail
+    .mockResolvedValueOnce({ ...detail("A"), active_run: null })
+    .mockResolvedValue({
+      ...detail("A"),
+      active_run: { ...detail("A").active_run!, run_id: "next-run" },
+    });
+
+  await act(async () => streams[0].finish());
+  await waitFor(() => expect(mocks.create).toHaveBeenCalledWith("Next question", "LeaderAgent", "A", [], "model", undefined));
+  await waitFor(() => expect(streams).toHaveLength(2));
+  expect(mocks.consume.mock.calls[1][0]).toBe("/runs/next-run/events?thread=A");
+  expect(screen.queryByText("Next question")).toBeNull();
 });

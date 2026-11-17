@@ -15,6 +15,7 @@ it("sends model and attachments in the chat request metadata", async () => {
     "/api/agent/runs",
     {
       query: "Analyze",
+      dispatch_policy: "reject",
       agent_id: "LeaderAgent",
       thread_id: "thread-1",
       request_metadata: {

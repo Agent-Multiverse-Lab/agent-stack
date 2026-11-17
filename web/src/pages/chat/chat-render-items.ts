@@ -252,6 +252,7 @@ export function buildChatRenderItems(
 
     items.push({
       kind: "agent_run",
+      stopReason: isRecord(metadata.metadata) && typeof metadata.metadata.stop_reason === "string" ? metadata.metadata.stop_reason : undefined,
       key: rId,
       runId: rId,
       threadId: options.threadId,

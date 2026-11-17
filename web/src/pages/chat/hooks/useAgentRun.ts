@@ -116,8 +116,9 @@ export function useAgentRun() {
       request.threadId,
       request.attachmentFileIds,
       request.modelId,
+      request.dispatchPolicy,
     );
-    if (version.current === expected) {
+    if (version.current === expected && run.run_id !== null) {
       update((previous) => ({
         ...previous,
         runId: run.run_id,

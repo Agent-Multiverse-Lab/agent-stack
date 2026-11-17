@@ -6,6 +6,13 @@ const supportedLanguages = ["en", "zh-CN"] as const;
 type Language = (typeof supportedLanguages)[number];
 
 const translations = {
+  "Response redirected to the next request": "已转向下一条请求",
+  "Waiting requests": "等待区",
+  "Dispatch policy": "发送方式",
+  "Queue message": "排队发送",
+  "Steer response": "转向新请求",
+  "Steer": "转向",
+  "Queued": "排队中",
   "Pinned": "置顶",
   "Projects": "项目",
   "Pin": "置顶",

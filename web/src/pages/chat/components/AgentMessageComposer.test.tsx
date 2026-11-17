@@ -330,3 +330,17 @@ describe("AgentMessageComposer", () => {
     expect(setDraft).toHaveBeenCalledWith("Read ");
   });
 });
+
+it("submits queue or steer while preserving the explicit stop action", () => {
+  const submit = vi.fn();
+  const cancel = vi.fn();
+  render(<AgentMessageComposer {...baseProps} draft="next" running submit={submit} cancel={cancel} />);
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), { key: "Enter" });
+  expect(submit).toHaveBeenLastCalledWith("queue");
+  fireEvent.click(screen.getByRole("button", { name: "Dispatch policy" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Steer response" }));
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  expect(submit).toHaveBeenLastCalledWith("steer");
+  fireEvent.click(screen.getByRole("button", { name: "Cancel response" }));
+  expect(cancel).toHaveBeenCalledOnce();
+});
