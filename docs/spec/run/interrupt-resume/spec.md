@@ -140,8 +140,10 @@ POST /api/agent/runs/{interrupted_run_id}/resume
 
 ```json
 {
+  "agent_id": "<agent-id>",
   "thread_id": "<thread-id>",
-  "thread_metadata": {
+  "request_metadata": {
+    "type": "resume",
     "request_id": "<client-idempotency-key>",
     "resume": {
       "answers": {"database": "postgresql"}
@@ -150,9 +152,8 @@ POST /api/agent/runs/{interrupted_run_id}/resume
 }
 ```
 
-`AgentRunResumeRequest` 沿用 `AgentRunCreateRequest` 的 Run metadata 约定：恢复数据放在
-`thread_metadata.resume`，幂等键放在 `thread_metadata.request_id`。Service 将
-`thread_metadata` 复制到新 Resume Run 的 `run_metadata`；恢复请求不使用 `msg_metadata`。
+恢复入口复用 `AgentRunCreateRequest`：要求 `request_metadata.type == "resume"`，结构化回答字典放在
+`request_metadata.resume.answers`，幂等键放在 `request_metadata.request_id`，不使用 `query`（`query` 仅承载创建 `HumanMessage` 的普通对话文本）。Service 校验后去除 `type`，继承父 Run 的 `model`，将 `request_metadata` 写入新 Resume Run 的 `run_metadata`。
 成功响应返回新 Resume Run：
 
 ```json
@@ -174,11 +175,11 @@ POST /api/agent/runs/{interrupted_run_id}/resume
 
 创建 Resume Run 前，Service 必须在同一事务中锁定父 Run 并验证：
 
-1. 父 Run 属于当前用户和请求 Thread；
+1. 父 Run 属于当前用户、请求 Thread 和 `agent_id`；
 2. 父 Run 状态为 `interrupted`；
-3. `thread_metadata.resume.answers` 是非空的 `question_id -> option.value` 字典；键集合必须与父 Run 的 questions 完全一致，每个值必须属于对应问题的 options；问题 ID 重复或问题结构无效时拒绝恢复；
+3. `request_metadata.type` 为 `"resume"`，且 `request_metadata.resume.answers` 是非空的 `question_id -> option.value` 字典；键集合必须与父 Run 的 questions 完全一致，每个值必须属于对应问题的 options；问题 ID 重复或问题结构无效时拒绝恢复；
 4. 父 Run 尚无 Resume 子 Run；
-5. 相同 `thread_metadata.request_id` 且 answers 相同的重试返回已有子 Run；相同键不同回答或其他重复恢复返回 `409`。
+5. 相同 `request_metadata.request_id` 且 answers 相同的重试返回已有子 Run；相同键不同回答或其他重复恢复返回 `409`。
 
 ### RUN-HIL-005 Interrupt detection
 
@@ -327,7 +328,7 @@ PostgreSQL 继续拥有 Run 状态和 interrupt metadata。
 ### RUN-HIL-010 Frontend ownership
 
 `useAgentRun` 保存 `pendingInteraction`，提交
-`resumeRun(createdByRunId, request)`，其中请求按上述 `thread_metadata` 结构构造；成功后切换到
+`resumeRun(createdByRunId, request)`，其中请求按上述 `request_metadata` 结构构造；成功后切换到
 响应中的新 Run ID 和 Stream URL。
 `ChatPage` 组合 `AskUser`；问题、选项和回答不伪造成普通聊天消息，也不写入
 `localStorage`。
@@ -363,9 +364,9 @@ pending_interaction: InteractionRequired | null
 ## 4. Failure Contract
 
 - 父 Run 不存在或不属于当前用户：`404`；
-- 状态或 Thread 不匹配：`409`；
-- `thread_metadata.resume.answers` 无效、漏答、多余问题或值不在对应 options 中：`422`；
-- 不同 `thread_metadata.request_id` 重复恢复同一父 Run：`409`；
+- 状态、Thread 或 `agent_id` 不匹配：`409`；
+- `request_metadata.type != "resume"`，或 `request_metadata.resume.answers` 无效、漏答、多余问题或值不在对应 options 中：`422`；
+- 不同 `request_metadata.request_id` 重复恢复同一父 Run：`409`；
 - Redis 发布失败：PostgreSQL 状态和 metadata 保持有效，读取侧按数据库收敛；
 - Resume Run 执行中取消：沿用现有 `cancel_requested -> cancelled`。
 
