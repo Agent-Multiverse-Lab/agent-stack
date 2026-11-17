@@ -181,9 +181,11 @@ class ConversationRepository:
         limit: int,
         before_message_id: int | None = None,
     ) -> list[Message]:
-        """按 ID 倒序读取指定对话的一页消息。"""
-        statement = select(Message).where(
+        """按 Run 接收顺序分页，晋升的旧 Message 随新 Run 出现在历史末尾。"""
+        history_time = func.coalesce(AgentRun.created_at, Message.created_at)
+        statement = select(Message).outerjoin(AgentRun, AgentRun.id == Message.agent_run_id).where(
             Message.conversation_id == conversation_id,
+            Message.status != "queued",
             # 已结束的审计操作也是执行过程；running 行仍由 SSE 恢复。
             or_(
                 func.coalesce(Message.message_type, "text").not_in(AUDIT_MESSAGE_TYPES),
@@ -191,11 +193,17 @@ class ConversationRepository:
             ),
         )
         if before_message_id is not None:
-            statement = statement.where(Message.id < before_message_id)
+            cursor = (await self.session.execute(
+                select(history_time).select_from(Message)
+                .outerjoin(AgentRun, AgentRun.id == Message.agent_run_id)
+                .where(Message.id == before_message_id, Message.conversation_id == conversation_id)
+            )).scalar_one_or_none()
+            if cursor is not None:
+                statement = statement.where(or_(history_time < cursor, and_(history_time == cursor, Message.id < before_message_id)))
 
         result = await self.session.execute(
             statement.options(selectinload(Message.tool_calls))
-            .order_by(Message.id.desc()).limit(limit)
+            .order_by(history_time.desc(), Message.id.desc()).limit(limit)
         )
         return list(result.scalars().all())
 
@@ -399,6 +407,13 @@ class ConversationRepository:
             request_id=request_id,
             msg_metadata=msg_metadata,
         )
+
+    async def promote_queued_input_message(self, message_id: int, run_id: str) -> None:
+        message = await self.session.get(Message, message_id)
+        message.sequence = await self.next_sequence(message.conversation_id)
+        message.status = "completed"
+        message.agent_run_id = run_id
+        await self.session.flush()
 
     async def bind_input_message_to_run(self, run: AgentRun) -> None:
         """在 Run 创建事务内关联已接收的输入消息。"""

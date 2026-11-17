@@ -48,6 +48,9 @@ class WorkerRetryTest(unittest.IsolatedAsyncioTestCase):
             return status, True
 
         self.namespace = {
+            "func": lambda task, **kwargs: task,
+            "process_knowledge_task": AsyncMock(),
+            "dispatch_next_queued_request": AsyncMock(),
             "RetryJob": RetryJob, "RedisSettings": RedisSettings,
             "asyncio": asyncio, "logger": Mock(),
             "uuid4": uuid4, "WORKER_ID": "worker-test",
@@ -153,16 +156,11 @@ class WorkerRetryTest(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_session_connection_failure_is_not_retried_before_stream_starts(self):
-        @asynccontextmanager
-        async def failed_session():
-            raise ConnectionError("offline")
-            yield
-
-        self.namespace["postgres_manager"].get_async_session_context = failed_session
+        self.namespace["_get_user"].side_effect = ConnectionError("offline")
         with self.assertRaises(ConnectionError):
             await self.process({"worker_id": "worker-test", "job_try": 1}, "run-1")
         self.namespace["_finalize_run"].assert_not_awaited()
-        self.controller.close.assert_awaited_once()
+        self.controller.close.assert_not_awaited()
         self.namespace["set_run_terminal"].assert_awaited_once_with(
             "run-1", worker_id=ANY, status="failed", error="offline", error_type="ConnectionError",
         )

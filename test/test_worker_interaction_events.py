@@ -21,6 +21,7 @@ class WorkerInteractionEventTest(unittest.IsolatedAsyncioTestCase):
             "Any": Any,
             "json": json,
             "set_run_terminal": AsyncMock(),
+            "dispatch_next_queued_request": AsyncMock(),
             "write_stream_event": AsyncMock(),
             "write_end_stream_event": AsyncMock(),
             "clear_agent_run_cancel_signal": AsyncMock(),

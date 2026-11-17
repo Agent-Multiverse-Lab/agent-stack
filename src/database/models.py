@@ -238,22 +238,27 @@ class ToolCall(Base):
 
 
 class AgentRunRequest(Base):
-    """已接收的聊天请求；输入由 trigger_message_id 指向的 Message 持有。"""
+    """输入关联与会话等待区；事务由持有会话锁的 Service 编排。"""
 
     __tablename__ = "agent_run_request"
+    __table_args__ = (
+        Index("ix_agent_run_request_thread_queued", "thread_id", "queue_seq",
+              postgresql_where=text("status = 'queued'"),
+              sqlite_where=text("status = 'queued'")),
+    )
 
     request_id = Column(String(128), primary_key=True)
     uid = Column(String(64), nullable=False)
-    conversation_id = Column(
-        Integer, ForeignKey("conversation.id", ondelete="CASCADE"),
-        nullable=False, index=True,
-    )
-    thread_id = Column(String(64), nullable=False)
+    thread_id = Column(String(64), nullable=False, index=True)
     agent_id = Column(String(128), nullable=False)
     trigger_message_id = Column(
         Integer, ForeignKey("message.id", ondelete="CASCADE"), nullable=False,
     )
+    dispatch_policy = Column(String(16), nullable=False, server_default="reject")
+    status = Column(String(16), nullable=False, server_default="dispatched")
+    queue_seq = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    trigger_message = relationship("Message")
 
 
 class AgentRun(Base):

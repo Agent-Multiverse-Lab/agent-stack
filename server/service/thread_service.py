@@ -898,6 +898,7 @@ async def save_partial_message(
     request_id: str | None = None,
     worker_id: str | None = None,
     interrupt_run: bool = False,
+    operation_id: str | None = None,
 ):
     """保存失败或中断时已经流出的部分输出。
 
@@ -932,17 +933,30 @@ async def save_partial_message(
             if locked_run is None:
                 raise ValueError(f"AgentRun 不存在: {run_id}")
 
-        message = await conv_repo.add_message_by_thread_id(
-            thread_id=thread_id,
-            user_id=uid,
-            role="assistant",
-            content=content,
-            message_type="text",
-            agent_run_id=run_id,
-            request_id=request_id,
-            msg_metadata=extra_metadata,
-            commit=run_id is None,
-        )
+        message = None
+        if run_id and operation_id:
+            audits = ModelMessageAuditRepository(conv_repo.session)
+            existing = await audits.get(run_id=run_id, operation_id=operation_id)
+            if existing is not None and existing.message_type != "model_audit":
+                return existing  # checkpoint 已经转正本轮，不覆盖完整内容。
+            message = await audits.reconcile_to_history(
+                uid=uid, thread_id=thread_id, run_id=run_id, operation_id=operation_id,
+                content=content, message_metadata={**extra_metadata, "stop_reason": error_type},
+            )
+        if message is None and full_msg is None and run_id:
+            return None
+        if message is None:
+            message = await conv_repo.add_message_by_thread_id(
+                thread_id=thread_id,
+                user_id=uid,
+                role="assistant",
+                content=content,
+                message_type="text",
+                agent_run_id=run_id,
+                request_id=request_id,
+                msg_metadata=extra_metadata,
+                commit=run_id is None,
+            )
         if run_id and message is not None:
             await run_repo.set_output_message(
                 run_id=run_id,
@@ -1126,7 +1140,7 @@ async def save_message_from_langgraph_state(
     agent_instance: BaseAgent,
     db: AsyncSession,
     interrupt_chunks: list[bytes] | None = None,
-) -> None:
+) -> str | None:
     """读取当前 checkpoint，并按 Message type 持久化运行结果。"""
 
     # 获取上下文
@@ -1141,7 +1155,7 @@ async def save_message_from_langgraph_state(
     )
 
     agent_run_repo = AgentRunRepository(db)
-    await agent_run_repo.lock_for_output_update(run_id, worker_id=worker_id)
+    locked_run = await agent_run_repo.lock_for_output_update(run_id, worker_id=worker_id)
 
     saved_ai_message: Message | None = None
     for message in checkpoint.values.get("messages", []):
@@ -1182,7 +1196,18 @@ async def save_message_from_langgraph_state(
             worker_id=worker_id,
         )
 
+    stop_reason = None
+    if interrupt_message is None and (
+        checkpoint.values.get("steered_run_id") == run_id
+        or await AgentRunRequestRepository(db).has_queued_steer_for_thread(thread_id)
+    ):
+        stop_reason = "steered"
+        locked_run.run_metadata = {**dict(locked_run.run_metadata or {}), "stop_reason": stop_reason}
+        if saved_ai_message is not None:
+            saved_ai_message.msg_metadata = {**dict(saved_ai_message.msg_metadata or {}), "stop_reason": stop_reason}
+
     await db.commit()
+    return stop_reason
 
 
 def _build_ask_human_interrupt(
@@ -1451,6 +1476,8 @@ async def _stream_agent_event_chunks(
             continue
 
         agent_msg, agent_metadata = payload
+        if isinstance(agent_msg, dict) and agent_msg.get("event") == "message-start":
+            accumulated_msg.clear()
         if model_audit is not None and _has_audit_stream_event(agent_metadata):
             await model_audit.consume(agent_msg, agent_metadata)
         standard_stream_events = _make_lc_message_to_standard(
@@ -1633,7 +1660,7 @@ async def stream_agent_response(
         # finish之前先save所有的的信息
         try:
             async with _scoped_session(db) as session:
-                await save_message_from_langgraph_state(
+                stop_reason = await save_message_from_langgraph_state(
                     thread_id=thread_id,
                     run_id=runtime_metadata.get("run_id"),
                     worker_id=runtime_metadata["worker_id"],
@@ -1658,6 +1685,7 @@ async def stream_agent_response(
 
         yield make_agent_stream_event(
             status="finished",
+            stop_reason=stop_reason,
             runtime_metadata=runtime_metadata,
         )
     except asyncio.CancelledError:
@@ -1665,11 +1693,17 @@ async def stream_agent_response(
         logger.warning("Agent stream 已取消：保存部分输出")
         full_msg = AIMessage(content="".join(accumulated_msg)) if accumulated_msg else None
         async with postgres_manager.get_async_session_context() as new_db:
+            if agent_instance is not None and agent_context is not None:
+                await save_message_from_langgraph_state(
+                    thread_id=thread_id, run_id=run_id, worker_id=runtime_metadata["worker_id"],
+                    context=agent_context, agent_instance=agent_instance, db=new_db,
+                )
             await save_partial_message(
                 ConversationRepository(new_db),
                 thread_id,
                 uid=current_user.uid,
                 full_msg=full_msg,
+                operation_id=model_audit.last_operation_id if model_audit else None,
                 error_message="对话已中断",
                 error_type="interrupted",
                 run_id=run_id,
@@ -1686,11 +1720,17 @@ async def stream_agent_response(
         full_msg = AIMessage(content="".join(accumulated_msg)) if accumulated_msg else None
 
         async with postgres_manager.get_async_session_context() as new_db:
+            if agent_instance is not None and agent_context is not None:
+                await save_message_from_langgraph_state(
+                    thread_id=thread_id, run_id=run_id, worker_id=runtime_metadata["worker_id"],
+                    context=agent_context, agent_instance=agent_instance, db=new_db,
+                )
             await save_partial_message(
                 ConversationRepository(new_db),
                 thread_id,
                 uid=current_user.uid,
                 full_msg=full_msg,
+                operation_id=model_audit.last_operation_id if model_audit else None,
                 error_message=error_msg,
                 error_type=error_type,
                 run_id=run_id,
@@ -1717,6 +1757,7 @@ async def resume_agent_response(
     runtime_metadata = dict(runtime_metadata or {})
     run_id = runtime_metadata.get("run_id")
     accumulated_msg: list[str] = []
+    agent_instance = agent_context = model_audit = None
 
     def make_agent_resume_event(
         status: str | None = None,
@@ -1827,7 +1868,7 @@ async def resume_agent_response(
         ]
         try:
             async with _scoped_session(db) as session:
-                await save_message_from_langgraph_state(
+                stop_reason = await save_message_from_langgraph_state(
                     thread_id=thread_id,
                     run_id=run_id,
                     worker_id=runtime_metadata["worker_id"],
@@ -1851,15 +1892,23 @@ async def resume_agent_response(
 
         yield make_agent_resume_event(
             status="finished",
+            stop_reason=stop_reason,
             runtime_metadata=runtime_metadata,
         )
     except asyncio.CancelledError:
         logger.warning("Agent Resume stream 已取消：保存部分输出")
         async with postgres_manager.get_async_session_context() as new_db:
+            if agent_instance is not None and agent_context is not None:
+                await save_message_from_langgraph_state(
+                    thread_id=thread_id, run_id=run_id, worker_id=runtime_metadata["worker_id"],
+                    context=agent_context, agent_instance=agent_instance, db=new_db,
+                )
             await save_partial_message(
                 ConversationRepository(new_db),
                 thread_id,
                 uid=current_user.uid,
+                full_msg=AIMessage(content="".join(accumulated_msg)) if accumulated_msg else None,
+                operation_id=model_audit.last_operation_id if model_audit else None,
                 error_message="对话恢复已中断",
                 error_type="interrupted",
                 run_id=run_id,
@@ -1872,10 +1921,17 @@ async def resume_agent_response(
         logger.exception(f"Error during resume: {exc}")
 
         async with postgres_manager.get_async_session_context() as new_db:
+            if agent_instance is not None and agent_context is not None:
+                await save_message_from_langgraph_state(
+                    thread_id=thread_id, run_id=run_id, worker_id=runtime_metadata["worker_id"],
+                    context=agent_context, agent_instance=agent_instance, db=new_db,
+                )
             await save_partial_message(
                 ConversationRepository(new_db),
                 thread_id,
                 uid=current_user.uid,
+                full_msg=AIMessage(content="".join(accumulated_msg)) if accumulated_msg else None,
+                operation_id=model_audit.last_operation_id if model_audit else None,
                 error_message=f"Error during resume: {exc}",
                 error_type="resume_error",
                 run_id=run_id,

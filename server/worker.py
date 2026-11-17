@@ -9,11 +9,10 @@ from uuid import uuid4
 
 from arq.connections import RedisSettings
 from arq.worker import RetryJob, func
-from server.service.knowledge_workspace_service import process_knowledge_task
 from sqlalchemy import select
 
 import src.agents.buildin as agent
-from server.service.agent_run_service import enqueue_agent_run
+from server.service.agent_run_service import dispatch_next_queued_request, enqueue_agent_run
 from server.service.arq_queue_servcie import (
     RUN_REDIS_TTL_SECONDS,
     clear_agent_run_cancel_signal,
@@ -23,6 +22,7 @@ from server.service.arq_queue_servcie import (
     write_agent_run_stream_event,
 )
 from server.service.input_message_service import build_agent_input_msg
+from server.service.knowledge_workspace_service import process_knowledge_task
 from server.service.thread_service import resume_agent_response, stream_agent_response
 from server.utils.woker_utils import reslove_thread_id
 from src.agents.backends.sandbox import init_sandbox_provider, shutdown_sandbox_provider
@@ -34,6 +34,7 @@ from src.database.models import AgentRun, Message, User
 from src.database.repositories import (
     AgentRepository,
     AgentRunRepository,
+    AgentRunRequestRepository,
 )
 from src.database.repositories.agent_run_repository import (
     AGENT_RUN_TERMINAL_STATUSES,
@@ -53,6 +54,7 @@ WORKER_ID = f"worker-{uuid4().hex}"
 # Run lease：认领时写入 120 秒租约，每 30 秒续期；失去租约的 Worker 必须停止
 # 执行，过期 Run 由扫描任务收敛为终态。
 RUN_LEASE_SECONDS = 120.0
+STEER_GRACE_SECONDS = 120.0
 RUN_HEARTBEAT_SECONDS = 30.0
 LEASE_REAPER_INTERVAL_SECONDS = 30.0
 LEASE_REAPER_CTX_KEY = "lease_reaper"
@@ -147,6 +149,14 @@ class AgentRunController:
                 return
             try:
                 renewed = await _renew_run_lease(self.run_id, self.worker_id)
+                if renewed:
+                    async with postgres_manager.get_async_session_context() as db:
+                        steer_expired = await AgentRunRequestRepository(db).has_expired_steer_for_run(
+                            self.run_id, grace_seconds=STEER_GRACE_SECONDS,
+                        )
+                    if steer_expired:
+                        self._cancel_event.set()
+                        return
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -299,6 +309,8 @@ async def reconcile_expired_run_leases(*, terminate_active: bool = False) -> int
             logger.exception(
                 "级联取消子 Agent Run 信号发布失败：run_id=%s", signal_run_id
             )
+    for run in [*runs, *timed_out_runs]:
+        await dispatch_next_queued_request(str(run.thread_id))
     for run in requeue_runs:
         try:
             await enqueue_agent_run(str(run.id))
@@ -357,6 +369,8 @@ async def set_run_terminal(
             logger.exception(
                 "级联取消子 Agent Run 信号发布失败：run_id=%s", signal_run_id
             )
+    if changed and current_agent_status in {"completed", "failed", "cancelled"}:
+        await dispatch_next_queued_request(str(run.thread_id))
     return current_agent_status, changed
 
 
@@ -895,7 +909,7 @@ async def process_agent_run(ctx, run_id: str):
                             agent_status, changed = await _finalize_run(
                                 run_id,
                                 worker_id=worker_id,
-                                status="completed",
+                                status="cancelled" if strem_agent_chunk.get("stop_reason") == "steered" else "completed",
                                 thread_id=str(thread_id),
                                 payload=strem_agent_chunk,
                             )

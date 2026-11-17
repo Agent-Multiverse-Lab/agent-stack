@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.entities.agent import (
@@ -91,7 +91,7 @@ async def create_agent_run(
     current_user: AuthenticatedUser,
     db: AsyncSession = Depends(get_db),
 ):
-    """先保存请求与输入，再按会话状态创建 Run，提交后入队。"""
+    """按会话状态和策略接收请求，创建 Run 提交后入队。"""
     if not config.enable_run_queue:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -107,6 +107,7 @@ async def create_agent_run(
             thread_id=agentrun_request.thread_id,
             request_metadata=agentrun_request.request_metadata,
             image_content=agentrun_request.image_content,
+            dispatch_policy=agentrun_request.dispatch_policy,
         )
     except LookupError as exc:
         raise HTTPException(
@@ -123,6 +124,9 @@ async def create_agent_run(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+
+    if isinstance(run, dict):
+        return JSONResponse(status_code=202, content=run)
 
     return {
         "run_id": run.id,

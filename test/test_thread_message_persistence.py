@@ -32,6 +32,7 @@ def load_message_persistence():
         _persist_agent_state=AsyncMock(),
         AIMessage=AIMessage, ToolMessage=ToolMessage, json=json, logger=Mock(),
         AgentRunRepository=AgentRunRepository, ConversationRepository=ConversationRepository,
+        AgentRunRequestRepository=Mock(return_value=SimpleNamespace(has_queued_steer_for_thread=AsyncMock(return_value=False))),
     )
     nodes = [node for node in tree.body if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)) and node.name in {
         "_reslove_interrupt_state", "_lc_message_v3_dispather", "_message_process_response",

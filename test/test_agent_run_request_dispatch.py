@@ -42,6 +42,10 @@ spec = importlib.util.spec_from_file_location("run_request_migration", MIGRATION
 migration = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(migration)
 
+queue_spec = importlib.util.spec_from_file_location("queue_migration", MIGRATION_PATH.with_name("0031_request_dispatch_queue.py"))
+queue_migration = importlib.util.module_from_spec(queue_spec)
+queue_spec.loader.exec_module(queue_migration)
+
 
 class AgentRunRequestRepositoryTest(unittest.IsolatedAsyncioTestCase):
     """用 SQLite 验证实际 SQL 与迁移；PostgreSQL 行锁竞争由下方集成测试验证。"""
@@ -52,9 +56,8 @@ class AgentRunRequestRepositoryTest(unittest.IsolatedAsyncioTestCase):
         with self.engine.begin() as connection:
             connection.exec_driver_sql("PRAGMA foreign_keys=ON")
             Base.metadata.create_all(connection, tables=[
-                model.__table__ for model in (Project, Conversation, Message, AgentRun)
+                model.__table__ for model in (Project, Conversation, Message, AgentRun, AgentRunRequest)
             ])
-            self.migrate(connection, "upgrade")
         self.db = Session(self.engine, expire_on_commit=False)
         self.addCleanup(self.db.close)
         self.db.add(Conversation(
@@ -89,8 +92,8 @@ class AgentRunRequestRepositoryTest(unittest.IsolatedAsyncioTestCase):
 
     async def create_request(self):
         return await self.repository.create_request(
-            request_id="request-1", uid="user-1", conversation_id=1, thread_id="thread-1",
-            agent_id="leader", trigger_message_id=1,
+            request_id="request-1", uid="user-1", thread_id="thread-1",
+            agent_id="leader", trigger_message_id=1, dispatch_policy="reject", status="dispatched",
         )
 
     async def test_reads_request_and_current_conversation_configuration(self):
@@ -109,7 +112,8 @@ class AgentRunRequestRepositoryTest(unittest.IsolatedAsyncioTestCase):
             "original", "image", {"source": "test"},
         ))
         self.assertEqual(set(AgentRunRequest.__table__.columns.keys()), {
-            "request_id", "uid", "conversation_id", "thread_id", "agent_id", "trigger_message_id", "created_at",
+            "request_id", "uid", "thread_id", "agent_id", "trigger_message_id", "created_at",
+            "dispatch_policy", "status", "queue_seq",
         })
 
     async def test_run_rollback_preserves_request_and_leaves_message_unbound(self):
@@ -135,20 +139,6 @@ class AgentRunRequestRepositoryTest(unittest.IsolatedAsyncioTestCase):
         self.db.commit()
         self.assertIsNone(await self.repository.get_by_request_id("request-1"))
 
-    async def test_migration_roundtrip_preserves_existing_run(self):
-        await self.create_request()
-        await AgentRunRepository(self.session).create_run(
-            run_id="run-1", uid="user-1", conversation_id=1, thread_id="thread-1",
-            agent_slug="leader", request_id="request-1", trigger_message_id=1,
-        )
-        self.db.commit()
-        with self.engine.begin() as connection:
-            self.migrate(connection, "downgrade")
-            self.assertFalse(inspect(connection).has_table("agent_run_request"))
-            self.assertEqual(connection.scalar(select(AgentRun.id)), "run-1")
-            self.migrate(connection, "upgrade")
-            self.assertTrue(inspect(connection).has_table("agent_run_request"))
-        self.assertIsNone(await self.repository.get_by_request_id("request-1"))
 
 
 @unittest.skipUnless(
@@ -177,6 +167,7 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
                 )
             ]))
             await connection.run_sync(self.migrate, "upgrade")
+            await connection.run_sync(self.migrate_queue, "upgrade")
         self.file_id = str(uuid4())
         self.source = f"save/attachments/{self.file_id}"
         self.target = f"save/thread-1/attachments/{self.file_id}"
@@ -219,6 +210,11 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
     def migrate(connection, action):
         with patch.object(migration, "op", Operations(MigrationContext.configure(connection))):
             getattr(migration, action)()
+
+    @staticmethod
+    def migrate_queue(connection, action):
+        with patch.object(queue_migration, "op", Operations(MigrationContext.configure(connection))):
+            getattr(queue_migration, action)()
 
     async def submit(self, request_id="request-1", *, db=None, **changes):
         values = {
@@ -270,43 +266,83 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.counts(), (1, 1, 1, 1))
         self.storage.adelete_file.assert_awaited_once_with(attachment_service.ATTACHMENT_BUCKET_NAME, self.source)
 
-    async def test_busy_preserves_request_then_retry_uses_original_message_and_current_model(self):
+    async def test_busy_reject_does_not_save_input(self):
         await self.add_blocking_run()
         with self.assertRaisesRegex(agent_run_service.AgentRunConflictError, "正在执行"):
-            await self.submit(request_metadata={"type": "chat", "request_id": "request-1", "attachment_file_ids": [self.file_id]})
-        self.assertEqual(await self.counts(), (1, 1, 1, 1))
-        self.enqueue.assert_not_awaited()
-        async with self.sessions() as db:
-            message = await db.scalar(select(Message))
-            original_message_id = message.id
-            self.assertIsNone(message.agent_run_id)
-            await db.execute(update(AgentRun).values(agent_status="completed"))
-            await db.execute(update(Conversation).where(Conversation.id == 1).values(
-                conversation_metadata={"model": "test/changed", "workspace": "new"},
-            ))
-            await db.commit()
-        run = await self.submit(
-            query="重发的新正文", image_content=None,
-            request_metadata={"type": "chat", "request_id": "request-1", "model": "test/ignored"},
-        )
-        self.assertEqual(run.trigger_message_id, original_message_id)
-        self.assertEqual(run.run_metadata["model"], "test/changed")
-        self.assertEqual(run.run_metadata["workspace"], "new")
-        async with self.sessions() as db:
-            message = await db.get(Message, original_message_id)
-            self.assertEqual(message.content, "原始输入")
-            self.assertEqual(message.agent_run_id, run.id)
-            request = await AgentRunRequestRepository(db).get_by_request_id("request-1")
-            self.assertEqual(request.trigger_message_id, original_message_id)
-            self.assertEqual((await db.get(Conversation, 1)).conversation_metadata["model"], "test/changed")
-        self.assertEqual(await self.counts(), (1, 1, 2, 1))
-        self.storage.acopy_file.assert_awaited_once()
-
-    async def test_pending_interaction_preserves_input_and_does_not_enqueue(self):
-        await self.add_blocking_run("interrupted")
-        with self.assertRaisesRegex(agent_run_service.AgentRunConflictError, "待回答"):
             await self.submit()
-        self.assertEqual(await self.counts(), (1, 1, 1, 0))
+        self.assertEqual(await self.counts(), (0, 0, 1, 0))
+        self.enqueue.assert_not_awaited()
+
+    async def promote(self):
+        from contextlib import asynccontextmanager
+        @asynccontextmanager
+        async def session_context():
+            async with self.sessions() as db:
+                yield db
+        with patch.object(agent_run_service, "session_context", session_context):
+            return await agent_run_service.dispatch_next_queued_request("thread-1")
+
+    async def finish_blocker(self):
+        async with self.sessions() as db:
+            await db.execute(update(AgentRun).where(AgentRun.id == "blocker").values(agent_status="completed"))
+            await db.commit()
+
+    async def test_steer_retry_and_promotion_use_original_input_and_current_model(self):
+        await self.add_blocking_run()
+        queued = await self.submit(dispatch_policy="steer")
+        self.assertEqual(queued["steering_run_id"], "blocker")
+        self.assertEqual((await self.submit(query="changed", dispatch_policy="steer"))["status"], "queued")
+        async with self.sessions() as db:
+            self.assertEqual(await ConversationRepository(db).list_messages(conversation_id=1, limit=10), [])
+            await db.execute(update(Conversation).values(conversation_metadata={"model": "test/changed"}))
+            await db.commit()
+        self.assertIsNone(await self.promote())
+        await self.finish_blocker()
+        first, second = await asyncio.gather(self.promote(), self.promote())
+        run = first or second
+        self.assertTrue(first is None or second is None)
+        self.assertEqual(run.run_metadata["model"], "test/changed")
+        async with self.sessions() as db:
+            message = await db.get(Message, run.trigger_message_id)
+            self.assertEqual((message.content, message.status, message.agent_run_id), ("原始输入", "completed", run.id))
+            self.assertGreater(message.sequence, 1)
+        self.assertEqual((await self.submit()).id, run.id)
+        self.enqueue.assert_awaited_once()
+
+    async def test_promoted_input_follows_previous_output_in_paginated_history(self):
+        await self.add_blocking_run()
+        await self.submit(dispatch_policy="steer")
+        async with self.sessions() as db:
+            output = Message(conversation_id=1, role="assistant", agent_run_id="blocker", content="previous answer")
+            db.add(output)
+            await db.commit()
+            output_id = output.id
+        await self.finish_blocker()
+        run = await self.promote()
+        async with self.sessions() as db:
+            repo = ConversationRepository(db)
+            latest = await repo.list_messages(conversation_id=1, limit=1)
+            self.assertEqual(latest[0].id, run.trigger_message_id)
+            older = await repo.list_messages(conversation_id=1, limit=1, before_message_id=latest[0].id)
+            self.assertEqual(older[0].id, output_id)
+
+    async def test_grace_timeout_uses_queued_steer(self):
+        from datetime import UTC, datetime, timedelta
+        await self.add_blocking_run()
+        await self.submit(dispatch_policy="steer")
+        async with self.sessions() as db:
+            repo = AgentRunRequestRepository(db)
+            self.assertFalse(await repo.has_expired_steer_for_run("blocker", grace_seconds=120))
+            await db.execute(update(AgentRunRequest).values(created_at=datetime.now(UTC) - timedelta(seconds=121)))
+            await db.commit()
+            self.assertTrue(await repo.has_expired_steer_for_run("blocker", grace_seconds=120))
+
+    async def test_pending_interaction_rejects_without_input(self):
+        await self.add_blocking_run("interrupted")
+        for policy in ("reject", "steer"):
+            with self.assertRaisesRegex(agent_run_service.AgentRunConflictError, "待回答"):
+                await self.submit(dispatch_policy=policy)
+        self.assertEqual(await self.counts(), (0, 0, 1, 0))
         self.enqueue.assert_not_awaited()
 
     async def test_reception_failure_rolls_back_input_links_and_copied_target(self):
@@ -319,28 +355,13 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await db.get(Attachment, 1)).object_name, self.source)
         self.enqueue.assert_not_awaited()
 
-    async def test_run_commit_failure_keeps_received_input_and_allows_retry(self):
-        async with self.sessions() as db:
-            commit = db.commit
-            count = 0
-
-            async def fail_second_commit():
-                nonlocal count
-                count += 1
-                if count == 2:
-                    raise RuntimeError("run commit failed")
-                await commit()
-
-            with patch.object(db, "commit", fail_second_commit):
-                with self.assertRaisesRegex(RuntimeError, "run commit failed"):
-                    await self.submit(db=db, request_metadata={"type": "chat", "request_id": "request-1", "attachment_file_ids": [self.file_id]})
-        self.assertEqual(await self.counts(), (1, 1, 0, 1))
-        async with self.sessions() as db:
-            self.assertIsNone((await db.scalar(select(Message))).agent_run_id)
-        self.enqueue.assert_not_awaited()
-        self.storage.adelete_file.assert_awaited_once_with(attachment_service.ATTACHMENT_BUCKET_NAME, self.source)
+    async def test_run_creation_failure_rolls_back_received_input(self):
+        with patch.object(AgentRunRepository, "create_run", AsyncMock(side_effect=RuntimeError("create failed"))):
+            with self.assertRaisesRegex(RuntimeError, "create failed"):
+                await self.submit()
+        self.assertEqual(await self.counts(), (0, 0, 0, 0))
         await self.submit()
-        self.assertEqual(await self.counts(), (1, 1, 1, 1))
+        self.assertEqual(await self.counts(), (1, 1, 1, 0))
 
     async def test_enqueue_failure_marks_only_unclaimed_run_failed(self):
         self.enqueue.side_effect = RuntimeError("redis unavailable")
@@ -370,13 +391,13 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.counts(), (1, 1, 1, 0))
         self.enqueue.assert_awaited_once()
 
-    async def test_different_requests_concurrently_keep_both_inputs_and_only_one_active_run(self):
+    async def test_different_requests_concurrently_accept_only_one_input(self):
         results = await asyncio.wait_for(asyncio.gather(
             self.submit("request-a"), self.submit("request-b"), return_exceptions=True,
         ), 15)
         self.assertEqual(sum(isinstance(value, AgentRun) for value in results), 1)
         self.assertEqual(sum(isinstance(value, agent_run_service.AgentRunConflictError) for value in results), 1)
-        self.assertEqual(await self.counts(), (2, 2, 1, 0))
+        self.assertEqual(await self.counts(), (1, 1, 1, 0))
         self.enqueue.assert_awaited_once()
 
     async def test_same_request_across_threads_conflicts_without_duplicate_input(self):
@@ -399,8 +420,7 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_request_ownership_checked_even_when_no_run_exists(self):
         await self.add_blocking_run()
-        with self.assertRaises(agent_run_service.AgentRunConflictError):
-            await self.submit()
+        await self.submit(dispatch_policy="steer")
         with self.assertRaisesRegex(agent_run_service.AgentRunConflictError, "其他请求"):
             await self.submit(thread_id="thread-2")
         self.assertEqual(await self.counts(), (1, 1, 1, 0))
@@ -410,18 +430,23 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         async with self.engine.begin() as connection:
             columns = await connection.run_sync(lambda db: inspect(db).get_columns("agent_run_request"))
             self.assertEqual({column["name"] for column in columns}, {
-                "request_id", "uid", "conversation_id", "thread_id", "agent_id", "trigger_message_id", "created_at",
+                "request_id", "uid", "thread_id", "agent_id", "trigger_message_id", "created_at",
+            "dispatch_policy", "status", "queue_seq",
             })
+            await connection.run_sync(self.migrate_queue, "downgrade")
+            await connection.run_sync(self.migrate_queue, "upgrade")
+            self.assertEqual(await connection.scalar(select(AgentRunRequest.request_id)), "request-1")
+            await connection.run_sync(self.migrate_queue, "downgrade")
             await connection.run_sync(self.migrate, "downgrade")
             self.assertEqual(await connection.scalar(select(AgentRun.id)), run.id)
             await connection.run_sync(self.migrate, "upgrade")
+            await connection.run_sync(self.migrate_queue, "upgrade")
             self.assertEqual(await connection.scalar(select(func.count()).select_from(AgentRunRequest)), 0)
         self.assertEqual((await self.submit()).id, run.id)
 
     async def test_message_delete_cascades_to_request(self):
         await self.add_blocking_run()
-        with self.assertRaises(agent_run_service.AgentRunConflictError):
-            await self.submit()
+        await self.submit(dispatch_policy="steer")
         async with self.sessions() as db:
             await db.execute(delete(Message))
             await db.commit()

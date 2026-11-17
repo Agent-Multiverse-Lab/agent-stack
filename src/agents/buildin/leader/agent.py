@@ -25,6 +25,7 @@ from src.agents.buildin.leader.prompt import TODO_MIDDLEWARE_SYSTEM_PROMPT, buil
 from src.agents.buildin.leader.tools import ask_user, calculator
 from src.agents.middlewares.memory_middleware import create_memory_middleware
 from src.agents.middlewares.sandbox_middleware import create_sandbox_middleware
+from src.agents.middlewares.steer_stop_middleware import SteerStopMiddleware
 from src.agents.middlewares.subagent_middlware import create_subagent_middleware
 from src.agents.middlewares.summary_middleware import (
     create_summary_middleware_from_context,
@@ -44,6 +45,7 @@ class LeaderAgent(BaseAgent):
         backend = create_composite_backend(context)
         delegation = await create_subagent_middleware(parent_context=context)
         return [
+            SteerStopMiddleware(),
             create_sandbox_middleware(),
             create_custom_filesystem_middleware(
                 context=context,

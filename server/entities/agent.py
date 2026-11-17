@@ -1,6 +1,6 @@
 """Agent 接口的请求与响应 Schema。"""
 
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -43,6 +43,7 @@ class AgentRunCreateRequest(BaseModel):
     query: str | None = Field(default=None, description="问题")
     agent_id: str = Field(default=..., description="Agent 标识")
     thread_id: str = Field(default=..., description="对话 thread_id")
+    dispatch_policy: Literal["reject", "steer"] = "reject"
     request_metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="请求元数据：type（chat/resume）、model、request_id、attachment_file_ids、resume.answers",
