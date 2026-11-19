@@ -27,7 +27,7 @@ vi.mock("@/pages/chat/components/AgentMessageComposer", () => ({
   }: {
     draft: string;
     setDraft: (value: string) => void;
-    submit: (policy?: "queue" | "steer") => void;
+    submit: (policy?: "enqueue" | "steer") => void;
   }) => (
     <div>
       <Input
@@ -35,7 +35,7 @@ vi.mock("@/pages/chat/components/AgentMessageComposer", () => ({
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
       />
-      <Button onClick={() => submit("queue")}>Queue</Button>
+      <Button onClick={() => submit("enqueue")}>Queue</Button>
       <Button onClick={() => submit("steer")}>Steer now</Button>
     </div>
   ),
@@ -220,7 +220,7 @@ it("holds queued messages locally with instant removal, steers on demand, and au
     });
 
   await act(async () => streams[0].finish());
-  await waitFor(() => expect(mocks.create).toHaveBeenCalledWith("Next question", "LeaderAgent", "A", [], "model", undefined));
+  await waitFor(() => expect(mocks.create).toHaveBeenCalledWith("Next question", "LeaderAgent", "A", [], "model", "enqueue"));
   await waitFor(() => expect(streams).toHaveLength(2));
   expect(mocks.consume.mock.calls[1][0]).toBe("/runs/next-run/events?thread=A");
   expect(screen.queryByText("Next question")).toBeNull();

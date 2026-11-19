@@ -397,6 +397,7 @@ export default function ChatPage() {
         threadId: currentThread.thread_id,
         attachmentFileIds: packet.attachments.map((item) => item.file_id),
         modelId: selectedModelId || undefined,
+        dispatchPolicy: "enqueue",
       });
       if (operation.current !== expected) return;
       await loadThreadDetail(currentThread.thread_id, expected);
@@ -417,16 +418,16 @@ export default function ChatPage() {
 
   /**
    * 处理普通发送：需要时先创建会话，再提交 chat Run、刷新消息并订阅事件。
-   * 运行中默认将消息暂存到前端等待区（0 网络请求）；选择 steer 时向后端发起转向请求。
+   * 运行中默认以 enqueue 将消息暂存到前端等待区（0 网络请求）；选择 steer 时向后端发起转向请求。
    */
-  async function submit(dispatchPolicy: "queue" | "steer" = "queue") {
+  async function submit(dispatchPolicy: "enqueue" | "steer" = "enqueue") {
     if (run.getState().pendingInteraction) return;
     if (run.isActive()) {
       const currentThread = thread.getState().thread;
       const selected = [...attachments.getState().attachments];
       const query = draft.trim();
       if (!currentThread || submissionInFlight.current || attachments.getState().uploadingCount || (!query && !selected.length)) return;
-      if (dispatchPolicy === "queue") {
+      if (dispatchPolicy === "enqueue") {
         updateQueuedSubmissions((previous) => [
           ...previous,
           { id: crypto.randomUUID(), query, attachments: selected },

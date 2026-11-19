@@ -9,13 +9,13 @@ vi.mock("@/i18n", () => ({ default: { t: (value: string) => value } }))
 
 beforeEach(() => vi.clearAllMocks())
 
-it("sends model and attachments in the chat request metadata", async () => {
+it("sends model and attachments in the chat request metadata with default enqueue policy", async () => {
   await createAgentRun("Analyze", "LeaderAgent", "thread-1", ["file-1"], "provider/model")
   expect(apiClient.apiPost).toHaveBeenCalledWith(
     "/api/agent/runs",
     {
       query: "Analyze",
-      dispatch_policy: "reject",
+      dispatch_policy: "enqueue",
       agent_id: "LeaderAgent",
       thread_id: "thread-1",
       request_metadata: {
@@ -24,6 +24,20 @@ it("sends model and attachments in the chat request metadata", async () => {
         attachment_file_ids: ["file-1"],
       },
     },
+    { requiresAuth: true },
+  )
+
+  await createAgentRun("Reject busy", "LeaderAgent", "thread-1", [], undefined, "reject")
+  expect(apiClient.apiPost).toHaveBeenLastCalledWith(
+    "/api/agent/runs",
+    expect.objectContaining({ dispatch_policy: "reject" }),
+    { requiresAuth: true },
+  )
+
+  await createAgentRun("Steer busy", "LeaderAgent", "thread-1", [], undefined, "steer")
+  expect(apiClient.apiPost).toHaveBeenLastCalledWith(
+    "/api/agent/runs",
+    expect.objectContaining({ dispatch_policy: "steer" }),
     { requiresAuth: true },
   )
 })

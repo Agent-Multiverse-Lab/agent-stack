@@ -80,7 +80,7 @@ type AgentMessageComposerProps = {
   selectModel: (id: string) => void;
   upload: (files: File[]) => void;
   removeAttachment: (id: string) => void;
-  submit: (policy?: "queue" | "steer") => void;
+  submit: (policy?: "enqueue" | "steer") => void;
   cancel: () => void;
 };
 
@@ -186,7 +186,7 @@ export function AgentMessageComposer({
   const recognition = useRef<SpeechRecognitionLike | null>(null);
   const dictationBase = useRef("");
   const setDraftRef = useRef(setDraft);
-  const [dispatchPolicy, setDispatchPolicy] = useState<"queue" | "steer">("queue");
+  const [dispatchPolicy, setDispatchPolicy] = useState<"enqueue" | "steer">("enqueue");
   const [composing, setComposing] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [speechSupported, setSpeechSupported] = useState<boolean | null>(null);
@@ -1009,10 +1009,10 @@ export function AgentMessageComposer({
               <>
                 <DropdownMenu>
                   <DropdownMenuTrigger render={<Button variant="ghost" size="sm" />} disabled={disabled} aria-label={t("Dispatch policy")}>
-                    {t(dispatchPolicy === "queue" ? "Queue message" : "Steer response")}
+                    {t(dispatchPolicy === "enqueue" ? "Queue message" : "Steer response")}
                   </DropdownMenuTrigger>
                   <DropdownMenuContent>
-                    <DropdownMenuItem onClick={() => setDispatchPolicy("queue")}>{t("Queue message")}</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setDispatchPolicy("enqueue")}>{t("Queue message")}</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setDispatchPolicy("steer")}>{t("Steer response")}</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>

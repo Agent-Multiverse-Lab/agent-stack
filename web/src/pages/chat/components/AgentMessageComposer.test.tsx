@@ -336,7 +336,7 @@ it("submits queue or steer while preserving the explicit stop action", () => {
   const cancel = vi.fn();
   render(<AgentMessageComposer {...baseProps} draft="next" running submit={submit} cancel={cancel} />);
   fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), { key: "Enter" });
-  expect(submit).toHaveBeenLastCalledWith("queue");
+  expect(submit).toHaveBeenLastCalledWith("enqueue");
   fireEvent.click(screen.getByRole("button", { name: "Dispatch policy" }));
   fireEvent.click(screen.getByRole("menuitem", { name: "Steer response" }));
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));

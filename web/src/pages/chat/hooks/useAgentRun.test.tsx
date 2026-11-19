@@ -229,14 +229,14 @@ it("preserves a known start when same-run metadata lacks it, but clears on anoth
   expect(result.current.state.startedAt).toBeNull();
 });
 
-it("keeps the active stream when a busy request is queued", async () => {
+it.each(["enqueue", "steer"] as const)("keeps the active stream when a busy %s request is queued", async (policy) => {
   const { result } = renderHook(() => useAgentRun());
   act(() => result.current.restoreRunFromThread(detail));
-  mocks.createRun.mockResolvedValue({ run_id: null, status: "queued", request_id: "q", stream_url: null });
+  mocks.createRun.mockResolvedValue({ run_id: null, status: "queued", dispatch_policy: policy, request_id: "q", stream_url: null });
   await act(async () => {
-    await result.current.createRun({ query: "next", agentId: "LeaderAgent", threadId: "thread", attachmentFileIds: [], dispatchPolicy: "steer" });
+    await result.current.createRun({ query: "next", agentId: "LeaderAgent", threadId: "thread", attachmentFileIds: [], dispatchPolicy: policy });
   });
   expect(result.current.state.runId).toBe("old-run");
   expect(result.current.state.runStatus).toBe("running");
-  expect(mocks.createRun).toHaveBeenLastCalledWith("next", "LeaderAgent", "thread", [], undefined, "steer");
+  expect(mocks.createRun).toHaveBeenLastCalledWith("next", "LeaderAgent", "thread", [], undefined, policy);
 });
