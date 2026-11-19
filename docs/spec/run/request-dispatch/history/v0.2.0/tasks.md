@@ -5,7 +5,7 @@
 - [x] 为 `AgentRunRequest` 移除冗余 `conversation_id` 列并保留索引化 `thread_id`（无外键），新增 `dispatch_policy`、`status`、`queue_seq` 字段与部分索引 `ix_agent_run_request_thread_queued`，编写 Alembic 迁移。
 - [x] 在 `AgentRunRequestRepository` 移除 `create_request` 的 `conversation_id` 参数，并实现 `has_queued_steer_for_thread`、`has_expired_steer_for_run`、`pop_next_queued_for_thread`、`mark_dispatched`。
 - [x] 调整 `ConversationRepository` 会话历史查询过滤 `Message.status != "queued"`。
-- [x] 更新 `create_agent_run_service` 支持 `reject`（忙碌不落盘直接 409）与 `steer`（入转向队列返回 202，不写额外队列信号）。
+- [x] 更新 `create_agent_run_service` 支持 `enqueue`（默认等待，忙碌入队返回 202 且不中断当前 Run）、`reject`（忙碌不落盘直接 409）与 `steer`（入转向队列返回 202，不写额外队列信号）。
 
 ## 运行时与 Steer 调度
 
