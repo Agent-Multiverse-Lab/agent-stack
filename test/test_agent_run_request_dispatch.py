@@ -139,6 +139,46 @@ class AgentRunRequestRepositoryTest(unittest.IsolatedAsyncioTestCase):
         self.db.commit()
         self.assertIsNone(await self.repository.get_by_request_id("request-1"))
 
+    async def test_enqueue_does_not_trigger_steer_and_pops_in_fifo_order(self):
+        from datetime import UTC, datetime, timedelta
+
+        await AgentRunRepository(self.session).create_run(
+            run_id="run-active", uid="user-1", conversation_id=1, thread_id="thread-1",
+            agent_slug="leader", request_id="blocking-request", trigger_message_id=None,
+            agent_status="running",
+        )
+        await self.repository.create_request(
+            request_id="request-enqueue", uid="user-1", thread_id="thread-1",
+            agent_id="leader", trigger_message_id=1, dispatch_policy="enqueue",
+            status="queued", queue_seq=await self.repository.get_next_queue_seq("thread-1"),
+        )
+        self.db.execute(
+            update(AgentRunRequest)
+            .where(AgentRunRequest.request_id == "request-enqueue")
+            .values(created_at=datetime.now(UTC) - timedelta(seconds=121))
+        )
+        self.db.commit()
+
+        self.assertFalse(await self.repository.has_queued_steer_for_thread("thread-1"))
+        self.assertFalse(await self.repository.has_expired_steer_for_run("run-active", grace_seconds=120))
+
+        await self.repository.create_request(
+            request_id="request-steer", uid="user-1", thread_id="thread-1",
+            agent_id="leader", trigger_message_id=1, dispatch_policy="steer",
+            status="queued", queue_seq=await self.repository.get_next_queue_seq("thread-1"),
+        )
+        self.db.commit()
+        self.assertTrue(await self.repository.has_queued_steer_for_thread("thread-1"))
+
+        first = await self.repository.pop_next_queued_for_thread("thread-1")
+        self.assertEqual(first.request_id, "request-enqueue")
+        await self.repository.mark_dispatched(first.request_id)
+        second = await self.repository.pop_next_queued_for_thread("thread-1")
+        self.assertEqual(second.request_id, "request-steer")
+        await self.repository.mark_dispatched(second.request_id)
+        self.assertIsNone(await self.repository.pop_next_queued_for_thread("thread-1"))
+        self.db.commit()
+
 
 
 @unittest.skipUnless(
@@ -269,7 +309,7 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
     async def test_busy_reject_does_not_save_input(self):
         await self.add_blocking_run()
         with self.assertRaisesRegex(agent_run_service.AgentRunConflictError, "正在执行"):
-            await self.submit()
+            await self.submit(dispatch_policy="reject")
         self.assertEqual(await self.counts(), (0, 0, 1, 0))
         self.enqueue.assert_not_awaited()
 
@@ -286,6 +326,21 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             await db.execute(update(AgentRun).where(AgentRun.id == "blocker").values(agent_status="completed"))
             await db.commit()
+
+    async def test_default_enqueue_queues_without_steering_and_promotes_after_completion(self):
+        await self.add_blocking_run()
+        queued = await self.submit()
+        self.assertEqual(queued["status"], "queued")
+        self.assertEqual(queued["dispatch_policy"], "enqueue")
+        self.assertIsNone(queued["steering_run_id"])
+        async with self.sessions() as db:
+            self.assertFalse(await AgentRunRequestRepository(db).has_queued_steer_for_thread("thread-1"))
+        self.assertIsNone(await self.promote())
+        await self.finish_blocker()
+        run = await self.promote()
+        self.assertIsNotNone(run)
+        self.assertEqual(run.request_id, "request-1")
+        self.enqueue.assert_awaited_once()
 
     async def test_steer_retry_and_promotion_use_original_input_and_current_model(self):
         await self.add_blocking_run()
@@ -339,7 +394,7 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_pending_interaction_rejects_without_input(self):
         await self.add_blocking_run("interrupted")
-        for policy in ("reject", "steer"):
+        for policy in ("enqueue", "reject", "steer"):
             with self.assertRaisesRegex(agent_run_service.AgentRunConflictError, "待回答"):
                 await self.submit(dispatch_policy=policy)
         self.assertEqual(await self.counts(), (0, 0, 1, 0))
@@ -393,7 +448,9 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_different_requests_concurrently_accept_only_one_input(self):
         results = await asyncio.wait_for(asyncio.gather(
-            self.submit("request-a"), self.submit("request-b"), return_exceptions=True,
+            self.submit("request-a", dispatch_policy="reject"),
+            self.submit("request-b", dispatch_policy="reject"),
+            return_exceptions=True,
         ), 15)
         self.assertEqual(sum(isinstance(value, AgentRun) for value in results), 1)
         self.assertEqual(sum(isinstance(value, agent_run_service.AgentRunConflictError) for value in results), 1)

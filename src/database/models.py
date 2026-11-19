@@ -254,7 +254,7 @@ class AgentRunRequest(Base):
     trigger_message_id = Column(
         Integer, ForeignKey("message.id", ondelete="CASCADE"), nullable=False,
     )
-    dispatch_policy = Column(String(16), nullable=False, server_default="reject")
+    dispatch_policy = Column(String(16), nullable=False, server_default="enqueue")
     status = Column(String(16), nullable=False, server_default="dispatched")
     queue_seq = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

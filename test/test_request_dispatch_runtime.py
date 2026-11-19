@@ -127,16 +127,33 @@ class DispatchHTTPTest(unittest.IsolatedAsyncioTestCase):
                            create_agent_run_service=AsyncMock())
         exec(compile(ast.Module(body=nodes, type_ignores=[]), "router", "exec"), self.module)
 
-    async def test_queued_steer_response_has_202_and_no_stream(self):
+    async def test_dispatch_policy_defaults_and_http_202_responses(self):
         import json
-        response = {"run_id": None, "stream_url": None, "status": "queued", "dispatch_policy": "steer", "request_id": "q", "steering_run_id": "r"}
-        self.module["create_agent_run_service"].return_value = response
+        from pydantic import ValidationError
+
+        request_model = self.module["AgentRunCreateRequest"]
+        default_req = request_model(agent_id="a", thread_id="t")
+        self.assertEqual(default_req.dispatch_policy, "enqueue")
+        self.assertEqual(request_model(agent_id="a", thread_id="t", dispatch_policy="reject").dispatch_policy, "reject")
+        with self.assertRaises(ValidationError):
+            request_model(agent_id="a", thread_id="t", dispatch_policy="queue")
+
+        enqueue_response = {"run_id": None, "stream_url": None, "status": "queued", "dispatch_policy": "enqueue", "request_id": "q1", "steering_run_id": None}
+        self.module["create_agent_run_service"].return_value = enqueue_response
+        result = await self.module["create_agent_run"](default_req, SimpleNamespace(uid="u"), object())
+        self.assertEqual(result.status_code, 202)
+        self.assertEqual(json.loads(result.body), enqueue_response)
+        self.assertIsNone(json.loads(result.body)["steering_run_id"])
+
+        steer_response = {"run_id": None, "stream_url": None, "status": "queued", "dispatch_policy": "steer", "request_id": "q2", "steering_run_id": "r"}
+        self.module["create_agent_run_service"].return_value = steer_response
         result = await self.module["create_agent_run"](
-            self.module["AgentRunCreateRequest"](agent_id="a", thread_id="t", dispatch_policy="steer"),
+            request_model(agent_id="a", thread_id="t", dispatch_policy="steer"),
             SimpleNamespace(uid="u"), object(),
         )
         self.assertEqual(result.status_code, 202)
-        self.assertEqual(json.loads(result.body), response)
+        self.assertEqual(json.loads(result.body), steer_response)
+        self.assertEqual(json.loads(result.body)["steering_run_id"], "r")
 
 class SteerGraceTest(unittest.IsolatedAsyncioTestCase):
     async def test_expired_steer_wakes_cancellable_stream_without_losing_lease(self):

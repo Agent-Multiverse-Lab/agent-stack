@@ -66,7 +66,7 @@ def _queued_response(request: AgentRunRequest, active_run=None) -> dict:
     return {
         "run_id": None, "thread_id": request.thread_id, "status": "queued",
         "dispatch_policy": request.dispatch_policy, "request_id": request.request_id,
-        "steering_run_id": str(active_run.id) if active_run is not None else None,
+        "steering_run_id": str(active_run.id) if active_run is not None and request.dispatch_policy == "steer" else None,
         "stream_url": None,
     }
 
@@ -111,14 +111,14 @@ async def _enqueue_committed_run(db: AsyncSession, run: AgentRun) -> AgentRun:
 async def create_agent_run_service(
     *, db: AsyncSession, current_user: User, query: str | None, agent_id: str,
     thread_id: str, request_metadata: dict[str, Any], image_content: str | None,
-    dispatch_policy: str = "reject",
+    dispatch_policy: str = "enqueue",
 ) -> AgentRun | dict:
     """持会话锁接收并分发请求，提交后才入 ARQ。"""
     if not thread_id:
         raise ValueError("会话 ID 不能为空")
     if request_metadata.get("type", "chat") != "chat":
         raise ValueError("普通创建接口要求 request_metadata.type 为 chat")
-    if dispatch_policy not in {"reject", "steer"}:
+    if dispatch_policy not in {"enqueue", "reject", "steer"}:
         raise ValueError("无效的分发策略")
     uid, user_id = str(current_user.uid), int(current_user.id)
     request_id = str(request_metadata.get("request_id") or uuid.uuid4())

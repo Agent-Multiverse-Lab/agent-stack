@@ -12,7 +12,7 @@ depends_on = None
 def upgrade() -> None:
     op.drop_index("ix_agent_run_request_conversation_id", table_name="agent_run_request")
     op.drop_column("agent_run_request", "conversation_id")
-    op.add_column("agent_run_request", sa.Column("dispatch_policy", sa.String(16), nullable=False, server_default="reject"))
+    op.add_column("agent_run_request", sa.Column("dispatch_policy", sa.String(16), nullable=False, server_default="enqueue"))
     op.add_column("agent_run_request", sa.Column("status", sa.String(16), nullable=False, server_default="dispatched"))
     op.add_column("agent_run_request", sa.Column("queue_seq", sa.Integer(), nullable=True))
     op.create_index("ix_agent_run_request_thread_id", "agent_run_request", ["thread_id"])

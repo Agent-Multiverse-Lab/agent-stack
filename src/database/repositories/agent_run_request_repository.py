@@ -7,7 +7,7 @@ from src.database.models import AgentRun, AgentRunRequest
 
 
 class AgentRunRequestRepository:
-    """输入关联与转向等待队列；由 Service 持有 Conversation 行锁后调用，不提交事务。"""
+    """输入关联与等待队列；由 Service 持有 Conversation 行锁后调用，不提交事务。"""
 
     def __init__(self, session: AsyncSession):
         self.session = session
