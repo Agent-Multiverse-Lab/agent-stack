@@ -35,11 +35,12 @@ vi.mock("@/api/attachment", () => ({
 vi.mock("@/i18n", () => ({ useTranslation: () => ({ t: (value: string) => value }) }));
 vi.mock("@/pages/chat/hooks/useAgentRun", () => ({
   useAgentRun: () => ({
-    state: { pendingInteraction: null, cancelling: false, resuming: false },
-    getState: () => ({ pendingInteraction: null }),
+    state: { pendingInteraction: null, queuedRequests: [], cancelling: false, resuming: false },
+    getState: () => ({ pendingInteraction: null, queuedRequests: [] }),
     isActive: () => false,
     clearRun: () => {},
     restoreRunFromThread: () => null,
+    setQueuedRequests: () => {},
     createRun: mocks.createRun,
   }),
 }));

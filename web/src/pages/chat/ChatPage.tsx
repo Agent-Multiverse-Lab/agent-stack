@@ -10,6 +10,7 @@ import {
   listChatAgents,
   renameThread,
 } from "@/api/thread";
+import { ApiError } from "@/api/client";
 import type { UploadedAttachmentResponse } from "@/api/attachment";
 import { Input } from "@/components/ui/input";
 import type { AgentRunEndEvent } from "@/api/agent-run";
@@ -31,17 +32,19 @@ import { useTranslation } from "@/i18n";
 const isAbortError = (caught: unknown) =>
   caught instanceof DOMException && caught.name === "AbortError";
 
+/** 识别并发晋升导致操作返回 409 冲突并附带 run_id 的响应异常。 */
+const isPromotedConflictError = (caught: unknown) =>
+  caught instanceof ApiError &&
+  caught.status === 409 &&
+  typeof caught.data?.run_id === "string";
+
+const PROMOTE_RECHECK_DELAYS_MS = [80, 160, 320];
+
 interface ChatSubmission {
   query: string;
   draft: string;
   attachments: UploadedAttachmentResponse[];
   optimisticMessageId: number;
-}
-
-interface QueuedSubmission {
-  id: string;
-  query: string;
-  attachments: UploadedAttachmentResponse[];
 }
 
 /** 编排当前会话的消息展示、用户发送、Run 订阅及提问恢复。 */
@@ -65,8 +68,6 @@ export default function ChatPage() {
   const controller = useRef<AbortController | null>(null);
   const operation = useRef(0);
   const submissionInFlight = useRef(false);
-  const queuedSubmissionsRef = useRef<QueuedSubmission[]>([]);
-  const [queuedSubmissions, setQueuedSubmissions] = useState<QueuedSubmission[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -77,13 +78,13 @@ export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<ChatSidebarTab>("state");
 
-  const updateQueuedSubmissions = (
-    updater: (previous: QueuedSubmission[]) => QueuedSubmission[],
-  ) => {
-    const next = updater(queuedSubmissionsRef.current);
-    queuedSubmissionsRef.current = next;
-    setQueuedSubmissions(next);
-  };
+  /** 仅在版本仍匹配时拉取并同步等待区列表，避免流式输出期间覆盖页面消息。 */
+  async function syncQueuedRequests(id: string, expected: number) {
+    const detail = await getThreadDetail(id);
+    if (operation.current === expected) {
+      run.setQueuedRequests(detail.queued_requests ?? []);
+    }
+  }
 
   /** 中断当前页面的事件订阅并释放控制器引用。 */
   const abortStream = () => {
@@ -171,6 +172,9 @@ export default function ChatPage() {
 
       if (operation.current !== expected) return;
       setError("");
+      const hadSteerQueued = run
+        .getState()
+        .queuedRequests.some((item) => item.dispatch_policy === "steer");
       try {
         await loadThreadDetail(id, expected);
       } catch (caught) {
@@ -183,17 +187,44 @@ export default function ChatPage() {
         monitoredRunId = run.getState().runId ?? "";
         continue;
       }
+
+      const shouldRecheckPromotion =
+        endEvent.status === "completed" ||
+        (endEvent.status === "cancelled" &&
+          (hadSteerQueued ||
+            run
+              .getState()
+              .queuedRequests.some((item) => item.dispatch_policy === "steer")));
+      if (shouldRecheckPromotion) {
+        for (const delay of PROMOTE_RECHECK_DELAYS_MS) {
+          if (
+            operation.current !== expected ||
+            run.isActive() ||
+            run.getState().pendingInteraction ||
+            run.getState().queuedRequests.length === 0
+          ) {
+            break;
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, delay));
+          if (operation.current !== expected) return;
+          try {
+            await loadThreadDetail(id, expected);
+          } catch {
+            // 仅作等待区切换窗口的短暂补偿重拉，读取失败时不覆盖终态页面。
+          }
+          if (operation.current !== expected) return;
+          if (run.isActive() && run.getState().runId !== monitoredRunId) {
+            break;
+          }
+        }
+        if (run.isActive() && run.getState().runId !== monitoredRunId) {
+          monitoredRunId = run.getState().runId ?? "";
+          continue;
+        }
+      }
+
       if (endEvent.status === "failed") {
         setError(endEvent.error || t("Agent execution failed"));
-      }
-      if (
-        endEvent.status === "completed" &&
-        !run.getState().pendingInteraction &&
-        queuedSubmissionsRef.current.length > 0
-      ) {
-        const [next, ...rest] = queuedSubmissionsRef.current;
-        updateQueuedSubmissions(() => rest);
-        await submitPacket(next);
       }
       return;
     }
@@ -206,7 +237,6 @@ export default function ChatPage() {
     abortStream();
     run.clearRun();
     thread.resetThread();
-    updateQueuedSubmissions(() => []);
     setDraft("");
     submissionInFlight.current = false;
     setSubmitting(false);
@@ -232,7 +262,6 @@ export default function ChatPage() {
       run.clearRun();
       thread.resetThread();
       attachments.reset();
-      updateQueuedSubmissions(() => []);
       setDraft("");
       setLoading(false);
       submissionInFlight.current = false;
@@ -344,15 +373,28 @@ export default function ChatPage() {
     attachments.setAttachments(submission.attachments);
   }
 
-  async function sendSteerSubmission(packet: {
+  /** 刷新会话详情并切流监控当前（或新晋升）的活动 Run。 */
+  async function refreshAndMonitorThread(threadId: string) {
+    const expected = ++operation.current;
+    abortStream();
+    const activeRun = await loadThreadDetail(threadId, expected);
+    if (operation.current === expected && activeRun && run.isActive()) {
+      void monitorRun(threadId, expected);
+    }
+  }
+
+  /** 在会话运行中以 enqueue 或 steer 即时请求后端落库，返回 200 时直接切流到新 Run。 */
+  async function sendBusySubmission(packet: {
     query: string;
     attachments: UploadedAttachmentResponse[];
+    dispatchPolicy: "enqueue" | "steer";
   }) {
     const currentThread = thread.getState().thread;
     if (!currentThread || submissionInFlight.current) return false;
-    const expected = operation.current;
+    let activeExpected = operation.current;
     submissionInFlight.current = true;
     setSubmitting(true);
+    setError("");
     try {
       const result = await run.createRun({
         query: packet.query,
@@ -360,56 +402,35 @@ export default function ChatPage() {
         threadId: currentThread.thread_id,
         attachmentFileIds: packet.attachments.map((item) => item.file_id),
         modelId: selectedModelId || undefined,
-        dispatchPolicy: "steer",
+        dispatchPolicy: packet.dispatchPolicy,
       });
-      if (operation.current !== expected) return false;
+      if (operation.current !== activeExpected) return false;
+      setDraft("");
+      attachments.clearAttachments();
+      attachments.clearAttachmentError();
       if (result.run_id !== null) {
+        activeExpected = ++operation.current;
         abortStream();
-        await loadThreadDetail(currentThread.thread_id, expected);
-        void monitorRun(currentThread.thread_id, expected);
+        const activeRun = await loadThreadDetail(
+          currentThread.thread_id,
+          activeExpected,
+        );
+        if (operation.current !== activeExpected) return false;
+        if (result.status === "failed") setError(t("Agent execution failed"));
+        if (activeRun && run.isActive()) {
+          void monitorRun(currentThread.thread_id, activeExpected);
+        }
+      } else {
+        await syncQueuedRequests(currentThread.thread_id, activeExpected);
       }
       return true;
     } catch (caught) {
-      if (operation.current === expected) setError(errorText(caught));
-      return false;
-    } finally {
-      if (operation.current === expected) {
-        submissionInFlight.current = false;
-        setSubmitting(false);
-      }
-    }
-  }
-
-  async function submitPacket(packet: {
-    query: string;
-    attachments: UploadedAttachmentResponse[];
-  }) {
-    const currentThread = thread.getState().thread;
-    if (!currentThread || submissionInFlight.current) return;
-    const expected = ++operation.current;
-    submissionInFlight.current = true;
-    setSubmitting(true);
-    abortStream();
-    try {
-      const createdRun = await run.createRun({
-        query: packet.query,
-        agentId: currentThread.agent_id,
-        threadId: currentThread.thread_id,
-        attachmentFileIds: packet.attachments.map((item) => item.file_id),
-        modelId: selectedModelId || undefined,
-        dispatchPolicy: "enqueue",
-      });
-      if (operation.current !== expected) return;
-      await loadThreadDetail(currentThread.thread_id, expected);
-      if (operation.current !== expected) return;
-      if (createdRun.status === "failed") setError(t("Agent execution failed"));
-      void monitorRun(currentThread.thread_id, expected);
-    } catch (caught) {
-      if (operation.current === expected && !isAbortError(caught)) {
+      if (operation.current === activeExpected && !isAbortError(caught)) {
         setError(errorText(caught));
       }
+      return false;
     } finally {
-      if (operation.current === expected) {
+      if (operation.current === activeExpected) {
         submissionInFlight.current = false;
         setSubmitting(false);
       }
@@ -418,7 +439,7 @@ export default function ChatPage() {
 
   /**
    * 处理普通发送：需要时先创建会话，再提交 chat Run、刷新消息并订阅事件。
-   * 运行中默认以 enqueue 将消息暂存到前端等待区（0 网络请求）；选择 steer 时向后端发起转向请求。
+   * 运行中无论是 enqueue 还是 steer 均立即发送 POST /api/agent/runs 持久化到数据库等待区。
    */
   async function submit(dispatchPolicy: "enqueue" | "steer" = "enqueue") {
     if (run.getState().pendingInteraction) return;
@@ -426,24 +447,19 @@ export default function ChatPage() {
       const currentThread = thread.getState().thread;
       const selected = [...attachments.getState().attachments];
       const query = draft.trim();
-      if (!currentThread || submissionInFlight.current || attachments.getState().uploadingCount || (!query && !selected.length)) return;
-      if (dispatchPolicy === "enqueue") {
-        updateQueuedSubmissions((previous) => [
-          ...previous,
-          { id: crypto.randomUUID(), query, attachments: selected },
-        ]);
-        setDraft("");
-        attachments.clearAttachments();
-        attachments.clearAttachmentError();
-        setError("");
+      if (
+        !currentThread ||
+        submissionInFlight.current ||
+        attachments.getState().uploadingCount > 0 ||
+        (!query && selected.length === 0)
+      ) {
         return;
       }
-      const steered = await sendSteerSubmission({ query, attachments: selected });
-      if (steered) {
-        setDraft("");
-        attachments.clearAttachments();
-        attachments.clearAttachmentError();
-      }
+      await sendBusySubmission({
+        query,
+        attachments: selected,
+        dispatchPolicy,
+      });
       return;
     }
     const isFirstMessage = thread.getState().messages.length === 0;
@@ -505,21 +521,86 @@ export default function ChatPage() {
     }
   }
 
-  function removeQueuedSubmission(id: string) {
-    updateQueuedSubmissions((previous) =>
-      previous.filter((item) => item.id !== id),
+  /** 乐观移除等待区条目并调用逻辑软取消接口；409 已晋升时自动接入新 Run，其余失败回滚。 */
+  async function removeQueuedRequest(requestId: string) {
+    const currentThread = thread.getState().thread;
+    if (!currentThread) return;
+    const expected = operation.current;
+    const previous = run.getState().queuedRequests;
+    run.setQueuedRequests((items) =>
+      items.filter((item) => item.request_id !== requestId),
     );
+    setError("");
+    try {
+      await run.cancelQueuedRequest(requestId);
+      if (operation.current !== expected) return;
+      await syncQueuedRequests(currentThread.thread_id, expected);
+    } catch (caught) {
+      if (operation.current !== expected || isAbortError(caught)) return;
+      if (isPromotedConflictError(caught)) {
+        try {
+          await refreshAndMonitorThread(currentThread.thread_id);
+        } catch (refreshCaught) {
+          if (!isAbortError(refreshCaught)) {
+            setError(errorText(refreshCaught));
+          }
+        }
+        return;
+      }
+      run.setQueuedRequests(previous);
+      setError(errorText(caught));
+    }
   }
 
-  async function steerQueuedSubmission(id: string) {
-    const target = queuedSubmissionsRef.current.find((item) => item.id === id);
-    if (!target || submissionInFlight.current) return;
-    updateQueuedSubmissions((previous) =>
-      previous.filter((item) => item.id !== id),
-    );
-    const steered = await sendSteerSubmission(target);
-    if (!steered) {
-      updateQueuedSubmissions((previous) => [target, ...previous]);
+  /** 将等待区请求原地升级为 steer（202），或在会话空闲时就地晋升执行（200）。 */
+  async function steerQueuedRequest(requestId: string) {
+    const currentThread = thread.getState().thread;
+    if (!currentThread || submissionInFlight.current) return;
+    let activeExpected = operation.current;
+    submissionInFlight.current = true;
+    setSubmitting(true);
+    setError("");
+    try {
+      const result = await run.steerQueuedRequest(requestId);
+      if (operation.current !== activeExpected) return;
+      if (result.run_id !== null) {
+        activeExpected = ++operation.current;
+        abortStream();
+        const activeRun = await loadThreadDetail(
+          currentThread.thread_id,
+          activeExpected,
+        );
+        if (operation.current !== activeExpected) return;
+        if (result.status === "failed") setError(t("Agent execution failed"));
+        if (activeRun && run.isActive()) {
+          void monitorRun(currentThread.thread_id, activeExpected);
+        }
+      } else {
+        await syncQueuedRequests(currentThread.thread_id, activeExpected);
+      }
+    } catch (caught) {
+      if (operation.current !== activeExpected || isAbortError(caught)) return;
+      if (isPromotedConflictError(caught)) {
+        try {
+          await refreshAndMonitorThread(currentThread.thread_id);
+        } catch (refreshCaught) {
+          if (!isAbortError(refreshCaught)) {
+            setError(errorText(refreshCaught));
+          }
+        }
+        return;
+      }
+      setError(errorText(caught));
+      try {
+        await syncQueuedRequests(currentThread.thread_id, activeExpected);
+      } catch {
+        // 同步失败时不覆盖已记录的业务错误提示。
+      }
+    } finally {
+      if (operation.current === activeExpected) {
+        submissionInFlight.current = false;
+        setSubmitting(false);
+      }
     }
   }
 
@@ -743,16 +824,31 @@ export default function ChatPage() {
                 submit={(answers) => void submitResume(answers)}
               />
             )}
-            {queuedSubmissions.length > 0 && (
+            {runState.queuedRequests.length > 0 && (
               <ul aria-label={t("Waiting requests")} className="m-0 grid list-none gap-1 rounded-lg border border-border bg-muted p-2">
-                {queuedSubmissions.map((item) => (
-                  <li key={item.id} className="flex items-center gap-2 text-sm">
-                    <span className="shrink-0 text-xs text-muted-foreground">{t("Queued")}</span>
-                    <span className="min-w-0 flex-1 truncate">{item.query || item.attachments.map((file) => file.file_name).join(", ") || t("Attachment")}</span>
-                    {active && (
-                      <Button variant="ghost" size="sm" disabled={submitting} onClick={() => void steerQueuedSubmission(item.id)}>{t("Steer")}</Button>
+                {runState.queuedRequests.map((item) => (
+                  <li key={item.request_id} className="flex items-center gap-2 text-sm">
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {item.dispatch_policy === "steer" ? t("Steer") : t("Queued")}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{item.content || t("Attachment")}</span>
+                    {(!active || item.dispatch_policy !== "steer") && !pending && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={submitting}
+                        onClick={() => void steerQueuedRequest(item.request_id)}
+                      >
+                        {active ? t("Steer") : t("Run now")}
+                      </Button>
                     )}
-                    <Button variant="ghost" size="sm" onClick={() => removeQueuedSubmission(item.id)}>{t("Remove")}</Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => void removeQueuedRequest(item.request_id)}
+                    >
+                      {t("Remove")}
+                    </Button>
                   </li>
                 ))}
               </ul>

@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   consumeStream: vi.fn(),
   cancelRun: vi.fn(),
   resumeRun: vi.fn(),
+  cancelQueued: vi.fn(),
+  steerQueued: vi.fn(),
 }));
 vi.mock("@/api/agent-run", () => ({
   createAgentRun: mocks.createRun,
@@ -18,6 +20,8 @@ vi.mock("@/api/agent-run", () => ({
   buildAgentRunStreamUrl: vi.fn(),
   cancelAgentRun: mocks.cancelRun,
   resumeAgentRun: mocks.resumeRun,
+  cancelQueuedAgentRunRequest: mocks.cancelQueued,
+  steerQueuedAgentRunRequest: mocks.steerQueued,
 }));
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -232,11 +236,43 @@ it("preserves a known start when same-run metadata lacks it, but clears on anoth
 it.each(["enqueue", "steer"] as const)("keeps the active stream when a busy %s request is queued", async (policy) => {
   const { result } = renderHook(() => useAgentRun());
   act(() => result.current.restoreRunFromThread(detail));
-  mocks.createRun.mockResolvedValue({ run_id: null, status: "queued", dispatch_policy: policy, request_id: "q", stream_url: null });
+  mocks.createRun.mockResolvedValue({ run_id: null, status: "queued", dispatch_policy: policy, request_id: "q", queue_position: 1, stream_url: null });
   await act(async () => {
     await result.current.createRun({ query: "next", agentId: "LeaderAgent", threadId: "thread", attachmentFileIds: [], dispatchPolicy: policy });
   });
   expect(result.current.state.runId).toBe("old-run");
   expect(result.current.state.runStatus).toBe("running");
   expect(mocks.createRun).toHaveBeenLastCalledWith("next", "LeaderAgent", "thread", [], undefined, policy);
+});
+
+it("restores, updates, cancels, and steers persisted queued requests", async () => {
+  const queued = [
+    { request_id: "req-1", dispatch_policy: "enqueue", queue_seq: 1, content: "Queued item", created_at: start },
+  ];
+  const { result } = renderHook(() => useAgentRun());
+  act(() => result.current.restoreRunFromThread({ ...detail, queued_requests: queued }));
+  expect(result.current.state.queuedRequests).toEqual(queued);
+
+  act(() => result.current.setQueuedRequests((items) => items.filter((item) => item.request_id !== "req-1")));
+  expect(result.current.state.queuedRequests).toEqual([]);
+
+  mocks.steerQueued.mockResolvedValueOnce({
+    run_id: null, thread_id: "thread", status: "queued", dispatch_policy: "steer",
+    request_id: "req-1", queue_position: 1, steering_run_id: "old-run", stream_url: null,
+  });
+  await act(async () => {
+    await result.current.steerQueuedRequest("req-1");
+  });
+  expect(result.current.state.runId).toBe("old-run");
+  expect(result.current.state.runStatus).toBe("running");
+
+  mocks.steerQueued.mockResolvedValueOnce({
+    run_id: "promoted-run", thread_id: "thread", status: "pending",
+    request_id: "req-1", stream_url: "/runs/promoted-run/events",
+  });
+  await act(async () => {
+    await result.current.steerQueuedRequest("req-1");
+  });
+  expect(result.current.state.runId).toBe("promoted-run");
+  expect(result.current.state.streamUrl).toBe("/runs/promoted-run/events");
 });

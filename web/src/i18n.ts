@@ -12,6 +12,7 @@ const translations = {
   "Queue message": "排队发送",
   "Steer response": "转向新请求",
   "Steer": "转向",
+  "Run now": "立即运行",
   "Queued": "排队中",
   "Pinned": "置顶",
   "Projects": "项目",

@@ -54,12 +54,21 @@ export interface ThreadMessageResponse {
   updated_at: string;
 }
 
+export interface QueuedRunRequestItem {
+  request_id: string;
+  dispatch_policy: string;
+  queue_seq: number | null;
+  content: string;
+  created_at: string;
+}
+
 export interface ThreadDetailResponse {
   thread: ThreadMetadataResponse;
   messages: ThreadMessageResponse[];
   next_before_message_id: number | null;
   active_run: ThreadRunMetadataResponse | null;
   pending_interaction: InteractionRequiredResponse | null;
+  queued_requests?: QueuedRunRequestItem[];
 }
 
 export interface ThreadListResponse {

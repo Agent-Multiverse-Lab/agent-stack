@@ -5,6 +5,22 @@ export type ApiFetchOptions = RequestInit & {
   requiresAuth: boolean
 }
 
+export class ApiError extends Error {
+  readonly status: number
+  readonly data: Record<string, unknown> | null
+
+  constructor(
+    message: string,
+    status: number,
+    data: Record<string, unknown> | null = null
+  ) {
+    super(message)
+    this.name = "ApiError"
+    this.status = status
+    this.data = data
+  }
+}
+
 export type ApiRequestOptions = Omit<
   ApiFetchOptions,
   "body" | "method"
@@ -79,7 +95,7 @@ export class FetchApiClient implements ApiClient {
     }
 
     const response = await fetch(path, { ...init, headers })
-    if (!response.ok) throw new Error(await this.readApiError(response))
+    if (!response.ok) throw await this.readApiError(response)
     return response
   }
 
@@ -149,17 +165,20 @@ export class FetchApiClient implements ApiClient {
   }
 
   /**
-   * 从失败响应中提取错误详情文本。
+   * 从失败响应中提取错误详情与结构化响应体。
    * @param response 失败的 Fetch Response 对象。
-   * @returns 可展示的错误提示字符串。
+   * @returns 携带状态码与 JSON 详情的 ApiError 实例。
    */
   protected async readApiError(response: Response) {
-    const payload = (await response.json().catch(() => null)) as {
-      detail?: unknown
-    } | null
-    return typeof payload?.detail === "string"
-      ? payload.detail
-      : i18n.t("Request failed ({{status}})", { status: response.status })
+    const payload = (await response.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null
+    const message =
+      typeof payload?.detail === "string"
+        ? payload.detail
+        : i18n.t("Request failed ({{status}})", { status: response.status })
+    return new ApiError(message, response.status, payload)
   }
 
   /**

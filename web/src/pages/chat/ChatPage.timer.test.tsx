@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 
+import { ApiError } from "@/api/client";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import ChatPage from "./ChatPage";
@@ -14,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   resume: vi.fn(),
   cancel: vi.fn(),
+  cancelQueued: vi.fn(),
+  steerQueued: vi.fn(),
 }));
 vi.mock("@/i18n", () => ({ useTranslation: () => ({ t: (value: string) => value }) }));
 vi.mock("@/context/ModelContext", () => ({
@@ -50,6 +53,8 @@ vi.mock("@/api/agent-run", () => ({
   createAgentRun: mocks.create,
   resumeAgentRun: mocks.resume,
   cancelAgentRun: mocks.cancel,
+  cancelQueuedAgentRunRequest: mocks.cancelQueued,
+  steerQueuedAgentRunRequest: mocks.steerQueued,
   buildAgentRunStreamUrl: (runId: string, threadId: string) => `/runs/${runId}/events?thread=${threadId}`,
 }));
 vi.mock("@/api/thread", () => ({
@@ -71,6 +76,7 @@ function detail(id: string, startedAt: string | null = start): ThreadDetailRespo
     messages: [],
     active_run: { run_id: `run-${id}`, run_type: "chat", status: startedAt ? "running" : "pending", started_at: startedAt, finished_at: null, created_by_run_id: null, metadata: {} },
     pending_interaction: null,
+    queued_requests: [],
     next_before_message_id: null,
   };
 }
@@ -187,41 +193,148 @@ it("removes Thinking status indicator after a terminal event", async () => {
   await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
 });
 
-it("holds queued messages locally with instant removal, steers on demand, and auto-sends after completion", async () => {
+it("persists busy enqueue submissions immediately, supports reload recovery, optimistic delete, steer, and post-end handover", async () => {
+  const queuedDrop = { request_id: "req-drop", dispatch_policy: "enqueue", queue_seq: 1, content: "Drop me", created_at: start };
+  const queuedNext = { request_id: "req-next", dispatch_policy: "enqueue", queue_seq: 2, content: "Next question", created_at: start };
+
   renderChat();
   await waitFor(() => expect(streams).toHaveLength(1));
 
+  // 1. 运行中发起 enqueue 立即调 POST /api/agent/runs 并刷新等待区，同时不中断当前流
+  mocks.create.mockResolvedValueOnce({
+    run_id: null, thread_id: "A", status: "queued", dispatch_policy: "enqueue",
+    request_id: "req-drop", queue_position: 1, steering_run_id: null, stream_url: null,
+  });
+  mocks.getThreadDetail.mockResolvedValueOnce({ ...detail("A"), queued_requests: [queuedDrop] });
+
   fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Drop me" } });
   fireEvent.click(screen.getByRole("button", { name: "Queue" }));
-  expect(screen.getByText("Drop me")).toBeTruthy();
-  expect(mocks.create).not.toHaveBeenCalled();
+  await waitFor(() => expect(mocks.create).toHaveBeenCalledWith("Drop me", "LeaderAgent", "A", [], "model", "enqueue"));
+  expect(await screen.findByText("Drop me")).toBeTruthy();
+  expect(streams).toHaveLength(1);
+  expect(streams[0].signal.aborted).toBe(false);
 
+  // 2. 点击 Remove 乐观删除并调用 DELETE；失败时回滚并显示错误
+  let rejectDelete!: (err: unknown) => void;
+  mocks.cancelQueued.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectDelete = reject; }));
   fireEvent.click(screen.getByRole("button", { name: "Remove" }));
   expect(screen.queryByText("Drop me")).toBeNull();
-  expect(mocks.create).not.toHaveBeenCalled();
+  await act(async () => rejectDelete(new Error("Delete failed")));
+  expect(screen.getByText("Drop me")).toBeTruthy();
+  expect(screen.getByRole("alert").textContent).toBe("Delete failed");
 
+  // 3. 删除成功后保持清空
+  mocks.cancelQueued.mockResolvedValueOnce({ request_id: "req-drop", status: "cancelled" });
+  mocks.getThreadDetail.mockResolvedValueOnce({ ...detail("A"), queued_requests: [] });
+  fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+  await waitFor(() => expect(mocks.cancelQueued).toHaveBeenCalledTimes(2));
+  expect(screen.queryByText("Drop me")).toBeNull();
+
+  // 4. 切走会话再切回可从 ThreadDetailResponse.queued_requests 恢复，并支持原地升级 steer
+  mocks.create.mockResolvedValueOnce({
+    run_id: null, thread_id: "A", status: "queued", dispatch_policy: "enqueue",
+    request_id: "req-next", queue_position: 1, steering_run_id: null, stream_url: null,
+  });
+  mocks.getThreadDetail.mockResolvedValueOnce({ ...detail("A"), queued_requests: [queuedNext] });
   fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Next question" } });
   fireEvent.click(screen.getByRole("button", { name: "Queue" }));
-  expect(screen.getByText("Next question")).toBeTruthy();
-  expect(mocks.create).not.toHaveBeenCalled();
+  expect(await screen.findByText("Next question")).toBeTruthy();
 
-  mocks.create.mockResolvedValueOnce({
-    run_id: "next-run",
-    thread_id: "A",
-    status: "pending",
-    request_id: "req-next",
-    stream_url: "/runs/next-run/events?thread=A",
+  fireEvent.click(screen.getByRole("button", { name: "B" }));
+  await waitFor(() => expect(streams).toHaveLength(2));
+  mocks.getThreadDetail.mockResolvedValueOnce({ ...detail("A"), queued_requests: [queuedNext] });
+  fireEvent.click(screen.getByRole("button", { name: "A" }));
+  expect(await screen.findByText("Next question")).toBeTruthy();
+  await waitFor(() => expect(streams).toHaveLength(3));
+
+  mocks.steerQueued.mockResolvedValueOnce({
+    run_id: null, thread_id: "A", status: "queued", dispatch_policy: "steer",
+    request_id: "req-next", queue_position: 1, steering_run_id: "run-A", stream_url: null,
   });
+  mocks.getThreadDetail.mockResolvedValueOnce({
+    ...detail("A"),
+    queued_requests: [{ ...queuedNext, dispatch_policy: "steer" }],
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Steer" }));
+  await waitFor(() => expect(mocks.steerQueued).toHaveBeenCalledWith("req-next"));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Steer" })).toBeNull());
+
+  // 5. 收到 end 后首次详情若短暂无 active_run，通过短退避重查接入 Worker 晋升的新 Run
   mocks.getThreadDetail
-    .mockResolvedValueOnce({ ...detail("A"), active_run: null })
-    .mockResolvedValue({
+    .mockResolvedValueOnce({ ...detail("A"), active_run: null, queued_requests: [{ ...queuedNext, dispatch_policy: "steer" }] })
+    .mockResolvedValueOnce({
       ...detail("A"),
       active_run: { ...detail("A").active_run!, run_id: "next-run" },
+      queued_requests: [],
     });
-
-  await act(async () => streams[0].finish());
-  await waitFor(() => expect(mocks.create).toHaveBeenCalledWith("Next question", "LeaderAgent", "A", [], "model", "enqueue"));
-  await waitFor(() => expect(streams).toHaveLength(2));
-  expect(mocks.consume.mock.calls[1][0]).toBe("/runs/next-run/events?thread=A");
+  await act(async () => streams[2].finish());
+  await waitFor(() => expect(streams).toHaveLength(4));
+  expect(mocks.consume.mock.calls[3][0]).toBe("/runs/next-run/events?thread=A");
   expect(screen.queryByText("Next question")).toBeNull();
+});
+
+it("handles 409 already-promoted conflicts, idle Run now, and non-polling failed termination correctly", async () => {
+  const queuedItem = { request_id: "req-1", dispatch_policy: "enqueue", queue_seq: 1, content: "Manual run", created_at: start };
+  mocks.getThreadDetail.mockResolvedValueOnce({ ...detail("A"), queued_requests: [queuedItem] });
+
+  renderChat();
+  await waitFor(() => expect(streams).toHaveLength(1));
+  expect(await screen.findByText("Manual run")).toBeTruthy();
+
+  // Remove 并发遇 409 run_id 时刷新并切流到新 active_run
+  mocks.cancelQueued.mockRejectedValueOnce(new ApiError("请求已开始执行", 409, { detail: "请求已开始执行", run_id: "promoted-1" }));
+  mocks.getThreadDetail.mockResolvedValueOnce({
+    ...detail("A"),
+    active_run: { ...detail("A").active_run!, run_id: "promoted-1" },
+    queued_requests: [],
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+  await waitFor(() => expect(streams).toHaveLength(2));
+  expect(mocks.consume.mock.calls[1][0]).toBe("/runs/promoted-1/events?thread=A");
+
+  // 验证 failed 终态：不自动轮询，保留等待区与 Run now，点击后发起 200 新流
+  cleanup();
+  streams.length = 0;
+  const consumeCallsBefore = mocks.consume.mock.calls.length;
+  mocks.getThreadDetail.mockReset();
+  mocks.getThreadDetail
+    .mockResolvedValueOnce({
+      ...detail("A"),
+      active_run: { ...detail("A").active_run!, run_id: "run-fail" },
+      queued_requests: [queuedItem],
+    })
+    .mockResolvedValueOnce({ ...detail("A"), active_run: null, queued_requests: [queuedItem] })
+    .mockResolvedValueOnce({
+      ...detail("A"),
+      active_run: { ...detail("A").active_run!, run_id: "manual-run" },
+      queued_requests: [],
+    });
+  mocks.consume.mockImplementationOnce((_url: string, signal: AbortSignal) =>
+    new Promise((resolve, reject) => {
+      streams.push({ signal, emit: async () => {}, finish: () => resolve(event({ type: "end", status: "failed", error: "Boom" })) });
+      signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+    }),
+  );
+
+  renderChat();
+  await waitFor(() => expect(streams).toHaveLength(1));
+  await act(async () => streams[0].finish());
+  const runNowButton = await screen.findByRole("button", { name: "Run now" });
+  expect(screen.getByRole("alert").textContent).toBe("Boom");
+  expect(mocks.getThreadDetail).toHaveBeenCalledTimes(2);
+
+  mocks.consume.mockImplementationOnce((_url: string, signal: AbortSignal, emit: (ev: AgentRunStreamEvent) => Promise<void>) =>
+    new Promise((resolve, reject) => {
+      streams.push({ signal, emit, finish: () => resolve(event({ type: "end", status: "completed" })) });
+      signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+    }),
+  );
+  mocks.steerQueued.mockResolvedValueOnce({
+    run_id: "manual-run", thread_id: "A", status: "pending",
+    request_id: "req-1", stream_url: "/runs/manual-run/events?thread=A",
+  });
+  fireEvent.click(runNowButton);
+  await waitFor(() => expect(mocks.steerQueued).toHaveBeenCalledWith("req-1"));
+  await waitFor(() => expect(streams).toHaveLength(2));
+  expect(mocks.consume.mock.calls[consumeCallsBefore + 1][0]).toBe("/runs/manual-run/events?thread=A");
 });

@@ -54,8 +54,14 @@ export interface QueuedAgentRunResponse {
   status: "queued"
   dispatch_policy: "enqueue" | "steer"
   request_id: string
+  queue_position: number
   steering_run_id: string | null
   stream_url: null
+}
+
+export interface CancelledAgentRunRequestResponse {
+  request_id: string
+  status: "cancelled"
 }
 
 export interface AgentRunResumeResponse extends AgentRunCreateResponse {
@@ -241,6 +247,29 @@ export const consumeAgentRunStream = async (
 export const cancelAgentRun = (runId: string) =>
   apiClient.apiPost<AgentRunCancelResponse>(
     `/api/agent/runs/${encodeURIComponent(runId)}/cancel`,
+    undefined,
+    { requiresAuth: true }
+  )
+
+/**
+ * 逻辑软取消等待区中尚未晋升为 Run 的排队请求。
+ * @param requestId 等待区请求的唯一标识。
+ * @returns 已取消的请求标识与状态。
+ */
+export const cancelQueuedAgentRunRequest = (requestId: string) =>
+  apiClient.apiDelete<CancelledAgentRunRequestResponse>(
+    `/api/agent/runs/requests/${encodeURIComponent(requestId)}`,
+    { requiresAuth: true }
+  )
+
+/**
+ * 将等待区请求原地升级为 steer（会话忙碌返回 202），或在会话空闲时就地晋升执行（返回 200）。
+ * @param requestId 等待区请求的唯一标识。
+ * @returns 升级后的排队响应或已创建的新 AgentRun 响应。
+ */
+export const steerQueuedAgentRunRequest = (requestId: string) =>
+  apiClient.apiPost<AgentRunCreateResponse | QueuedAgentRunResponse>(
+    `/api/agent/runs/requests/${encodeURIComponent(requestId)}/steer`,
     undefined,
     { requiresAuth: true }
   )
