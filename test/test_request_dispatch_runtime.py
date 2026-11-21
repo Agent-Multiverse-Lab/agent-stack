@@ -214,4 +214,104 @@ class SteerGraceTest(unittest.IsolatedAsyncioTestCase):
         ):
             await controller._heartbeat_lease()
         self.assertTrue(await controller.has_cancel_signal())
+        self.assertTrue(controller.steer_cancelled)
         self.assertFalse(controller.lease_lost)
+
+
+class WorkerTwoModeDispatchTest(unittest.IsolatedAsyncioTestCase):
+    async def test_reconcile_and_set_run_terminal_do_not_dispatch_queue(self):
+        from server import worker
+        fake_repo = SimpleNamespace(
+            reconcile_expired_leases=AsyncMock(return_value=[SimpleNamespace(id="r1", thread_id="t1", agent_status="failed")]),
+            recover_unclaimed_pending_runs=AsyncMock(return_value=([SimpleNamespace(id="r-pending", thread_id="t1")], [SimpleNamespace(id="r2", thread_id="t1")])),
+            last_cascaded_signal_run_ids=[],
+            set_agent_terminal=AsyncMock(return_value=(SimpleNamespace(id="r1", thread_id="t1", agent_status="completed"), True)),
+        )
+        with (
+            patch.object(worker.postgres_manager, "get_async_session_context", fake_session),
+            patch.object(worker, "AgentRunRepository", return_value=fake_repo),
+            patch.object(worker, "dispatch_next_queued_request", AsyncMock()) as dispatch_mock,
+            patch.object(worker, "enqueue_agent_run", AsyncMock()) as enqueue_mock,
+        ):
+            await worker.reconcile_expired_run_leases(terminate_active=True)
+            enqueue_mock.assert_awaited_once_with("r-pending")
+            dispatch_mock.assert_not_awaited()
+            await worker.set_run_terminal("r1", status="completed", worker_id="w1")
+            dispatch_mock.assert_not_awaited()
+
+    async def test_process_agent_run_two_mode_dispatch_and_non_dispatch_outcomes(self):
+        import asyncio
+        from server import worker
+
+        async def run_case(*, chunks=None, stream_error=None, final_status="completed", changed=True, steer_cancelled=False, cancelled=False, dispatch_side_effect=None):
+            run = SimpleNamespace(
+                id="run-1", agent_status="queued", uid="u1", agent_id="leader",
+                thread_id="thread-1", request_id="req-1", run_type="chat",
+                trigger_message_id=1, created_by_run_id=None, run_metadata={},
+            )
+            controller = SimpleNamespace(
+                start=Mock(), close=AsyncMock(),
+                is_cancelled=AsyncMock(return_value=cancelled),
+                lease_lost=False, steer_cancelled=steer_cancelled,
+            )
+
+            async def fake_stream(**_kwargs):
+                if stream_error is not None:
+                    raise stream_error
+                for item in (chunks or []):
+                    yield item
+
+            async def passthrough(iterator, **_kwargs):
+                async for item in iterator:
+                    yield item
+
+            dispatch_mock = AsyncMock(side_effect=dispatch_side_effect)
+            with (
+                patch.object(worker, "_get_agent_run", AsyncMock(return_value=run)),
+                patch.object(worker, "_get_agent_input_msg", AsyncMock(return_value=SimpleNamespace(content="hi", message_type="text", image_content=None, msg_metadata={}))),
+                patch.object(worker, "_get_user", AsyncMock(return_value=SimpleNamespace(uid="u1"))),
+                patch.object(worker, "build_agent_input_msg", Mock(return_value="input")),
+                patch.object(worker, "set_run_running", AsyncMock(return_value=run)),
+                patch.object(worker, "AgentRunController", return_value=controller),
+                patch.object(worker, "StreamEventSmoother", return_value=SimpleNamespace(append=AsyncMock(), release=AsyncMock())),
+                patch.object(worker, "stream_agent_response", side_effect=lambda **kwargs: fake_stream(**kwargs)),
+                patch.object(worker, "_cancellable_stream", new=passthrough),
+                patch.object(worker, "_normalize_steam_agent_chunk", side_effect=lambda c: [c]),
+                patch.object(worker, "reslove_thread_id", side_effect=lambda _c, tid: tid),
+                patch.object(worker, "write_stream_event", AsyncMock()),
+                patch.object(worker, "write_end_stream_event", AsyncMock()),
+                patch.object(worker, "_finalize_run", AsyncMock(return_value=(final_status, changed))) as finalize_mock,
+                patch.object(worker, "dispatch_next_queued_request", dispatch_mock),
+            ):
+                await worker.process_agent_run({"worker_id": "w1"}, "run-1")
+            return dispatch_mock, finalize_mock
+
+        # 1. 自然 completed 且 changed=True -> 触发派发
+        dispatch_mock, _ = await run_case(chunks=[{"status": "finished"}], final_status="completed", changed=True)
+        dispatch_mock.assert_awaited_once_with("thread-1")
+
+        # 2. Turn 边界 steered (stop_reason="steered") 且 changed=True -> 强制插入派发
+        dispatch_mock, _ = await run_case(chunks=[{"status": "finished", "stop_reason": "steered"}], final_status="cancelled", changed=True)
+        dispatch_mock.assert_awaited_once_with("thread-1")
+
+        # 3. 宽限期超限 CancelledError 且 steer_cancelled=True -> 强制插入派发
+        dispatch_mock, _ = await run_case(stream_error=asyncio.CancelledError(), final_status="cancelled", changed=True, cancelled=True, steer_cancelled=True)
+        dispatch_mock.assert_awaited_once_with("thread-1")
+
+        # 4. dispatch_next_queued_request 抛异常不回退把已完成 Run 标成 failed
+        dispatch_mock, finalize_mock = await run_case(
+            chunks=[{"status": "finished"}], final_status="completed", changed=True,
+            dispatch_side_effect=RuntimeError("db temporary glitch"),
+        )
+        dispatch_mock.assert_awaited_once_with("thread-1")
+        self.assertEqual(finalize_mock.await_count, 1)
+
+        # 5. 不触发派发的场景: changed=False / 普通手动取消 / interrupted / error
+        for kwargs in (
+            dict(chunks=[{"status": "finished"}], final_status="completed", changed=False),
+            dict(stream_error=asyncio.CancelledError(), final_status="cancelled", changed=True, cancelled=True, steer_cancelled=False),
+            dict(chunks=[{"status": "ask_human", "pending_interrupt": {"name": "ask_user"}}], final_status="interrupted", changed=True),
+            dict(chunks=[{"status": "error", "error": "boom"}], final_status="failed", changed=True),
+        ):
+            dispatch_mock, _ = await run_case(**kwargs)
+            dispatch_mock.assert_not_awaited()

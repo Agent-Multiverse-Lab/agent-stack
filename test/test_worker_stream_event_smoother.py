@@ -672,6 +672,10 @@ class AgentRunProcessTest(unittest.IsolatedAsyncioTestCase):
             patch("server.worker.write_stream_event", side_effect=write_event),
             patch("server.worker.write_end_stream_event", side_effect=write_end),
             patch(
+                "server.worker.dispatch_next_queued_request",
+                new_callable=AsyncMock,
+            ),
+            patch(
                 "server.worker.clear_agent_run_cancel_signal",
                 new_callable=AsyncMock,
             ),

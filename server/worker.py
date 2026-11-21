@@ -81,6 +81,7 @@ class AgentRunController:
     run_id: str
     worker_id: str = ""
     lease_lost: bool = field(default=False, init=False)
+    steer_cancelled: bool = field(default=False, init=False)
     _cancel_event: asyncio.Event = field(
         default_factory=asyncio.Event,
         init=False,
@@ -155,6 +156,7 @@ class AgentRunController:
                             self.run_id, grace_seconds=STEER_GRACE_SECONDS,
                         )
                     if steer_expired:
+                        self.steer_cancelled = True
                         self._cancel_event.set()
                         return
             except asyncio.CancelledError:
@@ -309,8 +311,6 @@ async def reconcile_expired_run_leases(*, terminate_active: bool = False) -> int
             logger.exception(
                 "级联取消子 Agent Run 信号发布失败：run_id=%s", signal_run_id
             )
-    for run in [*runs, *timed_out_runs]:
-        await dispatch_next_queued_request(str(run.thread_id))
     for run in requeue_runs:
         try:
             await enqueue_agent_run(str(run.id))
@@ -369,8 +369,6 @@ async def set_run_terminal(
             logger.exception(
                 "级联取消子 Agent Run 信号发布失败：run_id=%s", signal_run_id
             )
-    if changed and current_agent_status in {"completed", "failed", "cancelled"}:
-        await dispatch_next_queued_request(str(run.thread_id))
     return current_agent_status, changed
 
 
@@ -786,6 +784,7 @@ async def process_agent_run(ctx, run_id: str):
                 str(thread_id),
             )
             terminal_flag = False
+            dispatch_on_exit = False
             stream_event_smoother = StreamEventSmoother(
                 run_id=run_id,
                 character_limit=512,
@@ -914,6 +913,7 @@ async def process_agent_run(ctx, run_id: str):
                                 payload=strem_agent_chunk,
                             )
                             if changed:
+                                dispatch_on_exit = True
                                 await write_end_stream_event(
                                     run_id,
                                     {
@@ -938,6 +938,15 @@ async def process_agent_run(ctx, run_id: str):
                                 )
             await stream_event_smoother.release()
             if terminal_flag:
+                if dispatch_on_exit:
+                    try:
+                        await dispatch_next_queued_request(str(thread_id))
+                    except Exception:
+                        logger.exception(
+                            "派发等待区下一条请求失败：thread_id=%s run_id=%s",
+                            thread_id,
+                            run_id,
+                        )
                 return
 
             if not terminal_flag:
@@ -961,12 +970,22 @@ async def process_agent_run(ctx, run_id: str):
                 return
             if await run_controller.is_cancelled():
                 logger.info(f"Agent run 收到取消请求：{run_id}")
-                return await _finalize_run(
+                agent_status, changed = await _finalize_run(
                     run_id,
                     worker_id=worker_id,
                     status="cancelled",
                     thread_id=str(thread_id),
                 )
+                if changed and getattr(run_controller, "steer_cancelled", False):
+                    try:
+                        await dispatch_next_queued_request(str(thread_id))
+                    except Exception:
+                        logger.exception(
+                            "派发等待区下一条请求失败：thread_id=%s run_id=%s",
+                            thread_id,
+                            run_id,
+                        )
+                return agent_status, changed
             logger.warning("Agent run 基础设施取消（超时或 Worker 退出）：run_id=%s", run_id)
             return await _finalize_run(
                 run_id,
