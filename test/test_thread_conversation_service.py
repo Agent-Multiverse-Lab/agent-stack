@@ -119,6 +119,16 @@ class FakeAgentRunRepository:
         return self.pending_interaction_run
 
 
+class FakeAgentRunRequestRepository:
+    """在内存中模拟 AgentRunRequest Repository。"""
+
+    def __init__(self) -> None:
+        self.queued: list[SimpleNamespace] = []
+
+    async def list_queued_for_thread(self, _thread_id: str, *, uid: str):
+        return [item for item in self.queued if getattr(item, "uid", uid) == uid]
+
+
 class FakeMessageAttachmentRepository:
     """在内存中模拟 MessageAttachment Repository。"""
 
@@ -225,6 +235,7 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
         self.db = FakeSession()
         self.conversations = FakeConversationRepository()
         self.runs = FakeAgentRunRepository()
+        self.requests = FakeAgentRunRequestRepository()
         self.message_attachments = FakeMessageAttachmentRepository()
         self.users = FakeUserRepository()
         self.agents = FakeAgentRepository()
@@ -238,6 +249,10 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
             patch(
                 "server.service.thread_service.AgentRunRepository",
                 return_value=self.runs,
+            ),
+            patch(
+                "server.service.thread_service.AgentRunRequestRepository",
+                return_value=self.requests,
             ),
             patch(
                 "server.service.thread_service.MessageAttachmentRepository",
@@ -377,6 +392,55 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(result["active_run"])
         self.assertIsNone(result["pending_interaction"])
+        self.assertEqual([], result["queued_requests"])
+
+    async def test_detail_returns_queued_requests_from_waiting_area(self) -> None:
+        self.conversations.conversation = make_conversation(1)
+        self.requests.queued = [
+            SimpleNamespace(
+                request_id="req-steer",
+                uid="user-1",
+                dispatch_policy="steer",
+                queue_seq=2,
+                created_at=NOW,
+                trigger_message=SimpleNamespace(content="urgent question"),
+            ),
+            SimpleNamespace(
+                request_id="req-enqueue",
+                uid="user-1",
+                dispatch_policy="enqueue",
+                queue_seq=1,
+                created_at=NOW,
+                trigger_message=SimpleNamespace(content="normal question"),
+            ),
+        ]
+
+        result = await thread_service.get_thread_detail(
+            self.db,
+            uid="user-1",
+            thread_id="thread-1",
+            message_limit=10,
+        )
+
+        self.assertEqual(
+            [
+                {
+                    "request_id": "req-steer",
+                    "dispatch_policy": "steer",
+                    "queue_seq": 2,
+                    "content": "urgent question",
+                    "created_at": NOW,
+                },
+                {
+                    "request_id": "req-enqueue",
+                    "dispatch_policy": "enqueue",
+                    "queue_seq": 1,
+                    "content": "normal question",
+                    "created_at": NOW,
+                },
+            ],
+            result["queued_requests"],
+        )
 
     async def test_detail_returns_pending_ask_user_interaction(self) -> None:
         self.conversations.conversation = make_conversation(1)

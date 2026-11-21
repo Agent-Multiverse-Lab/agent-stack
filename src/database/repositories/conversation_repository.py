@@ -185,7 +185,7 @@ class ConversationRepository:
         history_time = func.coalesce(AgentRun.created_at, Message.created_at)
         statement = select(Message).outerjoin(AgentRun, AgentRun.id == Message.agent_run_id).where(
             Message.conversation_id == conversation_id,
-            Message.status != "queued",
+            Message.status.not_in(("queued", "cancelled")),
             # 已结束的审计操作也是执行过程；running 行仍由 SSE 恢复。
             or_(
                 func.coalesce(Message.message_type, "text").not_in(AUDIT_MESSAGE_TYPES),
@@ -413,6 +413,18 @@ class ConversationRepository:
         message.sequence = await self.next_sequence(message.conversation_id)
         message.status = "completed"
         message.agent_run_id = run_id
+        await self.session.flush()
+
+    async def cancel_queued_input_message(self, message_id: int) -> None:
+        await self.session.execute(
+            update(Message)
+            .where(
+                Message.id == message_id,
+                Message.status == "queued",
+                Message.agent_run_id.is_(None),
+            )
+            .values(status="cancelled")
+        )
         await self.session.flush()
 
     async def bind_input_message_to_run(self, run: AgentRun) -> None:

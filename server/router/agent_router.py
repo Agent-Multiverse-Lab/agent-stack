@@ -12,9 +12,11 @@ from server.entities.agent import (
 )
 from server.service.agent_run_service import (
     AgentRunConflictError,
+    cancel_queued_agent_run_request_service,
     cancel_run_service,
     create_agent_run_service,
     create_resume_agent_run_service,
+    steer_queued_agent_run_request_service,
     stream_agent_run_events,
 )
 from server.service.agent_service import get_agent_context
@@ -135,6 +137,86 @@ async def create_agent_run(
         "request_id": run.request_id,
         "stream_url": (
             f"/api/agent/runs/{run.id}/events?thread_id={run.thread_id}"
+        ),
+    }
+
+
+def _conflict_response(exc: AgentRunConflictError) -> JSONResponse:
+    if exc.run_id is not None:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc), "run_id": exc.run_id},
+        )
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=str(exc),
+    )
+
+
+@agent_router.delete("/runs/requests/{request_id}")
+async def cancel_queued_agent_run_request(
+    request_id: str,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """逻辑软取消等待区中的排队请求及其未绑定输入消息。"""
+    try:
+        return await cancel_queued_agent_run_request_service(
+            db=db,
+            current_user=current_user,
+            request_id=request_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except AgentRunConflictError as exc:
+        return _conflict_response(exc)
+
+
+@agent_router.post("/runs/requests/{request_id}/steer")
+async def steer_queued_agent_run_request(
+    request_id: str,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """将等待区请求原地升级为 steer，或在会话空闲时就地晋升执行。"""
+    if not config.enable_run_queue:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="请开启 ARQ 队列模式",
+        )
+
+    try:
+        result = await steer_queued_agent_run_request_service(
+            db=db,
+            current_user=current_user,
+            request_id=request_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except AgentRunConflictError as exc:
+        return _conflict_response(exc)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    if isinstance(result, dict):
+        return JSONResponse(status_code=202, content=result)
+
+    return {
+        "run_id": result.id,
+        "thread_id": result.thread_id,
+        "status": result.agent_status,
+        "request_id": result.request_id,
+        "stream_url": (
+            f"/api/agent/runs/{result.id}/events?thread_id={result.thread_id}"
         ),
     }
 

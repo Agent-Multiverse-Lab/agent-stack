@@ -56,7 +56,7 @@ class AgentRunRequestRepositoryTest(unittest.IsolatedAsyncioTestCase):
         with self.engine.begin() as connection:
             connection.exec_driver_sql("PRAGMA foreign_keys=ON")
             Base.metadata.create_all(connection, tables=[
-                model.__table__ for model in (Project, Conversation, Message, AgentRun, AgentRunRequest)
+                model.__table__ for model in (Project, Conversation, Message, ToolCall, AgentRun, AgentRunRequest)
             ])
         self.db = Session(self.engine, expire_on_commit=False)
         self.addCleanup(self.db.close)
@@ -170,14 +170,61 @@ class AgentRunRequestRepositoryTest(unittest.IsolatedAsyncioTestCase):
         self.db.commit()
         self.assertTrue(await self.repository.has_queued_steer_for_thread("thread-1"))
 
+        listed = await self.repository.list_queued_for_thread("thread-1", uid="user-1")
+        self.assertEqual([item.request_id for item in listed], ["request-steer", "request-enqueue"])
+        self.assertEqual(listed[0].trigger_message.content, "original")
+
         first = await self.repository.pop_next_queued_for_thread("thread-1")
-        self.assertEqual(first.request_id, "request-enqueue")
+        self.assertEqual(first.request_id, "request-steer")
         await self.repository.mark_dispatched(first.request_id)
         second = await self.repository.pop_next_queued_for_thread("thread-1")
-        self.assertEqual(second.request_id, "request-steer")
+        self.assertEqual(second.request_id, "request-enqueue")
         await self.repository.mark_dispatched(second.request_id)
         self.assertIsNone(await self.repository.pop_next_queued_for_thread("thread-1"))
         self.db.commit()
+
+    async def test_upgrade_cancel_and_list_messages_filter(self):
+        msg_cancelled = Message(
+            conversation_id=1, role="user", content="drop me", status="queued",
+        )
+        self.db.add(msg_cancelled)
+        self.db.flush()
+        msg_steer = Message(
+            conversation_id=1, role="user", content="steer me", status="queued",
+        )
+        self.db.add(msg_steer)
+        self.db.flush()
+
+        await self.repository.create_request(
+            request_id="req-cancel", uid="user-1", thread_id="thread-1",
+            agent_id="leader", trigger_message_id=msg_cancelled.id,
+            dispatch_policy="enqueue", status="queued", queue_seq=1,
+        )
+        await self.repository.create_request(
+            request_id="req-upgrade", uid="user-1", thread_id="thread-1",
+            agent_id="leader", trigger_message_id=msg_steer.id,
+            dispatch_policy="enqueue", status="queued", queue_seq=2,
+        )
+        self.db.commit()
+
+        upgraded = await self.repository.upgrade_queued_to_steer("req-upgrade", uid="user-1")
+        self.assertIsNotNone(upgraded)
+        self.assertEqual(upgraded.dispatch_policy, "steer")
+        self.assertIsNone(await self.repository.upgrade_queued_to_steer("req-upgrade", uid="other"))
+
+        cancelled = await self.repository.cancel_queued_request("req-cancel", uid="user-1")
+        self.assertIsNotNone(cancelled)
+        self.assertEqual(cancelled.status, "cancelled")
+        conversations = ConversationRepository(self.session)
+        await conversations.cancel_queued_input_message(msg_cancelled.id)
+        self.db.commit()
+
+        self.assertEqual(self.db.get(Message, msg_cancelled.id).status, "cancelled")
+        listed = await self.repository.list_queued_for_thread("thread-1", uid="user-1")
+        self.assertEqual([item.request_id for item in listed], ["req-upgrade"])
+
+        visible = await conversations.list_messages(conversation_id=1, limit=10)
+        self.assertEqual([item.id for item in visible], [1])
 
 
 
@@ -332,6 +379,7 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         queued = await self.submit()
         self.assertEqual(queued["status"], "queued")
         self.assertEqual(queued["dispatch_policy"], "enqueue")
+        self.assertEqual(queued["queue_position"], 1)
         self.assertIsNone(queued["steering_run_id"])
         async with self.sessions() as db:
             self.assertFalse(await AgentRunRequestRepository(db).has_queued_steer_for_thread("thread-1"))
@@ -341,6 +389,55 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(run)
         self.assertEqual(run.request_id, "request-1")
         self.enqueue.assert_awaited_once()
+
+    async def test_soft_cancel_and_steer_upgrade_contracts(self):
+        user = SimpleNamespace(id=7, uid="user-1")
+        await self.add_blocking_run()
+        await self.submit("req-1", query="first", dispatch_policy="enqueue")
+        second = await self.submit("req-2", query="second", dispatch_policy="enqueue")
+        self.assertEqual(second["queue_position"], 2)
+
+        async with self.sessions() as db:
+            upgraded = await agent_run_service.steer_queued_agent_run_request_service(
+                db=db, current_user=user, request_id="req-2",
+            )
+            self.assertEqual(upgraded["dispatch_policy"], "steer")
+            self.assertEqual(upgraded["queue_position"], 1)
+            self.assertEqual(upgraded["steering_run_id"], "blocker")
+
+        async with self.sessions() as db:
+            cancelled = await agent_run_service.cancel_queued_agent_run_request_service(
+                db=db, current_user=user, request_id="req-1",
+            )
+            self.assertEqual(cancelled, {"request_id": "req-1", "status": "cancelled"})
+            again = await agent_run_service.cancel_queued_agent_run_request_service(
+                db=db, current_user=user, request_id="req-1",
+            )
+            self.assertEqual(again["status"], "cancelled")
+
+        with self.assertRaisesRegex(agent_run_service.AgentRunConflictError, "取消"):
+            await self.submit("req-1")
+
+        await self.finish_blocker()
+        async with self.sessions() as db:
+            promoted = await agent_run_service.steer_queued_agent_run_request_service(
+                db=db, current_user=user, request_id="req-2",
+            )
+            self.assertEqual(promoted.request_id, "req-2")
+
+        async with self.sessions() as db:
+            with self.assertRaises(agent_run_service.AgentRunConflictError) as conflict:
+                await agent_run_service.cancel_queued_agent_run_request_service(
+                    db=db, current_user=user, request_id="req-2",
+                )
+            self.assertEqual(conflict.exception.run_id, promoted.id)
+
+        async with self.sessions() as db:
+            with self.assertRaises(agent_run_service.AgentRunConflictError) as steer_conflict:
+                await agent_run_service.steer_queued_agent_run_request_service(
+                    db=db, current_user=user, request_id="req-2",
+                )
+            self.assertEqual(steer_conflict.exception.run_id, promoted.id)
 
     async def test_steer_retry_and_promotion_use_original_input_and_current_model(self):
         await self.add_blocking_run()

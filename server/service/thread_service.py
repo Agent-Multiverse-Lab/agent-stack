@@ -37,6 +37,7 @@ from src.database import (
 from src.database.repositories import (
     AgentRepository,
     AgentRunRepository,
+    AgentRunRequestRepository,
     ConversationRepository,
     MessageAttachmentRepository,
     ProjectRepository,
@@ -230,6 +231,10 @@ async def get_thread_detail(
         uid=uid,
         thread_id=thread_id,
     )
+    queued_requests = await AgentRunRequestRepository(db).list_queued_for_thread(
+        thread_id,
+        uid=uid,
+    )
     pending_interaction = None
     if pending_interaction_run is not None:
         interrupt_value = dict(pending_interaction_run.run_metadata or {}).get(
@@ -289,6 +294,20 @@ async def get_thread_detail(
         "next_before_message_id": next_before_message_id,
         "active_run": _run_response(active_run),
         "pending_interaction": pending_interaction,
+        "queued_requests": [
+            {
+                "request_id": str(item.request_id),
+                "dispatch_policy": str(item.dispatch_policy),
+                "queue_seq": item.queue_seq,
+                "content": (
+                    str(item.trigger_message.content)
+                    if item.trigger_message is not None
+                    else ""
+                ),
+                "created_at": item.created_at,
+            }
+            for item in queued_requests
+        ],
     }
 
 

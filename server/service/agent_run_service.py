@@ -61,14 +61,45 @@ class AgentRunRequestInput:
 class AgentRunConflictError(RuntimeError):
     """Agent Run 当前状态不允许执行请求。"""
 
+    def __init__(self, message: str, *, run_id: str | None = None) -> None:
+        super().__init__(message)
+        self.run_id = run_id
 
-def _queued_response(request: AgentRunRequest, active_run=None) -> dict:
+
+def _queued_response(
+    request: AgentRunRequest,
+    active_run: AgentRun | None = None,
+    *,
+    queue_position: int = 1,
+) -> dict[str, Any]:
     return {
-        "run_id": None, "thread_id": request.thread_id, "status": "queued",
-        "dispatch_policy": request.dispatch_policy, "request_id": request.request_id,
-        "steering_run_id": str(active_run.id) if active_run is not None and request.dispatch_policy == "steer" else None,
+        "run_id": None,
+        "thread_id": request.thread_id,
+        "status": "queued",
+        "dispatch_policy": request.dispatch_policy,
+        "request_id": request.request_id,
+        "queue_position": queue_position,
+        "steering_run_id": (
+            str(active_run.id)
+            if active_run is not None and request.dispatch_policy == "steer"
+            else None
+        ),
         "stream_url": None,
     }
+
+
+async def _queue_position(
+    repo: AgentRunRequestRepository,
+    *,
+    thread_id: str,
+    uid: str,
+    request_id: str,
+) -> int:
+    queued = await repo.list_queued_for_thread(thread_id, uid=uid)
+    for index, item in enumerate(queued, start=1):
+        if str(item.request_id) == request_id:
+            return index
+    return len(queued) or 1
 
 
 async def _create_request_run(db: AsyncSession, request: AgentRunRequest, conversation: Conversation) -> AgentRun:
@@ -146,9 +177,14 @@ async def create_agent_run_service(
             return existing_run
         active_run = await agent_run_repo.get_latest_active_for_thread(uid=uid, thread_id=thread_id)
         if request is not None and request.status == "queued":
-            result = _queued_response(request, active_run)
+            position = await _queue_position(
+                agent_run_request_repo, thread_id=thread_id, uid=uid, request_id=request_id,
+            )
+            result = _queued_response(request, active_run, queue_position=position)
             await db.commit()
             return result
+        if request is not None and request.status == "cancelled":
+            raise AgentRunConflictError("请求已从等待区取消")
         if await agent_run_repo.get_pending_interaction_run(uid=uid, thread_id=thread_id) is not None:
             raise AgentRunConflictError("当前会话有待回答的问题")
         if active_run is not None and dispatch_policy == "reject":
@@ -211,7 +247,10 @@ async def create_agent_run_service(
             if active_run is not None:
                 message.status = "queued"
         if request.status == "queued":
-            result = _queued_response(request, active_run)
+            position = await _queue_position(
+                agent_run_request_repo, thread_id=thread_id, uid=uid, request_id=request_id,
+            )
+            result = _queued_response(request, active_run, queue_position=position)
         else:
             result = await _create_request_run(db, request, conversation)
         await db.commit()
@@ -250,6 +289,117 @@ async def dispatch_next_queued_request(thread_id: str) -> AgentRun | None:
         run = await _create_request_run(db, request, conversation)
         await db.commit()
         return await _enqueue_committed_run(db, run)
+
+
+async def _require_owned_request_with_thread_lock(
+    *,
+    db: AsyncSession,
+    uid: str,
+    request_id: str,
+) -> tuple[
+    AgentRunRequestRepository,
+    ConversationRepository,
+    AgentRunRepository,
+    Conversation,
+    AgentRunRequest,
+]:
+    """校验等待区请求归属后持 Conversation FOR UPDATE 行锁复查最新状态。"""
+    request_repo = AgentRunRequestRepository(db)
+    conversation_repo = ConversationRepository(db)
+    run_repo = AgentRunRepository(db)
+    initial = await request_repo.get_by_request_id(request_id)
+    if initial is None or str(initial.uid) != uid:
+        raise LookupError("等待区请求不存在")
+    conversation = await conversation_repo.get_conversation_by_thread_id_for_user(
+        thread_id=str(initial.thread_id),
+        user_id=uid,
+        for_update=True,
+    )
+    if conversation is None:
+        raise LookupError("当前会话不存在或已删除")
+    request = await request_repo.get_by_request_id(request_id)
+    if request is None or str(request.uid) != uid:
+        raise LookupError("等待区请求不存在")
+    return request_repo, conversation_repo, run_repo, conversation, request
+
+
+async def _raise_dispatched_conflict(run_repo: AgentRunRepository, request_id: str) -> None:
+    existing_run = await run_repo.get_by_request_id(request_id)
+    raise AgentRunConflictError(
+        "请求已开始执行",
+        run_id=str(existing_run.id) if existing_run is not None else None,
+    )
+
+
+async def cancel_queued_agent_run_request_service(
+    *,
+    db: AsyncSession,
+    current_user: User,
+    request_id: str,
+) -> dict[str, str]:
+    """在会话行锁下逻辑软取消等待区请求及其未绑定输入消息。"""
+    uid = str(current_user.uid)
+    try:
+        request_repo, conversation_repo, run_repo, _conversation, request = (
+            await _require_owned_request_with_thread_lock(
+                db=db, uid=uid, request_id=request_id,
+            )
+        )
+        if request.status == "cancelled":
+            await db.commit()
+            return {"request_id": str(request.request_id), "status": "cancelled"}
+        if request.status == "dispatched":
+            await _raise_dispatched_conflict(run_repo, request_id)
+        cancelled = await request_repo.cancel_queued_request(request_id, uid=uid)
+        if cancelled is None:
+            await _raise_dispatched_conflict(run_repo, request_id)
+        await conversation_repo.cancel_queued_input_message(int(cancelled.trigger_message_id))
+        await db.commit()
+        return {"request_id": str(cancelled.request_id), "status": "cancelled"}
+    except Exception:
+        await db.rollback()
+        raise
+
+
+async def steer_queued_agent_run_request_service(
+    *,
+    db: AsyncSession,
+    current_user: User,
+    request_id: str,
+) -> AgentRun | dict[str, Any]:
+    """在会话行锁下将等待区请求升级为 steer，或在会话空闲时就地晋升执行。"""
+    uid = str(current_user.uid)
+    promoted_run: AgentRun | None = None
+    try:
+        request_repo, _conversation_repo, run_repo, conversation, request = (
+            await _require_owned_request_with_thread_lock(
+                db=db, uid=uid, request_id=request_id,
+            )
+        )
+        if request.status == "dispatched":
+            await _raise_dispatched_conflict(run_repo, request_id)
+        if request.status == "cancelled":
+            raise AgentRunConflictError("请求已从等待区取消")
+        thread_id = str(request.thread_id)
+        if await run_repo.get_pending_interaction_run(uid=uid, thread_id=thread_id) is not None:
+            raise AgentRunConflictError("当前会话有待回答的问题")
+        active_run = await run_repo.get_latest_active_for_thread(uid=uid, thread_id=thread_id)
+        if active_run is not None:
+            upgraded = await request_repo.upgrade_queued_to_steer(request_id, uid=uid)
+            if upgraded is None:
+                await _raise_dispatched_conflict(run_repo, request_id)
+            position = await _queue_position(
+                request_repo, thread_id=thread_id, uid=uid, request_id=request_id,
+            )
+            result = _queued_response(upgraded, active_run, queue_position=position)
+            await db.commit()
+            return result
+        promoted_run = await _create_request_run(db, request, conversation)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return await _enqueue_committed_run(db, promoted_run)
 
 
 async def create_resume_agent_run_service(

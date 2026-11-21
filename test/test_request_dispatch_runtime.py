@@ -118,13 +118,23 @@ class DispatchHTTPTest(unittest.IsolatedAsyncioTestCase):
         from server.service.agent_run_service import AgentRunConflictError
 
         tree = ast.parse(Path("server/router/agent_router.py").read_text())
-        nodes = [n for n in tree.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "create_agent_run"]
+        target_names = {
+            "create_agent_run",
+            "_conflict_response",
+            "cancel_queued_agent_run_request",
+            "steer_queued_agent_run_request",
+        }
+        nodes = [n for n in tree.body if isinstance(n, ast.AsyncFunctionDef | ast.FunctionDef) and n.name in target_names]
         for node in nodes:
             node.decorator_list = []
-        self.module = dict(AgentRunCreateRequest=AgentRunCreateRequest, AuthenticatedUser=Any, AsyncSession=Any,
-                           Depends=Depends, get_db=Mock(), HTTPException=HTTPException, JSONResponse=JSONResponse,
-                           status=status, config=SimpleNamespace(enable_run_queue=True), AgentRunConflictError=AgentRunConflictError,
-                           create_agent_run_service=AsyncMock())
+        self.module = dict(
+            AgentRunCreateRequest=AgentRunCreateRequest, AuthenticatedUser=Any, AsyncSession=Any,
+            Depends=Depends, get_db=Mock(), HTTPException=HTTPException, JSONResponse=JSONResponse,
+            status=status, config=SimpleNamespace(enable_run_queue=True), AgentRunConflictError=AgentRunConflictError,
+            create_agent_run_service=AsyncMock(),
+            cancel_queued_agent_run_request_service=AsyncMock(),
+            steer_queued_agent_run_request_service=AsyncMock(),
+        )
         exec(compile(ast.Module(body=nodes, type_ignores=[]), "router", "exec"), self.module)
 
     async def test_dispatch_policy_defaults_and_http_202_responses(self):
@@ -138,14 +148,14 @@ class DispatchHTTPTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValidationError):
             request_model(agent_id="a", thread_id="t", dispatch_policy="queue")
 
-        enqueue_response = {"run_id": None, "stream_url": None, "status": "queued", "dispatch_policy": "enqueue", "request_id": "q1", "steering_run_id": None}
+        enqueue_response = {"run_id": None, "stream_url": None, "status": "queued", "dispatch_policy": "enqueue", "request_id": "q1", "queue_position": 1, "steering_run_id": None}
         self.module["create_agent_run_service"].return_value = enqueue_response
         result = await self.module["create_agent_run"](default_req, SimpleNamespace(uid="u"), object())
         self.assertEqual(result.status_code, 202)
         self.assertEqual(json.loads(result.body), enqueue_response)
         self.assertIsNone(json.loads(result.body)["steering_run_id"])
 
-        steer_response = {"run_id": None, "stream_url": None, "status": "queued", "dispatch_policy": "steer", "request_id": "q2", "steering_run_id": "r"}
+        steer_response = {"run_id": None, "stream_url": None, "status": "queued", "dispatch_policy": "steer", "request_id": "q2", "queue_position": 1, "steering_run_id": "r"}
         self.module["create_agent_run_service"].return_value = steer_response
         result = await self.module["create_agent_run"](
             request_model(agent_id="a", thread_id="t", dispatch_policy="steer"),
@@ -154,6 +164,43 @@ class DispatchHTTPTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status_code, 202)
         self.assertEqual(json.loads(result.body), steer_response)
         self.assertEqual(json.loads(result.body)["steering_run_id"], "r")
+
+    async def test_cancel_and_steer_queued_request_routes(self):
+        import json
+        from fastapi import HTTPException
+        conflict_cls = self.module["AgentRunConflictError"]
+
+        self.module["cancel_queued_agent_run_request_service"].return_value = {"request_id": "q1", "status": "cancelled"}
+        self.assertEqual(
+            await self.module["cancel_queued_agent_run_request"]("q1", SimpleNamespace(uid="u"), object()),
+            {"request_id": "q1", "status": "cancelled"},
+        )
+
+        self.module["cancel_queued_agent_run_request_service"].side_effect = LookupError("等待区请求不存在")
+        with self.assertRaises(HTTPException) as missing:
+            await self.module["cancel_queued_agent_run_request"]("q1", SimpleNamespace(uid="u"), object())
+        self.assertEqual(missing.exception.status_code, 404)
+
+        self.module["cancel_queued_agent_run_request_service"].side_effect = conflict_cls("请求已开始执行", run_id="run-9")
+        conflict_resp = await self.module["cancel_queued_agent_run_request"]("q1", SimpleNamespace(uid="u"), object())
+        self.assertEqual(conflict_resp.status_code, 409)
+        self.assertEqual(json.loads(conflict_resp.body), {"detail": "请求已开始执行", "run_id": "run-9"})
+
+        self.module["steer_queued_agent_run_request_service"].return_value = {
+            "run_id": None, "thread_id": "t", "status": "queued", "dispatch_policy": "steer",
+            "request_id": "q1", "queue_position": 1, "steering_run_id": "run-active", "stream_url": None,
+        }
+        steered = await self.module["steer_queued_agent_run_request"]("q1", SimpleNamespace(uid="u"), object())
+        self.assertEqual(steered.status_code, 202)
+        self.assertEqual(json.loads(steered.body)["steering_run_id"], "run-active")
+
+        self.module["steer_queued_agent_run_request_service"].return_value = SimpleNamespace(
+            id="run-new", thread_id="t", agent_status="pending", request_id="q1",
+        )
+        promoted = await self.module["steer_queued_agent_run_request"]("q1", SimpleNamespace(uid="u"), object())
+        self.assertEqual(promoted["run_id"], "run-new")
+        self.assertEqual(promoted["stream_url"], "/api/agent/runs/run-new/events?thread_id=t")
+
 
 class SteerGraceTest(unittest.IsolatedAsyncioTestCase):
     async def test_expired_steer_wakes_cancellable_stream_without_losing_lease(self):
