@@ -119,8 +119,8 @@ class FakeAgentRunRepository:
         return self.pending_interaction_run
 
 
-class FakeAgentRunRequestRepository:
-    """在内存中模拟 AgentRunRequest Repository。"""
+class FakeAgentRunRequestQueueRepository:
+    """在内存中模拟 AgentRunRequestQueue Repository。"""
 
     def __init__(self) -> None:
         self.queued: list[SimpleNamespace] = []
@@ -235,7 +235,7 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
         self.db = FakeSession()
         self.conversations = FakeConversationRepository()
         self.runs = FakeAgentRunRepository()
-        self.requests = FakeAgentRunRequestRepository()
+        self.requests = FakeAgentRunRequestQueueRepository()
         self.message_attachments = FakeMessageAttachmentRepository()
         self.users = FakeUserRepository()
         self.agents = FakeAgentRepository()
@@ -251,7 +251,7 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
                 return_value=self.runs,
             ),
             patch(
-                "server.service.thread_service.AgentRunRequestRepository",
+                "server.service.thread_service.AgentRunRequestQueueRepository",
                 return_value=self.requests,
             ),
             patch(

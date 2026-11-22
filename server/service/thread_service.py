@@ -37,7 +37,7 @@ from src.database import (
 from src.database.repositories import (
     AgentRepository,
     AgentRunRepository,
-    AgentRunRequestRepository,
+    AgentRunRequestQueueRepository,
     ConversationRepository,
     MessageAttachmentRepository,
     ProjectRepository,
@@ -231,7 +231,7 @@ async def get_thread_detail(
         uid=uid,
         thread_id=thread_id,
     )
-    queued_requests = await AgentRunRequestRepository(db).list_queued_for_thread(
+    queued_requests = await AgentRunRequestQueueRepository(db).list_queued_for_thread(
         thread_id,
         uid=uid,
     )
@@ -1218,7 +1218,7 @@ async def save_message_from_langgraph_state(
     stop_reason = None
     if interrupt_message is None and (
         checkpoint.values.get("steered_run_id") == run_id
-        or await AgentRunRequestRepository(db).has_queued_steer_for_thread(thread_id)
+        or await AgentRunRequestQueueRepository(db).has_queued_steer_for_thread(thread_id)
     ):
         stop_reason = "steered"
         locked_run.run_metadata = {**dict(locked_run.run_metadata or {}), "stop_reason": stop_reason}

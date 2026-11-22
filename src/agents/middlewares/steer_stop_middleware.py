@@ -4,7 +4,7 @@ from typing import NotRequired
 
 from langchain.agents.middleware import AgentMiddleware, AgentState, hook_config
 
-from src.database.repositories import AgentRunRequestRepository
+from src.database.repositories import AgentRunRequestQueueRepository
 from src.database.session import session_context
 
 
@@ -18,7 +18,7 @@ class SteerStopMiddleware(AgentMiddleware):
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state, runtime):
         async with session_context() as db:
-            should_stop = await AgentRunRequestRepository(db).has_queued_steer_for_thread(
+            should_stop = await AgentRunRequestQueueRepository(db).has_queued_steer_for_thread(
                 runtime.context.thread_id,
             )
         if should_stop:

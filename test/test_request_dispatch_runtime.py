@@ -50,7 +50,7 @@ class SteerBoundaryTest(unittest.IsolatedAsyncioTestCase):
         config = {"configurable": {"thread_id": "thread-1"}}
         with (
             patch.object(steer, "session_context", fake_session),
-            patch.object(steer, "AgentRunRequestRepository", return_value=SimpleNamespace(has_queued_steer_for_thread=should_stop)),
+            patch.object(steer, "AgentRunRequestQueueRepository", return_value=SimpleNamespace(has_queued_steer_for_thread=should_stop)),
         ):
             result = await graph.ainvoke({"messages": [HumanMessage(content="go")]}, config, context=SimpleNamespace(thread_id="thread-1", run_id="run-1"))
         self.assertEqual(executed, ["before_model", "tool", "before_model"])
@@ -63,7 +63,7 @@ class SteerBoundaryTest(unittest.IsolatedAsyncioTestCase):
         middleware = steer.SteerStopMiddleware()
         with (
             patch.object(steer, "session_context", fake_session),
-            patch.object(steer, "AgentRunRequestRepository", return_value=SimpleNamespace(has_queued_steer_for_thread=AsyncMock(return_value=False))),
+            patch.object(steer, "AgentRunRequestQueueRepository", return_value=SimpleNamespace(has_queued_steer_for_thread=AsyncMock(return_value=False))),
         ):
             self.assertIsNone(await middleware.abefore_model({}, SimpleNamespace(context=SimpleNamespace(thread_id="t"))))
 
@@ -210,7 +210,7 @@ class SteerGraceTest(unittest.IsolatedAsyncioTestCase):
             patch.object(worker.asyncio, "sleep", AsyncMock()),
             patch.object(worker, "_renew_run_lease", AsyncMock(return_value=True)),
             patch.object(worker.postgres_manager, "get_async_session_context", fake_session),
-            patch.object(worker, "AgentRunRequestRepository", return_value=SimpleNamespace(has_expired_steer_for_run=AsyncMock(return_value=True))),
+            patch.object(worker, "AgentRunRequestQueueRepository", return_value=SimpleNamespace(has_expired_steer_for_run=AsyncMock(return_value=True))),
         ):
             await controller._heartbeat_lease()
         self.assertTrue(await controller.has_cancel_signal())

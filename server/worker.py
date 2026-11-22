@@ -12,7 +12,7 @@ from arq.worker import RetryJob, func
 from sqlalchemy import select
 
 import src.agents.buildin as agent
-from server.service.agent_run_service import dispatch_next_queued_request
+from server.service.agent_run_request_queue_service import dispatch_next_queued_request
 from server.service.arq_queue_servcie import (
     RUN_REDIS_TTL_SECONDS,
     clear_agent_run_cancel_signal,
@@ -35,7 +35,7 @@ from src.database.models import AgentRun, Message, User
 from src.database.repositories import (
     AgentRepository,
     AgentRunRepository,
-    AgentRunRequestRepository,
+    AgentRunRequestQueueRepository,
 )
 from src.database.repositories.agent_run_repository import (
     AGENT_RUN_TERMINAL_STATUSES,
@@ -153,7 +153,7 @@ class AgentRunController:
                 renewed = await _renew_run_lease(self.run_id, self.worker_id)
                 if renewed:
                     async with postgres_manager.get_async_session_context() as db:
-                        steer_expired = await AgentRunRequestRepository(db).has_expired_steer_for_run(
+                        steer_expired = await AgentRunRequestQueueRepository(db).has_expired_steer_for_run(
                             self.run_id, grace_seconds=STEER_GRACE_SECONDS,
                         )
                     if steer_expired:
