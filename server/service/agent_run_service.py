@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.exception import AgentRunTimeOut
 from server.service.arq_queue_servcie import (
     build_agent_chunk_envolope,
-    get_arq_pool,
+    enqueue_agent_run,
     publish_agent_run_cancel_signal,
     read_agent_run_stream_events,
     read_recent_agent_run_stream_events,
@@ -29,7 +29,6 @@ from server.service.attachment_service import (
 from server.service.input_message_service import build_agent_input_msg
 from server.service.model_service import resolve_runtime_model
 from server.utils.agent_run_utils import format_agent_run_sse
-from src.configs import config
 from src.database.models import AgentRun, AgentRunRequest, Conversation, User
 from src.database.repositories import (
     AgentRepository,
@@ -530,17 +529,6 @@ async def create_resume_agent_run_service(
         if failed_run is not None:
             resume_run = failed_run
     return resume_run
-
-
-async def enqueue_agent_run(run_id: str) -> None:
-    queue = await get_arq_pool()
-    logger.info(f"当前事件 ID：{run_id}入队中...")
-    await queue.enqueue_job(
-        "process_agent_run",
-        run_id,
-        _job_id=f"run:{run_id}",
-        _queue_name=config.arq_queue_name,
-    )
 
 
 async def load_agent_run_result(run_id: str, uid: str):

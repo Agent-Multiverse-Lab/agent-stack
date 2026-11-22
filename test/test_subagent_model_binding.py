@@ -44,7 +44,7 @@ class SubAgentModelBindingTest(unittest.IsolatedAsyncioTestCase):
             current = patch.object(subagent_service, target, return_value=value)
             current.start()
             self.addCleanup(current.stop)
-        current = patch.object(subagent_service.agent_run_service, "enqueue_agent_run", self.enqueue)
+        current = patch.object(subagent_service, "enqueue_agent_run", self.enqueue)
         current.start()
         self.addCleanup(current.stop)
         current = patch.object(

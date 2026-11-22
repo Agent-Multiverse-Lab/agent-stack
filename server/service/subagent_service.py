@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import server.service.agent_run_service as agent_run_service
+from server.service.arq_queue_servcie import enqueue_agent_run
 from server.service.input_message_service import AgentInputMsg
 from server.service.model_service import resolve_runtime_model
 from src.database.models import AgentRun, Conversation, Message
@@ -137,7 +137,7 @@ class SubAgentRunService:
             tool_call_id=tool_call_id,
             request_id=request_id,
         )
-        await agent_run_service.enqueue_agent_run(record["run_id"])
+        await enqueue_agent_run(record["run_id"])
         return record
 
     async def get_parent_run(self, *, created_by_run_id: str) -> AgentRun:

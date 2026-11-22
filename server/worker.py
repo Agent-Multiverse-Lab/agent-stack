@@ -12,10 +12,11 @@ from arq.worker import RetryJob, func
 from sqlalchemy import select
 
 import src.agents.buildin as agent
-from server.service.agent_run_service import dispatch_next_queued_request, enqueue_agent_run
+from server.service.agent_run_service import dispatch_next_queued_request
 from server.service.arq_queue_servcie import (
     RUN_REDIS_TTL_SECONDS,
     clear_agent_run_cancel_signal,
+    enqueue_agent_run,
     has_agent_run_cancel_signal,
     publish_agent_run_cancel_signal,
     wait_agent_run_cancel_signal,
