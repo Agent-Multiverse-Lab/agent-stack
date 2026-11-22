@@ -69,8 +69,8 @@ SatelliteAgent -> Python gRPC Client -> Go Gateway -> PostgreSQL/PostGIS
 ## 7. Document Ownership
 
 - 稳定的全局原则：[`docs/constitution.md`](../constitution.md)。
-- 系统拓扑和模块所有权：本目录。
-- 能力行为、合同和验收：[`docs/spec/`](../spec/README.md)。
+- 系统拓扑、模块所有权与长期不变量：本目录。
+- 进行中的单文件功能设计：[`docs/develop/`](../develop/README.md)（具体接口与字段定义以源码和测试为准）。
 - 长期技术取舍：[`docs/adr/`](../adr/README.md)。
 - 源码只实现并验证上述文档，不反向复制完整架构说明。
 

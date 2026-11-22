@@ -1,8 +1,6 @@
 # Web 前端设计与开发规范
 
-本文档是 `web/` 的前端规范入口，适用于页面、布局、组件、Hooks、样式和交互变更。产品能力的
-具体行为仍由 [`docs/spec/product/`](../spec/product/README.md) 下对应的 capability 规定；本文件
-只定义跨页面通用的工程与设计规则。
+本文档是 `web/` 的前端规范入口，适用于页面、布局、组件、Hooks、样式和交互变更。本文件只定义跨页面通用的工程与设计规则，具体页面与接口协议以源码为准。
 
 ## 1. 技术与权威来源
 
@@ -100,8 +98,7 @@ web/
 
 ## 6. 品牌与资源
 
-- 产品名称、Logo 语义和品牌展示位置以
-  [`docs/spec/product/branding/spec.md`](../spec/product/branding/spec.md) 为准。
+- 活跃 Web 界面的产品名统一为 `AM`（全称 `Agent Multiverse`，品牌句 `A universe for agents.`），不得显示旧称 `AU` 或 `Multi-Agent S2C`；Git 仓库名、后端服务、API 及既有存储键（如 `au.access_token`）保持不变。
 - `web/src/assets/logo.svg` 是前端 Logo 的唯一源文件；favicon、导航和认证页面复用该资源，不创建
   页面专用副本。
 - 静态图片、标志和字体放在 `web/src/assets/`；只有无需构建处理、需要按原路径直接提供的资源才放

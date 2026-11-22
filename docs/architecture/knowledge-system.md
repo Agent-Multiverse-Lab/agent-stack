@@ -4,12 +4,6 @@
 
 管理知识库文件生命周期：上传 -> 解析 -> 切块 -> 向量化 -> 索引 -> 检索/重排。
 
-行为规格入口：
-
-- [Knowledge Ingestion Spec](../spec/knowledge/ingestion/spec.md)
-- [Knowledge Retrieval Spec](../spec/knowledge/retrieval/spec.md)
-- [Knowledge Evaluation Spec](../spec/knowledge/evaluation/spec.md)
-
 ## 2. Pipeline Components
 
 - `server/service/knowledge_service.py`：服务编排（上传、解析、索引、检索、图谱抽取、问答）。

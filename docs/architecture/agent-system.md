@@ -4,12 +4,6 @@
 
 负责将上下文转为可执行的代理图，统一入口是 `LeaderAgent`，并通过中间件连接子代理与工具。
 
-行为规格入口：
-
-- [Context Management Spec](../spec/agent/context-management/spec.md)
-- [Subagent Delegation Spec](../spec/agent/subagent-delegation/spec.md)
-- [Agent Construction Spec](../spec/agent/agent-construction/spec.md)
-
 ## 2. Core Components
 
 - `src/agents/base_agent.py`：agent 执行基类。

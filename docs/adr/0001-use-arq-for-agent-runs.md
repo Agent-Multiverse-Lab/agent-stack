@@ -18,4 +18,3 @@ Run 执行统一走 `ARQ`。
 
 ## References
 - [run-system.md](../architecture/run-system.md)
-- [docs/spec/run/README.md](../spec/run/README.md)

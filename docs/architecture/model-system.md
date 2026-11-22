@@ -5,10 +5,6 @@
 Model System 管理平台级 Chat Provider、公开模型列表和单次 Run 的模型连接解析。
 PostgreSQL 保存配置真相，Redis 缓存脱敏模型列表，Worker 创建仅在当前执行期间存在的 ChatModel。
 
-具体合同见 [Model Provider Management](../spec/model/provider-management/spec.md)，页面行为见
-[Settings 模型管理](../spec/product/model-settings/spec.md) 和
-[Chat 模型选择](../spec/product/chat-model-selection/spec.md)。
-
 ## 2. 当前边界
 
 全局表、预置补齐、管理员路由、数据库模型列表、缓存和 Agent 运行时已经接入。`/api/models` 从

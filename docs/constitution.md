@@ -13,7 +13,7 @@
 每个状态和关键流程只能有一个持久化 Owner，避免重复写入和互相覆盖。
 
 ### C4. 终态单向
-`AgentRun` 的终态只能是 `completed` / `failed` / `cancelled`，且不可从终态回退。
+`AgentRun` 的终态只能是 `completed` / `failed` / `cancelled` / `interrupted`，且不可从终态回退。
 
 ### C5. 事件是副本，不是真相
 `Redis Stream` 是消费型事件通道，不承接状态真相；状态读取与转移必须回到数据库。
@@ -23,7 +23,7 @@
 `cancel_requested` 只是中间态，最终落库必须通过终态确定。
 
 ### C7. Documentation on Demand
-文档按实际需要维护，不作为功能实现的前置门禁。普通功能变更不强制创建或更新 `docs/spec`。
+文档按实际需要维护，不作为功能实现的前置门禁。普通功能变更直接实现，不强制在 `docs/develop/` 创建设计文档。
 
 ### C8. 可验证
 关键行为（状态、取消、终态事件）必须有对应验收标准并可追踪测试点。

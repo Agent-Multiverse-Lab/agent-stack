@@ -4,8 +4,6 @@
 
 定义持久化真相与运行时缓存的分工边界。
 
-行为规格入口：[State Ownership Spec](../spec/persistence/state-ownership/spec.md)。
-
 ## 2. Storage by Responsibility
 
 ### PostgreSQL (Source of Truth)
@@ -59,5 +57,5 @@
 | `model:chat:list:v3` | Redis | `ModelProvider` 已启用 Chat 模型的可丢弃、可重建、不含连接参数的全局展示投影 |
 
 Redis、内存、RustFS 和 Milvus 不得复制 PostgreSQL 的权威业务状态；如果新增副本，
-必须先在对应能力文档中说明 Owner、生命周期、一致性和清理规则。
+必须先在对应架构文档中说明 Owner、生命周期、一致性和清理规则。
 全局模型列表不是可独立修改的业务状态；缓存失效、损坏或过期时必须从 PostgreSQL 重建。
