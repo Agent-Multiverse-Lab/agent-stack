@@ -115,7 +115,7 @@ class DispatchHTTPTest(unittest.IsolatedAsyncioTestCase):
         from fastapi.responses import JSONResponse
 
         from server.entities.agent import AgentRunCreateRequest
-        from server.service.agent_run_service import AgentRunConflictError
+        from server.exception import AgentRunConflictError
 
         tree = ast.parse(Path("server/router/agent_router.py").read_text())
         target_names = {
@@ -131,9 +131,11 @@ class DispatchHTTPTest(unittest.IsolatedAsyncioTestCase):
             AgentRunCreateRequest=AgentRunCreateRequest, AuthenticatedUser=Any, AsyncSession=Any,
             Depends=Depends, get_db=Mock(), HTTPException=HTTPException, JSONResponse=JSONResponse,
             status=status, config=SimpleNamespace(enable_run_queue=True), AgentRunConflictError=AgentRunConflictError,
-            create_agent_run_service=AsyncMock(),
-            cancel_queued_agent_run_request_service=AsyncMock(),
-            steer_queued_agent_run_request_service=AsyncMock(),
+            agent_run_request_service=SimpleNamespace(submit_agent_run_request=AsyncMock()),
+            agent_run_request_queue_service=SimpleNamespace(
+                cancel_queued_request=AsyncMock(),
+                steer_queued_request=AsyncMock(),
+            ),
         )
         exec(compile(ast.Module(body=nodes, type_ignores=[]), "router", "exec"), self.module)
 
@@ -149,14 +151,14 @@ class DispatchHTTPTest(unittest.IsolatedAsyncioTestCase):
             request_model(agent_id="a", thread_id="t", dispatch_policy="queue")
 
         enqueue_response = {"run_id": None, "stream_url": None, "status": "queued", "dispatch_policy": "enqueue", "request_id": "q1", "queue_position": 1, "steering_run_id": None}
-        self.module["create_agent_run_service"].return_value = enqueue_response
+        self.module["agent_run_request_service"].submit_agent_run_request.return_value = enqueue_response
         result = await self.module["create_agent_run"](default_req, SimpleNamespace(uid="u"), object())
         self.assertEqual(result.status_code, 202)
         self.assertEqual(json.loads(result.body), enqueue_response)
         self.assertIsNone(json.loads(result.body)["steering_run_id"])
 
         steer_response = {"run_id": None, "stream_url": None, "status": "queued", "dispatch_policy": "steer", "request_id": "q2", "queue_position": 1, "steering_run_id": "r"}
-        self.module["create_agent_run_service"].return_value = steer_response
+        self.module["agent_run_request_service"].submit_agent_run_request.return_value = steer_response
         result = await self.module["create_agent_run"](
             request_model(agent_id="a", thread_id="t", dispatch_policy="steer"),
             SimpleNamespace(uid="u"), object(),
@@ -170,23 +172,23 @@ class DispatchHTTPTest(unittest.IsolatedAsyncioTestCase):
         from fastapi import HTTPException
         conflict_cls = self.module["AgentRunConflictError"]
 
-        self.module["cancel_queued_agent_run_request_service"].return_value = {"request_id": "q1", "status": "cancelled"}
+        self.module["agent_run_request_queue_service"].cancel_queued_request.return_value = {"request_id": "q1", "status": "cancelled"}
         self.assertEqual(
             await self.module["cancel_queued_agent_run_request"]("q1", SimpleNamespace(uid="u"), object()),
             {"request_id": "q1", "status": "cancelled"},
         )
 
-        self.module["cancel_queued_agent_run_request_service"].side_effect = LookupError("等待区请求不存在")
+        self.module["agent_run_request_queue_service"].cancel_queued_request.side_effect = LookupError("等待区请求不存在")
         with self.assertRaises(HTTPException) as missing:
             await self.module["cancel_queued_agent_run_request"]("q1", SimpleNamespace(uid="u"), object())
         self.assertEqual(missing.exception.status_code, 404)
 
-        self.module["cancel_queued_agent_run_request_service"].side_effect = conflict_cls("请求已开始执行", run_id="run-9")
+        self.module["agent_run_request_queue_service"].cancel_queued_request.side_effect = conflict_cls("请求已开始执行", run_id="run-9")
         conflict_resp = await self.module["cancel_queued_agent_run_request"]("q1", SimpleNamespace(uid="u"), object())
         self.assertEqual(conflict_resp.status_code, 409)
         self.assertEqual(json.loads(conflict_resp.body), {"detail": "请求已开始执行", "run_id": "run-9"})
 
-        self.module["steer_queued_agent_run_request_service"].return_value = {
+        self.module["agent_run_request_queue_service"].steer_queued_request.return_value = {
             "run_id": None, "thread_id": "t", "status": "queued", "dispatch_policy": "steer",
             "request_id": "q1", "queue_position": 1, "steering_run_id": "run-active", "stream_url": None,
         }
@@ -194,7 +196,7 @@ class DispatchHTTPTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(steered.status_code, 202)
         self.assertEqual(json.loads(steered.body)["steering_run_id"], "run-active")
 
-        self.module["steer_queued_agent_run_request_service"].return_value = SimpleNamespace(
+        self.module["agent_run_request_queue_service"].steer_queued_request.return_value = SimpleNamespace(
             id="run-new", thread_id="t", agent_status="pending", request_id="q1",
         )
         promoted = await self.module["steer_queued_agent_run_request"]("q1", SimpleNamespace(uid="u"), object())
@@ -280,7 +282,7 @@ class WorkerTwoModeDispatchTest(unittest.IsolatedAsyncioTestCase):
                 patch.object(worker, "reslove_thread_id", side_effect=lambda _c, tid: tid),
                 patch.object(worker, "write_stream_event", AsyncMock()),
                 patch.object(worker, "write_end_stream_event", AsyncMock()),
-                patch.object(worker, "_finalize_run", AsyncMock(return_value=(final_status, changed))) as finalize_mock,
+                patch.object(worker, "finalize_run", AsyncMock(return_value=(final_status, changed))) as finalize_mock,
                 patch.object(worker, "dispatch_next_queued_request", dispatch_mock),
             ):
                 await worker.process_agent_run({"worker_id": "w1"}, "run-1")

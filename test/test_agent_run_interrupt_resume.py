@@ -75,7 +75,7 @@ class ResumeServiceTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.enqueue_patch.stop)
 
     async def submit(self, answers=None, uid="user-1", thread_id="thread-1", request_id="request-1", agent_id="LeaderAgent"):
-        return await agent_run_service.create_resume_agent_run_service(
+        return await agent_run_service.create_resume_agent_run(
             db=self.db, current_user=SimpleNamespace(uid=uid), interrupted_run_id="parent-run",
             agent_id=agent_id, thread_id=thread_id,
             request_metadata={"type": "resume", "request_id": request_id, "model": "injected-model",
@@ -101,7 +101,7 @@ class ResumeServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_resume_endpoint_rejects_chat_type(self):
         with self.assertRaisesRegex(ValueError, "request_metadata.type"):
-            await agent_run_service.create_resume_agent_run_service(
+            await agent_run_service.create_resume_agent_run(
                 db=self.db, current_user=SimpleNamespace(uid="user-1"), interrupted_run_id="parent-run",
                 agent_id="LeaderAgent", thread_id="thread-1", request_metadata={"type": "chat"},
             )
@@ -365,7 +365,7 @@ class ResumeWorkerTest(unittest.IsolatedAsyncioTestCase):
             "_get_agent_input_msg": AsyncMock(side_effect=AssertionError("Resume must not load HumanMessage")),
             "set_run_running": AsyncMock(return_value=SimpleNamespace(agent_status="running")),
             "AgentRunController": Mock(return_value=controller), "resume_agent_response": stream,
-            "_finalize_run": finalize, "write_stream_event": AsyncMock(), "write_end_stream_event": AsyncMock(),
+            "finalize_run": finalize, "write_stream_event": AsyncMock(), "write_end_stream_event": AsyncMock(),
         }
         with patch.multiple(worker, **patches), patch.object(worker.postgres_manager, "get_async_session_context", session):
             await worker.process_agent_run({"worker_id": "worker-test"}, "resume-run")

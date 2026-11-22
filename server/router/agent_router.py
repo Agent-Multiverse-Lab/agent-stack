@@ -10,14 +10,11 @@ from server.entities.agent import (
     AgentRunCreateRequest,
     AgentUpdateRequest,
 )
-from server.service.agent_run_service import (
-    AgentRunConflictError,
-    cancel_queued_agent_run_request_service,
-    cancel_run_service,
-    create_agent_run_service,
-    create_resume_agent_run_service,
-    steer_queued_agent_run_request_service,
-    stream_agent_run_events,
+from server.exception import AgentRunConflictError
+from server.service import (
+    agent_run_request_queue_service,
+    agent_run_request_service,
+    agent_run_service,
 )
 from server.service.agent_service import get_agent_context
 from server.utils.auth import AuthenticatedUser
@@ -101,7 +98,7 @@ async def create_agent_run(
         )
 
     try:
-        run = await create_agent_run_service(
+        run = await agent_run_request_service.submit_agent_run_request(
             db=db,
             current_user=current_user,
             query=agentrun_request.query,
@@ -161,7 +158,7 @@ async def cancel_queued_agent_run_request(
 ):
     """逻辑软取消等待区中的排队请求及其未绑定输入消息。"""
     try:
-        return await cancel_queued_agent_run_request_service(
+        return await agent_run_request_queue_service.cancel_queued_request(
             db=db,
             current_user=current_user,
             request_id=request_id,
@@ -189,7 +186,7 @@ async def steer_queued_agent_run_request(
         )
 
     try:
-        result = await steer_queued_agent_run_request_service(
+        result = await agent_run_request_queue_service.steer_queued_request(
             db=db,
             current_user=current_user,
             request_id=request_id,
@@ -236,7 +233,7 @@ async def resume_agent_run(
         )
 
     try:
-        run = await create_resume_agent_run_service(
+        run = await agent_run_service.create_resume_agent_run(
             db=db,
             current_user=current_user,
             interrupted_run_id=interrupted_run_id,
@@ -281,7 +278,7 @@ async def cancel_agent_run(
 ):
     """请求取消当前用户的 Agent Run。"""
     try:
-        return await cancel_run_service(
+        return await agent_run_service.cancel_agent_run(
             run_id=run_id,
             current_user_id=current_user.uid,
             db=db,
@@ -312,7 +309,7 @@ async def stream_run_event(
         raise HTTPException(status_code=404, detail="Agent Run 不存在")
 
     return StreamingResponse(
-        stream_agent_run_events(
+        agent_run_service.stream_agent_run_events(
             run_id=run_id,
             current_uid=current_user.uid,
             thread_id=thread_id,

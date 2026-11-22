@@ -10,7 +10,7 @@ from server.worker import (
     AgentRunController,
     StreamEventSmoother,
     _cancellable_stream,
-    _finalize_run,
+    finalize_run,
     map_stream_event,
     process_agent_run,
     write_end_stream_event,
@@ -311,7 +311,7 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
             patch("server.worker.write_stream_event", side_effect=write_event),
             patch("server.worker.write_end_stream_event", side_effect=write_end),
         ):
-            result = await _finalize_run(
+            result = await finalize_run(
                 "parent-run", worker_id="owner-1",
                 status="interrupted",
                 thread_id="thread-1",
@@ -347,7 +347,7 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
                 new_callable=AsyncMock,
             ) as clear_cancel,
         ):
-            result = await _finalize_run(
+            result = await finalize_run(
                 "run-1", worker_id="owner-1",
                 status="failed",
                 thread_id="thread-1",
@@ -388,7 +388,7 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
                 new_callable=AsyncMock,
             ) as clear_cancel,
         ):
-            result = await _finalize_run(
+            result = await finalize_run(
                 "run-1", worker_id="owner-1",
                 status="cancelled",
                 thread_id="thread-1",
@@ -420,7 +420,7 @@ class AgentRunFinalizationTest(unittest.IsolatedAsyncioTestCase):
                 new_callable=AsyncMock,
             ) as write_end_event,
         ):
-            result = await _finalize_run(
+            result = await finalize_run(
                 "run-1", worker_id="owner-1",
                 status="completed",
                 thread_id="thread-1",
@@ -479,7 +479,7 @@ class AgentRunPreStreamFailureTest(unittest.IsolatedAsyncioTestCase):
                 new_callable=AsyncMock,
             ) as set_terminal,
             patch(
-                "server.worker._finalize_run",
+                "server.worker.finalize_run",
                 new_callable=AsyncMock,
             ) as finalizer,
             patch(
@@ -516,7 +516,7 @@ class AgentRunPreStreamFailureTest(unittest.IsolatedAsyncioTestCase):
                 new_callable=AsyncMock,
             ) as set_terminal,
             patch(
-                "server.worker._finalize_run",
+                "server.worker.finalize_run",
                 new_callable=AsyncMock,
             ) as finalizer,
             patch(
@@ -562,7 +562,7 @@ class AgentRunPreStreamFailureTest(unittest.IsolatedAsyncioTestCase):
                 new_callable=AsyncMock,
             ) as clear_cancel,
             patch(
-                "server.worker._finalize_run",
+                "server.worker.finalize_run",
                 new_callable=AsyncMock,
             ) as finalizer,
             patch(
@@ -668,7 +668,7 @@ class AgentRunProcessTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=session_context,
             ),
             patch("server.worker.set_run_terminal", side_effect=set_terminal),
-            patch("server.worker._finalize_run", wraps=_finalize_run) as finalizer,
+            patch("server.worker.finalize_run", wraps=finalize_run) as finalizer,
             patch("server.worker.write_stream_event", side_effect=write_event),
             patch("server.worker.write_end_stream_event", side_effect=write_end),
             patch(

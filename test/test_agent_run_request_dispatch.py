@@ -15,7 +15,12 @@ from sqlalchemy import create_engine, delete, func, inspect, select, text, updat
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
-from server.service import agent_run_service, attachment_service
+from server.exception import AgentRunConflictError
+from server.service import (
+    agent_run_request_queue_service,
+    agent_run_request_service,
+    attachment_service,
+)
 from src.configs import config
 from src.database.base import Base
 from src.database.models import (
@@ -283,10 +288,12 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         self.model = AsyncMock(return_value=object())
         self.storage = SimpleNamespace(acopy_file=AsyncMock(), adelete_file=AsyncMock())
         for current in (
-            patch.object(agent_run_service, "enqueue_agent_run", self.enqueue),
-            patch.object(agent_run_service, "resolve_runtime_model", self.model),
+            patch.object(agent_run_request_service, "enqueue_agent_run", self.enqueue),
+            patch.object(agent_run_request_service, "resolve_runtime_model", self.model),
+            patch.object(agent_run_request_queue_service, "enqueue_agent_run", self.enqueue),
+            patch.object(agent_run_request_queue_service, "resolve_runtime_model", self.model),
             patch.object(attachment_service, "get_storage", return_value=self.storage),
-            patch.object(agent_run_service.logger, "exception"),
+            patch.object(agent_run_request_queue_service.logger, "exception"),
         ):
             current.start()
             self.addCleanup(current.stop)
@@ -314,9 +321,9 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         }
         values.update(changes)
         if db is not None:
-            return await agent_run_service.create_agent_run_service(db=db, **values)
+            return await agent_run_request_service.submit_agent_run_request(db=db, **values)
         async with self.sessions() as session:
-            return await agent_run_service.create_agent_run_service(db=session, **values)
+            return await agent_run_request_service.submit_agent_run_request(db=session, **values)
 
     async def counts(self):
         async with self.sessions() as db:
@@ -357,7 +364,7 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_busy_reject_does_not_save_input(self):
         await self.add_blocking_run()
-        with self.assertRaisesRegex(agent_run_service.AgentRunConflictError, "正在执行"):
+        with self.assertRaisesRegex(AgentRunConflictError, "正在执行"):
             await self.submit(dispatch_policy="reject")
         self.assertEqual(await self.counts(), (0, 0, 1, 0))
         self.enqueue.assert_not_awaited()
@@ -368,8 +375,8 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         async def session_context():
             async with self.sessions() as db:
                 yield db
-        with patch.object(agent_run_service, "session_context", session_context):
-            return await agent_run_service.dispatch_next_queued_request("thread-1")
+        with patch.object(agent_run_request_queue_service, "session_context", session_context):
+            return await agent_run_request_queue_service.dispatch_next_queued_request("thread-1")
 
     async def finish_blocker(self):
         async with self.sessions() as db:
@@ -384,7 +391,7 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(queued["queue_position"], 1)
         self.assertIsNone(queued["steering_run_id"])
         async with self.sessions() as db:
-            self.assertFalse(await AgentRunRequestRepository(db).has_queued_steer_for_thread("thread-1"))
+            self.assertFalse(await AgentRunRequestQueueRepository(db).has_queued_steer_for_thread("thread-1"))
         self.assertIsNone(await self.promote())
         await self.finish_blocker()
         run = await self.promote()
@@ -400,7 +407,7 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second["queue_position"], 2)
 
         async with self.sessions() as db:
-            upgraded = await agent_run_service.steer_queued_agent_run_request_service(
+            upgraded = await agent_run_request_queue_service.steer_queued_request(
                 db=db, current_user=user, request_id="req-2",
             )
             self.assertEqual(upgraded["dispatch_policy"], "steer")
@@ -408,35 +415,35 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(upgraded["steering_run_id"], "blocker")
 
         async with self.sessions() as db:
-            cancelled = await agent_run_service.cancel_queued_agent_run_request_service(
+            cancelled = await agent_run_request_queue_service.cancel_queued_request(
                 db=db, current_user=user, request_id="req-1",
             )
             self.assertEqual(cancelled, {"request_id": "req-1", "status": "cancelled"})
-            again = await agent_run_service.cancel_queued_agent_run_request_service(
+            again = await agent_run_request_queue_service.cancel_queued_request(
                 db=db, current_user=user, request_id="req-1",
             )
             self.assertEqual(again["status"], "cancelled")
 
-        with self.assertRaisesRegex(agent_run_service.AgentRunConflictError, "取消"):
+        with self.assertRaisesRegex(AgentRunConflictError, "取消"):
             await self.submit("req-1")
 
         await self.finish_blocker()
         async with self.sessions() as db:
-            promoted = await agent_run_service.steer_queued_agent_run_request_service(
+            promoted = await agent_run_request_queue_service.steer_queued_request(
                 db=db, current_user=user, request_id="req-2",
             )
             self.assertEqual(promoted.request_id, "req-2")
 
         async with self.sessions() as db:
-            with self.assertRaises(agent_run_service.AgentRunConflictError) as conflict:
-                await agent_run_service.cancel_queued_agent_run_request_service(
+            with self.assertRaises(AgentRunConflictError) as conflict:
+                await agent_run_request_queue_service.cancel_queued_request(
                     db=db, current_user=user, request_id="req-2",
                 )
             self.assertEqual(conflict.exception.run_id, promoted.id)
 
         async with self.sessions() as db:
-            with self.assertRaises(agent_run_service.AgentRunConflictError) as steer_conflict:
-                await agent_run_service.steer_queued_agent_run_request_service(
+            with self.assertRaises(AgentRunConflictError) as steer_conflict:
+                await agent_run_request_queue_service.steer_queued_request(
                     db=db, current_user=user, request_id="req-2",
                 )
             self.assertEqual(steer_conflict.exception.run_id, promoted.id)
@@ -485,7 +492,7 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         await self.add_blocking_run()
         await self.submit(dispatch_policy="steer")
         async with self.sessions() as db:
-            repo = AgentRunRequestRepository(db)
+            repo = AgentRunRequestQueueRepository(db)
             self.assertFalse(await repo.has_expired_steer_for_run("blocker", grace_seconds=120))
             await db.execute(update(AgentRunRequest).values(created_at=datetime.now(UTC) - timedelta(seconds=121)))
             await db.commit()
@@ -494,7 +501,7 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
     async def test_pending_interaction_rejects_without_input(self):
         await self.add_blocking_run("interrupted")
         for policy in ("enqueue", "reject", "steer"):
-            with self.assertRaisesRegex(agent_run_service.AgentRunConflictError, "待回答"):
+            with self.assertRaisesRegex(AgentRunConflictError, "待回答"):
                 await self.submit(dispatch_policy=policy)
         self.assertEqual(await self.counts(), (0, 0, 1, 0))
         self.enqueue.assert_not_awaited()
@@ -552,7 +559,7 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
             return_exceptions=True,
         ), 15)
         self.assertEqual(sum(isinstance(value, AgentRun) for value in results), 1)
-        self.assertEqual(sum(isinstance(value, agent_run_service.AgentRunConflictError) for value in results), 1)
+        self.assertEqual(sum(isinstance(value, AgentRunConflictError) for value in results), 1)
         self.assertEqual(await self.counts(), (1, 1, 1, 0))
         self.enqueue.assert_awaited_once()
 
@@ -562,7 +569,7 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         ), 15)
         errors = [value for value in results if isinstance(value, Exception)]
         self.assertEqual(len(errors), 1)
-        self.assertIsInstance(errors[0], agent_run_service.AgentRunConflictError)
+        self.assertIsInstance(errors[0], AgentRunConflictError)
         self.assertEqual(str(errors[0]), "request_id 已被其他请求使用")
         self.assertEqual(await self.counts(), (1, 1, 1, 0))
 
@@ -577,7 +584,7 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
     async def test_request_ownership_checked_even_when_no_run_exists(self):
         await self.add_blocking_run()
         await self.submit(dispatch_policy="steer")
-        with self.assertRaisesRegex(agent_run_service.AgentRunConflictError, "其他请求"):
+        with self.assertRaisesRegex(AgentRunConflictError, "其他请求"):
             await self.submit(thread_id="thread-2")
         self.assertEqual(await self.counts(), (1, 1, 1, 0))
 
