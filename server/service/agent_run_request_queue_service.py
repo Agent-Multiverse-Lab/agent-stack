@@ -152,11 +152,11 @@ async def _require_owned_request_with_thread_lock(
     AgentRunRequest,
 ]:
     """校验等待区请求归属后持 Conversation FOR UPDATE 行锁复查最新状态。"""
-    request_repo = AgentRunRequestRepository(db)
+    agent_run_request_repo = AgentRunRequestRepository(db)
     queue_repo = AgentRunRequestQueueRepository(db)
     conversation_repo = ConversationRepository(db)
     run_repo = AgentRunRepository(db)
-    initial = await request_repo.get_by_request_id(request_id)
+    initial = await agent_run_request_repo.get_run_request_by_request_id(request_id)
     if initial is None or str(initial.uid) != uid:
         raise LookupError("等待区请求不存在")
     conversation = await conversation_repo.get_conversation_by_thread_id_for_user(
@@ -166,7 +166,7 @@ async def _require_owned_request_with_thread_lock(
     )
     if conversation is None:
         raise LookupError("当前会话不存在或已删除")
-    request = await request_repo.get_by_request_id(request_id)
+    request = await agent_run_request_repo.get_run_request_by_request_id(request_id)
     if request is None or str(request.uid) != uid:
         raise LookupError("等待区请求不存在")
     return queue_repo, run_repo, conversation, request
@@ -175,7 +175,7 @@ async def _require_owned_request_with_thread_lock(
 async def _raise_dispatched_conflict(
     run_repo: AgentRunRepository, request_id: str
 ) -> None:
-    existing_run = await run_repo.get_by_request_id(request_id)
+    existing_run = await run_repo.get_run_by_request_id(request_id)
     raise AgentRunConflictError(
         "请求已开始执行",
         run_id=str(existing_run.id) if existing_run is not None else None,

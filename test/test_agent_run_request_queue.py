@@ -101,7 +101,7 @@ class AgentRunRequestQueueRepositoryTest(unittest.IsolatedAsyncioTestCase):
         msg_3 = self._add_message("third steer")
         msg_4 = self._add_message("direct", status="completed")
 
-        req_1 = await self.requests.create_request(
+        req_1 = await self.requests.create_agent_run_request(
             request_id="req-1",
             uid="user-1",
             thread_id="thread-1",
@@ -111,7 +111,7 @@ class AgentRunRequestQueueRepositoryTest(unittest.IsolatedAsyncioTestCase):
             status="queued",
             queue_seq=await self.queue.get_next_queue_seq("thread-1"),
         )
-        await self.requests.create_request(
+        await self.requests.create_agent_run_request(
             request_id="req-2",
             uid="user-1",
             thread_id="thread-1",
@@ -121,7 +121,7 @@ class AgentRunRequestQueueRepositoryTest(unittest.IsolatedAsyncioTestCase):
             status="queued",
             queue_seq=await self.queue.get_next_queue_seq("thread-1"),
         )
-        req_3 = await self.requests.create_request(
+        req_3 = await self.requests.create_agent_run_request(
             request_id="req-3",
             uid="user-1",
             thread_id="thread-1",
@@ -131,7 +131,7 @@ class AgentRunRequestQueueRepositoryTest(unittest.IsolatedAsyncioTestCase):
             status="queued",
             queue_seq=await self.queue.get_next_queue_seq("thread-1"),
         )
-        req_4 = await self.requests.create_request(
+        req_4 = await self.requests.create_agent_run_request(
             request_id="req-4",
             uid="user-1",
             thread_id="thread-1",
@@ -267,12 +267,12 @@ class AgentRunRequestQueueServiceTest(unittest.IsolatedAsyncioTestCase):
         self.db.add_all([msg_1, msg_2])
         self.db.flush()
         requests = AgentRunRequestRepository(self.session)
-        await requests.create_request(
+        await requests.create_agent_run_request(
             request_id="req-1", uid="user-1", thread_id="thread-1",
             agent_id="leader", trigger_message_id=msg_1.id,
             dispatch_policy="enqueue", status="queued", queue_seq=1,
         )
-        await requests.create_request(
+        await requests.create_agent_run_request(
             request_id="req-2", uid="user-1", thread_id="thread-1",
             agent_id="leader", trigger_message_id=msg_2.id,
             dispatch_policy="enqueue", status="queued", queue_seq=2,

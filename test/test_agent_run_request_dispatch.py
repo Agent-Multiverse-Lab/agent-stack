@@ -98,7 +98,7 @@ class AgentRunRequestRepositoryTest(unittest.IsolatedAsyncioTestCase):
             getattr(migration, action)()
 
     async def create_request(self):
-        return await self.repository.create_request(
+        return await self.repository.create_agent_run_request(
             request_id="request-1", uid="user-1", thread_id="thread-1",
             agent_id="leader", trigger_message_id=1, dispatch_policy="reject", status="dispatched",
         )
@@ -108,7 +108,7 @@ class AgentRunRequestRepositoryTest(unittest.IsolatedAsyncioTestCase):
         self.db.commit()
         self.db.execute(update(Conversation).values(conversation_metadata={"model": "test/changed"}))
         self.db.commit()
-        request = await self.repository.get_by_request_id("request-1")
+        request = await self.repository.get_run_request_by_request_id("request-1")
         conversation = await ConversationRepository(self.session).get_conversation_by_thread_id_for_user(
             thread_id=request.thread_id, user_id=request.uid, for_update=True,
         )
@@ -132,19 +132,19 @@ class AgentRunRequestRepositoryTest(unittest.IsolatedAsyncioTestCase):
         )
         await ConversationRepository(self.session).bind_input_message_to_run(run)
         self.db.rollback()
-        self.assertIsNotNone(await self.repository.get_by_request_id("request-1"))
+        self.assertIsNotNone(await self.repository.get_run_request_by_request_id("request-1"))
         self.assertIsNone(self.db.get(Message, 1).agent_run_id)
         self.assertIsNone(self.db.get(AgentRun, "run-1"))
 
     async def test_repository_does_not_commit_and_message_delete_cascades(self):
         await self.create_request()
         self.db.rollback()
-        self.assertIsNone(await self.repository.get_by_request_id("request-1"))
+        self.assertIsNone(await self.repository.get_run_request_by_request_id("request-1"))
         await self.create_request()
         self.db.commit()
         self.db.execute(delete(Message))
         self.db.commit()
-        self.assertIsNone(await self.repository.get_by_request_id("request-1"))
+        self.assertIsNone(await self.repository.get_run_request_by_request_id("request-1"))
 
     async def test_enqueue_does_not_trigger_steer_and_pops_in_fifo_order(self):
         from datetime import UTC, datetime, timedelta
@@ -154,7 +154,7 @@ class AgentRunRequestRepositoryTest(unittest.IsolatedAsyncioTestCase):
             agent_slug="leader", request_id="blocking-request", trigger_message_id=None,
             agent_status="running",
         )
-        await self.repository.create_request(
+        await self.repository.create_agent_run_request(
             request_id="request-enqueue", uid="user-1", thread_id="thread-1",
             agent_id="leader", trigger_message_id=1, dispatch_policy="enqueue",
             status="queued", queue_seq=await self.queue.get_next_queue_seq("thread-1"),
@@ -169,7 +169,7 @@ class AgentRunRequestRepositoryTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await self.queue.has_queued_steer_for_thread("thread-1"))
         self.assertFalse(await self.queue.has_expired_steer_for_run("run-active", grace_seconds=120))
 
-        await self.repository.create_request(
+        await self.repository.create_agent_run_request(
             request_id="request-steer", uid="user-1", thread_id="thread-1",
             agent_id="leader", trigger_message_id=1, dispatch_policy="steer",
             status="queued", queue_seq=await self.queue.get_next_queue_seq("thread-1"),
@@ -202,12 +202,12 @@ class AgentRunRequestRepositoryTest(unittest.IsolatedAsyncioTestCase):
         self.db.add(msg_steer)
         self.db.flush()
 
-        await self.repository.create_request(
+        await self.repository.create_agent_run_request(
             request_id="req-cancel", uid="user-1", thread_id="thread-1",
             agent_id="leader", trigger_message_id=msg_cancelled.id,
             dispatch_policy="enqueue", status="queued", queue_seq=1,
         )
-        await self.repository.create_request(
+        await self.repository.create_agent_run_request(
             request_id="req-upgrade", uid="user-1", thread_id="thread-1",
             agent_id="leader", trigger_message_id=msg_steer.id,
             dispatch_policy="enqueue", status="queued", queue_seq=2,
