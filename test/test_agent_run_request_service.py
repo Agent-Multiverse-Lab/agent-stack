@@ -401,7 +401,7 @@ class AgentRunRequestServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         self.db.add(msg)
         self.db.flush()
-        await AgentRunRequestRepository(self.session).create_request(
+        await AgentRunRequestRepository(self.session).create_agent_run_request(
             request_id="req-cancelled",
             uid="user-1",
             thread_id="thread-1",
@@ -438,7 +438,7 @@ class AgentRunRequestServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_rollback_cleans_copied_target_without_deleting_source(self):
         with patch.object(
             AgentRunRequestRepository,
-            "create_request",
+            "create_agent_run_request",
             AsyncMock(side_effect=RuntimeError("create failed")),
         ):
             with self.assertRaisesRegex(RuntimeError, "create failed"):

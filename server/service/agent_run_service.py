@@ -159,10 +159,8 @@ async def create_resume_agent_run(
             resume_run = failed_run
     return resume_run
 
-
 async def load_agent_run_result(run_id: str, uid: str):
     return await get_agent_run_result(current_uid=uid, run_id=run_id)
-
 
 async def wait_agent_run_result(run_id: str, uid: str, time_out: float = 600) -> str:
     """事件唤醒等待方，SQL 终态决定结果；超时与取消结束等待。"""
@@ -198,7 +196,6 @@ async def wait_agent_run_result(run_id: str, uid: str, time_out: float = 600) ->
         if events:
             after_id = events[-1][0]
     
-
 async def read_agent_run_events(
     run_id: str,
     *,
@@ -217,7 +214,6 @@ async def read_agent_run_events(
         for event_id, fields in stream_events:
             events.append((_to_text(event_id), _decode_event_fields(fields)))
     return events
-
 
 async def read_subagent_progress(
     *,
@@ -261,7 +257,6 @@ async def read_subagent_progress(
         "events": events,
     }
 
-
 async def get_agent_run_result(
     *,
     current_uid: str,
@@ -283,7 +278,6 @@ async def get_agent_run_result(
         if message is None:
             raise RuntimeError(f"Agent Run 未保存最终消息：{run_id}")
         return str(message.content)
-
 
 async def stream_agent_run_events(
     *,
@@ -401,7 +395,6 @@ async def stream_agent_run_events(
                 )
                 return
 
-
 async def cancel_agent_run(
     *,
     run_id: str,
@@ -421,7 +414,6 @@ async def cancel_agent_run(
         "agent_id": str(run.agent_id),
         "status": str(run.agent_status),
     }
-
 
 async def request_cancel_agent_run(
     *,
@@ -478,7 +470,6 @@ async def request_cancel_agent_run(
     )
     return run
 
-
 def _decode_event_fields(fields: dict[Any, Any]) -> dict[str, Any]:
     raw_event = fields.get("event") if "event" in fields else fields.get(b"event")
     if raw_event is None:
@@ -487,7 +478,6 @@ def _decode_event_fields(fields: dict[Any, Any]) -> dict[str, Any]:
         raw_event = raw_event.decode()
     event = json.loads(raw_event)
     return event if isinstance(event, dict) else {"data": event}
-
 
 def _to_text(value: Any) -> str:
     return value.decode() if isinstance(value, bytes) else str(value)

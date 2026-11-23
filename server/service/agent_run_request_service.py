@@ -106,7 +106,7 @@ async def create_agent_run_request(
         if active_run is not None
         else None
     )
-    request = await AgentRunRequestRepository(db).create_request(
+    request = await AgentRunRequestRepository(db).create_agent_run_request(
         request_id=request_id,
         uid=uid,
         thread_id=thread_id,
@@ -154,9 +154,9 @@ async def submit_agent_run_request(
             raise LookupError("当前会话不存在或已删除")
         if conversation.agent_id != agent_id:
             raise ValueError("当前会话未绑定所选智能体")
-        request = await agent_run_request_repo.get_by_request_id(request_id)
-        existing_run = await agent_run_repo.get_by_request_id(request_id)
-        for record in (request, existing_run):
+        agent_run_request = await agent_run_request_repo.get_run_request_by_request_id(request_id)
+        existing_run = await agent_run_repo.get_run_by_request_id(request_id)
+        for record in (agent_run_request, existing_run):
             if record is not None and (
                 str(record.uid) != uid
                 or str(record.thread_id) != thread_id
@@ -171,14 +171,14 @@ async def submit_agent_run_request(
         active_run = await agent_run_repo.get_latest_active_for_thread(
             uid=uid, thread_id=thread_id
         )
-        if request is not None and request.status == "queued":
+        if agent_run_request is not None and agent_run_request.status == "queued":
             position = await request_queue_repo.get_queue_position(
                 thread_id, request_id, uid=uid,
             )
-            result = build_queued_response(request, active_run, queue_position=position)
+            result = build_queued_response(agent_run_request, active_run, queue_position=position)
             await db.commit()
             return result
-        if request is not None and request.status == "cancelled":
+        if agent_run_request is not None and agent_run_request.status == "cancelled":
             raise AgentRunConflictError("请求已从等待区取消")
         if (
             await agent_run_repo.get_pending_interaction_run(
@@ -189,8 +189,8 @@ async def submit_agent_run_request(
             raise AgentRunConflictError("当前会话有待回答的问题")
         if active_run is not None and dispatch_policy == "reject":
             raise AgentRunConflictError("当前会话有正在执行的任务")
-        if request is None:
-            request = await create_agent_run_request(
+        if agent_run_request is None:
+            agent_run_request = await create_agent_run_request(
                 db=db,
                 conversation=conversation,
                 uid=uid,
@@ -205,24 +205,24 @@ async def submit_agent_run_request(
                 active_run=active_run,
                 copied_objects=copied_objects,
             )
-        if request.status == "queued":
+        if agent_run_request.status == "queued":
             position = await request_queue_repo.get_queue_position(
                 thread_id, request_id, uid=uid,
             )
             result: AgentRun | dict[str, Any] = build_queued_response(
-                request, active_run, queue_position=position
+                agent_run_request, active_run, queue_position=position
             )
         else:
             result = await convert_request_to_run(
-                db, request, conversation, resolve_model_fn=resolve_runtime_model,
+                db, agent_run_request, conversation, resolve_model_fn=resolve_runtime_model,
             )
         await db.commit()
     except IntegrityError:
         await db.rollback()
         await delete_copied_targets(copied_objects)
         # 不同会话的同名 request 不共用会话锁，主键唯一约束决定胜者。
-        record = await agent_run_request_repo.get_by_request_id(request_id)
-        if record is not None:
+        agent_run_request_record = await agent_run_request_repo.get_run_request_by_request_id(request_id)
+        if agent_run_request_record is not None:
             await db.rollback()
             raise AgentRunConflictError("request_id 已被其他请求使用") from None
         raise

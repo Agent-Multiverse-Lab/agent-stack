@@ -94,7 +94,7 @@ async def create_agent_run(
     if not config.enable_run_queue:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="请开启 ARQ 队列模式",
+            detail="请开启队列模式",
         )
 
     try:

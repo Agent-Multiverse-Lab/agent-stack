@@ -66,7 +66,7 @@ class AgentRunRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_by_request_id(self, request_id: str) -> AgentRun | None:
+    async def get_run_by_request_id(self, request_id: str) -> AgentRun | None:
         """按 request_id 查询已有 Agent Run，用于创建幂等校验。"""
         if not request_id:
             return None

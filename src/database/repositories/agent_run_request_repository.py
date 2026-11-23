@@ -10,14 +10,14 @@ class AgentRunRequestRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_by_request_id(self, request_id: str) -> AgentRunRequest | None:
+    async def get_run_request_by_request_id(self, request_id: str) -> AgentRunRequest | None:
         result = await self.session.execute(
             select(AgentRunRequest).where(AgentRunRequest.request_id == request_id)
             .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
 
-    async def create_request(
+    async def create_agent_run_request(
         self, *, request_id: str, uid: str, thread_id: str, agent_id: str,
         trigger_message_id: int, dispatch_policy: str, status: str,
         queue_seq: int | None = None,
