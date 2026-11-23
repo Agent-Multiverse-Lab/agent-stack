@@ -18,7 +18,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from src.database.base import Base
-from src.database.credential_types import EncryptedCredential, EncryptedHeaders
 from src.database.satellite_models import (
     SatelliteBusinessScene,  # noqa: F401
     SatelliteCollection,  # noqa: F401
@@ -44,8 +43,8 @@ class ModelProvider(Base):
     name = Column(String(255), nullable=False)
     base_url = Column(Text, nullable=False)
     protocol = Column(String(32), nullable=False)
-    api_key = Column(EncryptedCredential(), nullable=False, default="")
-    extra_headers = Column(EncryptedHeaders(), nullable=False, default=dict)
+    api_key = Column(String, nullable=False, default="")
+    extra_headers = Column(JSON, nullable=False, default=dict)
     is_enabled = Column(Boolean, nullable=False, default=False, server_default=false())
     enabled_models = Column(JSON, nullable=False, default=list)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

@@ -3,8 +3,6 @@
 import unittest
 from unittest.mock import patch
 
-from pydantic import SecretStr
-
 from src.model.runtime import ModelConnection, create_chat_model
 
 
@@ -16,8 +14,8 @@ class ModelRuntimeTest(unittest.TestCase):
             model_type="chatgpt",
             protocol="openai_compatible",
             base_url="https://models.example/v1",
-            api_key=SecretStr("private-key"),
-            extra_headers={"X-Tenant": SecretStr("tenant-1")},
+            api_key="private-key",
+            extra_headers={"X-Tenant": "tenant-1"},
             body_overrides={"temperature": 0.2, "metadata": {"mode": "fast"}},
         )
 
@@ -34,4 +32,3 @@ class ModelRuntimeTest(unittest.TestCase):
         )
         chat.call_args.kwargs["extra_body"]["metadata"]["mode"] = "changed"
         self.assertEqual(connection.body_overrides["metadata"]["mode"], "fast")
-        self.assertNotIn("private-key", repr(connection))

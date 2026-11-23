@@ -7,23 +7,17 @@ from unittest.mock import AsyncMock, patch
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from cryptography.fernet import Fernet
-from pydantic import SecretStr
 from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from src.configs import config
 from src.database.models import ModelProvider, User
 from src.database.repositories.model_provider_repository import ModelProviderRepository
 
 
 class SQLiteModelTestCase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        cipher_patch = patch.object(config, "model_credential_key", SecretStr(Fernet.generate_key().decode()))
-        cipher_patch.start()
-        self.addCleanup(cipher_patch.stop)
         self.engine = create_engine("sqlite://")
         with self.engine.connect() as connection:
             connection.exec_driver_sql("PRAGMA foreign_keys=ON")

@@ -74,7 +74,7 @@ sequenceDiagram
     Note over App,Redis: 数据库失败阻止启动；Redis 失败不阻止启动
 ```
 
-预置只提供首次插入值，不覆盖已保存记录。Provider 更新先提交 PostgreSQL，再删除并重建 Redis 列表；
+预置只提供首次插入值，不覆盖已保存记录。预置供应商默认将 `api_key` 设为对应环境变量名（`DEEPSEEK_API_KEY` / `DASHSCOPE_API_KEY`），在解析模型连接、探测或展示 `has_api_key` 时按环境变量读取（若写入非环境变量字符串则直接作为明文 API Key）；当前 `model_provider.api_key` 与 `extra_headers` 以明文列暂存（暂无列级加密）。Provider 更新先提交 PostgreSQL，再删除并重建 Redis 列表；
 刷新失败不回滚已提交配置，后续读取回源 PostgreSQL。
 
 ## 5. Runtime Boundary

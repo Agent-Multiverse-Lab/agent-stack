@@ -1,5 +1,6 @@
 """平台 Chat 模型管理、远程探测和内部连接参数解析。"""
 
+import os
 import re
 from copy import deepcopy
 from time import perf_counter
@@ -221,6 +222,24 @@ async def refresh_model_list_cache(
     return True
 
 
+_ENV_VAR_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
+def resolve_provider_api_key(value: str) -> str:
+    """若配置值为已声明的环境变量名则读取对应密钥，否则按明文 API Key 返回。"""
+    if not value:
+        return ""
+    if _ENV_VAR_NAME.fullmatch(value):
+        if value in os.environ:
+            return os.environ[value].strip()
+        attr = value.lower()
+        if hasattr(sys_config, attr):
+            configured = getattr(sys_config, attr)
+            if isinstance(configured, str):
+                return configured.strip()
+    return value
+
+
 async def ensure_builtin_model_providers(db: AsyncSession) -> None:
     """显式校验全部预置并补齐缺失行；接入 lifespan 时由调用方另行预热目录。"""
     pending: list[ModelProviderCreate] = []
@@ -232,7 +251,7 @@ async def ensure_builtin_model_providers(db: AsyncSession) -> None:
             "base_url": preset.base_url,
             "protocol": preset.protocol,
             "is_enabled": preset.is_enabled,
-            "api_key": "",
+            "api_key": preset.api_key,
             "extra_headers": {},
             "enabled_models": [
                 {
@@ -275,8 +294,8 @@ def _settings(provider: ModelProvider) -> ModelProviderCreate:
 def _public_provider(provider: ModelProvider) -> ModelProviderResponse:
     config = _settings(provider)
     return ModelProviderResponse(
-        **config.model_dump(exclude={"api_key", "extra_headers"}),
-        has_api_key=bool(config.api_key.get_secret_value()),
+        **config.model_dump(exclude={"extra_headers"}),
+        has_api_key=bool(resolve_provider_api_key(config.api_key)),
     )
 
 
@@ -314,17 +333,16 @@ async def list_settings_provider_summaries(
             provider_id=provider.provider_id,
             name=provider.name,
             is_enabled=provider.is_enabled,
-            has_api_key=bool(provider.api_key),
+            has_api_key=bool(resolve_provider_api_key(provider.api_key)),
         )
         for provider in await ModelProviderRepository(db).list_model_providers()
     ]
 
 
 def _write_values(config: ModelProviderCreate | ModelProviderUpdate) -> dict[str, Any]:
-    values = config.model_dump(exclude={"api_key", "extra_headers"})
-    values["extra_headers"] = {name: value.get_secret_value() for name, value in config.extra_headers.items()}
+    values = config.model_dump(exclude={"api_key"})
     if config.api_key is not None:
-        values["api_key"] = config.api_key.get_secret_value()
+        values["api_key"] = config.api_key
     return values
 
 
@@ -354,7 +372,7 @@ async def update_model_provider(
 ) -> ProviderWriteResult:
     try:
         provider = await _get_model_provider(db, provider_id)
-        if config.base_url != provider.base_url and provider.api_key and config.api_key is None:
+        if config.base_url != provider.base_url and resolve_provider_api_key(provider.api_key) and config.api_key is None:
             raise ValueError("更改 Base URL 后必须重新提供 API Key")
         updated = await ModelProviderRepository(db).update_model_provider(provider_id, **_write_values(config))
         if updated is None:
@@ -423,7 +441,7 @@ async def _resolve_connection(
         model_type=model.model_type,
         protocol=config.protocol,
         base_url=config.base_url,
-        api_key=config.api_key,
+        api_key=resolve_provider_api_key(config.api_key),
         extra_headers=config.extra_headers,
         body_overrides=model.body_overrides,
     )
@@ -549,7 +567,7 @@ async def _settings_draft(
     values = _settings(provider).model_dump(exclude={"provider_id"})
     previous = {item["model_id"]: item for item in values.get("enabled_models", [])}
     if request.base_url != provider.base_url:
-        if provider.api_key and "api_key" not in request.model_fields_set:
+        if resolve_provider_api_key(provider.api_key) and "api_key" not in request.model_fields_set:
             raise ValueError("更改 Base URL 后必须重新提供 API Key")
         values["extra_headers"] = {}
     values.update(request.model_dump(exclude={"models", "api_key"}))
@@ -592,8 +610,8 @@ async def discover_settings_models(
 
 
 async def _discover_config_models(config: ModelProviderCreate | ModelProviderUpdate) -> list[SettingsModel]:
-    headers = {key: value.get_secret_value() for key, value in config.extra_headers.items()}
-    if key := config.api_key.get_secret_value():
+    headers = dict(config.extra_headers)
+    if key := resolve_provider_api_key(config.api_key or ""):
         headers["Authorization"] = f"Bearer {key}"
     payload = await _request_json(config.base_url, headers, "/models")
     if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):

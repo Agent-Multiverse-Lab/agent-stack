@@ -1,6 +1,7 @@
 """模型服务的配置、持久化、缓存和 HTTP 合同测试，不访问真实供应商。"""
 
 import json
+import os
 import unittest
 from contextlib import asynccontextmanager
 from typing import get_args
@@ -89,8 +90,8 @@ class ModelValidationTest(unittest.TestCase):
                 self.assertEqual(config.base_url, "http://192.168.1.2:8000/v1")
                 self.assertEqual(config.enabled_models[0].model_type, model_type)
         config = provider_config()
-        self.assertNotIn("secret-key", repr(config))
-        self.assertNotIn("secret-header", config.model_dump_json())
+        self.assertEqual(config.api_key, "secret-key")
+        self.assertEqual(config.extra_headers, {"X-Private": "secret-header"})
 
     def test_rejects_unknown_types_duplicate_models_and_non_chat_schema(self):
         for model in [
@@ -177,15 +178,13 @@ class ModelServiceTest(SQLiteModelTestCase):
         self.assertEqual(self.redis.events[0], ("delete", service.MODEL_LIST_CACHE_KEY))
         public = await service.get_model_provider(self.db, "local")
         self.assertTrue(public.has_api_key)
-        self.assertNotIn("secret-key", public.model_dump_json())
+        self.assertEqual(public.api_key, "secret-key")
         self.assertNotIn("extra_headers", public.model_dump())
         connection = await service.resolve_runtime_model(self.db, "local/qwen3:8b")
-        self.assertEqual(connection.api_key.get_secret_value(), "secret-key")
+        self.assertEqual(connection.api_key, "secret-key")
         self.assertEqual(connection.request_headers()["X-Private"], "secret-header")
-        self.assertNotIn("secret-header", repr(connection))
-        self.assertNotIn("secret-key", connection.model_dump_json())
         await service.update_model_provider(self.db, "local", update_config())
-        self.assertEqual((await service.resolve_runtime_model(self.db, "local/qwen3:8b")).api_key.get_secret_value(), "secret-key")
+        self.assertEqual((await service.resolve_runtime_model(self.db, "local/qwen3:8b")).api_key, "secret-key")
         await service.update_model_provider(self.db, "local", update_config(api_key=""))
         self.assertFalse((await service.get_model_provider(self.db, "local")).has_api_key)
         self.assertEqual(len(await service.list_model_providers(self.db)), 1)
@@ -234,7 +233,7 @@ class ModelServiceTest(SQLiteModelTestCase):
             await service.create_model_provider(self.db, provider_config(api_key="other-key"))
         self.assertEqual(self.redis.events, [])
         resolved = await service.resolve_runtime_model(self.db, "local/qwen3:8b")
-        self.assertEqual(resolved.api_key.get_secret_value(), "secret-key")
+        self.assertEqual(resolved.api_key, "secret-key")
 
     async def test_provider_write_and_reads_are_independent_of_redis(self):
         self.redis.error = True
@@ -244,6 +243,25 @@ class ModelServiceTest(SQLiteModelTestCase):
             self.assertIsNotNone(verifier.scalar(select(ModelProvider)))
         self.assertEqual((await service.list_enabled_models(self.db))[0].id, "local/qwen3:8b")
         self.assertEqual(self.redis.events, [])
+
+    async def test_resolve_provider_api_key_supports_env_and_plaintext(self):
+        clean_env = {key: value for key, value in os.environ.items() if key != "DEEPSEEK_API_KEY"}
+        with patch.dict(os.environ, clean_env, clear=True), patch.object(service.sys_config, "deepseek_api_key", ""):
+            self.assertEqual(service.resolve_provider_api_key("DEEPSEEK_API_KEY"), "")
+        with patch.dict(os.environ, {**clean_env, "DEEPSEEK_API_KEY": " env-deepseek-key "}, clear=True):
+            self.assertEqual(service.resolve_provider_api_key("DEEPSEEK_API_KEY"), "env-deepseek-key")
+        with patch.dict(os.environ, clean_env, clear=True), patch.object(service.sys_config, "deepseek_api_key", "cfg-deepseek-key"):
+            self.assertEqual(service.resolve_provider_api_key("DEEPSEEK_API_KEY"), "cfg-deepseek-key")
+
+        await service.create_model_provider(
+            self.db,
+            provider_config(provider_id="custom", api_key="sk-plain-123"),
+        )
+        public = await service.get_model_provider(self.db, "custom")
+        self.assertEqual(public.api_key, "sk-plain-123")
+        self.assertTrue(public.has_api_key)
+        resolved = await service.resolve_runtime_model(self.db, "custom/qwen3:8b")
+        self.assertEqual(resolved.api_key, "sk-plain-123")
 
     async def test_cache_rebuild_database_error_is_soft_after_write_and_strict_at_startup(self):
         with patch.object(

@@ -1,5 +1,6 @@
 """Settings 管理入口：双供应商模板、保存和凭据脱敏。"""
 
+import os
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -54,9 +55,12 @@ class ModelSettingsTest(SQLiteModelTestCase):
 
     async def test_details_read_database_and_missing_records_are_not_synthesized(self):
         await service.ensure_builtin_model_providers(self.db)
-        template = await service.get_settings_provider(self.db, "deepseek")
+        clean_env = {key: value for key, value in os.environ.items() if key != "DEEPSEEK_API_KEY"}
+        with patch.dict(os.environ, clean_env, clear=True), patch.object(service.sys_config, "deepseek_api_key", ""):
+            template = await service.get_settings_provider(self.db, "deepseek")
         self.assertEqual(template.name, "DeepSeek")
         self.assertEqual(template.base_url, "https://api.deepseek.com/v1")
+        self.assertEqual(template.api_key, "DEEPSEEK_API_KEY")
         self.assertFalse(template.is_enabled)
         self.assertFalse(template.has_api_key)
         self.assertEqual(len(template.enabled_models), 2)
@@ -192,7 +196,7 @@ class ModelSettingsTest(SQLiteModelTestCase):
 
                 response = await client.get("/api/models/providers/deepseek")
                 self.assertEqual(response.status_code, 200)
-                self.assertNotIn("api_key", response.json())
+                self.assertEqual(response.json()["api_key"], "DEEPSEEK_API_KEY")
 
                 response = await client.post("/api/models/providers/deepseek", json=payload)
                 self.assertEqual(response.status_code, 200)

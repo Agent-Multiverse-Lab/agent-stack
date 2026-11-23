@@ -4,7 +4,7 @@ from copy import deepcopy
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from .provider import ModelProtocol, ModelType
 
@@ -12,33 +12,27 @@ SUPPORTED_CHAT_PROTOCOLS = frozenset({"openai_compatible"})
 
 
 class ModelConnection(BaseModel):
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    model_config = ConfigDict(extra="forbid")
 
     provider_id: str
     model_id: str
     model_type: ModelType
     protocol: ModelProtocol
     base_url: str
-    api_key: SecretStr = Field(repr=False)
-    extra_headers: dict[str, SecretStr] = Field(repr=False)
+    api_key: str
+    extra_headers: dict[str, str]
     body_overrides: dict[str, JsonValue]
 
     def request_headers(self) -> dict[str, str]:
-        """仅在实际请求边界解封凭据。"""
-        headers = {
-            name: value.get_secret_value()
-            for name, value in self.extra_headers.items()
-        }
-        if key := self.api_key.get_secret_value():
-            headers["Authorization"] = f"Bearer {key}"
+        """构造模型请求所需的认证及供应商扩展头。"""
+        headers = dict(self.extra_headers)
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
     def provider_headers(self) -> dict[str, str]:
         """返回不含 Authorization 的供应商私有请求头。"""
-        return {
-            name: value.get_secret_value()
-            for name, value in self.extra_headers.items()
-        }
+        return dict(self.extra_headers)
 
 
 def supports_chat_protocol(protocol: str) -> bool:
@@ -51,7 +45,7 @@ def create_chat_model(connection: ModelConnection) -> BaseChatModel:
         raise ValueError(f"不支持的模型协议：{connection.protocol}")
     return ChatOpenAI(
         model=connection.model_id,
-        api_key=connection.api_key.get_secret_value(),
+        api_key=connection.api_key,
         base_url=connection.base_url,
         default_headers=connection.provider_headers(),
         extra_body=deepcopy(connection.body_overrides),

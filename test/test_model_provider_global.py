@@ -40,7 +40,7 @@ class ModelGlobalProviderTest(SQLiteModelTestCase):
         other = ModelProviderRepository(self.db)
         provider = await other.get_model_provider_by_id("deepseek")
         self.assertEqual(provider.name, "Shared")
-        self.assertEqual((await service.resolve_runtime_model(self.db, "deepseek/chat")).api_key.get_secret_value(), "shared-key")
+        self.assertEqual((await service.resolve_runtime_model(self.db, "deepseek/chat")).api_key, "shared-key")
         await service.delete_model_provider(self.db, "deepseek")
         self.assertIsNone(await other.get_model_provider_by_id("deepseek"))
 

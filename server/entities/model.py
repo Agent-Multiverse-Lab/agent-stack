@@ -1,6 +1,6 @@
 """模型管理 HTTP 请求与响应 DTO。"""
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.model.provider import (
     ChatCapability,
@@ -48,6 +48,7 @@ class ModelProviderSummary(BaseModel):
 class ModelProviderResponse(ModelProviderSummary):
     base_url: str
     protocol: ModelProtocol
+    api_key: str = ""
     enabled_models: list[EnabledModel]
 
 
@@ -76,10 +77,10 @@ class SettingsModel(BaseModel):
 
 
 class ModelSettingsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    model_config = ConfigDict(extra="forbid")
 
     base_url: str
-    api_key: SecretStr | None = Field(default=None, repr=False)
+    api_key: str | None = Field(default=None)
     is_enabled: bool = Field(default=False, strict=True)
     models: list[SettingsModel] = Field(default_factory=list)
 
@@ -87,7 +88,7 @@ class ModelSettingsRequest(BaseModel):
 
     @field_validator("api_key")
     @classmethod
-    def validate_key(cls, value: SecretStr | None) -> SecretStr:
+    def validate_key(cls, value: str | None) -> str:
         if value is None:
             raise ValueError("API Key 不可为 null")
         return validate_api_key(value)

@@ -21,6 +21,7 @@ class ModelProviderPreset:
     name: str
     base_url: str
     enabled_models: tuple[PresetChatModel, ...]
+    api_key: str = ""
     protocol: ModelProtocol = "openai_compatible"
     is_enabled: bool = False
 
@@ -30,6 +31,7 @@ MODEL_PROVIDER_PRESETS: tuple[ModelProviderPreset, ...] = (
         provider_id="deepseek",
         name="DeepSeek",
         base_url="https://api.deepseek.com/v1",
+        api_key="DEEPSEEK_API_KEY",
         enabled_models=(
             PresetChatModel(model_id="deepseek-v4-pro", model_type="deepseek"),
             PresetChatModel(model_id="deepseek-v4-flash", model_type="deepseek"),
@@ -39,6 +41,7 @@ MODEL_PROVIDER_PRESETS: tuple[ModelProviderPreset, ...] = (
         provider_id="dashscope",
         name="Qwen",
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_key="DASHSCOPE_API_KEY",
         enabled_models=(
             PresetChatModel(model_id="qwen3.6-plus", model_type="qwen"),
             PresetChatModel(model_id="qwen3.5-27b", model_type="qwen"),

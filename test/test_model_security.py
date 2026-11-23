@@ -12,7 +12,6 @@ from server.entities.model import ModelSettingsRequest
 from server.service import model_service as service
 from server.service.model_outbound import UnsafeModelTarget, resolve_public_target
 from src.configs import config
-from src.database.credential_types import decrypt_credential
 from src.model.provider import ModelProviderCreate
 from test.test_model_repository import SQLiteModelTestCase
 
@@ -36,25 +35,21 @@ class ModelCredentialSecurityTest(SQLiteModelTestCase):
         self.assertEqual(original.api_key, "secret-key")
         self.assertEqual(original.extra_headers, {"X-Private": "private-header"})
 
-    async def test_raw_database_contains_ciphertext_not_secrets(self):
-        await self.insert_provider("deepseek", extra_headers={"X-Private": "private-header"})
-        await self.db.commit()
+    async def test_provider_credentials_stored_as_plaintext_without_cipher_key(self):
+        with patch.object(config, "model_credential_key", SecretStr("")):
+            await service.create_model_provider(
+                self.db,
+                ModelProviderCreate(
+                    provider_id="deepseek",
+                    name="DeepSeek",
+                    base_url="https://example.com/v1",
+                    api_key="sk-plaintext",
+                    extra_headers={"X-Private": "header-plaintext"},
+                ),
+            )
         raw = self.session.execute(text("SELECT api_key,extra_headers FROM model_provider")).one()
-        self.assertNotIn("secret-key", str(raw))
-        self.assertNotIn("private-header", str(raw))
-        self.assertTrue(raw[0].startswith("enc:v1:"))
-        self.assertEqual(decrypt_credential(raw[0]), "secret-key")
-        with self.assertRaises(RuntimeError):
-            decrypt_credential("plain-key")
-        with patch.object(config, "model_credential_key", SecretStr("")):
-            with self.assertRaises(RuntimeError):
-                decrypt_credential(raw[0])
-
-    async def test_missing_cipher_key_fails_without_committing_plaintext(self):
-        with patch.object(config, "model_credential_key", SecretStr("")):
-            with self.assertRaises(RuntimeError):
-                await service.create_model_provider(self.db, ModelProviderCreate(provider_id="deepseek", name="DeepSeek", base_url="https://example.com/v1", api_key="must-not-persist"))
-        self.assertEqual(self.session.execute(text("SELECT count(*) FROM model_provider")).scalar_one(), 0)
+        self.assertEqual(raw[0], "sk-plaintext")
+        self.assertIn("header-plaintext", raw[1])
 
 class ModelOutboundSecurityTest(unittest.IsolatedAsyncioTestCase):
     async def test_internal_literal_addresses_are_blocked_before_http(self):

@@ -10,7 +10,6 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
-    SecretStr,
     field_validator,
     model_validator,
 )
@@ -82,12 +81,11 @@ def normalize_base_url(value: str) -> str:
     return value.rstrip("/")
 
 
-def validate_api_key(value: SecretStr) -> SecretStr:
-    key = value.get_secret_value()
+def validate_api_key(value: str) -> str:
     if (
-        not key.isascii()
-        or any(ord(char) < 32 or ord(char) == 127 for char in key)
-        or key != key.strip()
+        not value.isascii()
+        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+        or value != value.strip()
     ):
         raise ValueError("API Key 包含无效字符")
     return value
@@ -97,7 +95,6 @@ class EnabledModel(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         strict=True,
-        hide_input_in_errors=True,
     )
 
     model_id: str = Field(min_length=1)
@@ -139,15 +136,12 @@ class EnabledModel(BaseModel):
 
 
 class ProviderSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=255)
     base_url: str
     protocol: ModelProtocol = "openai_compatible"
-    extra_headers: dict[str, SecretStr] = Field(
-        default_factory=dict,
-        repr=False,
-    )
+    extra_headers: dict[str, str] = Field(default_factory=dict)
     is_enabled: bool = Field(default=False, strict=True)
     enabled_models: list[EnabledModel] = Field(default_factory=list)
 
@@ -164,12 +158,11 @@ class ProviderSettings(BaseModel):
     @classmethod
     def validate_headers(
         cls,
-        headers: dict[str, SecretStr],
-    ) -> dict[str, SecretStr]:
+        headers: dict[str, str],
+    ) -> dict[str, str]:
         seen: set[str] = set()
-        for name, secret in headers.items():
+        for name, value in headers.items():
             normalized = name.lower()
-            value = secret.get_secret_value()
             if (
                 not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name)
                 or normalized in seen | {"host", "content-length", "authorization"}
@@ -191,7 +184,7 @@ class ProviderSettings(BaseModel):
 
 class ModelProviderCreate(ProviderSettings):
     provider_id: ProviderId
-    api_key: SecretStr = Field(default=SecretStr(""), repr=False)
+    api_key: str = Field(default="")
 
     _key_validator = field_validator("api_key")(validate_api_key)
 
@@ -199,14 +192,14 @@ class ModelProviderCreate(ProviderSettings):
 class ModelProviderUpdate(ProviderSettings):
     """完整替换设置；仅省略 api_key 时保留旧密钥。"""
 
-    api_key: SecretStr | None = Field(default=None, repr=False)
+    api_key: str | None = Field(default=None)
 
     @field_validator("api_key")
     @classmethod
     def validate_optional_api_key(
         cls,
-        value: SecretStr | None,
-    ) -> SecretStr:
+        value: str | None,
+    ) -> str:
         if value is None:
             raise ValueError("清除 API Key 请使用空字符串")
         return validate_api_key(value)
