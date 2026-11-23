@@ -55,7 +55,7 @@ Provider 不绑定 User；所有登录用户读取同一模型列表。Provider 
 - `src/model/provider.py` 拥有 Provider 值类型、校验和 Service 写入命令；
 - `src/model/runtime.py` 拥有 `ModelConnection` 与 `create_chat_model()`，不访问数据库；
 - `server/service/model_service.py` 编排 DTO 映射、事务、连接解析和运行时构造入口；
-- Repository 只处理 ORM，不依赖 DTO 或运行时对象。
+- `src/database/repositories/model_provider_repository.py`（`ModelProviderRepository`）只处理 `model_provider` ORM，不依赖 DTO 或运行时对象。
 
 ## 4. Lifecycle
 

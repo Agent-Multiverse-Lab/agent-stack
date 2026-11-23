@@ -28,10 +28,10 @@ class ModelProviderPresetTest(SQLiteModelTestCase):
         }
         await service.ensure_builtin_model_providers(self.db)
         await service.ensure_builtin_model_providers(self.db)
-        self.assertEqual([item.provider_id for item in await self.repository.list_providers()], ["custom", "dashscope", "deepseek"])
-        after = await self.repository.get_provider_by_id("deepseek")
+        self.assertEqual([item.provider_id for item in await self.repository.list_model_providers()], ["custom", "dashscope", "deepseek"])
+        after = await self.repository.get_model_provider_by_id("deepseek")
         self.assertEqual({key: getattr(after, key) for key in before}, before)
-        qwen = await self.repository.get_provider_by_id("dashscope")
+        qwen = await self.repository.get_model_provider_by_id("dashscope")
         self.assertFalse(qwen.is_enabled)
         self.assertEqual(qwen.api_key, "")
         self.assertEqual(qwen.extra_headers, {})
@@ -55,7 +55,7 @@ class ModelProviderPresetTest(SQLiteModelTestCase):
                     await service.ensure_builtin_model_providers(self.db)
         self.db.execute.assert_not_called()
         self.db.commit.assert_not_called()
-        self.assertEqual(await self.repository.list_providers(), [])
+        self.assertEqual(await self.repository.list_model_providers(), [])
 
     async def test_mapping_copies_nested_json_and_leaves_preset_untouched(self):
         body = {"parameters": {"values": [1, 2]}}
@@ -65,7 +65,7 @@ class ModelProviderPresetTest(SQLiteModelTestCase):
         )
         with patch.object(service, "MODEL_PROVIDER_PRESETS", (preset,)):
             await service.ensure_builtin_model_providers(self.db)
-        saved = await self.repository.get_provider_by_id("custom")
+        saved = await self.repository.get_model_provider_by_id("custom")
         self.assertEqual((saved.name, saved.base_url), ("Custom", "https://custom.example/v1"))
         self.assertEqual((preset.name, preset.base_url), (" Custom ", "https://custom.example/v1/"))
         body["parameters"]["values"].append(3)
@@ -79,4 +79,4 @@ class ModelProviderPresetTest(SQLiteModelTestCase):
             await service.ensure_builtin_model_providers(self.db)
         self.assertNotIn("private", str(error.exception))
         self.db.rollback.assert_awaited_once()
-        self.assertEqual(await self.repository.list_providers(), [])
+        self.assertEqual(await self.repository.list_model_providers(), [])

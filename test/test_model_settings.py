@@ -42,7 +42,7 @@ class ModelSettingsTest(SQLiteModelTestCase):
         with patch.object(service, "_request_json", new_callable=AsyncMock) as remote:
             await service.save_model_settings(self.db, "dashscope", request)
             remote.assert_not_called()
-        saved = await self.repository.get_provider_by_id("dashscope")
+        saved = await self.repository.get_model_provider_by_id("dashscope")
         self.assertEqual(saved.api_key, "secret-key")
         self.assertEqual(saved.extra_headers, {"X-Private": "header-secret"})
         self.assertEqual(saved.enabled_models[0]["body_overrides"], {"temperature": 0.4})
@@ -60,7 +60,7 @@ class ModelSettingsTest(SQLiteModelTestCase):
         self.assertFalse(template.is_enabled)
         self.assertFalse(template.has_api_key)
         self.assertEqual(len(template.enabled_models), 2)
-        self.assertIsNotNone(await self.repository.get_provider_by_id("deepseek"))
+        self.assertIsNotNone(await self.repository.get_model_provider_by_id("deepseek"))
         with self.assertRaises(LookupError):
             await service.get_settings_provider(self.db, "ollama")
         with self.assertRaises(LookupError):
@@ -93,7 +93,7 @@ class ModelSettingsTest(SQLiteModelTestCase):
         self.assertEqual(remote.call_args.args[0], "http://localhost:8000/v1")
         self.assertEqual(remote.call_args.args[1], {"Authorization": "Bearer draft-secret"})
         self.db.commit.assert_not_called()
-        self.assertEqual(len((await self.repository.get_provider_by_id("dashscope")).enabled_models), 4)
+        self.assertEqual(len((await self.repository.get_model_provider_by_id("dashscope")).enabled_models), 4)
 
     async def test_probe_validates_unsaved_api_key_without_a_selected_model(self):
         await self.insert_provider(
@@ -113,7 +113,7 @@ class ModelSettingsTest(SQLiteModelTestCase):
         self.assertEqual(remote.call_args.args[2], "/models")
         self.assertNotIn("body", remote.call_args.kwargs)
         self.db.commit.assert_not_called()
-        self.assertEqual((await self.repository.get_provider_by_id("dashscope")).api_key, "secret-key")
+        self.assertEqual((await self.repository.get_model_provider_by_id("dashscope")).api_key, "secret-key")
 
     async def test_probe_reports_rejected_api_key(self):
         await service.ensure_builtin_model_providers(self.db)
@@ -196,7 +196,7 @@ class ModelSettingsTest(SQLiteModelTestCase):
 
                 response = await client.post("/api/models/providers/deepseek", json=payload)
                 self.assertEqual(response.status_code, 200)
-                self.assertTrue((await self.repository.get_provider_by_id("deepseek")).is_enabled)
+                self.assertTrue((await self.repository.get_model_provider_by_id("deepseek")).is_enabled)
 
                 response = await client.post("/api/models/providers/deepseek/discover", json=payload)
                 self.assertEqual(response.status_code, 200)

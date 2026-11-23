@@ -26,7 +26,7 @@ from server.service.model_outbound import UnsafeModelTarget, resolve_public_targ
 from src.configs import config as sys_config
 from src.database import session_context
 from src.database.models import ModelProvider
-from src.database.repositories.model_repository import ModelRepository
+from src.database.repositories import ModelProviderRepository
 from src.model.provider import (
     ChatCapability,
     EnabledModel,
@@ -107,7 +107,7 @@ def _model_presentation(
 async def build_model_list(db: AsyncSession) -> ChatModelListResponse:
     """从 PostgreSQL 构建不含连接参数的公开 Chat 模型列表。"""
     projected: list[dict[str, Any]] = []
-    for provider in await ModelRepository(db).list_providers(enabled_only=True):
+    for provider in await ModelProviderRepository(db).list_model_providers(enabled_only=True):
         config = _settings(provider)
         available = supports_chat_protocol(config.protocol)
         for model in config.enabled_models:
@@ -251,11 +251,18 @@ async def ensure_builtin_model_providers(db: AsyncSession) -> None:
         seen.add(config.provider_id)
         pending.append(config)
 
-    repository = ModelRepository(db)
+    repository = ModelProviderRepository(db)
     try:
-        for config in pending:
-            await repository.insert_provider_if_missing(**_write_values(config))
-        await db.commit()
+        existing_ids = {
+            provider.provider_id for provider in await repository.list_model_providers()
+        }
+        missing = [
+            config for config in pending if config.provider_id not in existing_ids
+        ]
+        if missing:
+            for config in missing:
+                await repository.create_model_provider(**_write_values(config))
+            await db.commit()
     except SQLAlchemyError:
         await db.rollback()
         raise RuntimeError("补齐模型供应商失败") from None
@@ -273,25 +280,30 @@ def _public_provider(provider: ModelProvider) -> ModelProviderResponse:
     )
 
 
-async def _get_provider(db: AsyncSession, provider_id: str) -> ModelProvider:
-    provider = await ModelRepository(db).get_provider_by_id(provider_id)
+async def _get_model_provider(db: AsyncSession, provider_id: str) -> ModelProvider:
+    provider = await ModelProviderRepository(db).get_model_provider_by_id(provider_id)
     if provider is None:
         raise LookupError("模型供应商不存在")
     return provider
 
 
-async def get_provider(db: AsyncSession, provider_id: str) -> ModelProviderResponse:
-    return _public_provider(await _get_provider(db, provider_id))
+async def get_model_provider(
+    db: AsyncSession, provider_id: str
+) -> ModelProviderResponse:
+    return _public_provider(await _get_model_provider(db, provider_id))
 
 
-async def list_providers(db: AsyncSession) -> list[ModelProviderResponse]:
-    return [_public_provider(provider) for provider in await ModelRepository(db).list_providers()]
+async def list_model_providers(db: AsyncSession) -> list[ModelProviderResponse]:
+    return [
+        _public_provider(provider)
+        for provider in await ModelProviderRepository(db).list_model_providers()
+    ]
 
 
 async def get_settings_provider(
     db: AsyncSession, provider_id: str,
 ) -> ModelProviderResponse:
-    return await get_provider(db, provider_id)
+    return await get_model_provider(db, provider_id)
 
 
 async def list_settings_provider_summaries(
@@ -304,7 +316,7 @@ async def list_settings_provider_summaries(
             is_enabled=provider.is_enabled,
             has_api_key=bool(provider.api_key),
         )
-        for provider in await ModelRepository(db).list_providers()
+        for provider in await ModelProviderRepository(db).list_model_providers()
     ]
 
 
@@ -316,12 +328,12 @@ def _write_values(config: ModelProviderCreate | ModelProviderUpdate) -> dict[str
     return values
 
 
-async def create_provider(
+async def create_model_provider(
     db: AsyncSession,
     config: ModelProviderCreate,
 ) -> ProviderWriteResult:
     try:
-        await ModelRepository(db).create_provider(**_write_values(config))
+        await ModelProviderRepository(db).create_model_provider(**_write_values(config))
         await db.commit()
     except IntegrityError:
         await db.rollback()
@@ -335,16 +347,18 @@ async def create_provider(
     )
 
 
-async def update_provider(
+async def update_model_provider(
     db: AsyncSession,
     provider_id: str,
     config: ModelProviderUpdate,
 ) -> ProviderWriteResult:
     try:
-        provider = await _get_provider(db, provider_id)
+        provider = await _get_model_provider(db, provider_id)
         if config.base_url != provider.base_url and provider.api_key and config.api_key is None:
             raise ValueError("更改 Base URL 后必须重新提供 API Key")
-        await ModelRepository(db).update_provider(provider, **_write_values(config))
+        updated = await ModelProviderRepository(db).update_model_provider(provider_id, **_write_values(config))
+        if updated is None:
+            raise LookupError("模型供应商不存在")
         await db.commit()
     except SQLAlchemyError:
         await db.rollback()
@@ -355,10 +369,11 @@ async def update_provider(
     )
 
 
-async def delete_provider(db: AsyncSession, provider_id: str) -> ProviderWriteResult:
+async def delete_model_provider(db: AsyncSession, provider_id: str) -> ProviderWriteResult:
     try:
-        provider = await _get_provider(db, provider_id)
-        await ModelRepository(db).delete_provider(provider)
+        deleted = await ModelProviderRepository(db).delete_model_provider(provider_id)
+        if not deleted:
+            raise LookupError("模型供应商不存在")
         await db.commit()
     except SQLAlchemyError:
         await db.rollback()
@@ -372,7 +387,7 @@ async def delete_provider(db: AsyncSession, provider_id: str) -> ProviderWriteRe
 async def list_enabled_models(db: AsyncSession) -> list[ModelSummary]:
     """读取全局已启用模型；公开 Redis 目录在接入阶段实现。"""
     catalog = []
-    for provider in await ModelRepository(db).list_providers(enabled_only=True):
+    for provider in await ModelProviderRepository(db).list_model_providers(enabled_only=True):
         config = _settings(provider)
         for model in config.enabled_models:
             catalog.append(
@@ -396,7 +411,7 @@ async def _resolve_connection(
     provider_id, separator, model_id = model_ref.partition("/")
     if not separator or not provider_id or not model_id:
         raise ValueError("模型引用必须为 provider_id/model_id")
-    config = _settings(await _get_provider(db, provider_id))
+    config = _settings(await _get_model_provider(db, provider_id))
     if require_enabled and not config.is_enabled:
         raise ValueError("模型供应商已停用")
     model = next((item for item in config.enabled_models if item.model_id == model_id), None)
@@ -474,7 +489,7 @@ def _explicit_non_chat(item: dict[str, Any]) -> bool:
 
 
 async def discover_models(db: AsyncSession, provider_id: str) -> list[str]:
-    config = _settings(await _get_provider(db, provider_id))
+    config = _settings(await _get_model_provider(db, provider_id))
     return [model.model_id for model in await _discover_config_models(config)]
 
 
@@ -530,7 +545,7 @@ async def _test_connection(connection: ModelConnection) -> ConnectionTestResult:
 async def _settings_draft(
     db: AsyncSession, provider_id: str, request: ModelSettingsRequest,
 ) -> ModelProviderUpdate:
-    provider = await _get_provider(db, provider_id)
+    provider = await _get_model_provider(db, provider_id)
     values = _settings(provider).model_dump(exclude={"provider_id"})
     previous = {item["model_id"]: item for item in values.get("enabled_models", [])}
     if request.base_url != provider.base_url:
@@ -566,7 +581,7 @@ async def save_model_settings(
     db: AsyncSession, provider_id: str, request: ModelSettingsRequest,
 ) -> ProviderWriteResult:
     config = await _settings_draft(db, provider_id, request)
-    return await update_provider(db, provider_id, config)
+    return await update_model_provider(db, provider_id, config)
 
 
 async def discover_settings_models(

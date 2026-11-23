@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from src.configs import config
 from src.database.models import ModelProvider, User
-from src.database.repositories.model_repository import ModelRepository
+from src.database.repositories.model_provider_repository import ModelProviderRepository
 
 
 class SQLiteModelTestCase(unittest.IsolatedAsyncioTestCase):
@@ -37,14 +37,14 @@ class SQLiteModelTestCase(unittest.IsolatedAsyncioTestCase):
         self.db.add.side_effect = self.session.add
         for name in ("execute", "flush", "commit", "rollback", "delete"):
             getattr(self.db, name).side_effect = getattr(self.session, name)
-        self.repository = ModelRepository(self.db)
+        self.repository = ModelProviderRepository(self.db)
 
     async def asyncTearDown(self):
         self.session.close()
         self.engine.dispose()
 
     async def insert_provider(self, provider_id="local", **values):
-        return await self.repository.create_provider(
+        return await self.repository.create_model_provider(
             **{
                 "provider_id": provider_id,
                 "name": "Local",
@@ -59,24 +59,31 @@ class SQLiteModelTestCase(unittest.IsolatedAsyncioTestCase):
         )
 
 
-class ModelRepositoryTest(SQLiteModelTestCase):
+class ModelProviderRepositoryTest(SQLiteModelTestCase):
     async def test_crud_persists_replaced_json_and_filters_enabled(self):
-        first = await self.insert_provider()
+        await self.insert_provider()
         await self.insert_provider("disabled", is_enabled=False)
         self.db.commit.assert_not_called()
         await self.db.commit()
-        self.assertEqual(["local"], [p.provider_id for p in await self.repository.list_providers(enabled_only=True)])
+        self.assertEqual(["disabled", "local"], [p.provider_id for p in await self.repository.list_model_providers()])
+        self.assertEqual(["local"], [p.provider_id for p in await self.repository.list_model_providers(enabled_only=True)])
+        fetched = await self.repository.get_model_provider_by_id("local")
+        self.assertIsNotNone(fetched)
+        self.assertEqual(fetched.name, "Local")
         replacement = [{"model_id": "org/new-model", "model_type": "qwen", "body_overrides": {"temperature": 0.2}}]
-        await self.repository.update_provider(first, enabled_models=replacement)
+        updated = await self.repository.update_model_provider("local", enabled_models=replacement)
+        self.assertIsNotNone(updated)
+        self.assertIsNone(await self.repository.update_model_provider("missing", name="Nope"))
         await self.db.commit()
         with Session(self.engine) as verifier:
             saved = verifier.get(ModelProvider, "local")
             self.assertEqual(saved.enabled_models, replacement)
             self.assertIsNotNone(saved.created_at)
-        await self.repository.delete_provider(first)
+        self.assertTrue(await self.repository.delete_model_provider("local"))
+        self.assertFalse(await self.repository.delete_model_provider("missing"))
         await self.db.commit()
-        self.assertIsNone(await self.repository.get_provider_by_id("local"))
-        self.assertEqual(1, len(await self.repository.list_providers()))
+        self.assertIsNone(await self.repository.get_model_provider_by_id("local"))
+        self.assertEqual(1, len(await self.repository.list_model_providers()))
 
     async def test_duplicate_provider_is_rejected_by_database(self):
         await self.insert_provider()
@@ -84,19 +91,19 @@ class ModelRepositoryTest(SQLiteModelTestCase):
         with self.assertRaises(IntegrityError):
             await self.insert_provider()
         await self.db.rollback()
-        self.assertEqual(1, len(await self.repository.list_providers()))
+        self.assertEqual(1, len(await self.repository.list_model_providers()))
 
     async def test_rollback_discards_insert_and_get_refreshes_identity_map(self):
         await self.insert_provider("discard")
         await self.db.rollback()
-        self.assertIsNone(await self.repository.get_provider_by_id("discard"))
+        self.assertIsNone(await self.repository.get_model_provider_by_id("discard"))
         original = await self.insert_provider()
         await self.db.commit()
         with Session(self.engine) as writer:
             saved = writer.scalar(select(ModelProvider).where(ModelProvider.provider_id == "local"))
             saved.is_enabled = False
             writer.commit()
-        refreshed = await self.repository.get_provider_by_id("local")
+        refreshed = await self.repository.get_model_provider_by_id("local")
         self.assertIs(original, refreshed)
         self.assertFalse(refreshed.is_enabled)
 
