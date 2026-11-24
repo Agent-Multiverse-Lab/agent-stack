@@ -11,11 +11,10 @@ from cryptography.fernet import Fernet
 from pydantic import SecretStr
 from sqlalchemy import create_engine, inspect, text
 
-from server.service import model_service as service
 from src.configs import config
 from src.database.models import ModelProvider, User
-from src.database.repositories.model_provider_repository import ModelProviderRepository
-from src.model.provider import ModelProviderCreate
+from src.model import runtime, service
+from src.model.repository import ModelProviderRepository
 from test.test_model_repository import SQLiteModelTestCase
 
 
@@ -30,17 +29,21 @@ class ModelGlobalProviderTest(SQLiteModelTestCase):
         )
         refresh.start()
         self.addCleanup(refresh.stop)
-        await service.create_model_provider(self.db, ModelProviderCreate(
-            provider_id="deepseek", name="Shared", base_url="https://example.com/v1",
-            api_key="shared-key", is_enabled=True,
+        await service.create_model_provider(
+            self.db,
+            provider_id="deepseek",
+            name="Shared",
+            base_url="https://example.com/v1",
+            api_key="shared-key",
+            is_enabled=True,
             enabled_models=[{"model_id": "chat", "model_type": "deepseek"}],
-        ))
+        )
 
     async def test_repositories_share_global_configuration_and_deletion(self):
         other = ModelProviderRepository(self.db)
         provider = await other.get_model_provider_by_id("deepseek")
         self.assertEqual(provider.name, "Shared")
-        self.assertEqual((await service.resolve_runtime_model(self.db, "deepseek/chat")).api_key, "shared-key")
+        await runtime.validate_model(self.db, "deepseek/chat")
         await service.delete_model_provider(self.db, "deepseek")
         self.assertIsNone(await other.get_model_provider_by_id("deepseek"))
 

@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import type { AgentRunEndEvent } from "@/api/agent-run";
 import { AskUser } from "@/pages/chat/components/AskUser";
 import { AgentMessageComposer } from "@/pages/chat/components/AgentMessageComposer";
+import { QueuedRequestList } from "@/pages/chat/components/QueuedRequestList";
 import {
   ChatWorkspaceSidebar,
   type ChatSidebarTab,
@@ -825,33 +826,14 @@ export default function ChatPage() {
               />
             )}
             {runState.queuedRequests.length > 0 && (
-              <ul aria-label={t("Waiting requests")} className="m-0 grid list-none gap-1 rounded-lg border border-border bg-muted p-2">
-                {runState.queuedRequests.map((item) => (
-                  <li key={item.request_id} className="flex items-center gap-2 text-sm">
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {item.dispatch_policy === "steer" ? t("Steer") : t("Queued")}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate">{item.content || t("Attachment")}</span>
-                    {(!active || item.dispatch_policy !== "steer") && !pending && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={submitting}
-                        onClick={() => void steerQueuedRequest(item.request_id)}
-                      >
-                        {active ? t("Steer") : t("Run now")}
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => void removeQueuedRequest(item.request_id)}
-                    >
-                      {t("Remove")}
-                    </Button>
-                  </li>
-                ))}
-              </ul>
+              <QueuedRequestList
+                requests={runState.queuedRequests}
+                isActive={active}
+                hasPendingInteraction={Boolean(pending)}
+                isSubmitting={submitting}
+                onSteer={(requestId) => void steerQueuedRequest(requestId)}
+                onRemove={(requestId) => void removeQueuedRequest(requestId)}
+              />
             )}
             <AgentMessageComposer
               draft={draft}

@@ -3,28 +3,24 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.entities.model import (
-    ChatModelListResponse,
-    ConnectionTestResult,
-    ModelProviderResponse,
-    ModelProviderSummary,
-    ModelSettingsRequest,
-    ProviderWriteResult,
-    SettingsModel,
-)
-from server.service import model_service
+from server.entities.model import ModelProvider
 from server.utils.auth import AuthenticatedUser
 from src.database import get_db
+from src.model import service as model_service
 
 router = APIRouter(prefix="/models", tags=["models"])
 
 
-@router.get("", response_model=ChatModelListResponse)
+@router.get("")
 async def get_models(
     current_user: AuthenticatedUser,
     db: AsyncSession = Depends(get_db),
 ):
-    return await model_service.list_models(db)
+    catalog = await model_service.list_models(db)
+    return {
+        "default_model": catalog["default_model"],
+        "models": catalog["models"],
+    }
 
 
 class ModelSettingsRoute(APIRoute):
@@ -53,29 +49,59 @@ class ModelSettingsRoute(APIRoute):
 settings_router = APIRouter(prefix="/providers", route_class=ModelSettingsRoute)
 
 
-@settings_router.get("", response_model=list[ModelProviderSummary])
+@settings_router.get("", response_model=list[ModelProvider])
 async def get_model_providers(current_user: AuthenticatedUser, db: AsyncSession = Depends(get_db)):
-    return await model_service.list_settings_provider_summaries(db)
+    return await model_service.list_model_providers(db)
 
 
-@settings_router.get("/{provider_id}", response_model=ModelProviderResponse)
+@settings_router.get("/{provider_id}", response_model=ModelProvider)
 async def get_model_provider(provider_id: str, current_user: AuthenticatedUser, db: AsyncSession = Depends(get_db)):
-    return await model_service.get_settings_provider(db, provider_id)
+    return await model_service.get_model_provider(db, provider_id)
 
 
-@settings_router.post("/{provider_id}", response_model=ProviderWriteResult)
-async def save_model_provider(provider_id: str, payload: ModelSettingsRequest, current_user: AuthenticatedUser, db: AsyncSession = Depends(get_db)):
-    return await model_service.save_model_settings(db, provider_id, payload)
+@settings_router.post("/{provider_id}")
+async def save_model_provider(provider_id: str, payload: ModelProvider, current_user: AuthenticatedUser, db: AsyncSession = Depends(get_db)):
+    return await model_service.save_model_settings(
+        db,
+        provider_id,
+        base_url=payload.base_url,
+        embedding_base_url=payload.embedding_base_url,
+        rerank_base_url=payload.rerank_base_url,
+        is_enabled=payload.is_enabled,
+        models=payload.models,
+        api_key=payload.api_key,
+        api_key_provided="api_key" in payload.model_fields_set,
+    )
 
 
-@settings_router.post("/{provider_id}/discover", response_model=list[SettingsModel])
-async def discover_provider_models(provider_id: str, payload: ModelSettingsRequest, current_user: AuthenticatedUser, db: AsyncSession = Depends(get_db)):
-    return await model_service.discover_settings_models(db, provider_id, payload)
+@settings_router.post("/{provider_id}/discover")
+async def discover_provider_models(provider_id: str, payload: ModelProvider, current_user: AuthenticatedUser, db: AsyncSession = Depends(get_db)):
+    return await model_service.discover_settings_models(
+        db,
+        provider_id,
+        base_url=payload.base_url,
+        embedding_base_url=payload.embedding_base_url,
+        rerank_base_url=payload.rerank_base_url,
+        is_enabled=payload.is_enabled,
+        models=payload.models,
+        api_key=payload.api_key,
+        api_key_provided="api_key" in payload.model_fields_set,
+    )
 
 
-@settings_router.post("/{provider_id}/test", response_model=ConnectionTestResult)
-async def test_provider_connection(provider_id: str, payload: ModelSettingsRequest, current_user: AuthenticatedUser, db: AsyncSession = Depends(get_db)):
-    return await model_service.test_settings_connection(db, provider_id, payload)
+@settings_router.post("/{provider_id}/test")
+async def test_provider_connection(provider_id: str, payload: ModelProvider, current_user: AuthenticatedUser, db: AsyncSession = Depends(get_db)):
+    return await model_service.test_settings_connection(
+        db,
+        provider_id,
+        base_url=payload.base_url,
+        embedding_base_url=payload.embedding_base_url,
+        rerank_base_url=payload.rerank_base_url,
+        is_enabled=payload.is_enabled,
+        models=payload.models,
+        api_key=payload.api_key,
+        api_key_provided="api_key" in payload.model_fields_set,
+    )
 
 
 router.include_router(settings_router)

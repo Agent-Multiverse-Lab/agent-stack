@@ -289,9 +289,9 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         self.storage = SimpleNamespace(acopy_file=AsyncMock(), adelete_file=AsyncMock())
         for current in (
             patch.object(agent_run_request_service, "enqueue_agent_run", self.enqueue),
-            patch.object(agent_run_request_service, "resolve_runtime_model", self.model),
+            patch.object(agent_run_request_service, "validate_model", self.model),
             patch.object(agent_run_request_queue_service, "enqueue_agent_run", self.enqueue),
-            patch.object(agent_run_request_queue_service, "resolve_runtime_model", self.model),
+            patch.object(agent_run_request_queue_service, "validate_model", self.model),
             patch.object(attachment_service, "get_storage", return_value=self.storage),
             patch.object(agent_run_request_queue_service.logger, "exception"),
         ):
@@ -386,10 +386,10 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
     async def test_default_enqueue_queues_without_steering_and_promotes_after_completion(self):
         await self.add_blocking_run()
         queued = await self.submit()
-        self.assertEqual(queued["status"], "queued")
-        self.assertEqual(queued["dispatch_policy"], "enqueue")
-        self.assertEqual(queued["queue_position"], 1)
-        self.assertIsNone(queued["steering_run_id"])
+        self.assertEqual(queued.status, "queued")
+        self.assertEqual(queued.dispatch_policy, "enqueue")
+        self.assertEqual(queued.queue_position, 1)
+        self.assertIsNone(queued.steering_run_id)
         async with self.sessions() as db:
             self.assertFalse(await AgentRunRequestQueueRepository(db).has_queued_steer_for_thread("thread-1"))
         self.assertIsNone(await self.promote())
@@ -404,15 +404,15 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         await self.add_blocking_run()
         await self.submit("req-1", query="first", dispatch_policy="enqueue")
         second = await self.submit("req-2", query="second", dispatch_policy="enqueue")
-        self.assertEqual(second["queue_position"], 2)
+        self.assertEqual(second.queue_position, 2)
 
         async with self.sessions() as db:
             upgraded = await agent_run_request_queue_service.steer_queued_request(
                 db=db, current_user=user, request_id="req-2",
             )
-            self.assertEqual(upgraded["dispatch_policy"], "steer")
-            self.assertEqual(upgraded["queue_position"], 1)
-            self.assertEqual(upgraded["steering_run_id"], "blocker")
+            self.assertEqual(upgraded.dispatch_policy, "steer")
+            self.assertEqual(upgraded.queue_position, 1)
+            self.assertEqual(upgraded.steering_run_id, "blocker")
 
         async with self.sessions() as db:
             cancelled = await agent_run_request_queue_service.cancel_queued_request(
@@ -451,8 +451,8 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
     async def test_steer_retry_and_promotion_use_original_input_and_current_model(self):
         await self.add_blocking_run()
         queued = await self.submit(dispatch_policy="steer")
-        self.assertEqual(queued["steering_run_id"], "blocker")
-        self.assertEqual((await self.submit(query="changed", dispatch_policy="steer"))["status"], "queued")
+        self.assertEqual(queued.steering_run_id, "blocker")
+        self.assertEqual((await self.submit(query="changed", dispatch_policy="steer")).status, "queued")
         async with self.sessions() as db:
             self.assertEqual(await ConversationRepository(db).list_messages(conversation_id=1, limit=10), [])
             await db.execute(update(Conversation).values(conversation_metadata={"model": "test/changed"}))

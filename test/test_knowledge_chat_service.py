@@ -2,7 +2,7 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from server.service import knowledge_service
 
@@ -73,14 +73,9 @@ class KnowledgeChatServiceTest(unittest.IsolatedAsyncioTestCase):
             self._patch_search(hits=self._build_hits()),
             patch.object(
                 knowledge_service,
-                "resolve_runtime_model",
-                return_value=SimpleNamespace(),
-            ) as resolve_model,
-            patch.object(
-                knowledge_service,
-                "create_chat_model",
-                return_value=model,
-            ),
+                "load_chat_model",
+                AsyncMock(return_value=model),
+            ) as load_model,
         ):
             result = await knowledge_service.chat(
                 FakeSession(),
@@ -96,7 +91,7 @@ class KnowledgeChatServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("f1:0", result["citations"][0]["chunk_id"])
         self.assertEqual(300, len(result["citations"][0]["excerpt"]))
         self.assertEqual(1, len(model.calls))
-        resolve_model.assert_awaited_once()
+        load_model.assert_awaited_once()
 
     async def test_chat_returns_fixed_answer_without_llm_when_no_hits(self) -> None:
         """无命中时不调用 LLM 并返回固定答语。"""
@@ -104,9 +99,9 @@ class KnowledgeChatServiceTest(unittest.IsolatedAsyncioTestCase):
             self._patch_search(hits=[]),
             patch.object(
                 knowledge_service,
-                "resolve_runtime_model",
-            ) as resolve_model,
-            patch.object(knowledge_service, "create_chat_model") as create_model,
+                "load_chat_model",
+                AsyncMock(),
+            ) as load_model,
         ):
             result = await knowledge_service.chat(
                 FakeSession(),
@@ -121,8 +116,7 @@ class KnowledgeChatServiceTest(unittest.IsolatedAsyncioTestCase):
             result["answer"],
         )
         self.assertEqual([], result["citations"])
-        resolve_model.assert_not_awaited()
-        create_model.assert_not_called()
+        load_model.assert_not_awaited()
 
 
 if __name__ == "__main__":

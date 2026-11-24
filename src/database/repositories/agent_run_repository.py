@@ -243,16 +243,23 @@ class AgentRunRepository:
         conversation_ids: Sequence[int],
         uid: str,
     ) -> bool:
-        """判断当前用户的一组对话是否仍有未终止的 Run。"""
+        """判断当前用户的一组对话是否仍有未终止或待恢复的 Run。"""
         if not conversation_ids:
             return False
 
+        resume_child = aliased(AgentRun)
         result = await self.session.execute(
             select(AgentRun.id)
+            .outerjoin(
+                resume_child,
+                (resume_child.created_by_run_id == AgentRun.id)
+                & (resume_child.run_type == "resume"),
+            )
             .where(
                 AgentRun.conversation_id.in_(conversation_ids),
                 AgentRun.uid == uid,
-                AgentRun.agent_status.not_in(AGENT_RUN_TERMINAL_STATUSES),
+                AgentRun.agent_status.not_in(AGENT_RUN_TERMINAL_STATUSES)
+                | ((AgentRun.agent_status == "interrupted") & resume_child.id.is_(None)),
             )
             .limit(1)
         )
@@ -1112,7 +1119,14 @@ class AgentRunRepository:
         run = await self._lock_update(run_id)
         if run is None:
             return None
-        if str(run.agent_status) in AGENT_RUN_TERMINAL_STATUSES:
+        current_status = str(run.agent_status)
+        if current_status == "interrupted":
+            if await self.get_resume_child(run_id) is None:
+                run.agent_status = "cancelled"
+                run.finished_at = datetime.now(UTC)
+                await self.session.flush()
+            return run
+        if current_status in AGENT_RUN_TERMINAL_STATUSES:
             return run
 
         run.agent_status = "cancel_requested"

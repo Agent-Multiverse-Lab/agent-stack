@@ -271,7 +271,7 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
                 return_value=self.storage,
             ),
             patch(
-                "server.service.thread_service.resolve_runtime_model",
+                "server.service.thread_service.validate_model",
                 new=self.resolve_model,
             ),
         )

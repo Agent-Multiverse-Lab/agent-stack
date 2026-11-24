@@ -16,14 +16,8 @@ it.each(["", "qwen-model"])("closes after selecting a model with current selecti
       models={[{
         id: "qwen-model",
         name: "qwen-3.5-plus",
-        display_name: "Qwen",
-        version: "1",
         provider: "qwen",
-        icon: "qwen",
         is_available: true,
-        is_default: true,
-        is_fallback: false,
-        is_flash: false,
       }]}
       selectedId={selectedId}
       loading={false}

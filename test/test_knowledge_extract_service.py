@@ -3,7 +3,7 @@
 import unittest
 from contextlib import ExitStack
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from server.service import knowledge_service
 from src.knowledge.graph import GraphExtractionResult
@@ -179,13 +179,24 @@ class KnowledgeExtractServiceTest(unittest.IsolatedAsyncioTestCase):
             ("GraphExtractor", extractor),
             ("_get_knowledge", entity_store),
             ("get_graph_store", graph_store),
-            ("_create_embedding_service", (FakeEmbeddingService(), "mock/model", 2)),
-            ("resolve_runtime_model", SimpleNamespace()),
-            ("create_chat_model", SimpleNamespace()),
         ):
             stack.enter_context(
                 patch.object(knowledge_service, target, return_value=fake)
             )
+        stack.enter_context(
+            patch.object(
+                knowledge_service,
+                "_create_embedding_service",
+                AsyncMock(return_value=(FakeEmbeddingService(), "mock/model", 2)),
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                knowledge_service,
+                "load_chat_model",
+                AsyncMock(return_value=SimpleNamespace()),
+            )
+        )
         return stack
 
     async def test_extract_writes_entities_relations_and_vectors(self) -> None:

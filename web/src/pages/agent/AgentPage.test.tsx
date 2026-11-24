@@ -62,18 +62,23 @@ beforeEach(() => {
     {
       provider_id: "deepseek",
       name: "DeepSeek",
+      base_url: "https://api.deepseek.com/v1",
+      embedding_base_url: "",
+      rerank_base_url: "",
       is_enabled: true,
       has_api_key: true,
+      models: [],
     },
   ])
   vi.mocked(getModelProvider).mockResolvedValue({
     provider_id: "deepseek",
     name: "DeepSeek",
     base_url: "https://api.deepseek.com/v1",
-    protocol: "openai_compatible",
+    embedding_base_url: "",
+    rerank_base_url: "",
     is_enabled: true,
     has_api_key: true,
-    enabled_models: [],
+    models: [],
   })
 })
 

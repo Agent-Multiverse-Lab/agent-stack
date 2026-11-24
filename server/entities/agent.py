@@ -51,6 +51,39 @@ class AgentRunCreateRequest(BaseModel):
     image_content: str | None = Field(None, description="图像文件")
 
 
+class QueuedAgentRunResponse(BaseModel):
+    """等待区 202 排队响应。"""
+
+    run_id: None = None
+    thread_id: str
+    status: Literal["queued"] = "queued"
+    dispatch_policy: Literal["enqueue", "reject", "steer"]
+    request_id: str
+    queue_position: int = 1
+    steering_run_id: str | None = None
+    stream_url: None = None
+
+    @classmethod
+    def from_request(
+        cls,
+        request: Any,
+        active_run: Any | None = None,
+        *,
+        queue_position: int = 1,
+    ) -> Self:
+        return cls(
+            thread_id=str(request.thread_id),
+            dispatch_policy=request.dispatch_policy,
+            request_id=str(request.request_id),
+            queue_position=queue_position,
+            steering_run_id=(
+                str(active_run.id)
+                if active_run is not None and request.dispatch_policy == "steer"
+                else None
+            ),
+        )
+
+
 class AgentUpdateRequest(BaseModel):
     """只更新数据库 Agent 的基础展示字段和启用状态。"""
 

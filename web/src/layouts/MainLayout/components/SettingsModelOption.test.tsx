@@ -9,7 +9,7 @@ it("provides a named checkbox and a selected container", () => {
   const onSelectedChange = vi.fn();
   render(
     <SettingsModelOption
-      model={{ model_id: "org/model:latest", capabilities: ["chat"] }}
+      model={{ model_id: "org/model:latest", category: "chat", capabilities: ["chat"] }}
       isSelected
       onSelectedChange={onSelectedChange}
     />,
@@ -26,7 +26,7 @@ it("prevents selecting a disabled option while retaining its capability labels",
   const onSelectedChange = vi.fn();
   render(
     <SettingsModelOption
-      model={{ model_id: "disabled-model", capabilities: ["tools", "code"] }}
+      model={{ model_id: "disabled-model", category: "chat", capabilities: ["tools", "code"] }}
       isDisabled
       onSelectedChange={onSelectedChange}
     />,
@@ -43,7 +43,7 @@ it("prevents selecting a disabled option while retaining its capability labels",
 });
 
 it("does not introduce selection controls for a configured model", () => {
-  render(<SettingsModelOption model={{ model_id: "configured-model", capabilities: [] }} />);
+  render(<SettingsModelOption model={{ model_id: "configured-model", category: "chat", capabilities: [] }} />);
 
   expect(screen.queryByRole("checkbox")).toBeNull();
   expect(screen.getByRole("listitem", { name: "configured-model" })).toBeTruthy();

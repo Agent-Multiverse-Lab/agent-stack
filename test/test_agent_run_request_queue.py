@@ -180,10 +180,10 @@ class AgentRunRequestQueueRepositoryTest(unittest.IsolatedAsyncioTestCase):
         self.db.get(AgentRun, "run-active").agent_status = "completed"
         self.db.commit()
 
-        # pop_next_queued_for_thread 优先弹出 req-3 并通过 convert_request_to_run 转成 Run
+        # pop_next_queued_for_thread 优先弹出 req-3 并通过 dispatch_request_to_run 转成 Run
         popped = await self.queue.pop_next_queued_for_thread("thread-1")
         self.assertEqual(popped.request_id, "req-3")
-        promoted_run = await self.queue.convert_request_to_run(
+        promoted_run = await self.queue.dispatch_request_to_run(
             request=popped,
             conversation=self.conversation,
             run_metadata={"model": "test/initial", "request_id": "req-3"},
@@ -198,7 +198,7 @@ class AgentRunRequestQueueRepositoryTest(unittest.IsolatedAsyncioTestCase):
         # 非 queued 请求直接转换仅绑定 Message.agent_run_id
         self.db.get(AgentRun, "run-promoted").agent_status = "completed"
         self.db.commit()
-        direct_run = await self.queue.convert_request_to_run(
+        direct_run = await self.queue.dispatch_request_to_run(
             request=req_4,
             conversation=self.conversation,
             run_metadata={"model": "test/initial", "request_id": "req-4"},
@@ -254,7 +254,7 @@ class AgentRunRequestQueueServiceTest(unittest.IsolatedAsyncioTestCase):
         for p in (
             patch.object(agent_run_request_queue_service, "session_context", fake_ctx),
             patch.object(agent_run_request_queue_service, "enqueue_agent_run", self.enqueue_mock),
-            patch.object(agent_run_request_queue_service, "resolve_runtime_model", self.resolve_mock),
+            patch.object(agent_run_request_queue_service, "validate_model", self.resolve_mock),
         ):
             p.start()
             self.addCleanup(p.stop)
@@ -297,9 +297,9 @@ class AgentRunRequestQueueServiceTest(unittest.IsolatedAsyncioTestCase):
         upgraded = await agent_run_request_queue_service.steer_queued_request(
             db=self.session, current_user=user, request_id="req-2",
         )
-        self.assertEqual(upgraded["dispatch_policy"], "steer")
-        self.assertEqual(upgraded["queue_position"], 1)
-        self.assertEqual(upgraded["steering_run_id"], blocker.id)
+        self.assertEqual(upgraded.dispatch_policy, "steer")
+        self.assertEqual(upgraded.queue_position, 1)
+        self.assertEqual(upgraded.steering_run_id, blocker.id)
 
         # 取消 req-1 + 幂等重复取消
         cancelled = await agent_run_request_queue_service.cancel_queued_request(
@@ -339,3 +339,47 @@ class AgentRunRequestQueueServiceTest(unittest.IsolatedAsyncioTestCase):
                 db=self.session, current_user=user, request_id="req-2",
             )
         self.assertEqual(steer_conflict.exception.run_id, dispatched_run.id)
+
+    async def test_unresumed_interrupted_blocks_dispatch_and_steer_until_cancelled(self):
+        user = SimpleNamespace(id=7, uid="user-1")
+        msg = Message(conversation_id=1, role="user", content="queued after interrupt", status="queued")
+        self.db.add(msg)
+        self.db.flush()
+        await AgentRunRequestRepository(self.session).create_agent_run_request(
+            request_id="req-after-int",
+            uid="user-1",
+            thread_id="thread-1",
+            agent_id="leader",
+            trigger_message_id=msg.id,
+            dispatch_policy="enqueue",
+            status="queued",
+            queue_seq=1,
+        )
+        interrupted = await AgentRunRepository(self.session).create_run(
+            run_id="run-int",
+            uid="user-1",
+            conversation_id=1,
+            thread_id="thread-1",
+            agent_slug="leader",
+            request_id="req-int",
+            trigger_message_id=None,
+            agent_status="interrupted",
+        )
+        self.db.commit()
+
+        self.assertIsNone(
+            await agent_run_request_queue_service.dispatch_next_queued_request("thread-1")
+        )
+        with self.assertRaisesRegex(AgentRunConflictError, "待回答的问题"):
+            await agent_run_request_queue_service.steer_queued_request(
+                db=self.session, current_user=user, request_id="req-after-int",
+            )
+
+        cancelled = await AgentRunRepository(self.session).request_cancel(interrupted.id)
+        self.db.commit()
+        self.assertEqual(cancelled.agent_status, "cancelled")
+
+        dispatched = await agent_run_request_queue_service.dispatch_next_queued_request("thread-1")
+        self.assertIsNotNone(dispatched)
+        self.assertEqual(dispatched.request_id, "req-after-int")
+        self.enqueue_mock.assert_awaited_once_with(str(dispatched.id))

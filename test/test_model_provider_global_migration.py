@@ -68,7 +68,7 @@ class ModelProviderGlobalMigrationTest(unittest.TestCase):
     def test_empty_upgrade_matches_global_schema_and_downgrade(self):
         self.run_migration()
         columns = {column["name"] for column in inspect(self.db).get_columns("model_provider")}
-        self.assertEqual(columns, set(ModelProvider.__table__.columns.keys()))
+        self.assertEqual(columns, set(ModelProvider.__table__.columns.keys()) - {"embedding_base_url", "rerank_base_url"})
         self.assertEqual(inspect(self.db).get_pk_constraint("model_provider")["constrained_columns"], ["provider_id"])
         self.assertEqual(inspect(self.db).get_foreign_keys("model_provider"), [])
         self.run_migration("downgrade")

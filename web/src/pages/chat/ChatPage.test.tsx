@@ -79,12 +79,8 @@ const qwen = "dashscope/qwen3.8-max";
 const deepseek = "deepseek/deepseek-v4-flash";
 const catalog = {
   default_model: qwen,
-  fallback_model: "",
-  flash_model: deepseek,
-  image_model: "",
   models: [qwen, deepseek].map((id) => ({
-    id, name: id, display_name: id, version: "", provider: id.split("/")[0], icon: "",
-    is_available: true, is_default: id === qwen, is_fallback: false, is_flash: id === deepseek,
+    id, name: id, provider: id.split("/")[0], is_available: true,
   })),
 };
 

@@ -99,6 +99,49 @@ class AgentRunEventTest(unittest.IsolatedAsyncioTestCase):
         repo.request_cancel.assert_not_awaited()
         db.commit.assert_not_awaited()
 
+    async def test_cancel_unresumed_interrupted_run_without_redis_signal(self):
+        interrupted_run = SimpleNamespace(
+            id="run-int-1",
+            uid="user-1",
+            thread_id="thread-1",
+            agent_id="LeaderAgent",
+            run_type="chat",
+            agent_status="interrupted",
+        )
+        cancelled_run = SimpleNamespace(
+            id="run-int-1",
+            uid="user-1",
+            thread_id="thread-1",
+            agent_id="LeaderAgent",
+            run_type="chat",
+            agent_status="cancelled",
+        )
+        repo = SimpleNamespace(
+            get_by_id_for_user=AsyncMock(return_value=interrupted_run),
+            cascade_cancel_descendants=AsyncMock(return_value=[]),
+            request_cancel=AsyncMock(return_value=cancelled_run),
+        )
+        db = SimpleNamespace(commit=AsyncMock())
+        publish_mock = AsyncMock()
+        with (
+            patch(
+                "server.service.agent_run_service.AgentRunRepository",
+                return_value=repo,
+            ),
+            patch(
+                "server.service.agent_run_service.publish_agent_run_cancel_signal",
+                publish_mock,
+            ),
+        ):
+            result = await agent_run_service.cancel_agent_run(
+                run_id="run-int-1",
+                current_user_id="user-1",
+                db=db,
+            )
+        self.assertEqual(result["status"], "cancelled")
+        db.commit.assert_awaited_once()
+        publish_mock.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,7 +2,7 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from langchain_core.embeddings import Embeddings
 
@@ -93,12 +93,8 @@ class KnowledgeEmbeddingBindingTest(unittest.IsolatedAsyncioTestCase):
                 return_value=bindings,
             ),
             patch(
-                "server.service.knowledge_service.resolve_embedding_model",
-                return_value=("mock/bound", "bound", provider),
-            ) as resolve_model,
-            patch(
                 "server.service.knowledge_service.load_embedding_model",
-                return_value=FakeEmbeddings(),
+                AsyncMock(return_value=FakeEmbeddings()),
             ),
             patch.object(sys_config, "rerank_model", ""),
         ):
@@ -111,7 +107,6 @@ class KnowledgeEmbeddingBindingTest(unittest.IsolatedAsyncioTestCase):
                 knowledge_type="milvus",
             )
 
-        resolve_model.assert_called_once_with("mock/bound")
         self.assertEqual([1.0, 2.0, 3.0], knowledge.search_vector)
         self.assertEqual("mock/bound", result["embedding_model_spec"])
         self.assertEqual(3, result["embedding_dimension"])

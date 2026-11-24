@@ -1,5 +1,6 @@
+from src.model.service import list_models
+
 from .input_message_service import AgentInputMsg, build_agent_input_msg
-from .model_service import list_models
 from .skill_service import SkillDescriptor, SkillService
 from .subagent_service import (
     SubAgentMessageRecord,
