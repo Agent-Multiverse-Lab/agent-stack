@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from server.service import model_service as service
+from src.model import service
 from test.test_model_repository import SQLiteModelTestCase
 
 
@@ -36,7 +36,9 @@ class ModelCatalogTest(SQLiteModelTestCase):
             name="Qwen",
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             enabled_models=[
-                {"model_id": "qwen3.8-max", "model_type": "qwen"},
+                {"model_id": "qwen3.8-max", "model_type": "qwen", "category": "chat"},
+                {"model_id": "text-embedding-v4", "model_type": "qwen", "category": "embedding"},
+                {"model_id": "qwen3-rerank", "model_type": "qwen", "category": "rerank"},
             ],
         )
         await self.insert_provider(
@@ -52,32 +54,26 @@ class ModelCatalogTest(SQLiteModelTestCase):
     async def test_builds_public_catalog_from_enabled_database_providers(self):
         catalog = await service.build_model_list(self.db)
 
-        self.assertEqual(["dashscope/qwen3.8-max"], [item.id for item in catalog.models])
-        model = catalog.models[0]
+        self.assertEqual(["dashscope/qwen3.8-max"], [item["id"] for item in catalog["models"]])
+        model = catalog["models"][0]
         self.assertEqual(
-            (model.display_name, model.version, model.icon),
-            ("Qwen", "3.8 Max", "qwen"),
+            (model["name"], model["provider"], model["is_available"]),
+            ("qwen3.8-max", "dashscope", True),
         )
-        self.assertTrue(model.is_available)
+
+        embedding_catalog = await service.build_model_list(self.db, category="embedding")
+        self.assertEqual(["dashscope/text-embedding-v4"], [item["id"] for item in embedding_catalog["models"]])
 
     async def test_cache_hit_returns_strict_cached_catalog_without_rewrite(self):
         cached_catalog = {
             "default_model": "dashscope/cached-model",
-            "fallback_model": "",
             "flash_model": "",
-            "image_model": "",
             "models": [
                 {
                     "id": "dashscope/cached-model",
                     "name": "cached-model",
-                    "display_name": "Qwen",
-                    "version": "cached-model",
                     "provider": "dashscope",
-                    "icon": "qwen",
                     "is_available": True,
-                    "is_default": True,
-                    "is_fallback": False,
-                    "is_flash": False,
                 }
             ],
         }
@@ -86,7 +82,7 @@ class ModelCatalogTest(SQLiteModelTestCase):
         with patch.object(service, "get_async_redis_client", return_value=redis):
             result = await service.list_models(self.db)
 
-        self.assertEqual(cached_catalog, result.model_dump())
+        self.assertEqual(cached_catalog, result)
         self.assertEqual(service.MODEL_LIST_CACHE_KEY, redis.get_key)
         self.assertIsNone(redis.set_arguments)
 
@@ -99,7 +95,7 @@ class ModelCatalogTest(SQLiteModelTestCase):
         key, raw_catalog, ttl = redis.set_arguments
         self.assertEqual(service.MODEL_LIST_CACHE_KEY, key)
         self.assertEqual(service.MODEL_LIST_CACHE_TTL_SECONDS, ttl)
-        self.assertEqual(result.model_dump(), json.loads(raw_catalog))
+        self.assertEqual(result, json.loads(raw_catalog))
 
     async def test_invalid_cache_and_redis_failure_fall_back_to_database(self):
         for redis in (
@@ -115,5 +111,5 @@ class ModelCatalogTest(SQLiteModelTestCase):
 
             self.assertEqual(
                 ["dashscope/qwen3.8-max"],
-                [item.id for item in result.models],
+                [item["id"] for item in result["models"]],
             )

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from src.database.models import ModelProvider, User
-from src.database.repositories.model_provider_repository import ModelProviderRepository
+from src.model.repository import ModelProviderRepository
 
 
 class SQLiteModelTestCase(unittest.IsolatedAsyncioTestCase):
@@ -47,7 +47,7 @@ class SQLiteModelTestCase(unittest.IsolatedAsyncioTestCase):
                 "api_key": "secret-key",
                 "extra_headers": {},
                 "is_enabled": True,
-                "enabled_models": [{"model_id": "qwen3:8b", "model_type": "ollama", "body_overrides": {}}],
+                "enabled_models": [{"model_id": "qwen3:8b", "model_type": "ollama"}],
                 **values,
             }
         )
@@ -64,7 +64,7 @@ class ModelProviderRepositoryTest(SQLiteModelTestCase):
         fetched = await self.repository.get_model_provider_by_id("local")
         self.assertIsNotNone(fetched)
         self.assertEqual(fetched.name, "Local")
-        replacement = [{"model_id": "org/new-model", "model_type": "qwen", "body_overrides": {"temperature": 0.2}}]
+        replacement = [{"model_id": "org/new-model", "model_type": "qwen", "category": "chat"}]
         updated = await self.repository.update_model_provider("local", enabled_models=replacement)
         self.assertIsNotNone(updated)
         self.assertIsNone(await self.repository.update_model_provider("missing", name="Nope"))
@@ -104,21 +104,27 @@ class ModelProviderRepositoryTest(SQLiteModelTestCase):
 
 class ModelMigrationTest(unittest.TestCase):
     def test_upgrade_matches_metadata_and_downgrade_removes_only_new_table(self):
-        path = Path(__file__).resolve().parents[1] / "migrate/versions/0008_model_provider.py"
-        spec = importlib.util.spec_from_file_location("model_provider_migration", path)
-        migration = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(migration)
+        root = Path(__file__).resolve().parents[1] / "migrate/versions"
+        spec_0008 = importlib.util.spec_from_file_location("model_provider_migration", root / "0008_model_provider.py")
+        migration = importlib.util.module_from_spec(spec_0008)
+        spec_0008.loader.exec_module(migration)
+        spec_0032 = importlib.util.spec_from_file_location("model_provider_urls", root / "0032_model_provider_category_urls.py")
+        urls_migration = importlib.util.module_from_spec(spec_0032)
+        spec_0032.loader.exec_module(urls_migration)
         engine = create_engine("sqlite://")
         try:
             with engine.begin() as connection:
-                with patch.object(migration, "op", Operations(MigrationContext.configure(connection))):
+                operations = Operations(MigrationContext.configure(connection))
+                with patch.object(migration, "op", operations), patch.object(urls_migration, "op", operations):
                     migration.upgrade()
+                    urls_migration.upgrade()
                     actual = {c["name"]: c for c in inspect(connection).get_columns("model_provider")}
                     expected = {column.name: column for column in ModelProvider.__table__.columns if column.name != "user_id"}
                     self.assertEqual(set(actual), set(expected.keys()))
                     for column in expected.values():
                         self.assertEqual(actual[column.name]["nullable"], column.nullable)
                     self.assertEqual(inspect(connection).get_pk_constraint("model_provider")["constrained_columns"], ["provider_id"])
+                    urls_migration.downgrade()
                     migration.downgrade()
                     self.assertFalse(inspect(connection).has_table("model_provider"))
         finally:

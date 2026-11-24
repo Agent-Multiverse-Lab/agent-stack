@@ -42,6 +42,8 @@ class ModelProvider(Base):
     provider_id = Column(String(64), primary_key=True)
     name = Column(String(255), nullable=False)
     base_url = Column(Text, nullable=False)
+    embedding_base_url = Column(Text, nullable=False, default="", server_default="")
+    rerank_base_url = Column(Text, nullable=False, default="", server_default="")
     protocol = Column(String(32), nullable=False)
     api_key = Column(String, nullable=False, default="")
     extra_headers = Column(JSON, nullable=False, default=dict)

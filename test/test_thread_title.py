@@ -14,9 +14,9 @@ class ThreadTitleTests(unittest.IsolatedAsyncioTestCase):
         model = SimpleNamespace(ainvoke=AsyncMock(return_value=AIMessage(content="知识库 检索设计")))
         with (
             patch.object(service, "_require_thread", new_callable=AsyncMock),
-            patch.object(service, "build_model_list", AsyncMock(return_value=SimpleNamespace(
-                flash_model="provider/fast", default_model="provider/default",
-            ))),
+            patch.object(service, "build_model_list", AsyncMock(return_value={
+                "flash_model": "provider/fast", "default_model": "provider/default",
+            })),
             patch.object(service, "load_chat_model", AsyncMock(return_value=model)) as load,
         ):
             title = await service.generate_thread_title(
@@ -40,9 +40,9 @@ class ThreadTitleTests(unittest.IsolatedAsyncioTestCase):
         model = SimpleNamespace(ainvoke=AsyncMock(return_value=AIMessage(content=" ")))
         with (
             patch.object(service, "_require_thread", new_callable=AsyncMock),
-            patch.object(service, "build_model_list", AsyncMock(return_value=SimpleNamespace(
-                flash_model="", default_model="provider/default",
-            ))),
+            patch.object(service, "build_model_list", AsyncMock(return_value={
+                "flash_model": "", "default_model": "provider/default",
+            })),
             patch.object(service, "load_chat_model", AsyncMock(return_value=model)) as load,
         ):
             title = await service.generate_thread_title(

@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.exception import AgentRunConflictError
 from server.service.arq_queue_servcie import enqueue_agent_run
-from server.service.model_service import resolve_runtime_model
 from src.database.models import AgentRun, AgentRunRequest, Conversation, User
 from src.database.repositories import (
     AgentRunRepository,
@@ -18,6 +17,7 @@ from src.database.repositories import (
     ConversationRepository,
 )
 from src.database.session import session_context
+from src.model.runtime import validate_model
 from src.utils import logger
 
 
@@ -96,7 +96,7 @@ async def convert_request_to_run(
         conversation_metadata=dict(conversation.conversation_metadata or {}),
     )
     metadata = {**dispatch.conversation_metadata, "request_id": dispatch.request_id}
-    resolver = resolve_model_fn or resolve_runtime_model
+    resolver = resolve_model_fn or validate_model
     await resolver(db, metadata.get("model"))
     return await AgentRunRequestQueueRepository(db).convert_request_to_run(
         request=request,

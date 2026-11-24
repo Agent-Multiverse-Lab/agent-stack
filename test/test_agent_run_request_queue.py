@@ -254,7 +254,7 @@ class AgentRunRequestQueueServiceTest(unittest.IsolatedAsyncioTestCase):
         for p in (
             patch.object(agent_run_request_queue_service, "session_context", fake_ctx),
             patch.object(agent_run_request_queue_service, "enqueue_agent_run", self.enqueue_mock),
-            patch.object(agent_run_request_queue_service, "resolve_runtime_model", self.resolve_mock),
+            patch.object(agent_run_request_queue_service, "validate_model", self.resolve_mock),
         ):
             p.start()
             self.addCleanup(p.stop)

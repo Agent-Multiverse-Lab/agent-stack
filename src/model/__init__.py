@@ -1,52 +1,67 @@
-"""模型领域类型、运行时工厂与 Knowledge 模型入口。"""
+"""模型领域类型、预置、仓储、运行时工厂与管理服务统一出口。"""
 
-from .model_tool import (
-    load_embedding_model,
-    load_reranker,
-    resolve_chat_model_selection,
-    resolve_embedding_model,
-    resolve_rerank_model,
+from . import service
+from .model_provider.chat import SUPPORTED_CHAT_PROTOCOLS, build_chat_model, supports_chat_protocol
+from .model_provider.embedding import (
+    SUPPORTED_EMBEDDING_PROTOCOLS,
+    EmbeddingError,
+    HttpEmbeddings,
+    build_embedding_model,
 )
-from .provider import (
-    ChatCapability,
-    EnabledModel,
-    ModelProtocol,
-    ModelProviderCreate,
-    ModelProviderUpdate,
-    ModelSummary,
-    ModelType,
-    ProviderId,
-    ProviderSettings,
-)
-from .reranker import (
+from .model_provider.reranker import (
     BaseReranker,
     DashScopeReranker,
+    HttpReranker,
     RerankDocument,
     RerankError,
     RerankResult,
+    build_reranker,
 )
-from .runtime import ModelConnection, create_chat_model
+from .presets import MODEL_PROVIDER_PRESETS, ModelProviderPreset, PresetModel
+from .repository import ModelProviderRepository
+from .runtime import (
+    load_chat_model,
+    load_embedding_model,
+    load_reranker,
+    validate_model,
+)
+from .utils import (
+    ChatCapability,
+    ModelCategory,
+    ModelProtocol,
+    ModelType,
+    resolve_chat_model_selection,
+    resolve_provider_api_key,
+)
 
 __all__ = [
     "BaseReranker",
     "ChatCapability",
     "DashScopeReranker",
-    "EnabledModel",
-    "ModelConnection",
+    "EmbeddingError",
+    "HttpEmbeddings",
+    "HttpReranker",
+    "MODEL_PROVIDER_PRESETS",
+    "ModelCategory",
     "ModelProtocol",
-    "ModelProviderCreate",
-    "ModelProviderUpdate",
-    "ModelSummary",
+    "ModelProviderPreset",
+    "ModelProviderRepository",
     "ModelType",
-    "ProviderId",
-    "ProviderSettings",
+    "PresetModel",
     "RerankDocument",
     "RerankError",
     "RerankResult",
-    "create_chat_model",
+    "SUPPORTED_CHAT_PROTOCOLS",
+    "SUPPORTED_EMBEDDING_PROTOCOLS",
+    "build_chat_model",
+    "build_embedding_model",
+    "build_reranker",
+    "load_chat_model",
     "load_embedding_model",
     "load_reranker",
     "resolve_chat_model_selection",
-    "resolve_embedding_model",
-    "resolve_rerank_model",
+    "resolve_provider_api_key",
+    "service",
+    "supports_chat_protocol",
+    "validate_model",
 ]

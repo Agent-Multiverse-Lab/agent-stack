@@ -1,106 +1,51 @@
-"""模型管理 HTTP 请求与响应 DTO。"""
+"""模型管理 HTTP 请求与响应 Schema。"""
+
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from src.model.provider import (
-    ChatCapability,
-    EnabledModel,
-    ModelProtocol,
-    normalize_base_url,
+from src.model.utils import (
+    normalize_enabled_models,
+    normalize_optional_url,
     validate_api_key,
-    validate_capabilities,
-    validate_model_id,
 )
 
 
-class ChatModelItem(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    id: str
-    name: str
-    display_name: str
-    version: str
-    provider: str
-    icon: str
-    is_available: bool
-    is_default: bool
-    is_fallback: bool
-    is_flash: bool
-
-
-class ChatModelListResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    default_model: str
-    fallback_model: str
-    flash_model: str
-    image_model: str
-    models: list[ChatModelItem]
-
-
-class ModelProviderSummary(BaseModel):
-    provider_id: str
-    name: str
-    is_enabled: bool
-    has_api_key: bool
-
-
-class ModelProviderResponse(ModelProviderSummary):
-    base_url: str
-    protocol: ModelProtocol
-    api_key: str = ""
-    enabled_models: list[EnabledModel]
-
-
-class ProviderWriteResult(BaseModel):
-    provider_id: str
-    cache_refreshed: bool
-
-
-class ConnectionTestResult(BaseModel):
-    success: bool
-    elapsed_ms: float
-    error: str | None = None
-    status_code: int | None = None
-
-
-class SettingsModel(BaseModel):
+class ModelProvider(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    model_id: str = Field(min_length=1)
-    capabilities: list[ChatCapability] = Field(default_factory=list)
-
-    _id_validator = field_validator("model_id")(validate_model_id)
-    _capability_validator = field_validator("capabilities")(
-        validate_capabilities
-    )
-
-
-class ModelSettingsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    base_url: str
-    api_key: str | None = Field(default=None)
+    provider_id: str = ""
+    name: str = ""
+    base_url: str = ""
+    embedding_base_url: str = ""
+    rerank_base_url: str = ""
+    api_key: str | None = Field(default=None, exclude=True)
     is_enabled: bool = Field(default=False, strict=True)
-    models: list[SettingsModel] = Field(default_factory=list)
+    has_api_key: bool = False
+    models: list[dict[str, Any]] = Field(default_factory=list)
 
-    _url_validator = field_validator("base_url")(normalize_base_url)
+    @field_validator("base_url", "embedding_base_url", "rerank_base_url")
+    @classmethod
+    def _validate_urls(cls, value: str) -> str:
+        return normalize_optional_url(value)
 
     @field_validator("api_key")
     @classmethod
-    def validate_key(cls, value: str | None) -> str:
+    def _validate_api_key(cls, value: str | None) -> str:
         if value is None:
             raise ValueError("API Key 不可为 null")
         return validate_api_key(value)
 
+    @field_validator("models")
+    @classmethod
+    def _validate_models(cls, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for item in value:
+            if not isinstance(item, dict):
+                raise ValueError("模型配置项必须是字典")
+            unknown = set(item.keys()) - {"model_id", "category", "capabilities"}
+            if unknown:
+                raise ValueError(f"模型配置包含未知字段：{sorted(unknown)}")
+        return normalize_enabled_models(value)
 
-__all__ = [
-    "ChatModelItem",
-    "ChatModelListResponse",
-    "ConnectionTestResult",
-    "ModelProviderResponse",
-    "ModelProviderSummary",
-    "ModelSettingsRequest",
-    "ProviderWriteResult",
-    "SettingsModel",
-]
+
+__all__ = ["ModelProvider"]

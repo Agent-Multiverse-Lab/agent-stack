@@ -2,16 +2,16 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from server.service.model_service import (
-    ensure_builtin_model_providers,
-    refresh_model_list_cache,
-)
 from server.utils.auth import verify_required_auth_settings
 from src.agents.backends.sandbox import (
     init_sandbox_provider,
     shutdown_sandbox_provider,
 )
 from src.database import postgres_manager
+from src.model.service import (
+    ensure_builtin_model_providers,
+    refresh_model_list_cache,
+)
 from src.storage import close_async_redis_client
 from src.utils import logger
 

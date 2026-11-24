@@ -55,7 +55,7 @@ SatelliteAgent -> Python gRPC Client -> Go Gateway -> PostgreSQL/PostGIS
 | `src/database/` | SQLAlchemy 模型、会话和责任命名的仓储 | Redis Stream 或 Agent 推理 |
 | `src/storage/` | RustFS、Redis/ARQ 的基础设施适配 | Run 生命周期业务语义 |
 | `src/configs/` | 类型化配置、环境解析、默认值和校验 | 业务编排和可变运行时状态 |
-| `src/model/` | Provider-neutral 的 Chat、Embedding、Reranker 构造 | 数据库或向量库查询 |
+| `src/model/` | Chat/Embedding/Rerank 模型配置、预置、仓储、服务与运行时构造 | HTTP 路由与前端页面状态 |
 | `src/third_party/` | 外部 SDK 的小型兼容边界 | 应用策略和通用业务工具 |
 | `src/utils/` | 跨子系统复用的无状态通用帮助函数 | 单一子系统的领域逻辑 |
 | `docker/cube/` | CubeSandbox 部署、预检和运行验收 | 应用持久化和 Agent Run 编排 |

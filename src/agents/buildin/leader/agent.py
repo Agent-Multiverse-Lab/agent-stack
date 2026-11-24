@@ -11,7 +11,6 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
 from server.service.mcp_service import get_mcp_tools
-from server.service.model_service import load_chat_model
 from src.agents.backends.composite_backend import (
     ROUTE_SKILL,
     create_composite_backend,
@@ -31,6 +30,7 @@ from src.agents.middlewares.summary_middleware import (
     create_summary_middleware_from_context,
 )
 from src.knowledge.tools import web_search
+from src.model.runtime import load_chat_model
 
 
 class LeaderAgent(BaseAgent):

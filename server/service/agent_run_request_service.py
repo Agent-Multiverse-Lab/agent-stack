@@ -20,7 +20,6 @@ from server.service.attachment_service import (
     prepare_message_attachments,
 )
 from server.service.input_message_service import build_agent_input_msg
-from server.service.model_service import resolve_runtime_model
 from src.database.models import AgentRun, AgentRunRequest, Conversation, User
 from src.database.repositories import (
     AgentRepository,
@@ -30,7 +29,7 @@ from src.database.repositories import (
     ConversationRepository,
     MessageAttachmentRepository,
 )
-from src.model import resolve_chat_model_selection
+from src.model import resolve_chat_model_selection, validate_model
 
 
 async def create_agent_run_request(
@@ -77,7 +76,7 @@ async def create_agent_run_request(
         conversation_model=conversation_metadata.get("model"),
         agent_model=(agent.agent_config or {}).get("model"),
     )
-    await resolve_runtime_model(db, model_id)
+    await validate_model(db, model_id)
     if conversation_metadata.get("model") != model_id:
         conversation_metadata["model"] = model_id
         await conversation_repo.update_conversation(
@@ -214,7 +213,7 @@ async def submit_agent_run_request(
             )
         else:
             result = await convert_request_to_run(
-                db, agent_run_request, conversation, resolve_model_fn=resolve_runtime_model,
+                db, agent_run_request, conversation, resolve_model_fn=validate_model,
             )
         await db.commit()
     except IntegrityError:

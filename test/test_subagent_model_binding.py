@@ -49,7 +49,7 @@ class SubAgentModelBindingTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(current.stop)
         current = patch.object(
             subagent_service,
-            "resolve_runtime_model",
+            "validate_model",
             self.resolve_model,
         )
         current.start()

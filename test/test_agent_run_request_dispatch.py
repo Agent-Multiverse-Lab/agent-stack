@@ -289,9 +289,9 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         self.storage = SimpleNamespace(acopy_file=AsyncMock(), adelete_file=AsyncMock())
         for current in (
             patch.object(agent_run_request_service, "enqueue_agent_run", self.enqueue),
-            patch.object(agent_run_request_service, "resolve_runtime_model", self.model),
+            patch.object(agent_run_request_service, "validate_model", self.model),
             patch.object(agent_run_request_queue_service, "enqueue_agent_run", self.enqueue),
-            patch.object(agent_run_request_queue_service, "resolve_runtime_model", self.model),
+            patch.object(agent_run_request_queue_service, "validate_model", self.model),
             patch.object(attachment_service, "get_storage", return_value=self.storage),
             patch.object(agent_run_request_queue_service.logger, "exception"),
         ):

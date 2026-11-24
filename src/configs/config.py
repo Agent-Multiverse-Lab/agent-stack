@@ -83,6 +83,16 @@ class Config(BaseSettings):
         default="",
         description="向量生成模型名称，格式为 provider/model",
     )
+    embedding_batch_size: int = Field(
+        default=32,
+        gt=0,
+        description="Embedding 单次向量化批大小",
+    )
+    embedding_request_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description="Embedding 单次请求超时秒数",
+    )
     rerank_model: str = Field(
         default="",
         description="重排序模型名称，格式为 provider/model",
@@ -242,6 +252,7 @@ class Config(BaseSettings):
     # ---------- API Keys ----------
     dashscope_api_key: str = Field(default="", description="阿里 DashScope API Key")
     openai_api_key: str = Field(default="", description="OpenAI API Key")
+    anthropic_api_key: str = Field(default="", description="Anthropic API Key")
     gemini_api_key: str = Field(default="", description="Gemini API Key")
     deepseek_api_key: str = Field(default="", description="DeepSeek API Key")
 

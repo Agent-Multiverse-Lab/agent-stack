@@ -2,7 +2,7 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from server.service import knowledge_service
 
@@ -160,7 +160,7 @@ class KnowledgeGraphServiceTest(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 knowledge_service,
                 "_create_embedding_service",
-                return_value=(FakeEmbeddingService(), "mock/model", 2),
+                AsyncMock(return_value=(FakeEmbeddingService(), "mock/model", 2)),
             ),
             patch.object(
                 knowledge_service,

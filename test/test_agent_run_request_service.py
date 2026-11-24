@@ -170,7 +170,7 @@ class AgentRunRequestServiceTest(unittest.IsolatedAsyncioTestCase):
                 agent_run_request_service, "enqueue_agent_run", self.enqueue_mock
             ),
             patch.object(
-                agent_run_request_service, "resolve_runtime_model", self.resolve_mock
+                agent_run_request_service, "validate_model", self.resolve_mock
             ),
             patch.object(
                 agent_run_request_queue_service, "enqueue_agent_run", self.enqueue_mock
