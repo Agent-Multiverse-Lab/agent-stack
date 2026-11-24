@@ -62,7 +62,6 @@ import { SettingsModelOption } from "@/layouts/MainLayout/components/SettingsMod
 import type {
   ModelProvider,
   ModelProviderId,
-  ModelProviderMetadata,
   SettingsModel,
 } from "@/types/model"
 
@@ -102,6 +101,8 @@ interface Draft extends ModelSettingsRequest {
 
 const emptyDraft = (): Draft => ({
   base_url: "",
+  embedding_base_url: "",
+  rerank_base_url: "",
   is_enabled: false,
   models: [],
   key: "",
@@ -112,9 +113,12 @@ const emptyDraft = (): Draft => ({
 
 const providerDraft = (value: ModelProvider): Draft => ({
   base_url: value.base_url,
+  embedding_base_url: value.embedding_base_url,
+  rerank_base_url: value.rerank_base_url,
   is_enabled: value.is_enabled,
-  models: value.enabled_models.map((model) => ({
+  models: value.models.map((model) => ({
     model_id: model.model_id,
+    category: model.category ?? "chat",
     capabilities: model.capabilities ?? [],
   })),
   key: "",
@@ -126,7 +130,7 @@ const providerDraft = (value: ModelProvider): Draft => ({
 export function ModelProviderCards() {
   const { t, i18n } = useTranslation()
   const { accessToken } = useAuth()
-  const [providers, setProviders] = useState<ModelProviderMetadata[]>([])
+  const [providers, setProviders] = useState<ModelProvider[]>([])
   const [selected, setSelected] = useState<ModelProviderId>("")
   const [dialogOpen, setDialogOpen] = useState(false)
   const [drafts, setDrafts] = useState<Partial<Record<string, Draft>>>({})
@@ -209,22 +213,12 @@ export function ModelProviderCards() {
       .then((items) => {
         if (cancelled || current !== version.current) return
         setProviders(items)
+        setDrafts(
+          Object.fromEntries(
+            items.map((item) => [item.provider_id, providerDraft(item)])
+          )
+        )
         setListLoading(false)
-        for (const item of items) {
-          void getModelProvider(item.provider_id)
-            .then((detail) => {
-              if (cancelled || current !== version.current) return
-              setDrafts((previous) =>
-                previous[item.provider_id]?.initialized
-                  ? previous
-                  : {
-                      ...previous,
-                      [item.provider_id]: providerDraft(detail),
-                    }
-              )
-            })
-            .catch(() => {})
-        }
       })
       .catch((error: unknown) => {
         if (cancelled || current !== version.current) return
@@ -250,6 +244,8 @@ export function ModelProviderCards() {
   function request(): ModelSettingsRequest {
     return {
       base_url: draft.base_url,
+      embedding_base_url: draft.embedding_base_url,
+      rerank_base_url: draft.rerank_base_url,
       is_enabled: draft.is_enabled,
       models: draft.models.map((model) => ({
         ...model,
@@ -284,13 +280,7 @@ export function ModelProviderCards() {
         }))
         setProviders((previous) =>
           previous.map((item) =>
-            item.provider_id === selected
-              ? {
-                  ...item,
-                  is_enabled: saved.is_enabled,
-                  has_api_key: saved.has_api_key,
-                }
-              : item
+            item.provider_id === selected ? saved : item
           )
         )
         if (result.cache_refreshed) toast.success(t("Saved"))
@@ -509,6 +499,55 @@ export function ModelProviderCards() {
             ) : null}
 
             <FieldGroup className="gap-3">
+              <Field>
+                <FieldLabel htmlFor="provider-base-url">{t("Base URL")}</FieldLabel>
+                <InputGroup>
+                  <InputGroupInput
+                    id="provider-base-url"
+                    value={draft.base_url}
+                    onChange={(event) => edit({ base_url: event.target.value })}
+                    type="url"
+                    disabled={blocked}
+                    placeholder="https://api.example.com/v1"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </InputGroup>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="provider-embedding-base-url">{t("Embedding Base URL")}</FieldLabel>
+                <InputGroup>
+                  <InputGroupInput
+                    id="provider-embedding-base-url"
+                    value={draft.embedding_base_url}
+                    onChange={(event) =>
+                      edit({ embedding_base_url: event.target.value })
+                    }
+                    type="url"
+                    disabled={blocked}
+                    placeholder="https://api.example.com/v1"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </InputGroup>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="provider-rerank-base-url">{t("Rerank Base URL")}</FieldLabel>
+                <InputGroup>
+                  <InputGroupInput
+                    id="provider-rerank-base-url"
+                    value={draft.rerank_base_url}
+                    onChange={(event) =>
+                      edit({ rerank_base_url: event.target.value })
+                    }
+                    type="url"
+                    disabled={blocked}
+                    placeholder="https://api.example.com/v1/reranks"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </InputGroup>
+              </Field>
               <Field>
                 <FieldLabel htmlFor="provider-api-key">API Key</FieldLabel>
                 <InputGroup>

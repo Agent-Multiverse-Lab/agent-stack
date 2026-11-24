@@ -29,24 +29,33 @@ beforeEach(() => {
     {
       provider_id: "deepseek",
       name: "DeepSeek",
+      base_url: "https://api.deepseek.com/v1",
+      embedding_base_url: "",
+      rerank_base_url: "",
       is_enabled: false,
       has_api_key: false,
+      models: [],
     },
     {
       provider_id: "dashscope",
       name: "Qwen",
+      base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      embedding_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      rerank_base_url: "https://dashscope.aliyuncs.com/compatible-api/v1/reranks",
       is_enabled: false,
       has_api_key: false,
+      models: [],
     },
   ]);
   vi.mocked(getModelProvider).mockResolvedValue({
     provider_id: "deepseek",
     name: "DeepSeek",
     base_url: "https://api.deepseek.com/v1",
-    protocol: "openai_compatible",
+    embedding_base_url: "",
+    rerank_base_url: "",
     is_enabled: false,
     has_api_key: false,
-    enabled_models: [],
+    models: [],
   });
   vi.mocked(testProviderConnection).mockResolvedValue({
     success: true,
@@ -66,13 +75,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("sends the unsaved API key to the backend test without requiring a model", async () => {
+it("sends the unsaved API key and URLs to the backend test without requiring a model", async () => {
   render(<SettingsModels />);
 
   const apiKey = await screen.findByLabelText("API Key");
   await waitFor(() =>
     expect((apiKey as HTMLInputElement).disabled).toBe(false),
   );
+  fireEvent.change(screen.getByLabelText("Embedding Base URL"), {
+    target: { value: "https://embed.example/v1" },
+  });
+  fireEvent.change(screen.getByLabelText("Rerank Base URL"), {
+    target: { value: "https://rerank.example/v1/reranks" },
+  });
   fireEvent.change(apiKey, { target: { value: "test-api-key" } });
   fireEvent.click(
     screen.getByRole("button", { name: "Test model connection" }),
@@ -81,6 +96,8 @@ it("sends the unsaved API key to the backend test without requiring a model", as
   await waitFor(() =>
     expect(testProviderConnection).toHaveBeenCalledWith("deepseek", {
       base_url: "https://api.deepseek.com/v1",
+      embedding_base_url: "https://embed.example/v1",
+      rerank_base_url: "https://rerank.example/v1/reranks",
       api_key: "test-api-key",
       is_enabled: false,
       models: [],
@@ -95,14 +112,22 @@ it("renders the provider navigation from the backend list", async () => {
     {
       provider_id: "deepseek",
       name: "DeepSeek",
+      base_url: "https://api.deepseek.com/v1",
+      embedding_base_url: "",
+      rerank_base_url: "",
       is_enabled: false,
       has_api_key: false,
+      models: [],
     },
     {
       provider_id: "custom",
       name: "Custom Gateway",
+      base_url: "https://custom.example/v1",
+      embedding_base_url: "",
+      rerank_base_url: "",
       is_enabled: true,
       has_api_key: true,
+      models: [],
     },
   ]);
   render(<SettingsModels />);
@@ -113,25 +138,16 @@ it("renders the provider navigation from the backend list", async () => {
 });
 
 it("reloads the redacted provider after saving a new key", async () => {
-  vi.mocked(getModelProvider)
-    .mockResolvedValueOnce({
-      provider_id: "deepseek",
-      name: "DeepSeek",
-      base_url: "https://api.deepseek.com/v1",
-      protocol: "openai_compatible",
-      is_enabled: false,
-      has_api_key: false,
-      enabled_models: [],
-    })
-    .mockResolvedValueOnce({
-      provider_id: "deepseek",
-      name: "DeepSeek",
-      base_url: "https://api.deepseek.com/v1",
-      protocol: "openai_compatible",
-      is_enabled: false,
-      has_api_key: true,
-      enabled_models: [],
-    });
+  vi.mocked(getModelProvider).mockResolvedValueOnce({
+    provider_id: "deepseek",
+    name: "DeepSeek",
+    base_url: "https://api.deepseek.com/v1",
+    embedding_base_url: "",
+    rerank_base_url: "",
+    is_enabled: false,
+    has_api_key: true,
+    models: [],
+  });
   render(<SettingsModels />);
 
   const apiKey = await screen.findByLabelText("API Key");
@@ -144,12 +160,14 @@ it("reloads the redacted provider after saving a new key", async () => {
   await waitFor(() =>
     expect(saveModelProvider).toHaveBeenCalledWith("deepseek", {
       base_url: "https://api.deepseek.com/v1",
+      embedding_base_url: "",
+      rerank_base_url: "",
       api_key: "new-secret",
       is_enabled: false,
       models: [],
     }),
   );
-  await waitFor(() => expect(getModelProvider).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(getModelProvider).toHaveBeenCalledTimes(1));
   await waitFor(() =>
     expect((apiKey as HTMLInputElement).value).toBe(""),
   );
@@ -157,18 +175,22 @@ it("reloads the redacted provider after saving a new key", async () => {
 });
 
 it("shows the exact declared capabilities with icons and readable labels", async () => {
-  vi.mocked(getModelProvider).mockResolvedValue({
-    provider_id: "deepseek",
-    name: "DeepSeek",
-    base_url: "https://api.deepseek.com/v1",
-    protocol: "openai_compatible",
-    is_enabled: true,
-    has_api_key: true,
-    enabled_models: [{
-      model_id: "declared-model",
-      capabilities: ["chat", "vision", "reasoning", "tools", "code", "audio", "video"],
-    }],
-  });
+  vi.mocked(listModelProviders).mockResolvedValue([
+    {
+      provider_id: "deepseek",
+      name: "DeepSeek",
+      base_url: "https://api.deepseek.com/v1",
+      embedding_base_url: "",
+      rerank_base_url: "",
+      is_enabled: true,
+      has_api_key: true,
+      models: [{
+        model_id: "declared-model",
+        category: "chat",
+        capabilities: ["chat", "vision", "reasoning", "tools", "code", "audio", "video"],
+      }],
+    },
+  ]);
   render(<SettingsModels />);
 
   const option = await screen.findByRole("listitem", { name: "declared-model" });
@@ -182,15 +204,18 @@ it("shows the exact declared capabilities with icons and readable labels", async
 });
 
 it("does not infer capabilities from a model name when metadata is absent", async () => {
-  vi.mocked(getModelProvider).mockResolvedValue({
-    provider_id: "deepseek",
-    name: "DeepSeek",
-    base_url: "https://api.deepseek.com/v1",
-    protocol: "openai_compatible",
-    is_enabled: false,
-    has_api_key: false,
-    enabled_models: [{ model_id: "vision-audio-reasoning-model", capabilities: [] }],
-  });
+  vi.mocked(listModelProviders).mockResolvedValue([
+    {
+      provider_id: "deepseek",
+      name: "DeepSeek",
+      base_url: "https://api.deepseek.com/v1",
+      embedding_base_url: "",
+      rerank_base_url: "",
+      is_enabled: false,
+      has_api_key: false,
+      models: [{ model_id: "vision-audio-reasoning-model", category: "chat", capabilities: [] }],
+    },
+  ]);
   render(<SettingsModels />);
 
   const option = await screen.findByRole("listitem", { name: "vision-audio-reasoning-model" });
@@ -203,9 +228,9 @@ it("does not infer capabilities from a model name when metadata is absent", asyn
 
 it("shows discovery capabilities and saves only explicitly selected models", async () => {
   vi.mocked(discoverProviderModels).mockResolvedValue([
-    { model_id: "chat-model", capabilities: ["chat", "tools"] },
-    { model_id: "visual-model", capabilities: ["vision"] },
-    { model_id: "unspecified-model", capabilities: [] },
+    { model_id: "chat-model", category: "chat", capabilities: ["chat", "tools"] },
+    { model_id: "visual-model", category: "chat", capabilities: ["vision"] },
+    { model_id: "unspecified-model", category: "chat", capabilities: [] },
   ]);
   render(<SettingsModels />);
   const discover = await screen.findByRole("button", { name: "Discover models" });
@@ -235,23 +260,28 @@ it("shows discovery capabilities and saves only explicitly selected models", asy
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(saveModelProvider).toHaveBeenCalledWith("deepseek", {
     base_url: "https://api.deepseek.com/v1",
+    embedding_base_url: "",
+    rerank_base_url: "",
     is_enabled: false,
-    models: [{ model_id: "visual-model", capabilities: ["vision"] }],
+    models: [{ model_id: "visual-model", category: "chat", capabilities: ["vision"] }],
   }));
 });
 
 it("preserves configured models and capabilities when discovery is cancelled", async () => {
-  vi.mocked(getModelProvider).mockResolvedValue({
-    provider_id: "deepseek",
-    name: "DeepSeek",
-    base_url: "https://api.deepseek.com/v1",
-    protocol: "openai_compatible",
-    is_enabled: false,
-    has_api_key: false,
-    enabled_models: [{ model_id: "configured-model", capabilities: ["reasoning"] }],
-  });
+  vi.mocked(listModelProviders).mockResolvedValue([
+    {
+      provider_id: "deepseek",
+      name: "DeepSeek",
+      base_url: "https://api.deepseek.com/v1",
+      embedding_base_url: "",
+      rerank_base_url: "",
+      is_enabled: false,
+      has_api_key: false,
+      models: [{ model_id: "configured-model", category: "chat", capabilities: ["reasoning"] }],
+    },
+  ]);
   vi.mocked(discoverProviderModels).mockResolvedValue([
-    { model_id: "new-model", capabilities: ["vision"] },
+    { model_id: "new-model", category: "chat", capabilities: ["vision"] },
   ]);
   render(<SettingsModels />);
   await screen.findByRole("listitem", { name: "configured-model" });

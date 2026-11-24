@@ -3,20 +3,18 @@ import type {
   ChatModelOption,
   ModelProvider,
   ModelProviderId,
-  ModelProviderMetadata,
   SettingsModel,
 } from "@/types/model"
 
 export interface ChatModelListResponse {
   default_model: string
-  fallback_model: string
-  flash_model: string
-  image_model: string
   models: ChatModelOption[]
 }
 
 export interface ModelSettingsRequest {
   base_url: string
+  embedding_base_url: string
+  rerank_base_url: string
   api_key?: string
   is_enabled: boolean
   models: SettingsModel[]
@@ -30,8 +28,8 @@ export interface ConnectionTestResult {
 }
 
 /**
- * 获取当前可用对话模型列表及各角色默认模型配置。
- * @returns 模型列表及默认、备用、快速、图像模型标识。
+ * 获取当前可用对话模型列表及默认模型配置。
+ * @returns 模型列表及默认模型标识。
  */
 export const listModels = () =>
   apiClient.apiGet<ChatModelListResponse>("/api/models", {
@@ -39,11 +37,11 @@ export const listModels = () =>
   })
 
 /**
- * 获取所有模型供应商元数据列表。
- * @returns 模型供应商配置概览列表。
+ * 获取所有模型供应商配置列表。
+ * @returns 模型供应商配置列表。
  */
 export const listModelProviders = () =>
-  apiClient.apiGet<ModelProviderMetadata[]>("/api/models/providers", modelRequestOptions())
+  apiClient.apiGet<ModelProvider[]>("/api/models/providers", modelRequestOptions())
 
 /**
  * 获取指定模型供应商的详细配置。

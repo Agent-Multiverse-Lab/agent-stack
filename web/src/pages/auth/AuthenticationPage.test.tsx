@@ -45,9 +45,6 @@ describe("authentication routes", () => {
     vi.mocked(listModels).mockResolvedValue({
       models: [],
       default_model: "",
-      fallback_model: "",
-      flash_model: "",
-      image_model: ""
     })
     installBrowserStubs()
   })

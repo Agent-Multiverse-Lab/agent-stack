@@ -38,6 +38,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Bot, ChevronRight, Eye, EyeOff, Plug, RefreshCw, Search } from "lucide-react";
 import deepseekLogo from "@/assets/models/deepseek-color.svg";
+import geminiLogo from "@/assets/models/gemini-color.svg";
+import openaiLogo from "@/assets/models/openai.svg";
 import qwenLogo from "@/assets/models/qwen-color.svg";
 import {
   discoverProviderModels,
@@ -52,7 +54,6 @@ import { useTranslation } from "@/i18n";
 import type {
   ModelProvider,
   ModelProviderId,
-  ModelProviderMetadata,
   SettingsModel,
 } from "@/types/model";
 import { SettingsModelOption } from "./SettingsModelOption";
@@ -61,6 +62,8 @@ const providerLogos: Record<string, string> = {
   deepseek: deepseekLogo,
   dashscope: qwenLogo,
   qwen: qwenLogo,
+  openai: openaiLogo,
+  gemini: geminiLogo,
 };
 
 function ProviderMark({ providerId }: { providerId: string }) {
@@ -75,6 +78,8 @@ interface Draft extends ModelSettingsRequest {
 }
 const emptyDraft = (): Draft => ({
   base_url: "",
+  embedding_base_url: "",
+  rerank_base_url: "",
   is_enabled: false,
   models: [],
   key: "",
@@ -84,9 +89,12 @@ const emptyDraft = (): Draft => ({
 });
 const providerDraft = (value: ModelProvider): Draft => ({
   base_url: value.base_url,
+  embedding_base_url: value.embedding_base_url,
+  rerank_base_url: value.rerank_base_url,
   is_enabled: value.is_enabled,
-  models: value.enabled_models.map((model) => ({
+  models: value.models.map((model) => ({
     model_id: model.model_id,
+    category: model.category ?? "chat",
     capabilities: model.capabilities ?? [],
   })),
   key: "",
@@ -98,7 +106,7 @@ const providerDraft = (value: ModelProvider): Draft => ({
 export default function SettingsModels() {
   const { t, i18n } = useTranslation();
   const { accessToken } = useAuth();
-  const [providers, setProviders] = useState<ModelProviderMetadata[]>([]);
+  const [providers, setProviders] = useState<ModelProvider[]>([]);
   const [selected, setSelected] = useState<ModelProviderId>("");
   const [drafts, setDrafts] = useState<Partial<Record<string, Draft>>>(
     {},
@@ -174,8 +182,13 @@ export default function SettingsModels() {
       .then((items) => {
         if (cancelled || current !== version.current) return;
         setProviders(items);
+        setDrafts(
+          Object.fromEntries(
+            items.map((item) => [item.provider_id, providerDraft(item)]),
+          ),
+        );
         setSelected(items[0]?.provider_id ?? "");
-        if (!items.length) setLoading(false);
+        setLoading(false);
       })
       .catch((error) => {
         if (cancelled || current !== version.current) return;
@@ -190,15 +203,13 @@ export default function SettingsModels() {
     };
   }, [accessToken, i18n, reloadKey]);
   useEffect(() => {
-    if (!selected) return;
-    void load();
-  }, [load, selected]);
-  useEffect(() => {
     setRevealKey(false);
   }, [selected]);
   function request(): ModelSettingsRequest {
     return {
       base_url: draft.base_url,
+      embedding_base_url: draft.embedding_base_url,
+      rerank_base_url: draft.rerank_base_url,
       is_enabled: draft.is_enabled,
       models: draft.models.map((model) => ({
         ...model,
@@ -230,6 +241,11 @@ export default function SettingsModels() {
           ...previous,
           [selected]: providerDraft(saved),
         }));
+        setProviders((previous) =>
+          previous.map((item) =>
+            item.provider_id === selected ? saved : item,
+          ),
+        );
         if (result.cache_refreshed) toast.success(t("Saved"));
         else toast.warning(t("Saved, but refreshing the model cache failed"));
       } else if (action === "discover") {
@@ -369,6 +385,58 @@ export default function SettingsModels() {
         ) : null}
 
         <FieldGroup className="gap-3">
+          <Field>
+            <FieldLabel htmlFor="provider-base-url">{t("Base URL")}</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                id="provider-base-url"
+                value={draft.base_url}
+                onChange={(event) => edit({ base_url: event.target.value })}
+                type="url"
+                disabled={blocked}
+                placeholder="https://api.example.com/v1"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </InputGroup>
+          </Field>
+
+          <Field>
+            <FieldLabel htmlFor="provider-embedding-base-url">{t("Embedding Base URL")}</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                id="provider-embedding-base-url"
+                value={draft.embedding_base_url}
+                onChange={(event) =>
+                  edit({ embedding_base_url: event.target.value })
+                }
+                type="url"
+                disabled={blocked}
+                placeholder="https://api.example.com/v1"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </InputGroup>
+          </Field>
+
+          <Field>
+            <FieldLabel htmlFor="provider-rerank-base-url">{t("Rerank Base URL")}</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                id="provider-rerank-base-url"
+                value={draft.rerank_base_url}
+                onChange={(event) =>
+                  edit({ rerank_base_url: event.target.value })
+                }
+                type="url"
+                disabled={blocked}
+                placeholder="https://api.example.com/v1/reranks"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </InputGroup>
+          </Field>
+
           <Field>
             <FieldLabel htmlFor="provider-api-key">API Key</FieldLabel>
             <InputGroup>

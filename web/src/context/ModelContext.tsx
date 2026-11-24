@@ -38,8 +38,6 @@ export function ModelProvider({ children }: { children: ReactNode }) {
         const selected = catalog.models.find(
           (model) => model.id === catalog.default_model && model.is_available
         ) ?? catalog.models.find(
-          (model) => model.is_default && model.is_available
-        ) ?? catalog.models.find(
           (model) => model.is_available
         )
         setSelectedModelId(selected?.id ?? "")

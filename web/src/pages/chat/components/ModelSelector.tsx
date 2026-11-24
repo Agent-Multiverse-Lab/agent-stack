@@ -33,6 +33,7 @@ const modelIcons: Record<string, string> = {
   minimax: minimaxIcon,
   ollama: ollamaIcon,
   openai: openaiIcon,
+  dashscope: qwenIcon,
   qwen: qwenIcon,
   vllm: vllmIcon,
   zhipu: zhipuIcon,
@@ -150,8 +151,8 @@ export default function ModelSelector({
                 className="relative z-10 rounded-md bg-transparent py-1.5 pr-8 pl-2 focus:bg-transparent data-checked:bg-selection data-checked:text-selection-foreground data-checked:focus:bg-selection data-checked:focus:text-selection-foreground [&_[data-slot=dropdown-menu-radio-item-indicator]]:right-3"
               >
                 <span className="flex min-w-0 flex-1 items-center gap-2" title={model.name}>
-                  {modelIcons[model.icon] ? (
-                    <img src={modelIcons[model.icon]} alt="" className="size-4 shrink-0" />
+                  {modelIcons[model.provider] ? (
+                    <img src={modelIcons[model.provider]} alt="" className="size-4 shrink-0" />
                   ) : (
                     <CpuIcon className="size-4 shrink-0" aria-hidden="true" />
                   )}
