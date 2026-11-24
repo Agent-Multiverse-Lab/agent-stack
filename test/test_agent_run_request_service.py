@@ -8,6 +8,7 @@ from uuid import uuid4
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
+from server.entities.agent import QueuedAgentRunResponse
 from server.exception import AgentRunConflictError
 from server.service import (
     agent_run_request_queue_service,
@@ -306,16 +307,12 @@ class AgentRunRequestServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             enqueued,
-            {
-                "run_id": None,
-                "thread_id": "thread-1",
-                "status": "queued",
-                "dispatch_policy": "enqueue",
-                "request_id": "req-enq",
-                "queue_position": 1,
-                "steering_run_id": None,
-                "stream_url": None,
-            },
+            QueuedAgentRunResponse(
+                thread_id="thread-1",
+                dispatch_policy="enqueue",
+                request_id="req-enq",
+                queue_position=1,
+            ),
         )
 
         steered = await self._submit(
@@ -323,17 +320,17 @@ class AgentRunRequestServiceTest(unittest.IsolatedAsyncioTestCase):
             request_metadata={"type": "chat", "request_id": "req-steer"},
             dispatch_policy="steer",
         )
-        self.assertEqual(steered["dispatch_policy"], "steer")
-        self.assertEqual(steered["queue_position"], 1)
-        self.assertEqual(steered["steering_run_id"], "blocker")
+        self.assertEqual(steered.dispatch_policy, "steer")
+        self.assertEqual(steered.queue_position, 1)
+        self.assertEqual(steered.steering_run_id, "blocker")
 
         retried = await self._submit(
             query="ignored-retry",
             request_metadata={"type": "chat", "request_id": "req-enq"},
             dispatch_policy="enqueue",
         )
-        self.assertEqual(retried["request_id"], "req-enq")
-        self.assertEqual(retried["queue_position"], 2)
+        self.assertEqual(retried.request_id, "req-enq")
+        self.assertEqual(retried.queue_position, 2)
 
         self.assertEqual(self._counts(), (2, 2, 1, 0))
         req_enq = self.db.get(AgentRunRequest, "req-enq")

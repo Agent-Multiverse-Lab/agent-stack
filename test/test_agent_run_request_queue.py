@@ -180,10 +180,10 @@ class AgentRunRequestQueueRepositoryTest(unittest.IsolatedAsyncioTestCase):
         self.db.get(AgentRun, "run-active").agent_status = "completed"
         self.db.commit()
 
-        # pop_next_queued_for_thread 优先弹出 req-3 并通过 convert_request_to_run 转成 Run
+        # pop_next_queued_for_thread 优先弹出 req-3 并通过 dispatch_request_to_run 转成 Run
         popped = await self.queue.pop_next_queued_for_thread("thread-1")
         self.assertEqual(popped.request_id, "req-3")
-        promoted_run = await self.queue.convert_request_to_run(
+        promoted_run = await self.queue.dispatch_request_to_run(
             request=popped,
             conversation=self.conversation,
             run_metadata={"model": "test/initial", "request_id": "req-3"},
@@ -198,7 +198,7 @@ class AgentRunRequestQueueRepositoryTest(unittest.IsolatedAsyncioTestCase):
         # 非 queued 请求直接转换仅绑定 Message.agent_run_id
         self.db.get(AgentRun, "run-promoted").agent_status = "completed"
         self.db.commit()
-        direct_run = await self.queue.convert_request_to_run(
+        direct_run = await self.queue.dispatch_request_to_run(
             request=req_4,
             conversation=self.conversation,
             run_metadata={"model": "test/initial", "request_id": "req-4"},
@@ -297,9 +297,9 @@ class AgentRunRequestQueueServiceTest(unittest.IsolatedAsyncioTestCase):
         upgraded = await agent_run_request_queue_service.steer_queued_request(
             db=self.session, current_user=user, request_id="req-2",
         )
-        self.assertEqual(upgraded["dispatch_policy"], "steer")
-        self.assertEqual(upgraded["queue_position"], 1)
-        self.assertEqual(upgraded["steering_run_id"], blocker.id)
+        self.assertEqual(upgraded.dispatch_policy, "steer")
+        self.assertEqual(upgraded.queue_position, 1)
+        self.assertEqual(upgraded.steering_run_id, blocker.id)
 
         # 取消 req-1 + 幂等重复取消
         cancelled = await agent_run_request_queue_service.cancel_queued_request(

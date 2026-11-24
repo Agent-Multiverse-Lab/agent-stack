@@ -9,6 +9,7 @@ from server.entities.agent import (
     AgentResponse,
     AgentRunCreateRequest,
     AgentUpdateRequest,
+    QueuedAgentRunResponse,
 )
 from server.exception import AgentRunConflictError
 from server.service import (
@@ -124,8 +125,8 @@ async def create_agent_run(
             detail=str(exc),
         ) from exc
 
-    if isinstance(run, dict):
-        return JSONResponse(status_code=202, content=run)
+    if isinstance(run, QueuedAgentRunResponse):
+        return JSONResponse(status_code=202, content=run.model_dump())
 
     return {
         "run_id": run.id,
@@ -204,8 +205,8 @@ async def steer_queued_agent_run_request(
             detail=str(exc),
         ) from exc
 
-    if isinstance(result, dict):
-        return JSONResponse(status_code=202, content=result)
+    if isinstance(result, QueuedAgentRunResponse):
+        return JSONResponse(status_code=202, content=result.model_dump())
 
     return {
         "run_id": result.id,

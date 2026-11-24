@@ -114,7 +114,7 @@ class DispatchHTTPTest(unittest.IsolatedAsyncioTestCase):
         from fastapi import Depends, HTTPException, status
         from fastapi.responses import JSONResponse
 
-        from server.entities.agent import AgentRunCreateRequest
+        from server.entities.agent import AgentRunCreateRequest, QueuedAgentRunResponse
         from server.exception import AgentRunConflictError
 
         tree = ast.parse(Path("server/router/agent_router.py").read_text())
@@ -128,7 +128,8 @@ class DispatchHTTPTest(unittest.IsolatedAsyncioTestCase):
         for node in nodes:
             node.decorator_list = []
         self.module = dict(
-            AgentRunCreateRequest=AgentRunCreateRequest, AuthenticatedUser=Any, AsyncSession=Any,
+            AgentRunCreateRequest=AgentRunCreateRequest, QueuedAgentRunResponse=QueuedAgentRunResponse,
+            AuthenticatedUser=Any, AsyncSession=Any,
             Depends=Depends, get_db=Mock(), HTTPException=HTTPException, JSONResponse=JSONResponse,
             status=status, config=SimpleNamespace(enable_run_queue=True), AgentRunConflictError=AgentRunConflictError,
             agent_run_request_service=SimpleNamespace(submit_agent_run_request=AsyncMock()),
@@ -144,33 +145,35 @@ class DispatchHTTPTest(unittest.IsolatedAsyncioTestCase):
         from pydantic import ValidationError
 
         request_model = self.module["AgentRunCreateRequest"]
+        queued_model = self.module["QueuedAgentRunResponse"]
         default_req = request_model(agent_id="a", thread_id="t")
         self.assertEqual(default_req.dispatch_policy, "enqueue")
         self.assertEqual(request_model(agent_id="a", thread_id="t", dispatch_policy="reject").dispatch_policy, "reject")
         with self.assertRaises(ValidationError):
             request_model(agent_id="a", thread_id="t", dispatch_policy="queue")
 
-        enqueue_response = {"run_id": None, "stream_url": None, "status": "queued", "dispatch_policy": "enqueue", "request_id": "q1", "queue_position": 1, "steering_run_id": None}
+        enqueue_response = queued_model(thread_id="t", dispatch_policy="enqueue", request_id="q1", queue_position=1)
         self.module["agent_run_request_service"].submit_agent_run_request.return_value = enqueue_response
         result = await self.module["create_agent_run"](default_req, SimpleNamespace(uid="u"), object())
         self.assertEqual(result.status_code, 202)
-        self.assertEqual(json.loads(result.body), enqueue_response)
+        self.assertEqual(json.loads(result.body), enqueue_response.model_dump())
         self.assertIsNone(json.loads(result.body)["steering_run_id"])
 
-        steer_response = {"run_id": None, "stream_url": None, "status": "queued", "dispatch_policy": "steer", "request_id": "q2", "queue_position": 1, "steering_run_id": "r"}
+        steer_response = queued_model(thread_id="t", dispatch_policy="steer", request_id="q2", queue_position=1, steering_run_id="r")
         self.module["agent_run_request_service"].submit_agent_run_request.return_value = steer_response
         result = await self.module["create_agent_run"](
             request_model(agent_id="a", thread_id="t", dispatch_policy="steer"),
             SimpleNamespace(uid="u"), object(),
         )
         self.assertEqual(result.status_code, 202)
-        self.assertEqual(json.loads(result.body), steer_response)
+        self.assertEqual(json.loads(result.body), steer_response.model_dump())
         self.assertEqual(json.loads(result.body)["steering_run_id"], "r")
 
     async def test_cancel_and_steer_queued_request_routes(self):
         import json
         from fastapi import HTTPException
         conflict_cls = self.module["AgentRunConflictError"]
+        queued_model = self.module["QueuedAgentRunResponse"]
 
         self.module["agent_run_request_queue_service"].cancel_queued_request.return_value = {"request_id": "q1", "status": "cancelled"}
         self.assertEqual(
@@ -188,10 +191,9 @@ class DispatchHTTPTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conflict_resp.status_code, 409)
         self.assertEqual(json.loads(conflict_resp.body), {"detail": "请求已开始执行", "run_id": "run-9"})
 
-        self.module["agent_run_request_queue_service"].steer_queued_request.return_value = {
-            "run_id": None, "thread_id": "t", "status": "queued", "dispatch_policy": "steer",
-            "request_id": "q1", "queue_position": 1, "steering_run_id": "run-active", "stream_url": None,
-        }
+        self.module["agent_run_request_queue_service"].steer_queued_request.return_value = queued_model(
+            thread_id="t", dispatch_policy="steer", request_id="q1", queue_position=1, steering_run_id="run-active",
+        )
         steered = await self.module["steer_queued_agent_run_request"]("q1", SimpleNamespace(uid="u"), object())
         self.assertEqual(steered.status_code, 202)
         self.assertEqual(json.loads(steered.body)["steering_run_id"], "run-active")

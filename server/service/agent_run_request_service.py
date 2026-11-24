@@ -6,12 +6,9 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from server.entities.agent import QueuedAgentRunResponse
 from server.exception import AgentRunConflictError
-from server.service.agent_run_request_queue_service import (
-    build_queued_response,
-    convert_request_to_run,
-    enqueue_committed_run,
-)
+from server.service.agent_run_request_queue_service import enqueue_committed_run
 from server.service.arq_queue_servcie import enqueue_agent_run
 from server.service.attachment_service import (
     attachment_file_ids,
@@ -130,7 +127,7 @@ async def submit_agent_run_request(
     request_metadata: dict[str, Any],
     image_content: str | None,
     dispatch_policy: str = "enqueue",
-) -> AgentRun | dict[str, Any]:
+) -> AgentRun | QueuedAgentRunResponse:
     """持会话锁接收并分发请求，提交后才入 ARQ。"""
     if not thread_id:
         raise ValueError("会话 ID 不能为空")
@@ -174,7 +171,9 @@ async def submit_agent_run_request(
             position = await request_queue_repo.get_queue_position(
                 thread_id, request_id, uid=uid,
             )
-            result = build_queued_response(agent_run_request, active_run, queue_position=position)
+            result = QueuedAgentRunResponse.from_request(
+                agent_run_request, active_run, queue_position=position
+            )
             await db.commit()
             return result
         if agent_run_request is not None and agent_run_request.status == "cancelled":
@@ -188,7 +187,8 @@ async def submit_agent_run_request(
             raise AgentRunConflictError("当前会话有待回答的问题")
         if active_run is not None and dispatch_policy == "reject":
             raise AgentRunConflictError("当前会话有正在执行的任务")
-        if agent_run_request is None:
+        created_now = agent_run_request is None
+        if created_now:
             agent_run_request = await create_agent_run_request(
                 db=db,
                 conversation=conversation,
@@ -208,12 +208,20 @@ async def submit_agent_run_request(
             position = await request_queue_repo.get_queue_position(
                 thread_id, request_id, uid=uid,
             )
-            result: AgentRun | dict[str, Any] = build_queued_response(
+            result: AgentRun | QueuedAgentRunResponse = QueuedAgentRunResponse.from_request(
                 agent_run_request, active_run, queue_position=position
             )
         else:
-            result = await convert_request_to_run(
-                db, agent_run_request, conversation, resolve_model_fn=validate_model,
+            run_metadata = {
+                **dict(conversation.conversation_metadata or {}),
+                "request_id": str(agent_run_request.request_id),
+            }
+            if not created_now:
+                await validate_model(db, run_metadata.get("model"))
+            result = await request_queue_repo.dispatch_request_to_run(
+                request=agent_run_request,
+                conversation=conversation,
+                run_metadata=run_metadata,
             )
         await db.commit()
     except IntegrityError:
@@ -232,6 +240,6 @@ async def submit_agent_run_request(
     await delete_copied_sources(copied_objects)
     return (
         result
-        if isinstance(result, dict)
+        if isinstance(result, QueuedAgentRunResponse)
         else await enqueue_committed_run(db, result, enqueue_fn=enqueue_agent_run)
     )

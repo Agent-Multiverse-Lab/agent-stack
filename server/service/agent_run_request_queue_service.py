@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from server.entities.agent import QueuedAgentRunResponse
 from server.exception import AgentRunConflictError
 from server.service.arq_queue_servcie import enqueue_agent_run
 from src.database.models import AgentRun, AgentRunRequest, Conversation, User
@@ -19,41 +19,6 @@ from src.database.repositories import (
 from src.database.session import session_context
 from src.model.runtime import validate_model
 from src.utils import logger
-
-
-@dataclass(frozen=True)
-class AgentRunRequestInput:
-    """Run 创建业务接收的已保存请求及当前会话配置。"""
-
-    request_id: str
-    uid: str
-    thread_id: str
-    agent_id: str
-    trigger_message_id: int
-    conversation_metadata: dict[str, Any]
-
-
-def build_queued_response(
-    request: AgentRunRequest,
-    active_run: AgentRun | None = None,
-    *,
-    queue_position: int = 1,
-) -> dict[str, Any]:
-    """构造等待区 202 排队响应载荷。"""
-    return {
-        "run_id": None,
-        "thread_id": request.thread_id,
-        "status": "queued",
-        "dispatch_policy": request.dispatch_policy,
-        "request_id": request.request_id,
-        "queue_position": queue_position,
-        "steering_run_id": (
-            str(active_run.id)
-            if active_run is not None and request.dispatch_policy == "steer"
-            else None
-        ),
-        "stream_url": None,
-    }
 
 
 async def enqueue_committed_run(
@@ -77,32 +42,6 @@ async def enqueue_committed_run(
         await db.commit()
         return failed_run or run
     return run
-
-
-async def convert_request_to_run(
-    db: AsyncSession,
-    request: AgentRunRequest,
-    conversation: Conversation,
-    *,
-    resolve_model_fn: Callable[..., Awaitable[Any]] | None = None,
-) -> AgentRun:
-    """校验当前会话模型并将 AgentRunRequest 转换为待执行 AgentRun。"""
-    dispatch = AgentRunRequestInput(
-        request_id=request.request_id,
-        uid=request.uid,
-        thread_id=request.thread_id,
-        agent_id=request.agent_id,
-        trigger_message_id=request.trigger_message_id,
-        conversation_metadata=dict(conversation.conversation_metadata or {}),
-    )
-    metadata = {**dispatch.conversation_metadata, "request_id": dispatch.request_id}
-    resolver = resolve_model_fn or validate_model
-    await resolver(db, metadata.get("model"))
-    return await AgentRunRequestQueueRepository(db).convert_request_to_run(
-        request=request,
-        conversation=conversation,
-        run_metadata=metadata,
-    )
 
 
 async def dispatch_next_queued_request(thread_id: str) -> AgentRun | None:
@@ -130,12 +69,20 @@ async def dispatch_next_queued_request(thread_id: str) -> AgentRun | None:
             is not None
         ):
             return None
-        request = await AgentRunRequestQueueRepository(db).pop_next_queued_for_thread(
-            thread_id
-        )
+        queue_repo = AgentRunRequestQueueRepository(db)
+        request = await queue_repo.pop_next_queued_for_thread(thread_id)
         if request is None:
             return None
-        run = await convert_request_to_run(db, request, conversation)
+        run_metadata = {
+            **dict(conversation.conversation_metadata or {}),
+            "request_id": str(request.request_id),
+        }
+        await validate_model(db, run_metadata.get("model"))
+        run = await queue_repo.dispatch_request_to_run(
+            request=request,
+            conversation=conversation,
+            run_metadata=run_metadata,
+        )
         await db.commit()
         return await enqueue_committed_run(db, run)
 
@@ -216,7 +163,7 @@ async def steer_queued_request(
     db: AsyncSession,
     current_user: User,
     request_id: str,
-) -> AgentRun | dict[str, Any]:
+) -> AgentRun | QueuedAgentRunResponse:
     """在会话行锁下将等待区请求升级为 steer，或在会话空闲时就地晋升执行。"""
     uid = str(current_user.uid)
     promoted_run: AgentRun | None = None
@@ -246,10 +193,21 @@ async def steer_queued_request(
             position = await queue_repo.get_queue_position(
                 thread_id, request_id, uid=uid
             )
-            result = build_queued_response(upgraded, active_run, queue_position=position)
+            result = QueuedAgentRunResponse.from_request(
+                upgraded, active_run, queue_position=position
+            )
             await db.commit()
             return result
-        promoted_run = await convert_request_to_run(db, request, conversation)
+        run_metadata = {
+            **dict(conversation.conversation_metadata or {}),
+            "request_id": str(request.request_id),
+        }
+        await validate_model(db, run_metadata.get("model"))
+        promoted_run = await queue_repo.dispatch_request_to_run(
+            request=request,
+            conversation=conversation,
+            run_metadata=run_metadata,
+        )
         await db.commit()
     except Exception:
         await db.rollback()

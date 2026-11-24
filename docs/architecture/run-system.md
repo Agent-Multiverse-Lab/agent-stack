@@ -9,7 +9,7 @@
 ## 2. Core Components
 
 - `server/router/agent_router.py`：对外入口（创建 run、取消、SSE 读取）。
-- `server/service/agent_run_service.py`：Run 及事件流的服务层入口，定义并组装创建 Run 所需的 `AgentRunRequestInput`。
+- `server/service/agent_run_service.py`：Run 及事件流的服务层入口。
 - `server/service/arq_queue_servcie.py`：ARQ/Redis 运行时协作层。
 - `server/worker.py`：实际执行 worker，消费 `process_agent_run`。
 - `src/database/repositories/agent_run_repository.py`：状态原子更新。

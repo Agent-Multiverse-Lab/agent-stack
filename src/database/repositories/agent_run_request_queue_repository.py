@@ -151,7 +151,7 @@ class AgentRunRequestQueueRepository:
         )
         return request
 
-    async def convert_request_to_run(
+    async def dispatch_request_to_run(
         self,
         *,
         request: AgentRunRequest,
