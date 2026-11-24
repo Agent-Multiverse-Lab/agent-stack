@@ -8,6 +8,9 @@ type Language = (typeof supportedLanguages)[number];
 const translations = {
   "Response redirected to the next request": "已转向下一条请求",
   "Waiting requests": "等待区",
+  "Collapse waiting requests": "收起等待区",
+  "Expand waiting requests": "展开等待区",
+  "Attachment": "附件",
   "Dispatch policy": "发送方式",
   "Queue message": "排队发送",
   "Steer response": "转向新请求",
