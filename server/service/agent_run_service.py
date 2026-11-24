@@ -71,6 +71,14 @@ async def create_resume_agent_run(
     if str(owned_parent.agent_id) != agent_id:
         raise AgentRunConflictError("恢复请求与父 Run 的智能体不匹配")
 
+    conversation = await ConversationRepository(db).get_conversation_by_thread_id_for_user(
+        thread_id=thread_id,
+        user_id=str(current_user.uid),
+        for_update=True,
+    )
+    if conversation is None:
+        raise LookupError("当前会话不存在或已删除")
+
     parent = await agent_run_repo.get_for_resume_for_update(
         run_id=interrupted_run_id,
         uid=str(current_user.uid),
@@ -123,6 +131,15 @@ async def create_resume_agent_run(
             await db.commit()
             return existing
         raise AgentRunConflictError("当前问题已经回答")
+
+    if (
+        await agent_run_repo.get_latest_active_for_thread(
+            uid=str(current_user.uid),
+            thread_id=thread_id,
+        )
+        is not None
+    ):
+        raise AgentRunConflictError("当前会话有正在执行的任务")
 
     # 模型配置由父 Run 决定，回答请求不能替换模型。
     run_metadata.pop("model", None)

@@ -37,7 +37,7 @@ ARQ: process_agent_run(run_id)
 待回答问题阻止接收新输入；活动 Run 按 `enqueue | reject | steer`（默认 `enqueue`）决定拒收或即时落库 `AgentRunRequest(status="queued")` 与 `Message(status="queued")`，删除走逻辑软取消（`cancelled` 墓碑），`POST .../steer` 支持忙碌原地升级或空闲就地晋升。同一 `request_id` 重试复用已接收输入。Request 持有输入关联、策略、等待区状态和顺序；正文、图片和消息元数据由 Message 持有，执行状态由 AgentRun 持有。ARQ Worker 保持终止与派发解耦（`set_run_terminal`、`_finalize_run` 与租约回收器均不触发队列派发），仅由 `process_agent_run` 在 `completed`（自然结束）或 `steered`（Turn 边界停机及 120s 宽限硬取消）且 `changed=True` 时按 `steer` 优先与 `queue_seq ASC` 晋升下一条排队请求，创建 Run 时读取会话当前配置。
 
 **关键运行不变量：**
-- **Interrupt & Resume**：`ask_user` 中断产生 `interrupted` 终态并将问题载荷保存在 `AgentRun.run_metadata["interrupt"]`；恢复时创建新 `AgentRun(run_type="resume", created_by_run_id=parent_run_id)` 复用同一 `thread_id` 与 LangGraph checkpoint，父 Run 不回到 `running`。
+- **Interrupt & Resume**：`ask_user` 中断产生 `interrupted` 终态并将问题载荷保存在 `AgentRun.run_metadata["interrupt"]`；恢复时创建新 `AgentRun(run_type="resume", created_by_run_id=parent_run_id)` 复用同一 `thread_id` 与 LangGraph checkpoint，父 Run 不回到 `running`。尚无 `resume` 子 Run 的 `interrupted` Run 阻止新输入、`steer`、队列派发和会话删除，且可通过取消接口直接收敛为 `cancelled` 解锁会话。
 - **Cancellation**：`cancel_requested` 仅是中间态；Worker 仅在进入流消费循环后写入 Redis `end` 事件（流前停止只写 PostgreSQL 终态，由 SSE 按 DB 终态兜底）；终态单向，晚到取消不得覆盖已有终态。
 - **Stream Decoupling**：Worker 执行不依赖任何单条 SSE 连接，客户端断开不停止 Run，重连继续读取同一 `run_id`。
 

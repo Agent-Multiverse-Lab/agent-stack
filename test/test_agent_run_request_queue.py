@@ -339,3 +339,47 @@ class AgentRunRequestQueueServiceTest(unittest.IsolatedAsyncioTestCase):
                 db=self.session, current_user=user, request_id="req-2",
             )
         self.assertEqual(steer_conflict.exception.run_id, dispatched_run.id)
+
+    async def test_unresumed_interrupted_blocks_dispatch_and_steer_until_cancelled(self):
+        user = SimpleNamespace(id=7, uid="user-1")
+        msg = Message(conversation_id=1, role="user", content="queued after interrupt", status="queued")
+        self.db.add(msg)
+        self.db.flush()
+        await AgentRunRequestRepository(self.session).create_agent_run_request(
+            request_id="req-after-int",
+            uid="user-1",
+            thread_id="thread-1",
+            agent_id="leader",
+            trigger_message_id=msg.id,
+            dispatch_policy="enqueue",
+            status="queued",
+            queue_seq=1,
+        )
+        interrupted = await AgentRunRepository(self.session).create_run(
+            run_id="run-int",
+            uid="user-1",
+            conversation_id=1,
+            thread_id="thread-1",
+            agent_slug="leader",
+            request_id="req-int",
+            trigger_message_id=None,
+            agent_status="interrupted",
+        )
+        self.db.commit()
+
+        self.assertIsNone(
+            await agent_run_request_queue_service.dispatch_next_queued_request("thread-1")
+        )
+        with self.assertRaisesRegex(AgentRunConflictError, "待回答的问题"):
+            await agent_run_request_queue_service.steer_queued_request(
+                db=self.session, current_user=user, request_id="req-after-int",
+            )
+
+        cancelled = await AgentRunRepository(self.session).request_cancel(interrupted.id)
+        self.db.commit()
+        self.assertEqual(cancelled.agent_status, "cancelled")
+
+        dispatched = await agent_run_request_queue_service.dispatch_next_queued_request("thread-1")
+        self.assertIsNotNone(dispatched)
+        self.assertEqual(dispatched.request_id, "req-after-int")
+        self.enqueue_mock.assert_awaited_once_with(str(dispatched.id))

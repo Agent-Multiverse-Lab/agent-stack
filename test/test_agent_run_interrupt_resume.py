@@ -35,6 +35,7 @@ class ResumeRepository:
             run_metadata={"model": "parent-model", "interrupt": {"name": "ask_user", "questions": copy.deepcopy(QUESTIONS)}},
         )
         self.existing = None
+        self.active_run = None
         self.create_arguments = None
 
     async def get_by_id_for_user(self, **values):
@@ -45,6 +46,9 @@ class ResumeRepository:
 
     async def get_resume_child(self, _created_by_run_id):
         return self.existing
+
+    async def get_latest_active_for_thread(self, **_values):
+        return self.active_run
 
     async def create_run(self, **values):
         self.create_arguments = values
@@ -65,13 +69,23 @@ class ResumeRequestTest(unittest.TestCase):
 class ResumeServiceTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.repo = ResumeRepository()
+        self.conv_repo = SimpleNamespace(
+            get_conversation_by_thread_id_for_user=AsyncMock(
+                return_value=SimpleNamespace(id=7, thread_id="thread-1", uid="user-1")
+            )
+        )
         self.db = SimpleNamespace(commit=AsyncMock())
         self.enqueue = AsyncMock()
         self.repo_patch = patch.object(agent_run_service, "AgentRunRepository", return_value=self.repo)
+        self.conv_repo_patch = patch.object(
+            agent_run_service, "ConversationRepository", return_value=self.conv_repo
+        )
         self.enqueue_patch = patch.object(agent_run_service, "enqueue_agent_run", self.enqueue)
         self.repo_patch.start()
+        self.conv_repo_patch.start()
         self.enqueue_patch.start()
         self.addCleanup(self.repo_patch.stop)
+        self.addCleanup(self.conv_repo_patch.stop)
         self.addCleanup(self.enqueue_patch.stop)
 
     async def submit(self, answers=None, uid="user-1", thread_id="thread-1", request_id="request-1", agent_id="LeaderAgent"):
@@ -141,6 +155,20 @@ class ResumeServiceTest(unittest.IsolatedAsyncioTestCase):
             await self.submit({**ANSWERS, "database": "sqlite"})
         with self.assertRaises(agent_run_service.AgentRunConflictError):
             await self.submit(request_id="request-2")
+        self.enqueue.assert_not_awaited()
+
+    async def test_active_run_conflicts_for_new_resume_but_allows_idempotent_retry(self):
+        self.repo.active_run = SimpleNamespace(id="active-run", agent_status="running")
+        with self.assertRaisesRegex(agent_run_service.AgentRunConflictError, "正在执行"):
+            await self.submit()
+        self.assertIsNone(self.repo.create_arguments)
+
+        self.repo.existing = SimpleNamespace(
+            id="resume-run",
+            request_id="request-1",
+            run_metadata={"resume": {"answers": ANSWERS}},
+        )
+        self.assertIs(await self.submit(), self.repo.existing)
         self.enqueue.assert_not_awaited()
 
 
