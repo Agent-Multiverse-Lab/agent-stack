@@ -90,7 +90,6 @@ async def create_thread(
     uid: str,
     agent_id: str,
     title: str | None,
-    summary: str | None,
     metadata: dict[str, Any] | None,
     project_id: str | None = None,
 ) -> Conversation:
@@ -109,7 +108,6 @@ async def create_thread(
         raise LookupError("智能体不存在")
 
     title_text = (title or "").strip() or "新对话"
-    summary_text = summary.strip() if summary is not None else None
     thread_metadata = dict(metadata or {})
     thread_metadata["backend_id"] = str(agent.backend_id)
     thread_metadata["model"] = resolve_chat_model_selection(
@@ -123,7 +121,6 @@ async def create_thread(
         thread_id=str(uuid.uuid4()),
         agent_slug=str(agent.slug),
         title=title_text,
-        summary=summary_text,
         conversation_metadata=thread_metadata,
         project_id=project_id,
     )
@@ -358,22 +355,18 @@ async def update_thread(
     thread_id: str,
     fields: set[str],
     title: str | None,
-    summary: str | None,
     metadata: dict[str, Any] | None,
     project_id: str | None = None,
     pinned: bool | None = None,
 ) -> dict[str, Any]:
     """更新当前用户对话的可变字段。"""
-    allowed_fields = {"title", "summary", "metadata", "project_id", "pinned"}
+    allowed_fields = {"title", "metadata", "project_id", "pinned"}
     if not fields or not fields.issubset(allowed_fields):
         raise ValueError("未提供可更新的对话字段")
 
     conversations = ConversationRepository(db)
     conversation = await _require_thread(conversations, uid, thread_id)
     title_text = str(conversation.title)
-    summary_text = (
-        str(conversation.summary) if conversation.summary is not None else None
-    )
     existing_metadata = dict(conversation.conversation_metadata or {})
     thread_metadata = dict(existing_metadata)
 
@@ -381,8 +374,6 @@ async def update_thread(
         if title is None or not title.strip():
             raise ValueError("对话标题不能为空")
         title_text = title.strip()
-    if "summary" in fields:
-        summary_text = summary.strip() if summary is not None else None
     if "metadata" in fields:
         if metadata is None:
             raise ValueError("对话 metadata 必须是对象")
@@ -413,7 +404,6 @@ async def update_thread(
     conversation = await conversations.update_conversation(
         conversation,
         title=title_text,
-        summary=summary_text,
         conversation_metadata=thread_metadata,
         organization=organization,
     )
@@ -471,9 +461,6 @@ def _thread_summary(
         "pinned": conversation.pinned_at is not None,
         "pinned_at": conversation.pinned_at,
         "title": str(conversation.title),
-        "summary": (
-            str(conversation.summary) if conversation.summary is not None else None
-        ),
         "agent_id": str(conversation.agent_id),
         "metadata": dict(conversation.conversation_metadata or {}),
         "created_at": conversation.created_at,

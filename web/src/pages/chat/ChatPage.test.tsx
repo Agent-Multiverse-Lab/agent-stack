@@ -85,7 +85,7 @@ const catalog = {
 };
 
 const thread = {
-  uid: "user-1", thread_id: "thread-1", title: "Conversation", summary: null, agent_id: "LeaderAgent",
+  uid: "user-1", thread_id: "thread-1", title: "Conversation", agent_id: "LeaderAgent",
   metadata: { model: deepseek }, created_at: "2026-10-14T00:00:00Z", updated_at: "2026-10-14T00:00:00Z",
 };
 

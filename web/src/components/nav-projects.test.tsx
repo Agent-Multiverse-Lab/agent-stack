@@ -35,7 +35,6 @@ const thread: ThreadMetadataResponse = {
   project_id: null,
   pinned: false,
   pinned_at: null,
-  summary: null,
   agent_id: "agent",
   metadata: {},
   created_at: "2026-01-01T00:00:00Z",

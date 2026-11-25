@@ -106,7 +106,6 @@ class Conversation(Base):
     thread_id = Column(String(64), unique=True, index=True, nullable=False, comment="会话的thread_id")
     agent_id = Column(String(64), index=True, nullable=False, comment="当前会话绑定的agent")
     title = Column(String(255), nullable=False, comment="会话标题")
-    summary = Column(Text, nullable=True, comment="会话摘要")
     project_id = Column(String(64), ForeignKey("project.project_id", ondelete="SET NULL"), nullable=True, index=True)
     pinned_at = Column(DateTime(timezone=True), nullable=True)
     conversation_metadata = Column(JSON, nullable=False, default=dict, comment="会话元数据")

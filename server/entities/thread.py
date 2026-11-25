@@ -10,7 +10,6 @@ class ThreadRequest(BaseModel):
     """创建顶层对话的请求。"""
 
     title: str | None = None
-    summary: str | None = None
     agent_id: str
     metadata: dict[str, Any] | None = None
     project_id: str | None = Field(default=None, min_length=1, max_length=64)
@@ -36,7 +35,6 @@ class ThreadSummaryResponse(BaseModel):
     project_id: str | None = None
     pinned: bool = False
     pinned_at: datetime | None = None
-    summary: str | None
     agent_id: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
@@ -149,7 +147,6 @@ class ThreadUpdateRequest(BaseModel):
     title: str | None = Field(default=None, max_length=255)
     project_id: str | None = Field(default=None, min_length=1, max_length=64)
     pinned: bool | None = None
-    summary: str | None = None
     metadata: dict[str, Any] | None = None
 
 

@@ -152,7 +152,6 @@ const detail: ThreadDetailResponse = {
     project_id: null,
     pinned: false,
     pinned_at: null,
-    summary: null,
     agent_id: "LeaderAgent",
     metadata: {},
     created_at: start,

@@ -79,7 +79,6 @@ async def create_agent_run_request(
         await conversation_repo.update_conversation(
             conversation,
             title=conversation.title,
-            summary=conversation.summary,
             conversation_metadata=conversation_metadata,
         )
     attachments, new_copied = await prepare_message_attachments(

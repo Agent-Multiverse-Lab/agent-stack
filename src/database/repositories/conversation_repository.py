@@ -85,10 +85,7 @@ class ConversationRepository:
             )
         if query is not None:
             pattern = f"%{query}%"
-            statement = statement.where(or_(
-                Conversation.title.ilike(pattern),
-                Conversation.summary.ilike(pattern),
-            ))
+            statement = statement.where(Conversation.title.ilike(pattern))
         if before_activity_at is not None and before_id is not None:
             activity_after = or_(
                 last_activity_at < before_activity_at,
@@ -283,7 +280,6 @@ class ConversationRepository:
         thread_id: str,
         agent_slug: str,
         title: str | None = None,
-        summary: str | None = None,
         conversation_metadata: dict | None = None,
         project_id: str | None = None,
     ) -> Conversation:
@@ -293,7 +289,6 @@ class ConversationRepository:
             thread_id=thread_id,
             agent_id=agent_slug,
             title=title or "",
-            summary=summary,
             conversation_metadata=dict(conversation_metadata or {}),
             project_id=project_id,
         )
@@ -333,13 +328,11 @@ class ConversationRepository:
         conversation: Conversation,
         *,
         title: str,
-        summary: str | None,
         conversation_metadata: dict,
         organization: dict | None = None,
     ) -> Conversation:
         """更新允许修改的对话字段。"""
         conversation.title = title
-        conversation.summary = summary
         conversation.conversation_metadata = dict(conversation_metadata)
         if organization is not None:
             if "project_id" in organization:

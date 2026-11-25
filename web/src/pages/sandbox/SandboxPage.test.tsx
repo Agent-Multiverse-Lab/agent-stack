@@ -57,7 +57,6 @@ beforeEach(() => {
       project_id: null,
       pinned: false,
       pinned_at: null,
-      summary: null,
       agent_id: "leader",
       metadata: {},
       created_at: "2026-09-21T00:00:00Z",

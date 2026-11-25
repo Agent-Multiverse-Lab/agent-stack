@@ -135,7 +135,7 @@ class ChatProjectsTest(unittest.IsolatedAsyncioTestCase):
             from unittest.mock import AsyncMock
             users.return_value.get_by_uid = AsyncMock(return_value=SimpleNamespace(uid="user-1"))
             with self.assertRaises(LookupError):
-                await thread_service.create_thread(self.db, uid="user-1", agent_id="leader", title=None, summary=None, metadata=None, project_id=project.project_id)
+                await thread_service.create_thread(self.db, uid="user-1", agent_id="leader", title=None, metadata=None, project_id=project.project_id)
         self.assertEqual(0, self.session.query(Conversation).count())
 
 

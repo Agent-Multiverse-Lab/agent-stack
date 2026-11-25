@@ -12,7 +12,6 @@ export interface ThreadMetadataResponse {
   project_id: string | null;
   pinned: boolean;
   pinned_at: string | null;
-  summary: string | null;
   agent_id: string;
   metadata: Record<string, unknown>;
   created_at: string;
