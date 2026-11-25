@@ -1,7 +1,8 @@
-"""平台模型管理、预置补齐、目录缓存、模型发现与连通性探测。"""
+"""平台模型管理、预置补齐、目录缓存、模型发现、连通性探测与统一查库校验。"""
 
 import json
 from collections.abc import Sequence
+from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, get_args
 
@@ -10,34 +11,44 @@ from redis.exceptions import RedisError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.configs import config as sys_config
 from src.database.models import ModelProvider
 from src.storage import get_async_redis_client
 from src.utils import logger
 
-from .model_provider.chat import build_chat_model, supports_chat_protocol
-from .model_provider.embedding import EmbeddingError, build_embedding_model
-from .model_provider.reranker import RerankDocument, RerankError, build_reranker
+from .model_provider.chat import supports_chat_protocol
 from .presets import MODEL_PROVIDER_PRESETS
 from .repository import ModelProviderRepository
-from .runtime import _resolve
 from .utils import (
     ChatCapability,
     ModelCategory,
+    ModelProtocol,
     normalize_base_url,
     normalize_enabled_models,
     normalize_optional_url,
     resolve_provider_api_key,
     validate_api_key,
-    validate_extra_headers,
+    validate_category,
     validate_model_id,
     validate_name,
     validate_protocol,
     validate_provider_id,
 )
 
-MODEL_LIST_CACHE_KEY = "model:chat:list:v4"
+MODEL_CATALOG_CACHE_KEY = "model:catalog:v1"
 MODEL_LIST_CACHE_TTL_SECONDS = 3600
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedModel:
+    """查库校验后的脱敏模型信息（不含明文凭据）。"""
+
+    model_ref: str
+    provider_id: str
+    display_name: str
+    model_id: str
+    protocol: ModelProtocol
+    category: ModelCategory
+    capabilities: tuple[ChatCapability, ...] = ()
 
 
 class ModelConnectionError(RuntimeError):
@@ -49,34 +60,18 @@ class ModelConnectionError(RuntimeError):
         super().__init__(code)
 
 
-def _is_valid_cached_model_list(payload: Any) -> bool:
-    if not isinstance(payload, dict):
-        return False
-    if not isinstance(payload.get("default_model"), str) or not isinstance(payload.get("flash_model"), str):
-        return False
-    models = payload.get("models")
-    if not isinstance(models, list):
-        return False
-    for item in models:
-        if not isinstance(item, dict):
-            return False
-        if not (
-            isinstance(item.get("id"), str)
-            and isinstance(item.get("name"), str)
-            and isinstance(item.get("provider"), str)
-            and isinstance(item.get("is_available"), bool)
-        ):
-            return False
-    return True
+class ModelProviderConflictError(ValueError):
+    """模型供应商标识已存在。"""
 
 
 def _provider_dict(provider: ModelProvider) -> dict[str, Any]:
     return {
         "provider_id": provider.provider_id,
         "name": provider.name,
+        "protocol": provider.protocol,
         "base_url": provider.base_url or "",
-        "embedding_base_url": getattr(provider, "embedding_base_url", "") or "",
-        "rerank_base_url": getattr(provider, "rerank_base_url", "") or "",
+        "embedding_base_url": provider.embedding_base_url or "",
+        "rerank_base_url": provider.rerank_base_url or "",
         "is_enabled": bool(provider.is_enabled),
         "has_api_key": bool(resolve_provider_api_key(provider.api_key or "")),
         "models": [
@@ -91,82 +86,152 @@ def _provider_dict(provider: ModelProvider) -> dict[str, Any]:
     }
 
 
-async def build_model_list(
+async def get_enabled_model(
+    db: AsyncSession,
+    model_ref: str | None,
+    *,
+    category: ModelCategory,
+) -> ResolvedModel:
+    """业务层单一查库校验入口：确认模型已启用、属于目标分类并返回脱敏信息。"""
+    if not isinstance(model_ref, str) or not model_ref:
+        raise ValueError("未指定模型")
+    provider, model = await ModelProviderRepository(db).require_model(
+        model_ref, category=category
+    )
+    return ResolvedModel(
+        model_ref=f"{provider.provider_id}:{model['model_id']}",
+        provider_id=str(provider.provider_id),
+        display_name=str(provider.name),
+        model_id=str(model["model_id"]),
+        protocol=provider.protocol,
+        category=model.get("category", "chat"),
+        capabilities=tuple(model.get("capabilities") or ()),
+    )
+
+
+def _filter_catalog(
+    catalog: dict[str, dict[str, Any]],
+    category: ModelCategory,
+) -> dict[str, dict[str, Any]]:
+    filtered: dict[str, dict[str, Any]] = {}
+    for provider_id, entry in catalog.items():
+        models = [
+            {
+                "model_id": item["model_id"],
+                "category": item["category"],
+                "capabilities": list(item["capabilities"]),
+            }
+            for item in entry["models"]
+            if item["category"] == category
+        ]
+        if models:
+            filtered[provider_id] = {
+                "provider_id": entry["provider_id"],
+                "display_name": entry["display_name"],
+                "models": models,
+            }
+    return filtered
+
+
+def _is_valid_catalog(parsed: Any) -> bool:
+    if not isinstance(parsed, dict):
+        return False
+    for provider_id, entry in parsed.items():
+        if (
+            not isinstance(provider_id, str)
+            or not isinstance(entry, dict)
+            or entry.get("provider_id") != provider_id
+            or not isinstance(entry.get("display_name"), str)
+            or not isinstance(entry.get("models"), list)
+        ):
+            return False
+        for item in entry["models"]:
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("model_id"), str)
+                or not item["model_id"]
+                or item.get("category") not in {"chat", "embedding", "rerank"}
+                or not isinstance(item.get("capabilities"), list)
+            ):
+                return False
+    return True
+
+
+async def build_model_catalog(
     db: AsyncSession,
     *,
-    category: ModelCategory = "chat",
-) -> dict[str, Any]:
-    """从 PostgreSQL 构建不含连接参数的公开模型列表（默认仅 Chat 模型）。"""
-    models: list[dict[str, Any]] = []
+    category: ModelCategory | None = None,
+) -> dict[str, dict[str, Any]]:
+    """从 PostgreSQL 构建按厂商分组的已启用脱敏模型目录。"""
+    resolved_category = validate_category(category) if category is not None else None
+    catalog: dict[str, dict[str, Any]] = {}
     for provider in await ModelProviderRepository(db).list_model_providers(enabled_only=True):
-        protocol = validate_protocol(provider.protocol)
-        available = supports_chat_protocol(protocol)
-        enabled_models = normalize_enabled_models(
-            list(getattr(provider, "enabled_models", None) or []),
-            strip_legacy=True,
-        )
-        for model in enabled_models:
-            if model["category"] != category:
+        chat_supported = supports_chat_protocol(provider.protocol)
+        models: list[dict[str, Any]] = []
+        for model in provider.enabled_models or []:
+            if not isinstance(model, dict):
+                continue
+            model_id = model.get("model_id")
+            item_category = model.get("category", "chat")
+            if not isinstance(model_id, str) or not model_id:
+                continue
+            if item_category == "chat" and not chat_supported:
+                continue
+            if resolved_category is not None and item_category != resolved_category:
                 continue
             models.append(
                 {
-                    "id": f"{provider.provider_id}/{model['model_id']}",
-                    "name": model["model_id"],
-                    "provider": provider.provider_id,
-                    "is_available": available,
+                    "model_id": model_id,
+                    "category": item_category,
+                    "capabilities": list(model.get("capabilities") or []),
                 }
             )
-
-    available_ids = [item["id"] for item in models if item["is_available"]]
-    default_model = (
-        sys_config.default_model
-        if sys_config.default_model in available_ids
-        else available_ids[0]
-        if available_ids
-        else ""
-    )
-    flash_model = (
-        sys_config.flash_model if sys_config.flash_model in available_ids else ""
-    )
-    return {
-        "default_model": default_model,
-        "flash_model": flash_model,
-        "models": models,
-    }
+        if models:
+            catalog[str(provider.provider_id)] = {
+                "provider_id": str(provider.provider_id),
+                "display_name": str(provider.name),
+                "models": models,
+            }
+    return catalog
 
 
 async def _write_model_list_cache(catalog: dict[str, Any]) -> None:
     redis = await get_async_redis_client()
     await redis.set(
-        MODEL_LIST_CACHE_KEY,
+        MODEL_CATALOG_CACHE_KEY,
         json.dumps(catalog, ensure_ascii=False),
         ex=MODEL_LIST_CACHE_TTL_SECONDS,
     )
 
 
-async def list_models(db: AsyncSession) -> dict[str, Any]:
-    """读取全局模型列表；缓存失效或不可用时回源 PostgreSQL。"""
+async def list_models(
+    db: AsyncSession,
+    *,
+    category: ModelCategory = "chat",
+) -> dict[str, dict[str, Any]]:
+    """读取全量已启用模型目录（按 category 过滤）；缓存失效或不可用时回源 PostgreSQL。"""
+    resolved_category = validate_category(category)
     try:
         redis = await get_async_redis_client()
-        cached = await redis.get(MODEL_LIST_CACHE_KEY)
+        cached = await redis.get(MODEL_CATALOG_CACHE_KEY)
         if cached is not None:
             try:
                 raw = cached.decode() if isinstance(cached, (bytes, bytearray)) else cached
                 parsed = json.loads(raw)
-                if _is_valid_cached_model_list(parsed):
-                    return parsed
-                logger.warning("模型列表缓存结构无效，已回源 PostgreSQL")
+                if _is_valid_catalog(parsed):
+                    return _filter_catalog(parsed, resolved_category)
+                logger.warning("模型目录缓存结构无效，已回源 PostgreSQL")
             except (ValueError, UnicodeDecodeError):
-                logger.warning("模型列表缓存结构无效，已回源 PostgreSQL")
+                logger.warning("模型目录缓存结构无效，已回源 PostgreSQL")
     except (RedisError, OSError, ValueError) as exc:
-        logger.warning("模型列表 Redis 读取失败，已回源 PostgreSQL：%s", exc)
+        logger.warning("模型目录 Redis 读取失败，已回源 PostgreSQL：%s", exc)
 
-    catalog = await build_model_list(db)
+    catalog = await build_model_catalog(db)
     try:
         await _write_model_list_cache(catalog)
     except (RedisError, OSError, ValueError) as exc:
-        logger.warning("模型列表 Redis 回填失败：%s", exc)
-    return catalog
+        logger.warning("模型目录 Redis 回填失败：%s", exc)
+    return _filter_catalog(catalog, resolved_category)
 
 
 async def refresh_model_list_cache(
@@ -174,210 +239,115 @@ async def refresh_model_list_cache(
     *,
     raise_on_database_error: bool = False,
 ) -> bool:
-    """从已提交数据重建全局模型列表缓存。"""
+    """从已提交数据重建全量已启用模型目录缓存。"""
     try:
-        catalog = await build_model_list(db)
+        catalog = await build_model_catalog(db)
         redis = await get_async_redis_client()
-        await redis.delete(MODEL_LIST_CACHE_KEY)
+        await redis.delete(MODEL_CATALOG_CACHE_KEY)
         await _write_model_list_cache(catalog)
     except (SQLAlchemyError, ValueError) as exc:
         if raise_on_database_error:
             raise
-        logger.warning("模型列表缓存重建失败：%s", exc)
+        logger.warning("模型目录缓存重建失败：%s", exc)
         return False
     except (RedisError, OSError) as exc:
-        logger.warning("模型列表 Redis 刷新失败：%s", exc)
+        logger.warning("模型目录 Redis 刷新失败：%s", exc)
         return False
     return True
 
 
 async def ensure_builtin_model_providers(db: AsyncSession) -> None:
-    """显式校验全部预置并补齐缺失行。"""
-    pending: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for preset in MODEL_PROVIDER_PRESETS:
-        provider_id = validate_provider_id(preset.provider_id)
-        if provider_id in seen:
-            raise ValueError("预置供应商 ID 不得重复")
-        if not isinstance(preset.is_enabled, bool):
-            raise ValueError("is_enabled 必须是布尔值")
-        enabled_models = normalize_enabled_models(
-            [
-                {
-                    "model_id": model.model_id,
-                    "category": model.category,
-                    "model_type": model.model_type,
-                    "capabilities": list(model.capabilities),
-                }
-                for model in preset.enabled_models
-            ],
-            require_model_type=True,
-        )
-        if not enabled_models:
-            raise ValueError("预置模型列表不能为空")
-        seen.add(provider_id)
-        pending.append(
-            {
-                "provider_id": provider_id,
-                "name": validate_name(preset.name),
-                "base_url": normalize_base_url(preset.base_url),
-                "embedding_base_url": normalize_optional_url(preset.embedding_base_url),
-                "rerank_base_url": normalize_optional_url(preset.rerank_base_url),
-                "protocol": validate_protocol(preset.protocol),
-                "api_key": validate_api_key(preset.api_key),
-                "extra_headers": {},
-                "is_enabled": preset.is_enabled,
-                "enabled_models": enabled_models,
-            }
-        )
-
+    """启动时幂等补齐缺失的内置模型供应商预置行，不覆盖既有配置。"""
     repository = ModelProviderRepository(db)
     try:
         existing_ids = {
             provider.provider_id for provider in await repository.list_model_providers()
         }
         missing = [
-            item for item in pending if item["provider_id"] not in existing_ids
+            preset for preset in MODEL_PROVIDER_PRESETS if preset.provider_id not in existing_ids
         ]
         if missing:
-            for item in missing:
-                await repository.create_model_provider(**item)
+            for preset in missing:
+                await repository.create_model_provider(
+                    provider_id=preset.provider_id,
+                    name=preset.name.strip(),
+                    base_url=preset.base_url.rstrip("/"),
+                    embedding_base_url=preset.embedding_base_url.rstrip("/"),
+                    rerank_base_url=preset.rerank_base_url.rstrip("/"),
+                    protocol=preset.protocol,
+                    api_key=preset.api_key,
+                    extra_headers={},
+                    is_enabled=preset.is_enabled,
+                    enabled_models=[
+                        {
+                            "model_id": model.model_id,
+                            "category": model.category,
+                            "capabilities": list(model.capabilities),
+                        }
+                        for model in preset.enabled_models
+                    ],
+                )
             await db.commit()
     except SQLAlchemyError:
         await db.rollback()
         raise RuntimeError("补齐模型供应商失败") from None
 
 
-async def _get_model_provider(db: AsyncSession, provider_id: str) -> ModelProvider:
+async def get_model_provider(
+    db: AsyncSession,
+    provider_id: str,
+) -> dict[str, Any]:
     provider = await ModelProviderRepository(db).get_model_provider_by_id(provider_id)
     if provider is None:
         raise LookupError("模型供应商不存在")
-    return provider
-
-
-async def get_model_provider(db: AsyncSession, provider_id: str) -> dict[str, Any]:
-    return _provider_dict(await _get_model_provider(db, provider_id))
+    return _provider_dict(provider)
 
 
 async def list_model_providers(db: AsyncSession) -> list[dict[str, Any]]:
-    return [
-        _provider_dict(provider)
-        for provider in await ModelProviderRepository(db).list_model_providers()
-    ]
+    providers = await ModelProviderRepository(db).list_model_providers()
+    return [_provider_dict(provider) for provider in providers]
 
 
 async def create_model_provider(
     db: AsyncSession,
-    /,
-    **values: Any,
+    *,
+    provider_id: str,
+    name: str,
+    base_url: str,
+    protocol: str = "openai_compatible",
+    embedding_base_url: str = "",
+    rerank_base_url: str = "",
+    is_enabled: bool = False,
+    models: Sequence[dict[str, Any]] = (),
+    api_key: str = "",
 ) -> dict[str, Any]:
-    provider_id = validate_provider_id(values.get("provider_id", ""))
-    is_enabled = values.get("is_enabled", False)
+    """创建平台模型供应商配置并刷新全局目录缓存。"""
     if not isinstance(is_enabled, bool):
         raise ValueError("is_enabled 必须是布尔值")
+    pid = validate_provider_id(provider_id)
     record = {
-        "provider_id": provider_id,
-        "name": validate_name(values.get("name", "")),
-        "base_url": normalize_base_url(values.get("base_url", "")),
-        "embedding_base_url": normalize_optional_url(values.get("embedding_base_url", "")),
-        "rerank_base_url": normalize_optional_url(values.get("rerank_base_url", "")),
-        "protocol": validate_protocol(values.get("protocol", "openai_compatible")),
-        "api_key": validate_api_key(values.get("api_key", "")),
-        "extra_headers": validate_extra_headers(dict(values.get("extra_headers") or {})),
+        "provider_id": pid,
+        "name": validate_name(name),
+        "protocol": validate_protocol(protocol),
+        "base_url": normalize_base_url(base_url),
+        "embedding_base_url": normalize_optional_url(embedding_base_url),
+        "rerank_base_url": normalize_optional_url(rerank_base_url),
+        "api_key": validate_api_key(api_key),
+        "extra_headers": {},
         "is_enabled": is_enabled,
-        "enabled_models": normalize_enabled_models(
-            list(values.get("enabled_models") or []),
-            require_model_type=True,
-        ),
+        "enabled_models": normalize_enabled_models(models),
     }
     try:
         await ModelProviderRepository(db).create_model_provider(**record)
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise ValueError("供应商 ID 已存在") from None
+        raise ModelProviderConflictError("模型供应商已存在") from None
     except SQLAlchemyError:
         await db.rollback()
         raise RuntimeError("保存模型供应商失败") from None
     return {
-        "provider_id": provider_id,
-        "cache_refreshed": await refresh_model_list_cache(db),
-    }
-
-
-async def update_model_provider(
-    db: AsyncSession,
-    provider_id: str,
-    /,
-    **values: Any,
-) -> dict[str, Any]:
-    provider = await _get_model_provider(db, provider_id)
-    update_fields: dict[str, Any] = {}
-    if "name" in values:
-        update_fields["name"] = validate_name(values["name"])
-    if "base_url" in values:
-        update_fields["base_url"] = normalize_base_url(values["base_url"])
-    if "embedding_base_url" in values:
-        update_fields["embedding_base_url"] = normalize_optional_url(values["embedding_base_url"])
-    if "rerank_base_url" in values:
-        update_fields["rerank_base_url"] = normalize_optional_url(values["rerank_base_url"])
-    if "protocol" in values:
-        update_fields["protocol"] = validate_protocol(values["protocol"])
-    if "extra_headers" in values:
-        update_fields["extra_headers"] = validate_extra_headers(dict(values["extra_headers"] or {}))
-    if "is_enabled" in values:
-        if not isinstance(values["is_enabled"], bool):
-            raise ValueError("is_enabled 必须是布尔值")
-        update_fields["is_enabled"] = values["is_enabled"]
-    if "enabled_models" in values:
-        update_fields["enabled_models"] = normalize_enabled_models(
-            list(values["enabled_models"] or []),
-            require_model_type=True,
-        )
-    if "api_key" in values:
-        if values["api_key"] is None:
-            raise ValueError("清除 API Key 请使用空字符串")
-        update_fields["api_key"] = validate_api_key(values["api_key"])
-
-    urls_changed = (
-        ("base_url" in update_fields and update_fields["base_url"] != provider.base_url)
-        or (
-            "embedding_base_url" in update_fields
-            and update_fields["embedding_base_url"] != (getattr(provider, "embedding_base_url", "") or "")
-        )
-        or (
-            "rerank_base_url" in update_fields
-            and update_fields["rerank_base_url"] != (getattr(provider, "rerank_base_url", "") or "")
-        )
-    )
-    if urls_changed and resolve_provider_api_key(provider.api_key or "") and "api_key" not in update_fields:
-        raise ValueError("更改服务地址后必须重新提供 API Key")
-
-    try:
-        updated = await ModelProviderRepository(db).update_model_provider(provider_id, **update_fields)
-        if updated is None:
-            raise LookupError("模型供应商不存在")
-        await db.commit()
-    except SQLAlchemyError:
-        await db.rollback()
-        raise RuntimeError("更新模型供应商失败") from None
-    return {
-        "provider_id": provider_id,
-        "cache_refreshed": await refresh_model_list_cache(db),
-    }
-
-
-async def delete_model_provider(db: AsyncSession, provider_id: str) -> dict[str, Any]:
-    try:
-        deleted = await ModelProviderRepository(db).delete_model_provider(provider_id)
-        if not deleted:
-            raise LookupError("模型供应商不存在")
-        await db.commit()
-    except SQLAlchemyError:
-        await db.rollback()
-        raise RuntimeError("删除模型供应商失败") from None
-    return {
-        "provider_id": provider_id,
+        "provider_id": pid,
         "cache_refreshed": await refresh_model_list_cache(db),
     }
 
@@ -425,133 +395,42 @@ def _explicit_non_chat(item: dict[str, Any]) -> bool:
     return False
 
 
-async def discover_models(db: AsyncSession, provider_id: str) -> list[str]:
-    provider = await _get_model_provider(db, provider_id)
-    draft = {
-        "base_url": normalize_base_url(provider.base_url),
-        "protocol": validate_protocol(provider.protocol),
-        "api_key": provider.api_key or "",
-        "extra_headers": dict(getattr(provider, "extra_headers", None) or {}),
-    }
-    return [model["model_id"] for model in await _discover_config_models(draft)]
+async def _resolve_remote_config(
+    db: AsyncSession,
+    provider_id: str,
+    *,
+    base_url: str,
+    api_key: str | None = None,
+    api_key_provided: bool = False,
+    protocol: str | None = None,
+) -> dict[str, Any]:
+    provider = await ModelProviderRepository(db).get_model_provider_by_id(provider_id)
+    if provider is None:
+        raise LookupError("模型供应商不存在")
+    resolved_protocol = validate_protocol(protocol) if protocol is not None else provider.protocol
+    normalized_base = normalize_base_url(base_url)
+    if api_key_provided:
+        if api_key is None:
+            raise ValueError("API Key 不可为 null")
+        validated_key = validate_api_key(api_key)
+    else:
+        validated_key = provider.api_key or ""
 
+    extra_headers = dict(getattr(provider, "extra_headers", None) or {})
+    if normalized_base != provider.base_url:
+        if resolve_provider_api_key(provider.api_key or "") and not api_key_provided:
+            raise ValueError("更改服务地址后必须重新提供 API Key")
+        extra_headers = {}
 
-async def test_model_connection(db: AsyncSession, model_ref: str) -> dict[str, Any]:
-    spec = await _resolve(db, model_ref, require_enabled=False)
-    started = perf_counter()
-    try:
-        if spec.category == "chat":
-            chat = build_chat_model(
-                protocol=spec.protocol,
-                model_id=spec.model_id,
-                api_key=spec.api_key,
-                base_url=spec.base_url,
-                extra_headers=spec.extra_headers,
-            )
-            response = await chat.ainvoke("Reply with OK.")
-            content = getattr(response, "content", None)
-            tool_calls = getattr(response, "tool_calls", None)
-            has_content = isinstance(content, str) or (isinstance(content, list) and bool(content))
-            if not has_content and not (isinstance(tool_calls, list) and bool(tool_calls)):
-                raise ModelConnectionError("invalid_response")
-        elif spec.category == "embedding":
-            embedder = build_embedding_model(
-                protocol=spec.protocol,
-                model_id=spec.model_id,
-                api_key=spec.api_key,
-                base_url=spec.embedding_base_url or spec.base_url,
-                extra_headers=spec.extra_headers,
-                batch_size=1,
-                request_timeout=15.0,
-            )
-            vector = await embedder.aembed_query("OK")
-            if not vector:
-                raise ModelConnectionError("invalid_response")
-        else:
-            endpoint = spec.rerank_base_url or None
-            if endpoint is None and spec.provider_id == "dashscope" and sys_config.dashscope_rerank_url.strip():
-                endpoint = sys_config.dashscope_rerank_url.strip()
-            reranker = build_reranker(
-                protocol=spec.protocol,
-                model_id=spec.model_id,
-                api_key=spec.api_key,
-                base_url=spec.base_url,
-                endpoint=endpoint,
-                extra_headers=spec.extra_headers,
-                request_timeout=15.0,
-            )
-            results = await reranker.arerank(
-                "OK",
-                [RerankDocument(id="probe", text="OK", original_rank=1)],
-                top_n=1,
-            )
-            if not results:
-                raise ModelConnectionError("invalid_response")
-    except ModelConnectionError as exc:
-        return {
-            "success": False,
-            "elapsed_ms": (perf_counter() - started) * 1000,
-            "error": exc.code,
-            "status_code": exc.status_code,
-        }
-    except (EmbeddingError, RerankError) as exc:
-        return {
-            "success": False,
-            "elapsed_ms": (perf_counter() - started) * 1000,
-            "error": exc.code,
-            "status_code": exc.status_code,
-        }
-    except httpx.TimeoutException:
-        return {
-            "success": False,
-            "elapsed_ms": (perf_counter() - started) * 1000,
-            "error": "timeout",
-            "status_code": None,
-        }
-    except httpx.HTTPStatusError as exc:
-        return {
-            "success": False,
-            "elapsed_ms": (perf_counter() - started) * 1000,
-            "error": "http_error",
-            "status_code": exc.response.status_code,
-        }
-    except httpx.RequestError:
-        return {
-            "success": False,
-            "elapsed_ms": (perf_counter() - started) * 1000,
-            "error": "connection_error",
-            "status_code": None,
-        }
-    except ValueError:
-        return {
-            "success": False,
-            "elapsed_ms": (perf_counter() - started) * 1000,
-            "error": "invalid_response",
-            "status_code": None,
-        }
-    except Exception as exc:
-        status_code = getattr(exc, "status_code", None)
-        if isinstance(status_code, int):
-            code = "http_error"
-        elif isinstance(exc, TimeoutError):
-            code = "timeout"
-        else:
-            code = "connection_error"
-        return {
-            "success": False,
-            "elapsed_ms": (perf_counter() - started) * 1000,
-            "error": code,
-            "status_code": status_code if isinstance(status_code, int) else None,
-        }
     return {
-        "success": True,
-        "elapsed_ms": (perf_counter() - started) * 1000,
-        "error": None,
-        "status_code": None,
+        "protocol": resolved_protocol,
+        "base_url": normalized_base,
+        "extra_headers": extra_headers,
+        "api_key": validated_key,
     }
 
 
-async def _settings_draft(
+async def update_model_provider(
     db: AsyncSession,
     provider_id: str,
     *,
@@ -562,19 +441,26 @@ async def _settings_draft(
     models: Sequence[dict[str, Any]] = (),
     api_key: str | None = None,
     api_key_provided: bool = False,
+    name: str | None = None,
+    protocol: str | None = None,
 ) -> dict[str, Any]:
-    provider = await _get_model_provider(db, provider_id)
+    """更新平台模型供应商配置并刷新全局目录缓存。"""
+    provider = await ModelProviderRepository(db).get_model_provider_by_id(provider_id)
+    if provider is None:
+        raise LookupError("模型供应商不存在")
+    if not isinstance(is_enabled, bool):
+        raise ValueError("is_enabled 必须是布尔值")
+    resolved_name = validate_name(name) if name is not None else provider.name
+    resolved_protocol = validate_protocol(protocol) if protocol is not None else provider.protocol
     normalized_base = normalize_base_url(base_url)
     normalized_embedding = normalize_optional_url(embedding_base_url)
     normalized_rerank = normalize_optional_url(rerank_base_url)
-    if not isinstance(is_enabled, bool):
-        raise ValueError("is_enabled 必须是布尔值")
     if api_key_provided:
         if api_key is None:
             raise ValueError("API Key 不可为 null")
         validated_key = validate_api_key(api_key)
     else:
-        validated_key = provider.api_key or ""
+        validated_key = None
 
     urls_changed = (
         normalized_base != provider.base_url
@@ -587,83 +473,18 @@ async def _settings_draft(
             raise ValueError("更改服务地址后必须重新提供 API Key")
         extra_headers = {}
 
-    previous_models = normalize_enabled_models(
-        list(getattr(provider, "enabled_models", None) or []),
-        require_model_type=True,
-        strip_legacy=True,
-    )
-    previous = {item["model_id"]: item for item in previous_models}
-    model_types = {model["model_type"] for model in previous.values()}
-    if not model_types:
-        model_types = {
-            model.model_type
-            for preset in MODEL_PROVIDER_PRESETS
-            if preset.provider_id == provider_id
-            for model in preset.enabled_models
-        }
-
-    requested_models = normalize_enabled_models(models)
-    enabled_models: list[dict[str, Any]] = []
-    for item in requested_models:
-        existing = previous.get(item["model_id"])
-        if existing is None and len(model_types) != 1:
-            raise ValueError("新增模型需要明确模型类型")
-        merged = {
-            "model_id": item["model_id"],
-            "category": item["category"] if "category" in item else (existing["category"] if existing is not None else "chat"),
-            "model_type": existing["model_type"] if existing is not None else next(iter(model_types)),
-            "capabilities": item["capabilities"],
-        }
-        enabled_models.append(merged)
-
-    return {
-        "provider_id": provider_id,
-        "name": provider.name,
-        "protocol": validate_protocol(provider.protocol),
+    update_fields: dict[str, Any] = {
+        "name": resolved_name,
+        "protocol": resolved_protocol,
         "base_url": normalized_base,
         "embedding_base_url": normalized_embedding,
         "rerank_base_url": normalized_rerank,
         "extra_headers": extra_headers,
         "is_enabled": is_enabled,
-        "enabled_models": enabled_models,
-        "api_key": validated_key,
-        "api_key_provided": api_key_provided,
+        "enabled_models": normalize_enabled_models(models),
     }
-
-
-async def save_model_settings(
-    db: AsyncSession,
-    provider_id: str,
-    *,
-    base_url: str,
-    embedding_base_url: str = "",
-    rerank_base_url: str = "",
-    is_enabled: bool = False,
-    models: Sequence[dict[str, Any]] = (),
-    api_key: str | None = None,
-    api_key_provided: bool = False,
-) -> dict[str, Any]:
-    draft = await _settings_draft(
-        db,
-        provider_id,
-        base_url=base_url,
-        embedding_base_url=embedding_base_url,
-        rerank_base_url=rerank_base_url,
-        is_enabled=is_enabled,
-        models=models,
-        api_key=api_key,
-        api_key_provided=api_key_provided,
-    )
-    update_fields: dict[str, Any] = {
-        "base_url": draft["base_url"],
-        "embedding_base_url": draft["embedding_base_url"],
-        "rerank_base_url": draft["rerank_base_url"],
-        "extra_headers": draft["extra_headers"],
-        "is_enabled": draft["is_enabled"],
-        "enabled_models": draft["enabled_models"],
-    }
-    if draft["api_key_provided"]:
-        update_fields["api_key"] = draft["api_key"]
+    if validated_key is not None:
+        update_fields["api_key"] = validated_key
     try:
         updated = await ModelProviderRepository(db).update_model_provider(provider_id, **update_fields)
         if updated is None:
@@ -678,30 +499,40 @@ async def save_model_settings(
     }
 
 
-async def discover_settings_models(
+async def delete_model_provider(db: AsyncSession, provider_id: str) -> dict[str, Any]:
+    """删除平台模型供应商并刷新全局目录缓存。"""
+    try:
+        deleted = await ModelProviderRepository(db).delete_model_provider(provider_id)
+        if not deleted:
+            raise LookupError("模型供应商不存在")
+        await db.commit()
+    except SQLAlchemyError:
+        await db.rollback()
+        raise RuntimeError("删除模型供应商失败") from None
+    return {
+        "provider_id": provider_id,
+        "cache_refreshed": await refresh_model_list_cache(db),
+    }
+
+
+async def discover_provider_models(
     db: AsyncSession,
     provider_id: str,
     *,
     base_url: str,
-    embedding_base_url: str = "",
-    rerank_base_url: str = "",
-    is_enabled: bool = False,
-    models: Sequence[dict[str, Any]] = (),
     api_key: str | None = None,
     api_key_provided: bool = False,
+    protocol: str | None = None,
 ) -> list[dict[str, Any]]:
-    draft = await _settings_draft(
+    config = await _resolve_remote_config(
         db,
         provider_id,
         base_url=base_url,
-        embedding_base_url=embedding_base_url,
-        rerank_base_url=rerank_base_url,
-        is_enabled=is_enabled,
-        models=models,
         api_key=api_key,
         api_key_provided=api_key_provided,
+        protocol=protocol,
     )
-    return await _discover_config_models(draft)
+    return await _discover_config_models(config)
 
 
 async def _discover_config_models(config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -768,32 +599,26 @@ async def _discover_config_models(config: dict[str, Any]) -> list[dict[str, Any]
     return [models[key] for key in sorted(models)]
 
 
-async def test_settings_connection(
+async def test_provider_connection(
     db: AsyncSession,
     provider_id: str,
     *,
     base_url: str,
-    embedding_base_url: str = "",
-    rerank_base_url: str = "",
-    is_enabled: bool = False,
-    models: Sequence[dict[str, Any]] = (),
     api_key: str | None = None,
     api_key_provided: bool = False,
+    protocol: str | None = None,
 ) -> dict[str, Any]:
-    draft = await _settings_draft(
+    config = await _resolve_remote_config(
         db,
         provider_id,
         base_url=base_url,
-        embedding_base_url=embedding_base_url,
-        rerank_base_url=rerank_base_url,
-        is_enabled=is_enabled,
-        models=models,
         api_key=api_key,
         api_key_provided=api_key_provided,
+        protocol=protocol,
     )
     started = perf_counter()
     try:
-        await _discover_config_models(draft)
+        await _discover_config_models(config)
     except ModelConnectionError as exc:
         return {
             "success": False,

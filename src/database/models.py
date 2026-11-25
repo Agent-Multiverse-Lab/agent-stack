@@ -35,24 +35,36 @@ AUDIT_MESSAGE_TYPES = (MODEL_AUDIT_MESSAGE_TYPE, TOOL_AUDIT_MESSAGE_TYPE)
 
 
 class ModelProvider(Base):
-    """平台共享的聊天模型供应商配置。"""
+    """平台共享的模型供应商配置（支持 Chat / Embedding / Rerank）。"""
 
     __tablename__ = "model_provider"
 
-    provider_id = Column(String(64), primary_key=True)
-    name = Column(String(255), nullable=False)
-    base_url = Column(Text, nullable=False)
-    embedding_base_url = Column(Text, nullable=False, default="", server_default="")
-    rerank_base_url = Column(Text, nullable=False, default="", server_default="")
-    protocol = Column(String(32), nullable=False)
-    api_key = Column(String, nullable=False, default="")
-    extra_headers = Column(JSON, nullable=False, default=dict)
-    is_enabled = Column(Boolean, nullable=False, default=False, server_default=false())
-    enabled_models = Column(JSON, nullable=False, default=list)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    provider_id = Column(String(64), primary_key=True, comment="模型供应商唯一标识")
+    name = Column(String(255), nullable=False, comment="供应商展示名称")
+    base_url = Column(Text, nullable=False, comment="Chat 接口基础地址")
+    embedding_base_url = Column(
+        Text, nullable=False, default="", server_default="", comment="Embedding 接口基础地址"
+    )
+    rerank_base_url = Column(
+        Text, nullable=False, default="", server_default="", comment="Rerank 接口基础地址"
+    )
+    protocol = Column(
+        String(32), nullable=False, comment="模型协议类型（openai_compatible/anthropic/gemini）"
+    )
+    api_key = Column(String, nullable=False, default="", comment="API 密钥或环境变量名")
+    extra_headers = Column(JSON, nullable=False, default=dict, comment="附加请求头配置")
+    is_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=false(), comment="是否启用该供应商"
+    )
+    enabled_models = Column(
+        JSON, nullable=False, default=list, comment="已启用的模型清单（含分类与能力）"
+    )
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), comment="创建时间"
+    )
     updated_at = Column(
         DateTime(timezone=True), nullable=False,
-        server_default=func.now(), onupdate=func.now(),
+        server_default=func.now(), onupdate=func.now(), comment="更新时间",
     )
 
 

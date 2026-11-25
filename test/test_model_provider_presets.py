@@ -1,9 +1,7 @@
-"""纯字段预置、显式校验及全局幂等补齐。"""
+"""纯字段预置及全局幂等补齐。"""
 
-from dataclasses import replace
 from unittest.mock import patch
 
-from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.model import service
@@ -64,30 +62,12 @@ class ModelProviderPresetTest(SQLiteModelTestCase):
             ["anthropic", "custom", "dashscope", "deepseek", "gemini", "openai"],
         )
 
-    async def test_all_presets_validated_before_first_insert(self):
-        original = MODEL_PROVIDER_PRESETS[0]
-        invalid_presets = (
-            (original, original),
-            (original, replace(MODEL_PROVIDER_PRESETS[1], enabled_models=())),
-            (original, replace(MODEL_PROVIDER_PRESETS[1], base_url="invalid")),
-            (replace(original, is_enabled="false"),),
-            (replace(original, enabled_models=(original.enabled_models[0],) * 2),),
-            (replace(original, enabled_models=(PresetModel(model_id="m", model_type="qwen", capabilities=("chat", "chat")),)),),
-        )
-        for presets in invalid_presets:
-            with self.subTest(presets=presets), patch.object(service, "MODEL_PROVIDER_PRESETS", presets):
-                with self.assertRaises((ValueError, ValidationError)):
-                    await service.ensure_builtin_model_providers(self.db)
-        self.db.execute.assert_not_called()
-        self.db.commit.assert_not_called()
-        self.assertEqual(await self.repository.list_model_providers(), [])
-
     async def test_mapping_normalizes_values_and_leaves_preset_untouched(self):
         preset = ModelProviderPreset(
             provider_id="custom", name=" Custom ", base_url="https://custom.example/v1/",
             embedding_base_url="https://embed.example/v1/",
             rerank_base_url="https://rerank.example/v1/",
-            enabled_models=(PresetModel(model_id="chat", model_type="qwen", category="embedding"),),
+            enabled_models=(PresetModel(model_id="chat", category="embedding"),),
         )
         with patch.object(service, "MODEL_PROVIDER_PRESETS", (preset,)):
             await service.ensure_builtin_model_providers(self.db)

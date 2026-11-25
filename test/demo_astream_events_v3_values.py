@@ -1,4 +1,5 @@
 import asyncio
+import os
 from pprint import pprint
 
 from langchain.agents import create_agent
@@ -14,14 +15,14 @@ def add_numbers(a: int, b: int) -> int:
 
 
 async def main() -> None:
-    from src.configs import config
     from src.database import postgres_manager
-    from src.model.runtime import load_chat_model
+    from src.model import load_chat_model
 
     await postgres_manager.initialize()
     try:
         async with postgres_manager.get_async_session_context() as db:
-            model = await load_chat_model(config.default_model, db=db)
+            model_ref = os.environ.get("DEMO_CHAT_MODEL", "dashscope:qwen4-max")
+            model = await load_chat_model(model_ref, db=db)
     finally:
         await postgres_manager.dispose()
 

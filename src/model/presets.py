@@ -2,13 +2,12 @@
 
 from dataclasses import dataclass
 
-from .utils import ChatCapability, ModelCategory, ModelProtocol, ModelType
+from .utils import ChatCapability, ModelCategory, ModelProtocol
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class PresetModel:
     model_id: str
-    model_type: ModelType
     category: ModelCategory = "chat"
     capabilities: tuple[ChatCapability, ...] = ()
 
@@ -35,8 +34,8 @@ MODEL_PROVIDER_PRESETS: tuple[ModelProviderPreset, ...] = (
         api_key="DEEPSEEK_API_KEY",
         protocol="openai_compatible",
         enabled_models=(
-            PresetModel(model_id="deepseek-v4-pro", model_type="deepseek", category="chat"),
-            PresetModel(model_id="deepseek-flash", model_type="deepseek", category="chat"),
+            PresetModel(model_id="deepseek-v4-pro", category="chat"),
+            PresetModel(model_id="deepseek-flash", category="chat"),
         ),
     ),
     # https://help.aliyun.com/zh/model-studio/models
@@ -49,15 +48,15 @@ MODEL_PROVIDER_PRESETS: tuple[ModelProviderPreset, ...] = (
         api_key="DASHSCOPE_API_KEY",
         protocol="openai_compatible",
         enabled_models=(
-            PresetModel(model_id="qwen4-max", model_type="qwen", category="chat"),
-            PresetModel(model_id="qwen3.7-plus", model_type="qwen", category="chat"),
-            PresetModel(model_id="qwen3.8-flash", model_type="qwen", category="chat"),
-            PresetModel(model_id="qwen3.8-27b", model_type="qwen", category="chat"),
-            PresetModel(model_id="qwen3.7-text-embedding", model_type="qwen", category="embedding"),
-            PresetModel(model_id="qwen3.7-text-embedding-flash", model_type="qwen", category="embedding"),
-            PresetModel(model_id="text-embedding-v4", model_type="qwen", category="embedding"),
-            PresetModel(model_id="qwen3.7-text-rerank", model_type="qwen", category="rerank"),
-            PresetModel(model_id="qwen3-rerank", model_type="qwen", category="rerank"),
+            PresetModel(model_id="qwen4-max", category="chat"),
+            PresetModel(model_id="qwen3.7-plus", category="chat"),
+            PresetModel(model_id="qwen3.8-flash", category="chat"),
+            PresetModel(model_id="qwen3.8-27b", category="chat"),
+            PresetModel(model_id="qwen3.7-text-embedding", category="embedding"),
+            PresetModel(model_id="qwen3.7-text-embedding-flash", category="embedding"),
+            PresetModel(model_id="text-embedding-v4", category="embedding"),
+            PresetModel(model_id="qwen3.7-text-rerank", category="rerank"),
+            PresetModel(model_id="qwen3-rerank", category="rerank"),
         ),
     ),
     # https://developers.openai.com/api/docs/models/gpt-5.6-sol
@@ -70,11 +69,11 @@ MODEL_PROVIDER_PRESETS: tuple[ModelProviderPreset, ...] = (
         api_key="OPENAI_API_KEY",
         protocol="openai_compatible",
         enabled_models=(
-            PresetModel(model_id="gpt-5.6-sol", model_type="chatgpt", category="chat"),
-            PresetModel(model_id="gpt-5.6-terra", model_type="chatgpt", category="chat"),
-            PresetModel(model_id="gpt-5.6-luna", model_type="chatgpt", category="chat"),
-            PresetModel(model_id="text-embedding-3-small", model_type="chatgpt", category="embedding"),
-            PresetModel(model_id="text-embedding-3-large", model_type="chatgpt", category="embedding"),
+            PresetModel(model_id="gpt-5.6-sol", category="chat"),
+            PresetModel(model_id="gpt-5.6-terra", category="chat"),
+            PresetModel(model_id="gpt-5.6-luna", category="chat"),
+            PresetModel(model_id="text-embedding-3-small", category="embedding"),
+            PresetModel(model_id="text-embedding-3-large", category="embedding"),
         ),
     ),
     # https://platform.claude.com/docs/en/models/overview
@@ -85,10 +84,10 @@ MODEL_PROVIDER_PRESETS: tuple[ModelProviderPreset, ...] = (
         api_key="ANTHROPIC_API_KEY",
         protocol="anthropic",
         enabled_models=(
-            PresetModel(model_id="claude-fable-5-2", model_type="claude", category="chat"),
-            PresetModel(model_id="claude-opus-5-5", model_type="claude", category="chat"),
-            PresetModel(model_id="claude-sonnet-5-5", model_type="claude", category="chat"),
-            PresetModel(model_id="claude-haiku-5-5", model_type="claude", category="chat"),
+            PresetModel(model_id="claude-fable-5-2", category="chat"),
+            PresetModel(model_id="claude-opus-5-5", category="chat"),
+            PresetModel(model_id="claude-sonnet-5-5", category="chat"),
+            PresetModel(model_id="claude-haiku-5-5", category="chat"),
         ),
     ),
     # https://aistudio.google.com/docs/models
@@ -100,13 +99,13 @@ MODEL_PROVIDER_PRESETS: tuple[ModelProviderPreset, ...] = (
         api_key="GEMINI_API_KEY",
         protocol="gemini",
         enabled_models=(
-            PresetModel(model_id="gemini-4-carbon", model_type="gemini", category="chat"),
-            PresetModel(model_id="gemini-4-neon", model_type="gemini", category="chat"),
-            PresetModel(model_id="gemini-4-hydrogen", model_type="gemini", category="chat"),
-            PresetModel(model_id="gemini-4-argon", model_type="gemini", category="chat"),
-            PresetModel(model_id="gemini-3.5-flash-lite", model_type="gemini", category="chat"),
-            PresetModel(model_id="gemini-embedding-2", model_type="gemini", category="embedding"),
-            PresetModel(model_id="gemini-embedding-001", model_type="gemini", category="embedding"),
+            PresetModel(model_id="gemini-4-carbon", category="chat"),
+            PresetModel(model_id="gemini-4-neon", category="chat"),
+            PresetModel(model_id="gemini-4-hydrogen", category="chat"),
+            PresetModel(model_id="gemini-4-argon", category="chat"),
+            PresetModel(model_id="gemini-3.5-flash-lite", category="chat"),
+            PresetModel(model_id="gemini-embedding-2", category="embedding"),
+            PresetModel(model_id="gemini-embedding-001", category="embedding"),
         ),
     ),
 )

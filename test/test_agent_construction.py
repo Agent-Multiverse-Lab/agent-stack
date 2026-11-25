@@ -74,7 +74,7 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
     async def runtime(self, slug, run_type="subagent"):
         conversations = SimpleNamespace(
             get_conversation_by_thread_id_for_user=AsyncMock(
-                return_value=SimpleNamespace(conversation_metadata={})
+                return_value=SimpleNamespace(conversation_metadata={"model": "dashscope:qwen3.5-plus"})
             )
         )
         with (
@@ -157,6 +157,7 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(first_record.agent_config["system_prompt"], second_record.agent_config["system_prompt"])
         context = await thread_service._build_agent_runtime_context(
             uid="user-1", run_id="run-1", thread_id="thread-1", request_id="request-1",
+            model="dashscope:qwen3.5-plus",
             defaults=first_record.agent_config,
         )
         context["system_prompt"] = "local mutation"
@@ -204,6 +205,7 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(child, SubAgentGraph)
             context = await thread_service._build_agent_runtime_context(
                 uid="user-1", run_id="child-1", thread_id="child-thread", request_id="request-1",
+                model="dashscope:qwen3.5-plus",
                 defaults=record.agent_config,
             )
             self.assertEqual(context["system_prompt"], "数据库中的 Prompt")
@@ -212,40 +214,44 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(fresh._subagents[custom.slug]["description"], custom.description)
 
     async def test_context_defaults_survive_missing_model_and_do_not_share_nested_values(self):
-        defaults = {"model": "preset/model", "mcps": ["configured-server"], "tools": [["a"]]}
+        defaults = {"model": "preset:model", "mcps": ["configured-server"], "tools": [["a"]]}
         values = dict(uid="user-1", run_id="run-1", thread_id="thread-1", request_id="request-1", defaults=defaults)
         first = await thread_service._build_agent_runtime_context(**values, model="")
-        second = await thread_service._build_agent_runtime_context(**values, model="chosen/model")
+        second = await thread_service._build_agent_runtime_context(**values, model="chosen:model")
         first["mcps"].append("local")
         first["tools"][0].append("b")
-        self.assertEqual(first["model"], "preset/model")
-        self.assertEqual(second["model"], "chosen/model")
+        self.assertEqual(first["model"], "preset:model")
+        self.assertEqual(second["model"], "chosen:model")
         self.assertEqual(second["mcps"], ["configured-server"])
         self.assertEqual(defaults["tools"], [["a"]])
 
-    async def test_runtime_context_freezes_default_model_and_overrides_run_identity(self):
+    async def test_runtime_context_requires_explicit_model_and_overrides_run_identity(self):
         values = dict(uid="user-1", run_id="run-1", thread_id="thread-1", request_id="request-1")
-        with patch.object(sys_config, "default_model", "configured/model"):
-            context = await thread_service._build_agent_runtime_context(
+        with self.assertRaisesRegex(ValueError, "运行上下文缺少模型配置"):
+            await thread_service._build_agent_runtime_context(
                 **values, defaults={"uid": "ignored", "model": ""}, created_by_run_id="parent-1",
             )
-        with patch.object(sys_config, "default_model", "changed/model"):
-            self.assertEqual(context["model"], "configured/model")
-            agent_context = SubAgentContext()
-            agent_context.update_context(context)
-            self.assertEqual(agent_context.model, "configured/model")
+        context = await thread_service._build_agent_runtime_context(
+            **values,
+            model="configured:model",
+            defaults={"uid": "ignored", "model": ""},
+            created_by_run_id="parent-1",
+        )
+        self.assertEqual(context["model"], "configured:model")
+        agent_context = SubAgentContext()
+        agent_context.update_context(context)
+        self.assertEqual(agent_context.model, "configured:model")
         self.assertEqual(context["uid"], "user-1")
         self.assertEqual(context["created_by_run_id"], "parent-1")
 
-    async def test_context_uses_run_snapshot_then_conversation_then_agent_then_config(self):
+    async def test_context_uses_run_snapshot_then_conversation_then_agent_without_config_fallback(self):
         identity = dict(uid="user-1", run_id="run-1", thread_id="thread-1", request_id="request-1")
         for run_model, conversation_model, agent_model, expected in (
-            ("run/model", "conversation/model", "agent/model", "run/model"),
-            (None, "conversation/model", "agent/model", "conversation/model"),
-            ("", None, "agent/model", "agent/model"),
-            (None, "", None, "configured/model"),
+            ("run:model", "conversation:model", "agent:model", "run:model"),
+            (None, "conversation:model", "agent:model", "conversation:model"),
+            ("", None, "agent:model", "agent:model"),
         ):
-            with self.subTest(expected=expected), patch.object(sys_config, "default_model", "configured/model"):
+            with self.subTest(expected=expected):
                 runtime = await thread_service._build_agent_runtime_context(
                     **identity, model=run_model, conversation_model=conversation_model,
                     defaults={"model": agent_model},
@@ -253,18 +259,21 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
                 context = SubAgentContext()
                 context.update_context(runtime)
                 self.assertEqual(context.model, expected)
+        with self.assertRaisesRegex(ValueError, "运行上下文缺少模型配置"):
+            await thread_service._build_agent_runtime_context(
+                **identity, model=None, conversation_model="", defaults={},
+            )
 
-    async def test_new_agent_binds_config_model_without_mutating_definition(self):
+    async def test_new_agent_does_not_inject_default_model_or_mutate_definition(self):
         definition = AgentLibrary(
             slug="configured-agent", name="Configured", description="", backend_id="SubAgentGraph",
             context={"system_prompt": "Prompt"},
         )
-        with patch.object(sys_config, "default_model", "configured/model"):
-            await self.repository.ensure_agent(definition=definition, role="subagent", internal_only=True)
-            context = BaseContext()
+        await self.repository.ensure_agent(definition=definition, role="subagent", internal_only=True)
+        context = BaseContext()
         row = await self.repository._get_by_slug(definition.slug)
-        self.assertEqual(row.agent_config["model"], "configured/model")
-        self.assertEqual(context.model, "configured/model")
+        self.assertNotIn("model", row.agent_config)
+        self.assertEqual(context.model, "")
         self.assertNotIn("model", definition.context)
 
     async def test_unknown_backend_and_context_are_rejected_before_execution(self):
@@ -310,7 +319,12 @@ class AgentConstructionTest(unittest.IsolatedAsyncioTestCase):
         model = Model(responses=[AIMessage(content="role result")])
         for definition in (SEARCH_AGENT, CITATION_AGENT):
             record, agent = await self.runtime(definition.slug)
-            context = SubAgentContext(uid="user-1", thread_id=definition.slug, run_id=definition.slug)
+            context = SubAgentContext(
+                uid="user-1",
+                thread_id=definition.slug,
+                run_id=definition.slug,
+                model="dashscope:qwen3.5-plus",
+            )
             context.update_context(record.agent_config)
             with (
                 patch("src.agents.buildin.subagents.subagent_graph.get_mcp_tools", AsyncMock(return_value=[])),

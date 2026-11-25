@@ -9,7 +9,7 @@ from server.service.arq_queue_servcie import enqueue_agent_run
 from server.service.input_message_service import AgentInputMsg
 from src.database.models import AgentRun, Conversation, Message
 from src.database.repositories import AgentRepository, AgentRunRepository, ConversationRepository
-from src.model import resolve_chat_model_selection, validate_model
+from src.model import get_enabled_model
 
 
 class SubAgentMessageRecord(TypedDict):
@@ -195,8 +195,14 @@ class SubAgentRunService:
             agent = await AgentRepository(self.db).get_by_slug_for_run_type(slug=agent_slug, run_type="subagent")
             if agent is None:
                 raise ValueError("子智能体不存在或已停用")
-            model = resolve_chat_model_selection(agent_model=(agent.agent_config or {}).get("model"))
-            await validate_model(self.db, model)
+            agent_model = (agent.agent_config or {}).get("model")
+            selected_model = (
+                agent_model
+                if (isinstance(agent_model, str) and agent_model)
+                else (parent_run.run_metadata or {}).get("model")
+            )
+            resolved_model = await get_enabled_model(self.db, selected_model, category="chat")
+            model = resolved_model.model_ref
 
             child_thread_id = str(uuid4())
 

@@ -8,17 +8,6 @@ from urllib.parse import urlsplit
 
 from src.configs import config as sys_config
 
-ModelType = Literal[
-    "deepseek",
-    "qwen",
-    "glm",
-    "minomax",
-    "gemini",
-    "chatgpt",
-    "claude",
-    "ollama",
-    "vllm",
-]
 ModelProtocol = Literal["openai_compatible", "anthropic", "gemini"]
 ModelCategory = Literal["chat", "embedding", "rerank"]
 ChatCapability = Literal[
@@ -32,9 +21,7 @@ ChatCapability = Literal[
 ]
 
 _PROVIDER_ID_RE = re.compile(r"^[a-z0-9_-]{1,64}$")
-_HEADER_NAME_RE = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
 _ENV_VAR_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
-_VALID_MODEL_TYPES = frozenset(get_args(ModelType))
 _VALID_PROTOCOLS = frozenset(get_args(ModelProtocol))
 _VALID_CATEGORIES = frozenset(get_args(ModelCategory))
 _VALID_CAPABILITIES = frozenset(get_args(ChatCapability))
@@ -136,37 +123,10 @@ def validate_api_key(value: str) -> str:
     return value
 
 
-def validate_extra_headers(headers: dict[str, str]) -> dict[str, str]:
-    if not isinstance(headers, dict):
-        raise ValueError("extra_headers 必须是字典")
-    seen: set[str] = set()
-    for name, value in headers.items():
-        if not isinstance(name, str) or not isinstance(value, str):
-            raise ValueError("额外请求头键值必须是字符串")
-        normalized = name.lower()
-        if (
-            not _HEADER_NAME_RE.fullmatch(name)
-            or normalized in seen | {"host", "content-length", "authorization"}
-            or not value.isascii()
-            or any(ord(char) < 32 or ord(char) == 127 for char in value)
-            or value != value.strip()
-        ):
-            raise ValueError("额外请求头无效或包含受保护字段")
-        seen.add(normalized)
-    return dict(headers)
-
-
-def normalize_enabled_models(
-    models: Sequence[dict[str, Any]],
-    *,
-    require_model_type: bool = False,
-    strip_legacy: bool = False,
-) -> list[dict[str, Any]]:
+def normalize_enabled_models(models: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     if isinstance(models, (str, bytes)) or not isinstance(models, Sequence):
         raise ValueError("models 必须是列表")
-    allowed_keys = {"model_id", "category", "capabilities", "model_type"}
-    if strip_legacy:
-        allowed_keys = allowed_keys | {"body_overrides", "endpoint"}
+    allowed_keys = {"model_id", "category", "capabilities"}
     normalized: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     for raw in models:
@@ -181,21 +141,13 @@ def normalize_enabled_models(
         seen_ids.add(model_id)
         category = validate_category(raw.get("category", "chat"))
         capabilities = validate_capabilities(raw.get("capabilities", []))
-        item: dict[str, Any] = {
-            "model_id": model_id,
-            "category": category,
-            "capabilities": capabilities,
-        }
-        if "model_type" in raw and raw["model_type"] is not None:
-            model_type = raw["model_type"]
-            if not isinstance(model_type, str) or model_type not in _VALID_MODEL_TYPES:
-                raise ValueError(f"不支持的模型类型：{model_type}")
-            item["model_type"] = model_type
-        elif require_model_type:
-            raise ValueError("模型配置缺少 model_type")
-        if strip_legacy and "endpoint" in raw and raw["endpoint"]:
-            item["endpoint"] = raw["endpoint"]
-        normalized.append(item)
+        normalized.append(
+            {
+                "model_id": model_id,
+                "category": category,
+                "capabilities": capabilities,
+            }
+        )
     return normalized
 
 
@@ -214,36 +166,34 @@ def resolve_provider_api_key(value: str) -> str:
     return value
 
 
-def resolve_chat_model_selection(
-    *,
-    model: str | None = None,
-    conversation_model: str | None = None,
-    agent_model: str | None = None,
-) -> str:
-    """依次选择 Run 快照、会话绑定、Agent 配置和配置文件默认模型。"""
-    for candidate in (model, conversation_model, agent_model, sys_config.default_model):
-        if candidate is None or candidate == "":
-            continue
-        if not isinstance(candidate, str) or candidate != candidate.strip():
-            raise ValueError("模型配置必须是非空、无首尾空白的字符串")
-        return candidate
-    raise ValueError("未配置聊天模型")
+def parse_model_ref(model_ref: str) -> tuple[str, str]:
+    """解析并校验 provider_id:model_id 格式的模型引用，按第一个冒号切分。"""
+    if not isinstance(model_ref, str) or not model_ref or model_ref != model_ref.strip():
+        raise ValueError("模型引用必须为 provider_id:model_id")
+    provider_id, separator, model_id = model_ref.partition(":")
+    if (
+        not separator
+        or not _PROVIDER_ID_RE.fullmatch(provider_id)
+        or not model_id
+        or model_id != model_id.strip()
+        or any(ord(char) < 32 or ord(char) == 127 for char in model_id)
+    ):
+        raise ValueError("模型引用必须为 provider_id:model_id")
+    return provider_id, model_id
 
 
 __all__ = [
     "ChatCapability",
     "ModelCategory",
     "ModelProtocol",
-    "ModelType",
     "normalize_base_url",
     "normalize_enabled_models",
     "normalize_optional_url",
-    "resolve_chat_model_selection",
+    "parse_model_ref",
     "resolve_provider_api_key",
     "validate_api_key",
     "validate_capabilities",
     "validate_category",
-    "validate_extra_headers",
     "validate_model_id",
     "validate_name",
     "validate_protocol",

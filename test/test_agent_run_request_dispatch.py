@@ -68,7 +68,7 @@ class AgentRunRequestRepositoryTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.db.close)
         self.db.add(Conversation(
             id=1, uid="user-1", thread_id="thread-1", agent_id="leader", title="test",
-            conversation_metadata={"model": "test/initial"},
+            conversation_metadata={"model": "test:initial"},
         ))
         self.db.flush()
         self.db.add(Message(
@@ -106,13 +106,13 @@ class AgentRunRequestRepositoryTest(unittest.IsolatedAsyncioTestCase):
     async def test_reads_request_and_current_conversation_configuration(self):
         await self.create_request()
         self.db.commit()
-        self.db.execute(update(Conversation).values(conversation_metadata={"model": "test/changed"}))
+        self.db.execute(update(Conversation).values(conversation_metadata={"model": "test:changed"}))
         self.db.commit()
         request = await self.repository.get_run_request_by_request_id("request-1")
         conversation = await ConversationRepository(self.session).get_conversation_by_thread_id_for_user(
             thread_id=request.thread_id, user_id=request.uid, for_update=True,
         )
-        self.assertEqual(conversation.conversation_metadata, {"model": "test/changed"})
+        self.assertEqual(conversation.conversation_metadata, {"model": "test:changed"})
         self.assertEqual(request.trigger_message_id, 1)
         message = self.db.get(Message, request.trigger_message_id)
         self.assertEqual((message.content, message.image_content, message.msg_metadata), (
@@ -269,12 +269,12 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
             db.add(User(id=7, uid="user-1", email="request@example.test", password_hash="unused"))
             db.add(Agent(
                 slug="leader", backend_id="test", name="test", internal_only=False,
-                agent_config={"model": "test/initial"},
+                agent_config={"model": "test:initial"},
             ))
             db.add_all([
                 Conversation(
                     id=index, uid="user-1", thread_id=f"thread-{index}", agent_id="leader",
-                    title="test", conversation_metadata={"model": "test/initial", "workspace": "demo"},
+                    title="test", conversation_metadata={"model": "test:initial", "workspace": "demo"},
                 )
                 for index in (1, 2)
             ])
@@ -285,13 +285,17 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
             ))
             await db.commit()
         self.enqueue = AsyncMock()
-        self.model = AsyncMock(return_value=object())
+        self.model = AsyncMock(
+            side_effect=lambda _db, model_ref, *, category="chat": SimpleNamespace(
+                model_ref=model_ref, category=category
+            )
+        )
         self.storage = SimpleNamespace(acopy_file=AsyncMock(), adelete_file=AsyncMock())
         for current in (
             patch.object(agent_run_request_service, "enqueue_agent_run", self.enqueue),
-            patch.object(agent_run_request_service, "validate_model", self.model),
             patch.object(agent_run_request_queue_service, "enqueue_agent_run", self.enqueue),
-            patch.object(agent_run_request_queue_service, "validate_model", self.model),
+            patch.object(agent_run_request_service, "get_enabled_model", self.model),
+            patch.object(agent_run_request_queue_service, "get_enabled_model", self.model),
             patch.object(attachment_service, "get_storage", return_value=self.storage),
             patch.object(agent_run_request_queue_service.logger, "exception"),
         ):
@@ -354,7 +358,7 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(message.image_content, "https://example.test/input.png")
                 self.assertEqual(message.msg_metadata["attachment_file_ids"], [self.file_id])
                 self.assertEqual(run.run_metadata, {
-                    "model": "test/initial", "workspace": "demo", "request_id": "request-1",
+                    "model": "test:initial", "workspace": "demo", "request_id": "request-1",
                 })
                 self.assertEqual(await observer.scalar(select(func.count()).select_from(MessageAttachment)), 1)
         self.enqueue.side_effect = enqueue
@@ -455,14 +459,14 @@ class AgentRunRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.submit(query="changed", dispatch_policy="steer")).status, "queued")
         async with self.sessions() as db:
             self.assertEqual(await ConversationRepository(db).list_messages(conversation_id=1, limit=10), [])
-            await db.execute(update(Conversation).values(conversation_metadata={"model": "test/changed"}))
+            await db.execute(update(Conversation).values(conversation_metadata={"model": "test:changed"}))
             await db.commit()
         self.assertIsNone(await self.promote())
         await self.finish_blocker()
         first, second = await asyncio.gather(self.promote(), self.promote())
         run = first or second
         self.assertTrue(first is None or second is None)
-        self.assertEqual(run.run_metadata["model"], "test/changed")
+        self.assertEqual(run.run_metadata["model"], "test:changed")
         async with self.sessions() as db:
             message = await db.get(Message, run.trigger_message_id)
             self.assertEqual((message.content, message.status, message.agent_run_id), ("原始输入", "completed", run.id))

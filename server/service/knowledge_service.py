@@ -30,10 +30,12 @@ from src.knowledge.store.milvus.milvus import MilvusKnowledge
 from src.knowledge.store.neo4j.neo4j_store import get_graph_store
 from src.model import (
     RerankDocument,
+    get_enabled_model,
     load_chat_model,
     load_embedding_model,
     load_reranker,
 )
+from src.model.service import list_models
 from src.storage.minio import get_storage, sanitize_filename
 from src.utils import logger
 
@@ -637,12 +639,29 @@ async def get_file_markdown(
     }
 
 
+async def _require_chat_model_ref(
+    db: AsyncSession,
+    model_ref: str | None = None,
+) -> str:
+    """校验显式传入的聊天模型，或从已启用目录中选择首个可用聊天模型。"""
+    if isinstance(model_ref, str) and model_ref.strip():
+        resolved = await get_enabled_model(db, model_ref.strip(), category="chat")
+        return resolved.model_ref
+    catalog = await list_models(db, category="chat")
+    for entry in catalog.values():
+        models = entry.get("models") or []
+        if models:
+            return f"{entry['provider_id']}:{models[0]['model_id']}"
+    raise ValueError("未配置可用的聊天模型")
+
+
 async def extract_file(
     db: AsyncSession,
     *,
     uid: str,
     kb_id: str,
     file_id: str,
+    model_ref: str | None = None,
 ) -> dict[str, Any]:
     """抽取知识文件实体关系并写入 Neo4j 与 Milvus 实体集合。"""
     knowledge_files = KnowledgeFileRepository(db)
@@ -685,8 +704,9 @@ async def extract_file(
                 len(markdown_text),
             )
             markdown_text = markdown_text[:_EXTRACT_MAX_CHARS]
+        chat_model_ref = await _require_chat_model_ref(db, model_ref)
         result = await GraphExtractor(
-            model=await load_chat_model(sys_config.flash_model, db=db)
+            model=await load_chat_model(chat_model_ref, db=db)
         ).extract(markdown_text)
 
         entities = []
@@ -889,6 +909,7 @@ async def chat(
     kb_id: str,
     query: str,
     limit: int,
+    model_ref: str | None = None,
 ) -> dict[str, Any]:
     """基于知识库检索结果同步生成带引用的回答。"""
     result = await search(
@@ -925,7 +946,8 @@ async def chat(
             zip(citations, range(1, len(citations) + 1), strict=True)
         )
     )
-    model = await load_chat_model(sys_config.default_model, db=db)
+    chat_model_ref = await _require_chat_model_ref(db, model_ref)
+    model = await load_chat_model(chat_model_ref, db=db)
     response = await model.ainvoke(
         [
             SystemMessage(content=_CHAT_SYSTEM_PROMPT),
@@ -1045,7 +1067,7 @@ async def _create_embedding_service(
     """根据入库模型配置装配无基础设施依赖的向量服务。"""
     resolved_spec = (model_spec or sys_config.embed_model).strip()
     if not resolved_spec:
-        raise ValueError("未配置 Embedding 模型，应设置 EMBED_MODEL=provider/model")
+        raise ValueError("未配置 Embedding 模型，应设置 EMBED_MODEL=provider_id:model_id")
     resolved_batch_size = batch_size or sys_config.embedding_batch_size
     embedding_model = await load_embedding_model(resolved_spec, db=db)
     service = EmbeddingService(

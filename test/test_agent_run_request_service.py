@@ -114,7 +114,7 @@ class AgentRunRequestServiceTest(unittest.IsolatedAsyncioTestCase):
                     is_subagent=False,
                     internal_only=False,
                     enabled=True,
-                    agent_config={"model": "test/initial"},
+                    agent_config={"model": "test:initial"},
                 ),
                 Conversation(
                     id=1,
@@ -123,7 +123,7 @@ class AgentRunRequestServiceTest(unittest.IsolatedAsyncioTestCase):
                     agent_id="leader",
                     title="test",
                     conversation_metadata={
-                        "model": "test/initial",
+                        "model": "test:initial",
                         "workspace": "demo",
                     },
                 ),
@@ -133,7 +133,7 @@ class AgentRunRequestServiceTest(unittest.IsolatedAsyncioTestCase):
                     thread_id="thread-2",
                     agent_id="leader",
                     title="test-2",
-                    conversation_metadata={"model": "test/initial"},
+                    conversation_metadata={"model": "test:initial"},
                 ),
                 Conversation(
                     id=3,
@@ -141,7 +141,7 @@ class AgentRunRequestServiceTest(unittest.IsolatedAsyncioTestCase):
                     thread_id="thread-other",
                     agent_id="leader",
                     title="other",
-                    conversation_metadata={"model": "test/initial"},
+                    conversation_metadata={"model": "test:initial"},
                 ),
             ]
         )
@@ -162,8 +162,13 @@ class AgentRunRequestServiceTest(unittest.IsolatedAsyncioTestCase):
         self.session = _sqlite_async_adapter(self.db)
         self.user = SimpleNamespace(id=7, uid="user-1")
         self.other_user = SimpleNamespace(id=8, uid="user-2")
+        async def _resolve(_db, model_ref, *, category):
+            if not model_ref:
+                raise ValueError("未指定模型")
+            return SimpleNamespace(model_ref=model_ref, category=category)
+
         self.enqueue_mock = AsyncMock()
-        self.resolve_mock = AsyncMock(return_value=object())
+        self.resolve_mock = AsyncMock(side_effect=_resolve)
         self.storage = SimpleNamespace(acopy_file=AsyncMock(), adelete_file=AsyncMock())
 
         for p in (
@@ -171,7 +176,10 @@ class AgentRunRequestServiceTest(unittest.IsolatedAsyncioTestCase):
                 agent_run_request_service, "enqueue_agent_run", self.enqueue_mock
             ),
             patch.object(
-                agent_run_request_service, "validate_model", self.resolve_mock
+                agent_run_request_service, "get_enabled_model", self.resolve_mock
+            ),
+            patch.object(
+                agent_run_request_queue_service, "get_enabled_model", self.resolve_mock
             ),
             patch.object(
                 agent_run_request_queue_service, "enqueue_agent_run", self.enqueue_mock
@@ -209,7 +217,7 @@ class AgentRunRequestServiceTest(unittest.IsolatedAsyncioTestCase):
             request_metadata={
                 "type": "chat",
                 "request_id": "req-idle",
-                "model": "test/switched",
+                "model": "test:switched",
                 "attachment_file_ids": [self.file_id],
                 "source": "web",
             }
@@ -219,7 +227,7 @@ class AgentRunRequestServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             run.run_metadata,
             {
-                "model": "test/switched",
+                "model": "test:switched",
                 "workspace": "demo",
                 "request_id": "req-idle",
             },
@@ -227,7 +235,7 @@ class AgentRunRequestServiceTest(unittest.IsolatedAsyncioTestCase):
         self.db.expire_all()
 
         conversation = self.db.get(Conversation, 1)
-        self.assertEqual(conversation.conversation_metadata["model"], "test/switched")
+        self.assertEqual(conversation.conversation_metadata["model"], "test:switched")
         request = self.db.get(AgentRunRequest, "req-idle")
         self.assertEqual(request.status, "dispatched")
         self.assertIsNone(request.queue_seq)
@@ -382,6 +390,16 @@ class AgentRunRequestServiceTest(unittest.IsolatedAsyncioTestCase):
             await self._submit(dispatch_policy="invalid")
         with self.assertRaises(ValueError):
             await self._submit(request_metadata={"type": "chat", "model": 123})
+        conversation = self.db.get(Conversation, 2)
+        conversation.conversation_metadata = {}
+        self.db.commit()
+        with self.assertRaisesRegex(ValueError, "未指定模型"):
+            await self._submit(
+                thread_id="thread-2",
+                request_metadata={"type": "chat", "request_id": "req-no-model"},
+            )
+        conversation.conversation_metadata = {"model": "test:initial"}
+        self.db.commit()
 
         existing = await AgentRunRepository(self.session).create_run(
             run_id="run-done",
@@ -443,7 +461,7 @@ class AgentRunRequestServiceTest(unittest.IsolatedAsyncioTestCase):
                     request_metadata={
                         "type": "chat",
                         "request_id": "req-fail",
-                        "model": "test/switched",
+                        "model": "test:switched",
                         "attachment_file_ids": [self.file_id],
                     }
                 )
@@ -451,7 +469,7 @@ class AgentRunRequestServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._counts(), (0, 0, 0, 0))
         self.assertEqual(self.db.get(Attachment, 1).object_name, self.source)
         self.assertEqual(
-            self.db.get(Conversation, 1).conversation_metadata["model"], "test/initial"
+            self.db.get(Conversation, 1).conversation_metadata["model"], "test:initial"
         )
         self.storage.adelete_file.assert_awaited_once_with(
             attachment_service.ATTACHMENT_BUCKET_NAME,

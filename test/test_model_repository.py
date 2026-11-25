@@ -47,7 +47,7 @@ class SQLiteModelTestCase(unittest.IsolatedAsyncioTestCase):
                 "api_key": "secret-key",
                 "extra_headers": {},
                 "is_enabled": True,
-                "enabled_models": [{"model_id": "qwen3:8b", "model_type": "ollama"}],
+                "enabled_models": [{"model_id": "qwen3:8b", "category": "chat", "capabilities": []}],
                 **values,
             }
         )
@@ -64,7 +64,7 @@ class ModelProviderRepositoryTest(SQLiteModelTestCase):
         fetched = await self.repository.get_model_provider_by_id("local")
         self.assertIsNotNone(fetched)
         self.assertEqual(fetched.name, "Local")
-        replacement = [{"model_id": "org/new-model", "model_type": "qwen", "category": "chat"}]
+        replacement = [{"model_id": "org/new-model", "category": "chat", "capabilities": []}]
         updated = await self.repository.update_model_provider("local", enabled_models=replacement)
         self.assertIsNotNone(updated)
         self.assertIsNone(await self.repository.update_model_provider("missing", name="Nope"))
@@ -78,6 +78,44 @@ class ModelProviderRepositoryTest(SQLiteModelTestCase):
         await self.db.commit()
         self.assertIsNone(await self.repository.get_model_provider_by_id("local"))
         self.assertEqual(1, len(await self.repository.list_model_providers()))
+
+    async def test_require_model_validates_format_existence_enabled_and_category(self):
+        await self.insert_provider(
+            "local",
+            enabled_models=[
+                {"model_id": "org/qwen3:8b", "category": "chat", "capabilities": []},
+                {"model_id": "bge-m3", "category": "embedding", "capabilities": []},
+            ],
+        )
+        await self.insert_provider(
+            "disabled",
+            is_enabled=False,
+            enabled_models=[{"model_id": "m1", "category": "chat", "capabilities": []}],
+        )
+        await self.db.commit()
+
+        provider, model = await self.repository.require_model("local:org/qwen3:8b", category="chat")
+        self.assertEqual(provider.provider_id, "local")
+        self.assertEqual(model["model_id"], "org/qwen3:8b")
+
+        _, emb = await self.repository.require_model("local:bge-m3", category="embedding")
+        self.assertEqual(emb["category"], "embedding")
+
+        for invalid in ("local", ":model", "local:", "local/model", " local:m", 123):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                await self.repository.require_model(invalid)  # type: ignore[arg-type]
+
+        for missing in ("unknown:model", "local:missing"):
+            with self.subTest(missing=missing), self.assertRaises(LookupError):
+                await self.repository.require_model(missing)
+
+        with self.assertRaisesRegex(ValueError, "停用"):
+            await self.repository.require_model("disabled:m1")
+        disabled_provider, _ = await self.repository.require_model("disabled:m1", require_enabled=False)
+        self.assertEqual(disabled_provider.provider_id, "disabled")
+
+        with self.assertRaisesRegex(ValueError, "模型类型不匹配"):
+            await self.repository.require_model("local:bge-m3", category="chat")
 
     async def test_duplicate_provider_is_rejected_by_database(self):
         await self.insert_provider()

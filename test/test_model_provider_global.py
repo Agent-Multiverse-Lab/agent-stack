@@ -13,7 +13,6 @@ from sqlalchemy import create_engine, inspect, text
 
 from src.configs import config
 from src.database.models import ModelProvider, User
-from src.model import runtime, service
 from src.model.repository import ModelProviderRepository
 from test.test_model_repository import SQLiteModelTestCase
 
@@ -21,30 +20,23 @@ from test.test_model_repository import SQLiteModelTestCase
 class ModelGlobalProviderTest(SQLiteModelTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
-        refresh = patch.object(
-            service,
-            "refresh_model_list_cache",
-            new_callable=AsyncMock,
-            return_value=True,
-        )
-        refresh.start()
-        self.addCleanup(refresh.stop)
-        await service.create_model_provider(
-            self.db,
-            provider_id="deepseek",
+        await self.insert_provider(
+            "deepseek",
             name="Shared",
             base_url="https://example.com/v1",
             api_key="shared-key",
             is_enabled=True,
-            enabled_models=[{"model_id": "chat", "model_type": "deepseek"}],
+            enabled_models=[{"model_id": "chat", "category": "chat", "capabilities": []}],
         )
+        await self.db.commit()
 
     async def test_repositories_share_global_configuration_and_deletion(self):
         other = ModelProviderRepository(self.db)
         provider = await other.get_model_provider_by_id("deepseek")
         self.assertEqual(provider.name, "Shared")
-        await runtime.validate_model(self.db, "deepseek/chat")
-        await service.delete_model_provider(self.db, "deepseek")
+        await other.require_model("deepseek:chat")
+        await self.repository.delete_model_provider("deepseek")
+        await self.db.commit()
         self.assertIsNone(await other.get_model_provider_by_id("deepseek"))
 
     async def test_deleting_user_does_not_delete_or_modify_provider(self):
@@ -56,10 +48,9 @@ class ModelGlobalProviderTest(SQLiteModelTestCase):
         self.assertNotIn("user_id", ModelProvider.__table__.columns)
         self.assertEqual([column.name for column in ModelProvider.__table__.primary_key], ["provider_id"])
 
-    async def test_repository_rejects_identity_and_ownership_changes(self):
-        for values in ({"user_id": 2}, {"provider_id": "other"}):
-            with self.assertRaises(ValueError):
-                await self.repository.update_model_provider("deepseek", **values)
+    async def test_repository_rejects_identity_changes(self):
+        with self.assertRaises(ValueError):
+            await self.repository.update_model_provider("deepseek", provider_id="other")
 
 
 def migration(name):

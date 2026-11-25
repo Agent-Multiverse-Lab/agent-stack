@@ -239,13 +239,17 @@ class AgentRunRequestQueueServiceTest(unittest.IsolatedAsyncioTestCase):
                 thread_id="thread-1",
                 agent_id="leader",
                 title="test",
-                conversation_metadata={"model": "test/initial"},
+                conversation_metadata={"model": "test:initial"},
             )
         )
         self.db.flush()
         self.session = _sqlite_async_adapter(self.db)
         self.enqueue_mock = AsyncMock()
-        self.resolve_mock = AsyncMock(return_value=object())
+        self.resolve_mock = AsyncMock(
+            side_effect=lambda _db, model_ref, *, category: SimpleNamespace(
+                model_ref=model_ref, category=category
+            )
+        )
 
         @asynccontextmanager
         async def fake_ctx():
@@ -254,7 +258,7 @@ class AgentRunRequestQueueServiceTest(unittest.IsolatedAsyncioTestCase):
         for p in (
             patch.object(agent_run_request_queue_service, "session_context", fake_ctx),
             patch.object(agent_run_request_queue_service, "enqueue_agent_run", self.enqueue_mock),
-            patch.object(agent_run_request_queue_service, "validate_model", self.resolve_mock),
+            patch.object(agent_run_request_queue_service, "get_enabled_model", self.resolve_mock),
         ):
             p.start()
             self.addCleanup(p.stop)

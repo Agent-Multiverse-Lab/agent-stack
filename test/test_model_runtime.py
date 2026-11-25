@@ -1,21 +1,17 @@
-"""Chat / Embedding / Rerank 运行时工厂与统一解析入口测试。"""
+"""Chat / Embedding / Rerank 协议工厂与模型加载入口测试。"""
 
 import json
 import unittest
-from unittest.mock import AsyncMock, patch
+from contextlib import asynccontextmanager
+from unittest.mock import patch
 
 import httpx
 
-from src.model.model_provider.chat import build_chat_model
-from src.model.model_provider.embedding import HttpEmbeddings
-from src.model.model_provider.reranker import HttpReranker
-from src.model.runtime import (
-    load_chat_model,
-    load_embedding_model,
-    load_reranker,
-    validate_model,
-)
-from src.model.service import create_model_provider
+from src.model.model_provider import chat as chat_module
+from src.model.model_provider.chat import build_chat_model, load_chat_model
+from src.model.model_provider.embedding import HttpEmbeddings, load_embedding_model
+from src.model.model_provider.reranker import HttpReranker, load_reranker
+from src.model.repository import session_context as _unused_session_context  # noqa: F401
 from test.test_model_repository import SQLiteModelTestCase
 
 
@@ -117,43 +113,64 @@ class HttpEmbeddingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured[1]["headers"]["x-goog-api-key"], "AIza-key")
 
 
-class RuntimeFacadeTest(SQLiteModelTestCase):
+class ModelLoaderTest(SQLiteModelTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
-        with patch("src.model.service.refresh_model_list_cache", AsyncMock(return_value=True)):
-            await create_model_provider(
-                self.db,
-                provider_id="dashscope",
-                name="Qwen",
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-                embedding_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-                rerank_base_url="https://dashscope.aliyuncs.com/compatible-api/v1/reranks",
-                protocol="openai_compatible",
-                api_key="sk-ds",
-                is_enabled=True,
-                enabled_models=[
-                    {"model_id": "qwen3.8-max", "model_type": "qwen", "category": "chat"},
-                    {"model_id": "text-embedding-v4", "model_type": "qwen", "category": "embedding"},
-                    {"model_id": "qwen3-rerank", "model_type": "qwen", "category": "rerank"},
-                ],
-            )
+        await self.insert_provider(
+            "dashscope",
+            name="Qwen",
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            embedding_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            rerank_base_url="https://dashscope.aliyuncs.com/compatible-api/v1/reranks",
+            protocol="openai_compatible",
+            api_key="sk-ds",
+            extra_headers={"X-Private": "secret-header"},
+            is_enabled=True,
+            enabled_models=[
+                {"model_id": "qwen3.8-max", "category": "chat", "capabilities": []},
+                {"model_id": "text-embedding-v4", "category": "embedding", "capabilities": []},
+                {"model_id": "qwen3-rerank", "category": "rerank", "capabilities": []},
+            ],
+        )
+        await self.db.commit()
 
-    async def test_validate_and_load_three_categories_with_mismatch_guard(self):
-        await validate_model(self.db, "dashscope/qwen3.8-max", category="chat")
-        await validate_model(self.db, "dashscope/text-embedding-v4", category="embedding")
-        await validate_model(self.db, "dashscope/qwen3-rerank", category="rerank")
+    async def test_require_and_load_three_categories_with_mismatch_guard(self):
+        await self.repository.require_model("dashscope:qwen3.8-max", category="chat")
+        await self.repository.require_model("dashscope:text-embedding-v4", category="embedding")
+        await self.repository.require_model("dashscope:qwen3-rerank", category="rerank")
 
         with self.assertRaisesRegex(ValueError, "模型类型不匹配"):
-            await validate_model(self.db, "dashscope/text-embedding-v4", category="chat")
+            await self.repository.require_model("dashscope:text-embedding-v4", category="chat")
 
         with patch("src.model.model_provider.chat.ChatOpenAI", return_value=object()) as chat_cls:
-            chat = await load_chat_model("dashscope/qwen3.8-max", db=self.db)
+            chat = await load_chat_model("dashscope:qwen3.8-max", db=self.db)
             self.assertIs(chat, chat_cls.return_value)
 
-        emb = await load_embedding_model("dashscope/text-embedding-v4", db=self.db)
+        emb = await load_embedding_model("dashscope:text-embedding-v4", db=self.db)
         self.assertIsInstance(emb, HttpEmbeddings)
         self.assertEqual(emb.endpoint, "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings")
 
-        reranker = await load_reranker("dashscope/qwen3-rerank", db=self.db)
+        reranker = await load_reranker("dashscope:qwen3-rerank", db=self.db)
         self.assertIsInstance(reranker, HttpReranker)
         self.assertEqual(reranker.endpoint, "https://dashscope.aliyuncs.com/compatible-api/v1/reranks")
+
+    async def test_load_chat_model_uses_session_context_and_rejects_disabled_provider(self):
+        @asynccontextmanager
+        async def fake_session_context():
+            yield self.db
+
+        model = object()
+        with (
+            patch("src.model.repository.session_context", fake_session_context),
+            patch.object(chat_module, "build_chat_model", return_value=model) as create_model,
+        ):
+            self.assertIs(await load_chat_model("dashscope:qwen3.8-max"), model)
+            self.assertEqual(create_model.call_args.kwargs["model_id"], "qwen3.8-max")
+            self.assertEqual(create_model.call_args.kwargs["protocol"], "openai_compatible")
+            self.assertEqual(create_model.call_args.kwargs["extra_headers"], {"X-Private": "secret-header"})
+
+            await self.repository.update_model_provider("dashscope", is_enabled=False)
+            await self.db.commit()
+            with self.assertRaisesRegex(ValueError, "供应商已停用"):
+                await load_chat_model("dashscope:qwen3.8-max")
+            create_model.assert_called_once()

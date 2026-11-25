@@ -8,8 +8,12 @@ from numbers import Real
 from typing import Any
 
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..utils import ModelProtocol, normalize_base_url
+from src.configs import config as sys_config
+
+from ..repository import fetch_model_config
+from ..utils import ModelProtocol, normalize_base_url, resolve_provider_api_key
 
 _MAX_DOCUMENTS = 500
 
@@ -325,9 +329,6 @@ class HttpReranker(BaseReranker):
         )
 
 
-DashScopeReranker = HttpReranker
-
-
 def build_reranker(
     *,
     protocol: ModelProtocol,
@@ -353,12 +354,36 @@ def build_reranker(
     )
 
 
+async def load_reranker(
+    model_ref: str | None = None,
+    *,
+    db: AsyncSession | None = None,
+) -> BaseReranker:
+    """按入库配置加载 HTTP Rerank 模型实例。"""
+    ref = (model_ref or sys_config.rerank_model).strip()
+    if not ref:
+        raise ValueError("未配置 Rerank 模型，应设置 RERANK_MODEL=provider_id:model_id")
+    provider, model = await fetch_model_config(ref, category="rerank", db=db)
+    endpoint = provider.rerank_base_url or None
+    if endpoint is None and provider.provider_id == "dashscope" and sys_config.dashscope_rerank_url.strip():
+        endpoint = sys_config.dashscope_rerank_url.strip()
+    return build_reranker(
+        protocol=provider.protocol,
+        model_id=model["model_id"],
+        api_key=resolve_provider_api_key(provider.api_key or ""),
+        base_url=provider.base_url,
+        endpoint=endpoint,
+        extra_headers=dict(provider.extra_headers or {}),
+        request_timeout=sys_config.rerank_request_timeout_seconds,
+    )
+
+
 __all__ = [
     "BaseReranker",
-    "DashScopeReranker",
     "HttpReranker",
     "RerankDocument",
     "RerankError",
     "RerankResult",
     "build_reranker",
+    "load_reranker",
 ]

@@ -30,7 +30,7 @@ from src.agents.middlewares.summary_middleware import (
     create_summary_middleware_from_context,
 )
 from src.knowledge.tools import web_search
-from src.model.runtime import load_chat_model
+from src.model import load_chat_model
 
 
 class LeaderAgent(BaseAgent):

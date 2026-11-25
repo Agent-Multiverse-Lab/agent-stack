@@ -5,9 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 from fastapi import FastAPI
-from pydantic import ValidationError
 
-from server.entities.model import ModelProvider
 from server.router.model_router import router
 from server.utils.auth import get_current_user, is_admin_user
 from src.configs import config
@@ -38,14 +36,13 @@ class ModelSettingsTest(SQLiteModelTestCase):
             enabled_models=[
                 {
                     "model_id": "qwen3-rerank",
-                    "model_type": "qwen",
                     "category": "rerank",
                 }
             ],
         )
         await self.db.commit()
         with patch.object(service, "_request_json", new_callable=AsyncMock) as remote:
-            await service.save_model_settings(
+            await service.update_model_provider(
                 self.db,
                 "dashscope",
                 base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -62,7 +59,7 @@ class ModelSettingsTest(SQLiteModelTestCase):
         self.assertEqual(saved.embedding_base_url, "https://dashscope.aliyuncs.com/compatible-mode/v1")
         self.assertEqual(saved.rerank_base_url, "https://dashscope.aliyuncs.com/compatible-api/v1/reranks")
         self.assertFalse(saved.is_enabled)
-        await service.save_model_settings(
+        await service.update_model_provider(
             self.db,
             "dashscope",
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -79,7 +76,7 @@ class ModelSettingsTest(SQLiteModelTestCase):
     async def test_details_read_database_and_missing_records_are_not_synthesized(self):
         await service.ensure_builtin_model_providers(self.db)
         clean_env = {key: value for key, value in os.environ.items() if key != "DEEPSEEK_API_KEY"}
-        with patch.dict(os.environ, clean_env, clear=True), patch.object(service.sys_config, "deepseek_api_key", ""):
+        with patch.dict(os.environ, clean_env, clear=True), patch.object(config, "deepseek_api_key", ""):
             template = await service.get_model_provider(self.db, "deepseek")
         self.assertEqual(template["name"], "DeepSeek")
         self.assertEqual(template["base_url"], "https://api.deepseek.com/v1")
@@ -91,7 +88,7 @@ class ModelSettingsTest(SQLiteModelTestCase):
         with self.assertRaises(LookupError):
             await service.get_model_provider(self.db, "ollama")
         with self.assertRaises(LookupError):
-            await service.save_model_settings(
+            await service.update_model_provider(
                 self.db,
                 "ollama",
                 base_url="http://localhost:11434/v1",
@@ -112,7 +109,7 @@ class ModelSettingsTest(SQLiteModelTestCase):
                 ]
             },
         ) as remote:
-            result = await service.discover_settings_models(
+            result = await service.discover_provider_models(
                 self.db,
                 "dashscope",
                 base_url="http://localhost:8000/v1",
@@ -136,7 +133,7 @@ class ModelSettingsTest(SQLiteModelTestCase):
         await self.db.commit()
         self.db.commit.reset_mock()
         with patch.object(service, "_request_json", new_callable=AsyncMock, return_value={"data": []}) as remote:
-            result = await service.test_settings_connection(
+            result = await service.test_provider_connection(
                 self.db,
                 "dashscope",
                 base_url="http://localhost:8000/v1",
@@ -161,7 +158,7 @@ class ModelSettingsTest(SQLiteModelTestCase):
             new_callable=AsyncMock,
             side_effect=service.ModelConnectionError("http_error", 401),
         ):
-            result = await service.test_settings_connection(
+            result = await service.test_provider_connection(
                 self.db,
                 "deepseek",
                 base_url="https://example.com/v1",
@@ -184,8 +181,11 @@ class ModelSettingsTest(SQLiteModelTestCase):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
             for method, path in (
                 ("GET", "/api/models/providers"),
+                ("POST", "/api/models/providers"),
                 ("GET", "/api/models/providers/deepseek"),
                 ("POST", "/api/models/providers/deepseek"),
+                ("PUT", "/api/models/providers/deepseek"),
+                ("DELETE", "/api/models/providers/deepseek"),
                 ("POST", "/api/models/providers/deepseek/discover"),
                 ("POST", "/api/models/providers/deepseek/test"),
             ):
@@ -230,13 +230,16 @@ class ModelSettingsTest(SQLiteModelTestCase):
             ) as client:
                 response = await client.get("/api/models/providers")
                 self.assertEqual(response.status_code, 200)
-                self.assertEqual(len(response.json()), 5)
-                for item in response.json():
+                providers_envelope = response.json()
+                self.assertEqual(providers_envelope["status"], "success")
+                self.assertEqual(len(providers_envelope["data"]), 5)
+                for item in providers_envelope["data"]:
                     self.assertNotIn("api_key", item)
 
                 response = await client.get("/api/models/providers/deepseek")
                 self.assertEqual(response.status_code, 200)
-                body = response.json()
+                self.assertEqual(response.json()["status"], "success")
+                body = response.json()["data"]
                 self.assertNotIn("api_key", body)
                 self.assertEqual(body["base_url"], "https://api.deepseek.com/v1")
                 self.assertEqual(body["embedding_base_url"], "")
@@ -245,16 +248,101 @@ class ModelSettingsTest(SQLiteModelTestCase):
 
                 response = await client.post("/api/models/providers/deepseek", json=payload)
                 self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["status"], "success")
                 self.assertTrue((await self.repository.get_model_provider_by_id("deepseek")).is_enabled)
+
+                with patch.object(service, "get_async_redis_client", side_effect=OSError("no redis")):
+                    catalog_resp = await client.get("/api/models?category=chat")
+                self.assertEqual(catalog_resp.status_code, 200)
+                catalog_body = catalog_resp.json()
+                self.assertEqual(catalog_body["status"], "success")
+                self.assertEqual(catalog_body["data"]["deepseek"]["provider_id"], "deepseek")
+                self.assertEqual(catalog_body["data"]["deepseek"]["display_name"], "DeepSeek")
+                self.assertEqual(
+                    catalog_body["data"]["deepseek"]["models"],
+                    [{"model_id": "deepseek-v4-pro", "category": "chat", "capabilities": []}],
+                )
+                self.assertNotIn("default_model", catalog_body["data"])
 
                 response = await client.post("/api/models/providers/deepseek/discover", json=payload)
                 self.assertEqual(response.status_code, 200)
-                self.assertEqual(response.json()[0]["model_id"], "deepseek-v4-pro")
+                self.assertEqual(response.json()["status"], "success")
+                self.assertEqual(response.json()["data"][0]["model_id"], "deepseek-v4-pro")
 
                 response = await client.post("/api/models/providers/deepseek/test", json=payload)
                 self.assertEqual(response.status_code, 200)
-                self.assertTrue(response.json()["success"])
+                self.assertEqual(response.json()["status"], "success")
+                self.assertTrue(response.json()["data"]["success"])
+
+                create_payload = {
+                    "provider_id": "custom_claude",
+                    "name": "Custom Claude",
+                    "protocol": "anthropic",
+                    "base_url": "https://api.anthropic.com",
+                    "api_key": "sk-ant-123",
+                    "is_enabled": True,
+                    "models": [{"model_id": "claude-sonnet-5-5", "category": "chat", "capabilities": []}],
+                }
+                created = await client.post("/api/models/providers", json=create_payload)
+                self.assertEqual(created.status_code, 201)
+                self.assertEqual(created.json()["status"], "success")
+                self.assertEqual(created.json()["data"]["provider_id"], "custom_claude")
+
+                detail = await client.get("/api/models/providers/custom_claude")
+                self.assertEqual(detail.status_code, 200)
+                self.assertEqual(detail.json()["status"], "success")
+                detail_data = detail.json()["data"]
+                self.assertEqual(detail_data["protocol"], "anthropic")
+                self.assertNotIn("api_key", detail_data)
+                self.assertTrue(detail_data["has_api_key"])
+
+                dup = await client.post("/api/models/providers", json=create_payload)
+                self.assertEqual(dup.status_code, 409)
+
+                for bad_payload in (
+                    {**create_payload, "provider_id": "bad/id"},
+                    {**create_payload, "provider_id": "ok_id", "name": "  "},
+                    {**create_payload, "provider_id": "ok_id", "base_url": ""},
+                    {**create_payload, "provider_id": "ok_id", "protocol": "unknown"},
+                ):
+                    bad_resp = await client.post("/api/models/providers", json=bad_payload)
+                    self.assertEqual(bad_resp.status_code, 422)
+
+                # PUT 更新时不传 name/protocol/api_key，应保留库内原值
+                put_resp = await client.put(
+                    "/api/models/providers/custom_claude",
+                    json={
+                        "base_url": "https://api.anthropic.com",
+                        "is_enabled": False,
+                        "models": [{"model_id": "claude-opus-5-5", "category": "chat", "capabilities": []}],
+                    },
+                )
+                self.assertEqual(put_resp.status_code, 200)
+                updated_row = await self.repository.get_model_provider_by_id("custom_claude")
+                self.assertEqual(updated_row.protocol, "anthropic")
+                self.assertEqual(updated_row.name, "Custom Claude")
+                self.assertEqual(updated_row.api_key, "sk-ant-123")
+                self.assertFalse(updated_row.is_enabled)
+
+                missing_put = await client.put(
+                    "/api/models/providers/missing",
+                    json={"base_url": "https://example.com/v1"},
+                )
+                self.assertEqual(missing_put.status_code, 404)
+
+                del_resp = await client.delete("/api/models/providers/custom_claude")
+                self.assertEqual(del_resp.status_code, 200)
+                self.assertEqual((await client.get("/api/models/providers/custom_claude")).status_code, 404)
+                self.assertEqual((await client.delete("/api/models/providers/custom_claude")).status_code, 404)
 
     async def test_null_key_rejected(self):
-        with self.assertRaises(ValidationError):
-            ModelProvider(base_url="http://localhost/v1", api_key=None)
+        await self.insert_provider("deepseek")
+        await self.db.commit()
+        with self.assertRaises(ValueError):
+            await service.update_model_provider(
+                self.db,
+                "deepseek",
+                base_url="http://localhost/v1",
+                api_key=None,
+                api_key_provided=True,
+            )

@@ -5,8 +5,12 @@ from typing import Any
 
 import httpx
 from langchain_core.embeddings import Embeddings
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..utils import ModelProtocol, normalize_base_url
+from src.configs import config as sys_config
+
+from ..repository import fetch_model_config
+from ..utils import ModelProtocol, normalize_base_url, resolve_provider_api_key
 
 SUPPORTED_EMBEDDING_PROTOCOLS = frozenset({"openai_compatible", "gemini"})
 
@@ -257,9 +261,31 @@ def build_embedding_model(
     )
 
 
+async def load_embedding_model(
+    model_ref: str | None = None,
+    *,
+    db: AsyncSession | None = None,
+) -> HttpEmbeddings:
+    """按入库配置加载 HTTP Embedding 模型实例。"""
+    ref = (model_ref or sys_config.embed_model).strip()
+    if not ref:
+        raise ValueError("未配置 Embedding 模型，应设置 EMBED_MODEL=provider_id:model_id")
+    provider, model = await fetch_model_config(ref, category="embedding", db=db)
+    return build_embedding_model(
+        protocol=provider.protocol,
+        model_id=model["model_id"],
+        api_key=resolve_provider_api_key(provider.api_key or ""),
+        base_url=provider.embedding_base_url or provider.base_url,
+        extra_headers=dict(provider.extra_headers or {}),
+        batch_size=sys_config.embedding_batch_size,
+        request_timeout=sys_config.embedding_request_timeout_seconds,
+    )
+
+
 __all__ = [
     "EmbeddingError",
     "HttpEmbeddings",
     "SUPPORTED_EMBEDDING_PROTOCOLS",
     "build_embedding_model",
+    "load_embedding_model",
 ]

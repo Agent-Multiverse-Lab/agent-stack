@@ -167,7 +167,7 @@ class FakeAgentRepository:
     """返回固定顶层 Agent。"""
 
     def __init__(self):
-        self.agent_config = {"model": "dashscope/qwen3.8-max"}
+        self.agent_config = {"model": "dashscope:qwen3.8-max"}
 
     async def get_by_slug_for_run_type(self, *, slug, run_type):
         """返回请求的顶层 Agent。"""
@@ -242,7 +242,12 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
         self.users = FakeUserRepository()
         self.agents = FakeAgentRepository()
         self.storage = FakeStorage()
-        self.resolve_model = AsyncMock(return_value=object())
+        async def _resolve(_db, model_ref, *, category):
+            if not isinstance(model_ref, str) or model_ref != model_ref.strip() or ":" not in model_ref:
+                raise ValueError("模型引用必须为 provider_id:model_id")
+            return SimpleNamespace(model_ref=model_ref, category=category)
+
+        self.resolve_model = AsyncMock(side_effect=_resolve)
         patches = (
             patch(
                 "server.service.thread_service.ConversationRepository",
@@ -272,8 +277,9 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
                 "server.service.thread_service.get_storage",
                 return_value=self.storage,
             ),
-            patch(
-                "server.service.thread_service.validate_model",
+            patch.object(
+                thread_service,
+                "get_enabled_model",
                 new=self.resolve_model,
             ),
         )
@@ -288,7 +294,7 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
             uid="user-1",
             agent_id="leaderagent",
             title="  新会话  ",
-            metadata={"backend_id": "client", "workspace": "research"},
+            metadata={"backend_id": "client", "workspace": "research", "model": "dashscope:qwen3.8-max"},
         )
 
         self.assertEqual("新会话", conversation.title)
@@ -296,27 +302,28 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
             "leader-backend",
             conversation.conversation_metadata["backend_id"],
         )
-        self.assertEqual("dashscope/qwen3.8-max", conversation.conversation_metadata["model"])
+        self.assertEqual("dashscope:qwen3.8-max", conversation.conversation_metadata["model"])
 
     async def test_create_thread_prefers_selected_model_and_preserves_client_metadata(self):
-        metadata = {"model": "deepseek/deepseek-v4-flash", "workspace": "research"}
+        metadata = {"model": "deepseek:deepseek-v4-flash", "workspace": "research"}
         conversation = await thread_service.create_thread(
             self.db, uid="user-1", agent_id="leaderagent", title=None, metadata=metadata,
         )
-        self.assertEqual(conversation.conversation_metadata["model"], "deepseek/deepseek-v4-flash")
+        self.assertEqual(conversation.conversation_metadata["model"], "deepseek:deepseek-v4-flash")
         self.assertEqual(conversation.conversation_metadata["workspace"], "research")
         self.assertNotIn("backend_id", metadata)
 
-    async def test_create_thread_without_agent_model_uses_config_default(self):
+    async def test_create_thread_without_model_leaves_binding_empty(self):
         self.agents.agent_config = {}
         conversation = await thread_service.create_thread(
             self.db, uid="user-1", agent_id="leaderagent", title=None, metadata=None,
         )
-        self.assertEqual(conversation.conversation_metadata["model"], "dashscope/qwen3.8-max")
+        self.assertNotIn("model", conversation.conversation_metadata)
+        self.resolve_model.assert_not_awaited()
 
     async def test_invalid_thread_model_is_rejected_before_creation(self):
         self.resolve_model.side_effect = ValueError("聊天模型未配置")
-        for model in (42, "unknown/model", " deepseek/deepseek-v4-flash"):
+        for model in (42, "unknown:model", " deepseek:deepseek-v4-flash"):
             with self.subTest(model=model), self.assertRaises(ValueError):
                 await thread_service.create_thread(
                     self.db, uid="user-1", agent_id="leaderagent", title=None, metadata={"model": model},

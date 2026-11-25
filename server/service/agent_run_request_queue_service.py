@@ -17,7 +17,7 @@ from src.database.repositories import (
     ConversationRepository,
 )
 from src.database.session import session_context
-from src.model.runtime import validate_model
+from src.model import get_enabled_model
 from src.utils import logger
 
 
@@ -77,7 +77,7 @@ async def dispatch_next_queued_request(thread_id: str) -> AgentRun | None:
             **dict(conversation.conversation_metadata or {}),
             "request_id": str(request.request_id),
         }
-        await validate_model(db, run_metadata.get("model"))
+        await get_enabled_model(db, run_metadata.get("model"), category="chat")
         run = await queue_repo.dispatch_request_to_run(
             request=request,
             conversation=conversation,
@@ -202,7 +202,7 @@ async def steer_queued_request(
             **dict(conversation.conversation_metadata or {}),
             "request_id": str(request.request_id),
         }
-        await validate_model(db, run_metadata.get("model"))
+        await get_enabled_model(db, run_metadata.get("model"), category="chat")
         promoted_run = await queue_repo.dispatch_request_to_run(
             request=request,
             conversation=conversation,

@@ -1,7 +1,6 @@
 """图像处理角色的预定义配置。"""
 
 from src.agents.library import AgentLibrary
-from src.configs import config
 
 SYSTEM_PROMPT = """你是 ImageProcessingAgent，负责使用当前可用的 MCP 工具完成图像处理任务。
 任务可包括裁剪、缩放、格式转换、增强、检测、分割，以及遥感影像处理和变化检测；
@@ -27,5 +26,5 @@ IMAGE_AGENT = AgentLibrary(
     name="图像处理",
     description="通过 MCP 处理已有图像并返回产物引用",
     backend_id="SubAgentGraph",
-    context={"system_prompt": SYSTEM_PROMPT, "model": config.default_model, "require_mcp_tools": True},
+    context={"system_prompt": SYSTEM_PROMPT, "require_mcp_tools": True},
 )

@@ -26,7 +26,7 @@ from src.database.repositories import (
     ConversationRepository,
     MessageAttachmentRepository,
 )
-from src.model import resolve_chat_model_selection, validate_model
+from src.model import get_enabled_model
 
 
 async def create_agent_run_request(
@@ -68,14 +68,14 @@ async def create_agent_run_request(
         raise LookupError("智能体不存在或已停用")
     conversation_repo = ConversationRepository(db)
     conversation_metadata = dict(conversation.conversation_metadata or {})
-    model_id = resolve_chat_model_selection(
-        model=model_id,
-        conversation_model=conversation_metadata.get("model"),
-        agent_model=(agent.agent_config or {}).get("model"),
+    selected_model = (
+        model_id
+        if (model_id is not None and model_id != "")
+        else conversation_metadata.get("model")
     )
-    await validate_model(db, model_id)
-    if conversation_metadata.get("model") != model_id:
-        conversation_metadata["model"] = model_id
+    resolved_model = await get_enabled_model(db, selected_model, category="chat")
+    if conversation_metadata.get("model") != resolved_model.model_ref:
+        conversation_metadata["model"] = resolved_model.model_ref
         await conversation_repo.update_conversation(
             conversation,
             title=conversation.title,
@@ -216,7 +216,7 @@ async def submit_agent_run_request(
                 "request_id": str(agent_run_request.request_id),
             }
             if not created_now:
-                await validate_model(db, run_metadata.get("model"))
+                await get_enabled_model(db, run_metadata.get("model"), category="chat")
             result = await request_queue_repo.dispatch_request_to_run(
                 request=agent_run_request,
                 conversation=conversation,

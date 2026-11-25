@@ -6,7 +6,6 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from src.agents.library import AgentLibrary
-from src.configs import config
 
 
 class SatelliteEvidence(BaseModel):
@@ -65,5 +64,5 @@ SATELLITE_AGENT = AgentLibrary(
     name="卫星数据",
     description="卫星目录检索、单时相解译与多时相变化分析",
     backend_id="SubAgentGraph",
-    context={"system_prompt": SYSTEM_PROMPT, "model": config.default_model},
+    context={"system_prompt": SYSTEM_PROMPT},
 )

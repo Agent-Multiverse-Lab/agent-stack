@@ -71,7 +71,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             get_conversation_by_thread_id_for_user=AsyncMock(
                 return_value=SimpleNamespace(
                     uid="user-1",
-                    conversation_metadata={},
+                    conversation_metadata={"model": "dashscope:qwen3.8-max"},
                 )
             )
         )
@@ -110,7 +110,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                 db=db,
             )
 
-        self.assertEqual((agent_item, agent_instance, "dashscope/qwen3.8-max"), result)
+        self.assertEqual((agent_item, agent_instance, "dashscope:qwen3.8-max"), result)
         resolve_class.assert_called_once_with(agent_item.backend_id)
         resolve_class.return_value.assert_called_once_with()
         conversation_repository.get_conversation_by_thread_id_for_user.assert_awaited_once_with(
@@ -124,17 +124,14 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             run_id="run-1",
             thread_id="thread-1",
             request_id="request-1",
-            model="dashscope/qwen3.8-max",
+            model="dashscope:qwen3.8-max",
         )
 
-        self.assertEqual("dashscope/qwen3.8-max", context["model"])
+        self.assertEqual("dashscope:qwen3.8-max", context["model"])
 
     async def collect_events(self, agent: FakeAgent, *, conversation_metadata=None) -> list[dict]:
-        agent_item = SimpleNamespace(slug="test-agent", agent_config={"model": "dashscope/qwen3.8-max"})
-        model_id = thread_service.resolve_chat_model_selection(
-            conversation_model=(conversation_metadata or {}).get("model"),
-            agent_model=agent_item.agent_config["model"],
-        )
+        agent_item = SimpleNamespace(slug="test-agent", agent_config={"model": "dashscope:qwen3.8-max"})
+        model_id = (conversation_metadata or {}).get("model") or agent_item.agent_config["model"]
         input_message = SimpleNamespace(
             content="hello",
             image_content=None,
@@ -490,8 +487,8 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_chat_stream_loads_bound_model_into_runtime_context(self):
         agent = FakeAgent()
-        await self.collect_events(agent, conversation_metadata={"model": "deepseek/deepseek-v4-flash"})
-        self.assertEqual(agent.runtime_context["model"], "deepseek/deepseek-v4-flash")
+        await self.collect_events(agent, conversation_metadata={"model": "deepseek:deepseek-v4-flash"})
+        self.assertEqual(agent.runtime_context["model"], "deepseek:deepseek-v4-flash")
 
     async def test_resume_stream_passes_command_without_human_message(self) -> None:
         agent = FakeAgent()
@@ -502,7 +499,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             patch(
                 "server.service.thread_service._build_agent_runtime",
                 new_callable=AsyncMock,
-                return_value=(agent_item, agent, "dashscope/qwen3.8-max"),
+                return_value=(agent_item, agent, "dashscope:qwen3.8-max"),
             ),
             patch(
                 "server.service.thread_service._check_conv_status",
@@ -517,7 +514,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                 "server.service.thread_service.check_agent_interrupt_handler",
                 new=no_interrupt,
             ),
-            patch.object(thread_service, "_require_thread", AsyncMock(return_value=SimpleNamespace(conversation_metadata={"model": "deepseek/deepseek-v4-flash"}))),
+            patch.object(thread_service, "_require_thread", AsyncMock(return_value=SimpleNamespace(conversation_metadata={"model": "deepseek:deepseek-v4-flash"}))),
         ):
             events = [
                 json.loads(chunk)
@@ -527,7 +524,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                     runtime_metadata={
                         "run_id": "resume-run",
                         "request_id": "resume-request",
-                        "model": "dashscope/qwen3.8-max",
+                        "model": "dashscope:qwen3.8-max",
                         "worker_id": "worker-1",
                         "run_type": "resume",
                         "resume": {"answer": "PostgreSQL"},
@@ -539,7 +536,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual({"answer": "PostgreSQL"}, agent.resume_input.resume)
         self.assertEqual("finished", events[-1]["status"])
-        self.assertEqual(agent.runtime_context["model"], "dashscope/qwen3.8-max")
+        self.assertEqual(agent.runtime_context["model"], "dashscope:qwen3.8-max")
 
     async def test_resume_stream_error_yields_error_chunk(self) -> None:
         agent = FakeAgent(error=RuntimeError("resume failed"))
@@ -550,7 +547,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             patch(
                 "server.service.thread_service._build_agent_runtime",
                 new_callable=AsyncMock,
-                return_value=(agent_item, agent, "dashscope/qwen3.8-max"),
+                return_value=(agent_item, agent, "dashscope:qwen3.8-max"),
             ),
             patch(
                 "server.service.thread_service._check_conv_status",
