@@ -15,8 +15,11 @@ it.each(["", "qwen-model"])("closes after selecting a model with current selecti
     <ModelSelector
       models={[{
         id: "qwen-model",
+        model_id: "qwen-model",
         name: "qwen-3.5-plus",
         provider: "qwen",
+        provider_name: "Qwen",
+        capabilities: ["chat"],
         is_available: true,
       }]}
       selectedId={selectedId}

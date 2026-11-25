@@ -31,16 +31,22 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     setModels([])
     setSelectedModelId("")
     setLoading(true)
-    void listModels()
+    void listModels("chat")
       .then((catalog) => {
         if (cancelled) return
-        setModels(catalog.models)
-        const selected = catalog.models.find(
-          (model) => model.id === catalog.default_model && model.is_available
-        ) ?? catalog.models.find(
-          (model) => model.is_available
+        const flattened: ChatModelOption[] = Object.values(catalog).flatMap((entry) =>
+          entry.models.map((model) => ({
+            id: `${entry.provider_id}:${model.model_id}`,
+            model_id: model.model_id,
+            name: model.model_id,
+            provider: entry.provider_id,
+            provider_name: entry.display_name,
+            capabilities: model.capabilities,
+            is_available: true,
+          }))
         )
-        setSelectedModelId(selected?.id ?? "")
+        setModels(flattened)
+        setSelectedModelId(flattened[0]?.id ?? "")
       })
       .catch(() => {
         if (!cancelled) {

@@ -111,7 +111,7 @@ export interface AgentRunEndEvent extends AgentRunStreamEvent {
  * @param agentId 当前会话绑定的 Agent 标识。
  * @param threadId 已创建的会话 ID。
  * @param attachmentFileIds 上传接口返回的附件 file_id 列表。
- * @param modelId 所选模型的 provider_id/model_id；省略时由后端解析会话模型。
+ * @param modelId 所选模型的 provider_id:model_id；省略时由后端读取会话绑定模型。
  * @returns Run 标识、当前状态、请求 ID 和用于订阅执行事件的 stream_url。
  */
 export const createAgentRun = (

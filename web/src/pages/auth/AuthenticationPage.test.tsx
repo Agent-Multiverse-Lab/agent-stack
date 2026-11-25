@@ -42,10 +42,7 @@ describe("authentication routes", () => {
   beforeEach(() => {
     localStorage.clear()
     vi.mocked(getCurrentUser).mockResolvedValue(user)
-    vi.mocked(listModels).mockResolvedValue({
-      models: [],
-      default_model: "",
-    })
+    vi.mocked(listModels).mockResolvedValue({})
     installBrowserStubs()
   })
   afterEach(() => {

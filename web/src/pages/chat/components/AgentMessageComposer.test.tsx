@@ -204,14 +204,20 @@ describe("AgentMessageComposer", () => {
         models={[
           {
             id: "first",
+            model_id: "first",
             name: "First",
             provider: "test",
+            provider_name: "Test",
+            capabilities: ["chat"],
             is_available: true,
           },
           {
             id: "second",
+            model_id: "second",
             name: "Second",
             provider: "test",
+            provider_name: "Test",
+            capabilities: ["chat"],
             is_available: true,
           },
         ]}
