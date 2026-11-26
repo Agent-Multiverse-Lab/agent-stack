@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Bot, Eye, EyeOff, Plug, RefreshCw, Search } from "lucide-react"
+import { Bot, Eye, EyeOff, Plug, Plus, RefreshCw, Search } from "lucide-react"
 import { toast } from "sonner"
 
 import {
+  createModelProvider,
   discoverProviderModels,
   getModelProvider,
   listModelProviders,
   saveModelProvider,
   testProviderConnection,
 } from "@/api/model"
-import type { ModelSettingsRequest } from "@/api/model"
+import type {
+  CreateModelProviderRequest,
+  ModelSettingsRequest,
+} from "@/api/model"
 import chatgptLogo from "@/assets/models/chatgpt-color.svg"
 import deepseekLogo from "@/assets/models/deepseek-color.svg"
 import geminiLogo from "@/assets/models/gemini-color.svg"
@@ -53,6 +57,13 @@ import {
 } from "@/components/ui/item"
 import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
@@ -60,9 +71,9 @@ import { useAuth } from "@/context/AuthContext"
 import { useTranslation } from "@/i18n"
 import { SettingsModelOption } from "@/layouts/MainLayout/components/SettingsModelOption"
 import type {
+  ModelProtocol,
   ModelProvider,
   ModelProviderId,
-  ModelProviderMetadata,
   SettingsModel,
 } from "@/types/model"
 
@@ -102,6 +113,8 @@ interface Draft extends ModelSettingsRequest {
 
 const emptyDraft = (): Draft => ({
   base_url: "",
+  embedding_base_url: "",
+  rerank_base_url: "",
   is_enabled: false,
   models: [],
   key: "",
@@ -112,9 +125,12 @@ const emptyDraft = (): Draft => ({
 
 const providerDraft = (value: ModelProvider): Draft => ({
   base_url: value.base_url,
+  embedding_base_url: value.embedding_base_url,
+  rerank_base_url: value.rerank_base_url,
   is_enabled: value.is_enabled,
-  models: value.enabled_models.map((model) => ({
+  models: value.models.map((model) => ({
     model_id: model.model_id,
+    category: model.category ?? "chat",
     capabilities: model.capabilities ?? [],
   })),
   key: "",
@@ -123,12 +139,27 @@ const providerDraft = (value: ModelProvider): Draft => ({
   initialized: true,
 })
 
+const emptyCreateForm = (): CreateModelProviderRequest => ({
+  provider_id: "",
+  name: "",
+  protocol: "openai_compatible",
+  base_url: "",
+  embedding_base_url: "",
+  rerank_base_url: "",
+  api_key: "",
+  is_enabled: false,
+  models: [],
+})
+
 export function ModelProviderCards() {
   const { t, i18n } = useTranslation()
   const { accessToken } = useAuth()
-  const [providers, setProviders] = useState<ModelProviderMetadata[]>([])
+  const [providers, setProviders] = useState<ModelProvider[]>([])
   const [selected, setSelected] = useState<ModelProviderId>("")
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createForm, setCreateForm] = useState<CreateModelProviderRequest>(emptyCreateForm)
+  const [creating, setCreating] = useState(false)
   const [drafts, setDrafts] = useState<Partial<Record<string, Draft>>>({})
   const draft = drafts[selected] ?? emptyDraft()
   const [listLoading, setListLoading] = useState(true)
@@ -209,22 +240,12 @@ export function ModelProviderCards() {
       .then((items) => {
         if (cancelled || current !== version.current) return
         setProviders(items)
+        setDrafts(
+          Object.fromEntries(
+            items.map((item) => [item.provider_id, providerDraft(item)])
+          )
+        )
         setListLoading(false)
-        for (const item of items) {
-          void getModelProvider(item.provider_id)
-            .then((detail) => {
-              if (cancelled || current !== version.current) return
-              setDrafts((previous) =>
-                previous[item.provider_id]?.initialized
-                  ? previous
-                  : {
-                      ...previous,
-                      [item.provider_id]: providerDraft(detail),
-                    }
-              )
-            })
-            .catch(() => {})
-        }
       })
       .catch((error: unknown) => {
         if (cancelled || current !== version.current) return
@@ -250,6 +271,8 @@ export function ModelProviderCards() {
   function request(): ModelSettingsRequest {
     return {
       base_url: draft.base_url,
+      embedding_base_url: draft.embedding_base_url,
+      rerank_base_url: draft.rerank_base_url,
       is_enabled: draft.is_enabled,
       models: draft.models.map((model) => ({
         ...model,
@@ -284,13 +307,7 @@ export function ModelProviderCards() {
         }))
         setProviders((previous) =>
           previous.map((item) =>
-            item.provider_id === selected
-              ? {
-                  ...item,
-                  is_enabled: saved.is_enabled,
-                  has_api_key: saved.has_api_key,
-                }
-              : item
+            item.provider_id === selected ? saved : item
           )
         )
         if (result.cache_refreshed) toast.success(t("Saved"))
@@ -332,6 +349,167 @@ export function ModelProviderCards() {
     }
   }
 
+  async function handleCreateProvider() {
+    if (
+      creating ||
+      !createForm.provider_id.trim() ||
+      !createForm.name.trim() ||
+      !createForm.base_url.trim()
+    ) {
+      toast.error(t("Provider ID, display name, and base URL are required"))
+      return
+    }
+    setCreating(true)
+    try {
+      const result = await createModelProvider({
+        ...createForm,
+        provider_id: createForm.provider_id.trim(),
+        name: createForm.name.trim(),
+        base_url: createForm.base_url.trim(),
+        embedding_base_url: createForm.embedding_base_url.trim(),
+        rerank_base_url: createForm.rerank_base_url.trim(),
+      })
+      if (result.cache_refreshed) toast.success(t("Saved"))
+      else toast.warning(t("Saved, but refreshing the model cache failed"))
+      setCreateOpen(false)
+      setCreateForm(emptyCreateForm())
+      setReloadKey((value) => value + 1)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("Operation failed"))
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const createProviderDialog = (
+    <Dialog
+      open={createOpen}
+      onOpenChange={(open) => {
+        if (creating) return
+        setCreateOpen(open)
+        if (!open) setCreateForm(emptyCreateForm())
+      }}
+    >
+      <DialogContent
+        className="z-[100] flex max-h-[min(680px,calc(100dvh-48px))] w-[calc(100vw-32px)] max-w-lg flex-col gap-0 overflow-hidden p-0"
+        overlayClassName="z-[90]"
+      >
+        <DialogHeader className="shrink-0 border-b border-border px-6 py-4 pr-12">
+          <DialogTitle className="text-base font-semibold">{t("Add provider")}</DialogTitle>
+          <DialogDescription className="sr-only">{t("Add provider")}</DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto p-6">
+          <FieldGroup className="gap-3">
+            <Field>
+              <FieldLabel htmlFor="create-provider-id">{t("Provider ID")}</FieldLabel>
+              <InputGroup>
+                <InputGroupInput
+                  id="create-provider-id"
+                  value={createForm.provider_id}
+                  onChange={(event) =>
+                    setCreateForm((prev) => ({ ...prev, provider_id: event.target.value }))
+                  }
+                  disabled={creating}
+                  placeholder="openai"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </InputGroup>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="create-provider-name">{t("Display name")}</FieldLabel>
+              <InputGroup>
+                <InputGroupInput
+                  id="create-provider-name"
+                  value={createForm.name}
+                  onChange={(event) =>
+                    setCreateForm((prev) => ({ ...prev, name: event.target.value }))
+                  }
+                  disabled={creating}
+                  placeholder="OpenAI"
+                  autoComplete="off"
+                />
+              </InputGroup>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="create-provider-protocol">{t("Protocol")}</FieldLabel>
+              <Select
+                value={createForm.protocol}
+                onValueChange={(value) =>
+                  setCreateForm((prev) => ({ ...prev, protocol: value as ModelProtocol }))
+                }
+                disabled={creating}
+              >
+                <SelectTrigger id="create-provider-protocol">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="z-[1100]">
+                  <SelectItem value="openai_compatible">openai_compatible</SelectItem>
+                  <SelectItem value="anthropic">anthropic</SelectItem>
+                  <SelectItem value="gemini">gemini</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="create-provider-base-url">{t("Base URL")}</FieldLabel>
+              <InputGroup>
+                <InputGroupInput
+                  id="create-provider-base-url"
+                  value={createForm.base_url}
+                  onChange={(event) =>
+                    setCreateForm((prev) => ({ ...prev, base_url: event.target.value }))
+                  }
+                  type="url"
+                  disabled={creating}
+                  placeholder="https://api.example.com/v1"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </InputGroup>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="create-provider-api-key">API Key</FieldLabel>
+              <InputGroup>
+                <InputGroupInput
+                  id="create-provider-api-key"
+                  value={createForm.api_key ?? ""}
+                  onChange={(event) =>
+                    setCreateForm((prev) => ({ ...prev, api_key: event.target.value }))
+                  }
+                  type="password"
+                  disabled={creating}
+                  placeholder="sk-..."
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </InputGroup>
+            </Field>
+          </FieldGroup>
+        </div>
+        <DialogFooter className="shrink-0 flex-row justify-end gap-2 border-t border-border px-6 py-4">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={creating}
+            onClick={() => setCreateOpen(false)}
+          >
+            {t("Cancel")}
+          </Button>
+          <Button type="button" disabled={creating} onClick={() => void handleCreateProvider()}>
+            {creating ? (
+              <>
+                <Spinner />
+                {t("Creating...")}
+              </>
+            ) : (
+              t("Create")
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+
   if (listLoading) {
     return (
       <div
@@ -361,21 +539,44 @@ export function ModelProviderCards() {
 
   if (!providers.length) {
     return (
-      <Empty className="min-h-48">
-        <EmptyMedia>
-          <Bot aria-hidden="true" />
-        </EmptyMedia>
-        <EmptyTitle>{t("No models available")}</EmptyTitle>
-      </Empty>
+      <>
+        <Empty className="min-h-48">
+          <EmptyMedia>
+            <Bot aria-hidden="true" />
+          </EmptyMedia>
+          <EmptyTitle>{t("No models available")}</EmptyTitle>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus className="size-4" />
+            {t("Add provider")}
+          </Button>
+        </Empty>
+        {createProviderDialog}
+      </>
     )
   }
 
   return (
     <>
       <section className="space-y-3" aria-labelledby="model-providers-heading">
-        <h2 id="model-providers-heading" className="flex items-center gap-2 text-sm font-medium">
-          {t("Model providers")} <Badge>{providers.length}</Badge>
-        </h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 id="model-providers-heading" className="flex items-center gap-2 text-sm font-medium">
+            {t("Model providers")} <Badge>{providers.length}</Badge>
+          </h2>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus className="size-4" />
+            {t("Add provider")}
+          </Button>
+        </div>
         <ul
           aria-label={t("Model providers")}
           className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr))]"
@@ -509,6 +710,55 @@ export function ModelProviderCards() {
             ) : null}
 
             <FieldGroup className="gap-3">
+              <Field>
+                <FieldLabel htmlFor="provider-base-url">{t("Base URL")}</FieldLabel>
+                <InputGroup>
+                  <InputGroupInput
+                    id="provider-base-url"
+                    value={draft.base_url}
+                    onChange={(event) => edit({ base_url: event.target.value })}
+                    type="url"
+                    disabled={blocked}
+                    placeholder="https://api.example.com/v1"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </InputGroup>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="provider-embedding-base-url">{t("Embedding Base URL")}</FieldLabel>
+                <InputGroup>
+                  <InputGroupInput
+                    id="provider-embedding-base-url"
+                    value={draft.embedding_base_url}
+                    onChange={(event) =>
+                      edit({ embedding_base_url: event.target.value })
+                    }
+                    type="url"
+                    disabled={blocked}
+                    placeholder="https://api.example.com/v1"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </InputGroup>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="provider-rerank-base-url">{t("Rerank Base URL")}</FieldLabel>
+                <InputGroup>
+                  <InputGroupInput
+                    id="provider-rerank-base-url"
+                    value={draft.rerank_base_url}
+                    onChange={(event) =>
+                      edit({ rerank_base_url: event.target.value })
+                    }
+                    type="url"
+                    disabled={blocked}
+                    placeholder="https://api.example.com/v1/reranks"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </InputGroup>
+              </Field>
               <Field>
                 <FieldLabel htmlFor="provider-api-key">API Key</FieldLabel>
                 <InputGroup>
@@ -712,6 +962,7 @@ export function ModelProviderCards() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {createProviderDialog}
     </>
   )
 }

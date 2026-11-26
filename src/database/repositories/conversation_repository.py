@@ -85,10 +85,7 @@ class ConversationRepository:
             )
         if query is not None:
             pattern = f"%{query}%"
-            statement = statement.where(or_(
-                Conversation.title.ilike(pattern),
-                Conversation.summary.ilike(pattern),
-            ))
+            statement = statement.where(Conversation.title.ilike(pattern))
         if before_activity_at is not None and before_id is not None:
             activity_after = or_(
                 last_activity_at < before_activity_at,
@@ -181,9 +178,11 @@ class ConversationRepository:
         limit: int,
         before_message_id: int | None = None,
     ) -> list[Message]:
-        """按 ID 倒序读取指定对话的一页消息。"""
-        statement = select(Message).where(
+        """按 Run 接收顺序分页，晋升的旧 Message 随新 Run 出现在历史末尾。"""
+        history_time = func.coalesce(AgentRun.created_at, Message.created_at)
+        statement = select(Message).outerjoin(AgentRun, AgentRun.id == Message.agent_run_id).where(
             Message.conversation_id == conversation_id,
+            Message.status.not_in(("queued", "cancelled")),
             # 已结束的审计操作也是执行过程；running 行仍由 SSE 恢复。
             or_(
                 func.coalesce(Message.message_type, "text").not_in(AUDIT_MESSAGE_TYPES),
@@ -191,11 +190,17 @@ class ConversationRepository:
             ),
         )
         if before_message_id is not None:
-            statement = statement.where(Message.id < before_message_id)
+            cursor = (await self.session.execute(
+                select(history_time).select_from(Message)
+                .outerjoin(AgentRun, AgentRun.id == Message.agent_run_id)
+                .where(Message.id == before_message_id, Message.conversation_id == conversation_id)
+            )).scalar_one_or_none()
+            if cursor is not None:
+                statement = statement.where(or_(history_time < cursor, and_(history_time == cursor, Message.id < before_message_id)))
 
         result = await self.session.execute(
             statement.options(selectinload(Message.tool_calls))
-            .order_by(Message.id.desc()).limit(limit)
+            .order_by(history_time.desc(), Message.id.desc()).limit(limit)
         )
         return list(result.scalars().all())
 
@@ -275,7 +280,6 @@ class ConversationRepository:
         thread_id: str,
         agent_slug: str,
         title: str | None = None,
-        summary: str | None = None,
         conversation_metadata: dict | None = None,
         project_id: str | None = None,
     ) -> Conversation:
@@ -285,7 +289,6 @@ class ConversationRepository:
             thread_id=thread_id,
             agent_id=agent_slug,
             title=title or "",
-            summary=summary,
             conversation_metadata=dict(conversation_metadata or {}),
             project_id=project_id,
         )
@@ -325,13 +328,11 @@ class ConversationRepository:
         conversation: Conversation,
         *,
         title: str,
-        summary: str | None,
         conversation_metadata: dict,
         organization: dict | None = None,
     ) -> Conversation:
         """更新允许修改的对话字段。"""
         conversation.title = title
-        conversation.summary = summary
         conversation.conversation_metadata = dict(conversation_metadata)
         if organization is not None:
             if "project_id" in organization:
@@ -399,6 +400,25 @@ class ConversationRepository:
             request_id=request_id,
             msg_metadata=msg_metadata,
         )
+
+    async def promote_queued_input_message(self, message_id: int, run_id: str) -> None:
+        message = await self.session.get(Message, message_id)
+        message.sequence = await self.next_sequence(message.conversation_id)
+        message.status = "completed"
+        message.agent_run_id = run_id
+        await self.session.flush()
+
+    async def cancel_queued_input_message(self, message_id: int) -> None:
+        await self.session.execute(
+            update(Message)
+            .where(
+                Message.id == message_id,
+                Message.status == "queued",
+                Message.agent_run_id.is_(None),
+            )
+            .values(status="cancelled")
+        )
+        await self.session.flush()
 
     async def bind_input_message_to_run(self, run: AgentRun) -> None:
         """在 Run 创建事务内关联已接收的输入消息。"""

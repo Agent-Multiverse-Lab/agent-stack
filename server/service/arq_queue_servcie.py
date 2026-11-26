@@ -24,6 +24,18 @@ async def get_arq_pool():
     return _arq_pool
 
 
+async def enqueue_agent_run(run_id: str) -> None:
+    """将已提交的 AgentRun 推入 ARQ 任务队列。"""
+    queue = await get_arq_pool()
+    logger.info(f"当前事件 ID：{run_id}入队中...")
+    await queue.enqueue_job(
+        "process_agent_run",
+        run_id,
+        _job_id=f"run:{run_id}",
+        _queue_name=config.arq_queue_name,
+    )
+
+
 @asynccontextmanager
 async def subscribe_redis_channel(channel: str) -> AsyncGenerator[PubSub, None]:
     """订阅信道，并在退出上下文时关闭 PubSub。"""

@@ -1,23 +1,22 @@
 # Architecture 文档说明
 
-本目录给出 `agent-stack` 的架构主视图与边界定义，覆盖全系统运行层次与职责归属。
+本目录给出 `agent-stack` 的架构主视图、系统边界与长期不变量；具体类定义、接口和字段以真实源码与测试为准。
 
 ## 阅读入口
 
-先按任务选择架构文档，再进入对应的能力规格。架构文档回答“哪个系统承载什么”，
-`docs/spec/` 回答“该能力必须如何工作”。
+按任务范围选择对应的架构文档，确认系统承载关系与边界后直接阅读相关源码：
 
-| 任务范围 | 架构文档 | 能力规格 |
-| --- | --- | --- |
-| Agent 构造、上下文、子代理 | [agent-system.md](agent-system.md) | [docs/spec/agent](../spec/agent/README.md) |
-| Run 生命周期、取消、事件流 | [run-system.md](run-system.md) | [docs/spec/run](../spec/run/README.md) |
-| 知识上传、解析、索引、检索 | [knowledge-system.md](knowledge-system.md) | [docs/spec/knowledge](../spec/knowledge/README.md) |
-| 状态和存储所有权 | [persistence-system.md](persistence-system.md) | [docs/spec/persistence](../spec/persistence/README.md) |
-| 沙箱与工具执行隔离 | [sandbox-system.md](sandbox-system.md) | [docs/spec/sandbox](../spec/sandbox/README.md) |
-| 模型供应商预置、平台配置和模型列表缓存 | [model-system.md](model-system.md) | [docs/spec/model](../spec/model/README.md) |
-| 卫星影像多源目录 | [data-platform-system.md](data-platform-system.md) | [docs/spec/data-platform](../spec/data-platform/README.md) |
-| 认证和用户身份 | [auth-system.md](auth-system.md) | 暂无独立能力规格 |
-| 跨系统拓扑和目录职责 | [overview.md](overview.md) | — |
+| 任务范围 | 架构文档 |
+| --- | --- |
+| Agent 构造、上下文、子代理 | [agent-system.md](agent-system.md) |
+| Run 生命周期、取消、事件流 | [run-system.md](run-system.md) |
+| 知识上传、解析、索引、检索 | [knowledge-system.md](knowledge-system.md) |
+| 状态和存储所有权 | [persistence-system.md](persistence-system.md) |
+| 沙箱与工具执行隔离 | [sandbox-system.md](sandbox-system.md) |
+| 模型供应商预置、平台配置和模型列表缓存 | [model-system.md](model-system.md) |
+| 卫星影像多源目录 | [data-platform-system.md](data-platform-system.md) |
+| 认证和用户身份 | [auth-system.md](auth-system.md) |
+| 跨系统拓扑和目录职责 | [overview.md](overview.md) |
 
 - [overview.md](overview.md)
   - 全局运行拓扑、数据所有权与跨域约束。
@@ -38,4 +37,4 @@
 - [data-platform-system.md](data-platform-system.md)
   - Go Gateway、PostGIS 卫星目录与 SatelliteAgent 的依赖边界。
 
-具体行为以 `docs/spec/` 为准；本目录只保留系统之间的承载关系、依赖方向和所有权边界。
+本目录只维护系统间的承载关系、依赖方向、所有权边界和长期不变量，不镜像源码实现细节。

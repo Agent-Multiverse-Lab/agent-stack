@@ -3,16 +3,21 @@ import { useCallback, useRef, useState } from "react";
 import {
   buildAgentRunStreamUrl,
   cancelAgentRun,
+  cancelQueuedAgentRunRequest,
   consumeAgentRunStream,
   createAgentRun,
   resumeAgentRun,
+  steerQueuedAgentRunRequest,
 } from "@/api/agent-run";
 import type {
   AgentRunCreateRequest,
   AgentRunStreamEvent,
   ThreadRunMetadataResponse,
 } from "@/api/agent-run";
-import type { ThreadDetailResponse } from "@/api/thread";
+import type {
+  QueuedRunRequestItem,
+  ThreadDetailResponse,
+} from "@/api/thread";
 import type {
   AgentRunCreateInput,
   HumanQuestion,
@@ -25,6 +30,7 @@ interface RunState {
   startedAt: number | null;
   streamUrl: string | null;
   pendingInteraction: InteractionRequired | null;
+  queuedRequests: QueuedRunRequestItem[];
   cancelling: boolean;
   resuming: boolean;
 }
@@ -38,6 +44,7 @@ const initialState = (): RunState => ({
   startedAt: null,
   streamUrl: null,
   pendingInteraction: null,
+  queuedRequests: [],
   cancelling: false,
   resuming: false,
 });
@@ -116,8 +123,9 @@ export function useAgentRun() {
       request.threadId,
       request.attachmentFileIds,
       request.modelId,
+      request.dispatchPolicy,
     );
-    if (version.current === expected) {
+    if (version.current === expected && run.run_id !== null) {
       update((previous) => ({
         ...previous,
         runId: run.run_id,
@@ -174,6 +182,7 @@ export function useAgentRun() {
     update((previous) => ({
       ...previous,
       pendingInteraction: detail.pending_interaction,
+      queuedRequests: detail.queued_requests ?? [],
       runId: restored?.run_id ?? null,
       runStatus: restored?.status ?? null,
       startedAt:
@@ -268,6 +277,47 @@ export function useAgentRun() {
     }
   }
 
+  /** 更新本地等待区请求列表，供乐观删除、同步或回滚使用。 */
+  const setQueuedRequests = useCallback(
+    (
+      requests:
+        | QueuedRunRequestItem[]
+        | ((previous: QueuedRunRequestItem[]) => QueuedRunRequestItem[]),
+    ) => {
+      update((previous) => ({
+        ...previous,
+        queuedRequests:
+          typeof requests === "function"
+            ? requests(previous.queuedRequests)
+            : requests,
+      }));
+    },
+    [update],
+  );
+
+  /** 逻辑软取消等待区中的指定排队请求。 */
+  async function cancelQueuedRequest(requestId: string) {
+    return cancelQueuedAgentRunRequest(requestId);
+  }
+
+  /** 将等待区请求原地升级为 steer（202）或在会话空闲时立即晋升执行（200）。 */
+  async function steerQueuedRequest(requestId: string) {
+    const expected = ++version.current;
+    const result = await steerQueuedAgentRunRequest(requestId);
+    if (version.current === expected && result.run_id !== null) {
+      update((previous) => ({
+        ...previous,
+        runId: result.run_id,
+        runStatus: result.status,
+        startedAt: null,
+        streamUrl: result.stream_url,
+        cancelling: false,
+        pendingInteraction: null,
+      }));
+    }
+    return result;
+  }
+
   /** 清空本地 Run 状态并使在途操作失效，后台执行是否停止由取消接口决定。 */
   function clearRun() {
     version.current += 1;
@@ -283,6 +333,9 @@ export function useAgentRun() {
     restoreRunFromThread,
     consumeRunStream,
     cancelCurrentRun,
+    setQueuedRequests,
+    cancelQueuedRequest,
+    steerQueuedRequest,
     clearRun,
   };
 }

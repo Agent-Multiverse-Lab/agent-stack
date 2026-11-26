@@ -1,9 +1,15 @@
 """Thread/Conversation 查询、更新和软删除契约测试。"""
 
+import importlib.util
 import unittest
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+
+import sqlalchemy as sa
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 
 from server.router.thread_router import router
 from server.service import thread_service
@@ -37,7 +43,6 @@ class FakeConversationRepository:
             thread_id=values["thread_id"],
             agent_id=values["agent_slug"],
             title=values["title"],
-            summary=values["summary"],
             conversation_metadata=values["conversation_metadata"],
             created_at=NOW,
             updated_at=NOW,
@@ -66,13 +71,11 @@ class FakeConversationRepository:
         conversation,
         *,
         title,
-        summary,
         conversation_metadata,
         organization=None,
     ):
         """在内存中更新对话。"""
         conversation.title = title
-        conversation.summary = summary
         conversation.conversation_metadata = conversation_metadata
         if organization:
             if "project_id" in organization:
@@ -119,6 +122,16 @@ class FakeAgentRunRepository:
         return self.pending_interaction_run
 
 
+class FakeAgentRunRequestQueueRepository:
+    """在内存中模拟 AgentRunRequestQueue Repository。"""
+
+    def __init__(self) -> None:
+        self.queued: list[SimpleNamespace] = []
+
+    async def list_queued_for_thread(self, _thread_id: str, *, uid: str):
+        return [item for item in self.queued if getattr(item, "uid", uid) == uid]
+
+
 class FakeMessageAttachmentRepository:
     """在内存中模拟 MessageAttachment Repository。"""
 
@@ -154,7 +167,7 @@ class FakeAgentRepository:
     """返回固定顶层 Agent。"""
 
     def __init__(self):
-        self.agent_config = {"model": "dashscope/qwen3.8-max"}
+        self.agent_config = {"model": "dashscope:qwen3.8-max"}
 
     async def get_by_slug_for_run_type(self, *, slug, run_type):
         """返回请求的顶层 Agent。"""
@@ -183,7 +196,6 @@ def make_conversation(
         thread_id=f"thread-{conversation_id}",
         agent_id="leaderagent",
         title=f"对话 {conversation_id}",
-        summary="摘要",
         conversation_metadata=metadata or {"backend_id": "system-backend"},
         created_at=NOW,
         updated_at=NOW,
@@ -225,11 +237,17 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
         self.db = FakeSession()
         self.conversations = FakeConversationRepository()
         self.runs = FakeAgentRunRepository()
+        self.requests = FakeAgentRunRequestQueueRepository()
         self.message_attachments = FakeMessageAttachmentRepository()
         self.users = FakeUserRepository()
         self.agents = FakeAgentRepository()
         self.storage = FakeStorage()
-        self.resolve_model = AsyncMock(return_value=object())
+        async def _resolve(_db, model_ref, *, category):
+            if not isinstance(model_ref, str) or model_ref != model_ref.strip() or ":" not in model_ref:
+                raise ValueError("模型引用必须为 provider_id:model_id")
+            return SimpleNamespace(model_ref=model_ref, category=category)
+
+        self.resolve_model = AsyncMock(side_effect=_resolve)
         patches = (
             patch(
                 "server.service.thread_service.ConversationRepository",
@@ -238,6 +256,10 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
             patch(
                 "server.service.thread_service.AgentRunRepository",
                 return_value=self.runs,
+            ),
+            patch(
+                "server.service.thread_service.AgentRunRequestQueueRepository",
+                return_value=self.requests,
             ),
             patch(
                 "server.service.thread_service.MessageAttachmentRepository",
@@ -255,8 +277,9 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
                 "server.service.thread_service.get_storage",
                 return_value=self.storage,
             ),
-            patch(
-                "server.service.thread_service.resolve_runtime_model",
+            patch.object(
+                thread_service,
+                "get_enabled_model",
                 new=self.resolve_model,
             ),
         )
@@ -271,40 +294,39 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
             uid="user-1",
             agent_id="leaderagent",
             title="  新会话  ",
-            summary="  摘要  ",
-            metadata={"backend_id": "client", "workspace": "research"},
+            metadata={"backend_id": "client", "workspace": "research", "model": "dashscope:qwen3.8-max"},
         )
 
         self.assertEqual("新会话", conversation.title)
-        self.assertEqual("摘要", conversation.summary)
         self.assertEqual(
             "leader-backend",
             conversation.conversation_metadata["backend_id"],
         )
-        self.assertEqual("dashscope/qwen3.8-max", conversation.conversation_metadata["model"])
+        self.assertEqual("dashscope:qwen3.8-max", conversation.conversation_metadata["model"])
 
     async def test_create_thread_prefers_selected_model_and_preserves_client_metadata(self):
-        metadata = {"model": "deepseek/deepseek-v4-flash", "workspace": "research"}
+        metadata = {"model": "deepseek:deepseek-v4-flash", "workspace": "research"}
         conversation = await thread_service.create_thread(
-            self.db, uid="user-1", agent_id="leaderagent", title=None, summary=None, metadata=metadata,
+            self.db, uid="user-1", agent_id="leaderagent", title=None, metadata=metadata,
         )
-        self.assertEqual(conversation.conversation_metadata["model"], "deepseek/deepseek-v4-flash")
+        self.assertEqual(conversation.conversation_metadata["model"], "deepseek:deepseek-v4-flash")
         self.assertEqual(conversation.conversation_metadata["workspace"], "research")
         self.assertNotIn("backend_id", metadata)
 
-    async def test_create_thread_without_agent_model_uses_config_default(self):
+    async def test_create_thread_without_model_leaves_binding_empty(self):
         self.agents.agent_config = {}
         conversation = await thread_service.create_thread(
-            self.db, uid="user-1", agent_id="leaderagent", title=None, summary=None, metadata=None,
+            self.db, uid="user-1", agent_id="leaderagent", title=None, metadata=None,
         )
-        self.assertEqual(conversation.conversation_metadata["model"], "dashscope/qwen3.8-max")
+        self.assertNotIn("model", conversation.conversation_metadata)
+        self.resolve_model.assert_not_awaited()
 
     async def test_invalid_thread_model_is_rejected_before_creation(self):
         self.resolve_model.side_effect = ValueError("聊天模型未配置")
-        for model in (42, "unknown/model", " deepseek/deepseek-v4-flash"):
+        for model in (42, "unknown:model", " deepseek:deepseek-v4-flash"):
             with self.subTest(model=model), self.assertRaises(ValueError):
                 await thread_service.create_thread(
-                    self.db, uid="user-1", agent_id="leaderagent", title=None, summary=None, metadata={"model": model},
+                    self.db, uid="user-1", agent_id="leaderagent", title=None, metadata={"model": model},
                 )
         self.assertIsNone(self.conversations.created_values)
 
@@ -377,6 +399,55 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(result["active_run"])
         self.assertIsNone(result["pending_interaction"])
+        self.assertEqual([], result["queued_requests"])
+
+    async def test_detail_returns_queued_requests_from_waiting_area(self) -> None:
+        self.conversations.conversation = make_conversation(1)
+        self.requests.queued = [
+            SimpleNamespace(
+                request_id="req-steer",
+                uid="user-1",
+                dispatch_policy="steer",
+                queue_seq=2,
+                created_at=NOW,
+                trigger_message=SimpleNamespace(content="urgent question"),
+            ),
+            SimpleNamespace(
+                request_id="req-enqueue",
+                uid="user-1",
+                dispatch_policy="enqueue",
+                queue_seq=1,
+                created_at=NOW,
+                trigger_message=SimpleNamespace(content="normal question"),
+            ),
+        ]
+
+        result = await thread_service.get_thread_detail(
+            self.db,
+            uid="user-1",
+            thread_id="thread-1",
+            message_limit=10,
+        )
+
+        self.assertEqual(
+            [
+                {
+                    "request_id": "req-steer",
+                    "dispatch_policy": "steer",
+                    "queue_seq": 2,
+                    "content": "urgent question",
+                    "created_at": NOW,
+                },
+                {
+                    "request_id": "req-enqueue",
+                    "dispatch_policy": "enqueue",
+                    "queue_seq": 1,
+                    "content": "normal question",
+                    "created_at": NOW,
+                },
+            ],
+            result["queued_requests"],
+        )
 
     async def test_detail_returns_pending_ask_user_interaction(self) -> None:
         self.conversations.conversation = make_conversation(1)
@@ -490,13 +561,12 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
             self.db,
             uid="user-1",
             thread_id="thread-1",
-            fields={"summary", "metadata"},
+            fields={"metadata"},
             title=None,
-            summary=None,
             metadata={"backend_id": "client", "new": True},
         )
 
-        self.assertIsNone(result["summary"])
+        self.assertNotIn("summary", result)
         self.assertEqual(
             {"backend_id": "system-backend", "new": True},
             result["metadata"],
@@ -538,6 +608,77 @@ class ThreadFunctionTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("GET", methods_by_path["/chat/thread/{thread_id}"])
         self.assertIn("PATCH", methods_by_path["/chat/thread/{thread_id}"])
         self.assertIn("DELETE", methods_by_path["/chat/thread/{thread_id}"])
+
+
+class DropConversationSummaryMigrationTest(unittest.TestCase):
+    """验证 0033 迁移删除与回滚 conversation.summary 时保留已有会话行。"""
+
+    def test_upgrade_idempotent_and_downgrade_preserves_conversations(self) -> None:
+        path = (
+            Path(__file__).resolve().parents[1]
+            / "migrate/versions/0033_drop_conversation_summary.py"
+        )
+        spec = importlib.util.spec_from_file_location("drop_conversation_summary_migration", path)
+        migration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(migration)
+
+        engine = sa.create_engine("sqlite://")
+        self.addCleanup(engine.dispose)
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE conversation ("
+                "id INTEGER PRIMARY KEY, "
+                "uid VARCHAR(64) NOT NULL, "
+                "title VARCHAR(255) NOT NULL, "
+                "summary TEXT)"
+            )
+            connection.exec_driver_sql(
+                "INSERT INTO conversation (id, uid, title, summary) "
+                "VALUES (1, 'user-1', 'Keep me', 'Legacy summary')"
+            )
+            with patch.object(
+                migration, "op", Operations(MigrationContext.configure(connection))
+            ):
+                migration.upgrade()
+                columns_after_upgrade = {
+                    col["name"]
+                    for col in sa.inspect(connection).get_columns("conversation")
+                }
+                self.assertNotIn("summary", columns_after_upgrade)
+                self.assertEqual(
+                    ("user-1", "Keep me"),
+                    tuple(
+                        connection.exec_driver_sql(
+                            "SELECT uid, title FROM conversation WHERE id = 1"
+                        ).one()
+                    ),
+                )
+
+                # 幂等性：列已不存在时再次执行 upgrade 不应报错
+                migration.upgrade()
+                self.assertNotIn(
+                    "summary",
+                    {
+                        col["name"]
+                        for col in sa.inspect(connection).get_columns("conversation")
+                    },
+                )
+
+                migration.downgrade()
+                columns_after_downgrade = {
+                    col["name"]: col
+                    for col in sa.inspect(connection).get_columns("conversation")
+                }
+                self.assertIn("summary", columns_after_downgrade)
+                self.assertTrue(columns_after_downgrade["summary"]["nullable"])
+                self.assertEqual(
+                    ("user-1", "Keep me", None),
+                    tuple(
+                        connection.exec_driver_sql(
+                            "SELECT uid, title, summary FROM conversation WHERE id = 1"
+                        ).one()
+                    ),
+                )
 
 
 if __name__ == "__main__":

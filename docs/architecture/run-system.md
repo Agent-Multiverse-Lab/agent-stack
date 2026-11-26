@@ -4,18 +4,12 @@
 
 `Run System` 管理一次对话/子任务的执行生命周期：入队、执行、事件、终态、取消。
 
-行为规格入口：
-
-- [Run Lifecycle Spec](../spec/run/lifecycle/spec.md)
-- [请求持久化与派发](../spec/run/request-dispatch/spec.md)
-- [Run Cancellation Spec](../spec/run/cancellation/spec.md)
-- [Agent Run Event Streaming Spec](../spec/run/event-streaming/spec.md)
-- [Run 执行记录与租约](run-execution-schema.md)：execution 持有执行权、心跳、租约与结束事实
+相关存储细节见 [Run 执行记录与租约](run-execution-schema.md)（execution 持有执行权、心跳、租约与结束事实）。
 
 ## 2. Core Components
 
 - `server/router/agent_router.py`：对外入口（创建 run、取消、SSE 读取）。
-- `server/service/agent_run_service.py`：Run 及事件流的服务层入口，定义并组装创建 Run 所需的 `AgentRunRequestInput`。
+- `server/service/agent_run_service.py`：Run 及事件流的服务层入口。
 - `server/service/arq_queue_servcie.py`：ARQ/Redis 运行时协作层。
 - `server/worker.py`：实际执行 worker，消费 `process_agent_run`。
 - `src/database/repositories/agent_run_repository.py`：状态原子更新。
@@ -30,20 +24,22 @@
 
 ```text
 POST /api/agent/runs
-  -> lock conversation, persist input Message + attachments + AgentRunRequest, commit
-  -> lock conversation again, return existing Run or check active Run / pending interaction
-  -> Service assembles AgentRunRequestInput from Request and locked Conversation
-  -> create pending Run, bind Message.agent_run_id, commit
-  -> enqueue run_id to ARQ
+  -> lock conversation, check request_id / pending interaction / active Run
+  -> reject busy input, or persist queued Request + Message
+  -> when idle: persist Request + Message + pending Run in the same transaction
+  -> commit, then enqueue run_id to ARQ
 ARQ: process_agent_run(run_id)
   -> set running
   -> stream agent output
   -> end -> set terminal status + write end event
 ```
 
-活动 Run 或待回答问题阻止创建时，返回 409，已提交的请求与输入保留。同一 `request_id`
-重试复用原输入；创建 Run 时使用会话表当前配置。Request 只保存标识与 `trigger_message_id`，
-正文、图片和消息元数据由 Message 持有；Run 状态由 AgentRun 持有。
+待回答问题阻止接收新输入；活动 Run 按 `enqueue | reject | steer`（默认 `enqueue`）决定拒收或即时落库 `AgentRunRequest(status="queued")` 与 `Message(status="queued")`，删除走逻辑软取消（`cancelled` 墓碑），`POST .../steer` 支持忙碌原地升级或空闲就地晋升。同一 `request_id` 重试复用已接收输入。Request 持有输入关联、策略、等待区状态和顺序；正文、图片和消息元数据由 Message 持有，执行状态由 AgentRun 持有。ARQ Worker 保持终止与派发解耦（`set_run_terminal`、`_finalize_run` 与租约回收器均不触发队列派发），仅由 `process_agent_run` 在 `completed`（自然结束）或 `steered`（Turn 边界停机及 120s 宽限硬取消）且 `changed=True` 时按 `steer` 优先与 `queue_seq ASC` 晋升下一条排队请求，创建 Run 时读取会话当前配置。
+
+**关键运行不变量：**
+- **Interrupt & Resume**：`ask_user` 中断产生 `interrupted` 终态并将问题载荷保存在 `AgentRun.run_metadata["interrupt"]`；恢复时创建新 `AgentRun(run_type="resume", created_by_run_id=parent_run_id)` 复用同一 `thread_id` 与 LangGraph checkpoint，父 Run 不回到 `running`。尚无 `resume` 子 Run 的 `interrupted` Run 阻止新输入、`steer`、队列派发和会话删除，且可通过取消接口直接收敛为 `cancelled` 解锁会话。
+- **Cancellation**：`cancel_requested` 仅是中间态；Worker 仅在进入流消费循环后写入 Redis `end` 事件（流前停止只写 PostgreSQL 终态，由 SSE 按 DB 终态兜底）；终态单向，晚到取消不得覆盖已有终态。
+- **Stream Decoupling**：Worker 执行不依赖任何单条 SSE 连接，客户端断开不停止 Run，重连继续读取同一 `run_id`。
 
 ## 5. Event Flow
 
@@ -67,7 +63,7 @@ ARQ: process_agent_run(run_id)
 | 能力 | 承载位置 | 责任边界 |
 | --- | --- | --- |
 | HTTP 创建、取消和 SSE 入口 | `server/router/agent_router.py` | 鉴权、参数校验和响应整形，不执行 Agent |
-| Run 服务编排 | `server/service/agent_run_service.py` | 请求接收与 Run 创建的两次事务、授权校验、提交后入队和事件读取编排 |
+| Run 服务编排 | `server/service/agent_run_service.py` | 会话锁内的策略路由、请求接收与 Run 创建事务、授权校验、提交后入队和事件读取编排 |
 | 请求持久化 | `src/database/repositories/agent_run_request_repository.py` | 保存请求及输入关联，查询并返回请求 ORM 记录 |
 | ARQ/Redis 适配 | `server/service/arq_queue_servcie.py` | 队列、Stream、取消 key/Pub/Sub 和事件信封，不决定业务终态 |
 | Run 执行 | `server/worker.py` | 重载输入、执行 Agent、发布事件和收口终态 |

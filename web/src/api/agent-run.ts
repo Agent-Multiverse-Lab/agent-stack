@@ -23,7 +23,10 @@ export interface InteractionRequiredResponse {
   questions: HumanQuestionResponse[]
 }
 
+export type DispatchPolicy = "enqueue" | "reject" | "steer"
+
 export interface AgentRunCreateRequest {
+  dispatch_policy?: DispatchPolicy
   query?: string | null
   agent_id: string
   thread_id: string
@@ -43,6 +46,22 @@ export interface AgentRunCreateResponse {
   status: string
   request_id: string | null
   stream_url: string
+}
+
+export interface QueuedAgentRunResponse {
+  run_id: null
+  thread_id: string
+  status: "queued"
+  dispatch_policy: "enqueue" | "steer"
+  request_id: string
+  queue_position: number
+  steering_run_id: string | null
+  stream_url: null
+}
+
+export interface CancelledAgentRunRequestResponse {
+  request_id: string
+  status: "cancelled"
 }
 
 export interface AgentRunResumeResponse extends AgentRunCreateResponse {
@@ -92,7 +111,7 @@ export interface AgentRunEndEvent extends AgentRunStreamEvent {
  * @param agentId 当前会话绑定的 Agent 标识。
  * @param threadId 已创建的会话 ID。
  * @param attachmentFileIds 上传接口返回的附件 file_id 列表。
- * @param modelId 所选模型的 provider_id/model_id；省略时由后端解析会话模型。
+ * @param modelId 所选模型的 provider_id:model_id；省略时由后端读取会话绑定模型。
  * @returns Run 标识、当前状态、请求 ID 和用于订阅执行事件的 stream_url。
  */
 export const createAgentRun = (
@@ -100,12 +119,14 @@ export const createAgentRun = (
   agentId: string,
   threadId: string,
   attachmentFileIds: string[],
-  modelId?: string
+  modelId?: string,
+  dispatchPolicy: DispatchPolicy = "enqueue",
 ) =>
-  apiClient.apiPost<AgentRunCreateResponse, AgentRunCreateRequest>(
+  apiClient.apiPost<AgentRunCreateResponse | QueuedAgentRunResponse, AgentRunCreateRequest>(
     "/api/agent/runs",
     {
       query,
+      dispatch_policy: dispatchPolicy,
       agent_id: agentId,
       thread_id: threadId,
       request_metadata: {
@@ -226,6 +247,29 @@ export const consumeAgentRunStream = async (
 export const cancelAgentRun = (runId: string) =>
   apiClient.apiPost<AgentRunCancelResponse>(
     `/api/agent/runs/${encodeURIComponent(runId)}/cancel`,
+    undefined,
+    { requiresAuth: true }
+  )
+
+/**
+ * 逻辑软取消等待区中尚未晋升为 Run 的排队请求。
+ * @param requestId 等待区请求的唯一标识。
+ * @returns 已取消的请求标识与状态。
+ */
+export const cancelQueuedAgentRunRequest = (requestId: string) =>
+  apiClient.apiDelete<CancelledAgentRunRequestResponse>(
+    `/api/agent/runs/requests/${encodeURIComponent(requestId)}`,
+    { requiresAuth: true }
+  )
+
+/**
+ * 将等待区请求原地升级为 steer（会话忙碌返回 202），或在会话空闲时就地晋升执行（返回 200）。
+ * @param requestId 等待区请求的唯一标识。
+ * @returns 升级后的排队响应或已创建的新 AgentRun 响应。
+ */
+export const steerQueuedAgentRunRequest = (requestId: string) =>
+  apiClient.apiPost<AgentRunCreateResponse | QueuedAgentRunResponse>(
+    `/api/agent/runs/requests/${encodeURIComponent(requestId)}/steer`,
     undefined,
     { requiresAuth: true }
   )

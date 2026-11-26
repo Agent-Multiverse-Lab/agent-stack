@@ -74,18 +74,25 @@ class Config(BaseSettings):
 
     # ---------- 模型 ----------
     model_credential_key: SecretStr = Field(default=SecretStr(""), repr=False, description="模型凭据加密密钥，独立于 JWT")
-    default_model: str = Field(default="dashscope/qwen3.8-max", description="默认使用的模型名称")
-    fallback_model: str = Field(default="deepseek/deepseek-v4-pro", description="备用模型名称")
-    flash_model: str = Field(default="deepseek/deepseek-v4-flash", description="快速推断模型名称")
-    image_model: str = Field(default="dashscope/qwen-image-2.0-pro-2026-04-22", description="图片生成模型名称")
+    image_model: str = Field(default="dashscope:qwen-image-2.0-pro-2026-04-22", description="图片生成模型名称")
 
     embed_model: str = Field(
         default="",
-        description="向量生成模型名称，格式为 provider/model",
+        description="向量生成模型名称，格式为 provider_id:model_id",
+    )
+    embedding_batch_size: int = Field(
+        default=32,
+        gt=0,
+        description="Embedding 单次向量化批大小",
+    )
+    embedding_request_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description="Embedding 单次请求超时秒数",
     )
     rerank_model: str = Field(
         default="",
-        description="重排序模型名称，格式为 provider/model",
+        description="重排序模型名称，格式为 provider_id:model_id",
     )
     dashscope_rerank_url: str = Field(
         default="",
@@ -242,6 +249,7 @@ class Config(BaseSettings):
     # ---------- API Keys ----------
     dashscope_api_key: str = Field(default="", description="阿里 DashScope API Key")
     openai_api_key: str = Field(default="", description="OpenAI API Key")
+    anthropic_api_key: str = Field(default="", description="Anthropic API Key")
     gemini_api_key: str = Field(default="", description="Gemini API Key")
     deepseek_api_key: str = Field(default="", description="DeepSeek API Key")
 

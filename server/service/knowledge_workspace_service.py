@@ -14,6 +14,7 @@ from src.database.repositories.knowledge_workspace_repository import KnowledgeWo
 from src.database.session import session_context
 from src.knowledge.rag_eval.evaluator import RetrievalEvaluator
 from src.knowledge.rag_eval.types import RetrievalDataset
+from src.model import get_enabled_model
 
 
 def folder_data(row):
@@ -46,7 +47,7 @@ async def update_settings(db, uid, kb_id, payload):
     if binding and requested and requested != binding.embedding_model_spec:
         raise ValueError('已建立索引的知识库不能更换 Embedding 模型')
     if requested:
-        knowledge_service.resolve_embedding_model(requested)
+        await get_enabled_model(db, requested, category="embedding")
     base.name, base.description = payload.name, payload.description.strip()
     base.settings = payload.settings.model_dump()
     await db.commit()

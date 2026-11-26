@@ -2,92 +2,60 @@
 
 ## 1. Responsibility
 
-Model System 管理平台级 Chat Provider、公开模型列表和单次 Run 的模型连接解析。
-PostgreSQL 保存配置真相，Redis 缓存脱敏模型列表，Worker 创建仅在当前执行期间存在的 ChatModel。
+Model System 统一管理平台级 Chat / Embedding / Rerank 模型供应商配置、按厂商分组的已启用模型目录缓存、统一模型引用校验与单次运行时模型构造。
 
-具体合同见 [Model Provider Management](../spec/model/provider-management/spec.md)，页面行为见
-[Settings 模型管理](../spec/product/model-settings/spec.md) 和
-[Chat 模型选择](../spec/product/chat-model-selection/spec.md)。
+- **PostgreSQL（Source of Truth）**：`model_provider` 保存唯一配置真相（启动时按 `src/model/presets.py` 补齐缺失内置供应商模板，不覆盖已有记录；其余供应商由管理员通过管理端/API 创建与维护）；`base_url` 为 Chat 地址，另附 `embedding_base_url`、`rerank_base_url`。
+- **Redis**：缓存从 PostgreSQL 派生的全量已启用脱敏模型目录（可按 `category` 过滤；供应商增删改提交后刷新，缓存失效或不可用时回源 PostgreSQL）。
+- **协议适配**：
+  - Chat（含多模态）使用 LangChain 官方三家整合包（`langchain-openai` / `langchain-anthropic` / `langchain-google-genai`）；
+  - Embedding 与 Rerank 直接使用纯 HTTP 请求适配器（不依赖额外厂商 SDK）。
 
-## 2. 当前边界
+## 2. 目录所有权
 
-全局表、预置补齐、管理员路由、数据库模型列表、缓存和 Agent 运行时已经接入。`/api/models` 从
-PostgreSQL 投影并使用 Redis read-through cache；ChatModel 只由单次 Run 的 Provider 连接构造。
-静态 Chat 目录和 `load_model()` 已移除，Embedding 与 Rerank 仍保留各自的配置路径。
+`src/model/` 不反向依赖 `server/`，不定义 Pydantic DTO，对外通过 `src/model/__init__.py` 与 `src/model/service.py` 提供统一入口（不提供脱离数据库的纯字符串选型函数）：
 
-当前拓扑：
+- `src/model/presets.py`：内置模型供应商启动预置模板常量；
+- `src/model/utils.py`：类型别名（`ModelProtocol`、`ModelCategory`、`ChatCapability`）、参数校验函数、`parse_model_ref` 与 `api_key` 解析（支持环境变量名引用或明文存库）。
+- `src/model/repository.py`：`ModelProviderRepository`（操作 `model_provider` ORM 及按 `provider_id:model_id` 查库校验）与 `fetch_model_config`；仅供 `src/model/` 内部使用，业务 Service 不直接访问。
+- `src/model/service.py`：启动预置补齐（`ensure_builtin_model_providers`）、供应商 CRUD（`list_model_providers`、`get_model_provider`、`create_model_provider`、`update_model_provider`、`delete_model_provider`）、全量已启用目录构建与 Redis 缓存管理、模型发现与连通性探测，以及面向业务层的单一模型校验入口 `get_enabled_model(db, model_ref, *, category)`。
+- `src/model/model_provider/chat.py`、`embedding.py`、`reranker.py`：单次执行实例构造与 `load_chat_model` / `load_embedding_model` / `load_reranker`。
 
-```mermaid
-flowchart LR
-    Preset["Chat Provider presets"] --> Life["FastAPI lifespan"]
-    Life --> DB[("PostgreSQL model_provider")]
+`server/entities/model.py` 定义模型接口 HTTP Schema；`server/router/model_router.py` 提供目录面 `/api/models` 与管理面 `/api/models/providers`（含 CRUD、`/discover`、`/test`），统一通过 `src/model/service.py` 消费，不直接访问 Repository。
 
-    Admin["管理员 Settings"] --> Manage["Provider Management API"]
-    Manage --> DB
+## 3. HTTP 接口契约
 
-    DB --> Project["公开模型列表投影"]
-    Project --> Redis[("Redis model:chat:list:v3")]
-    User["登录用户"] --> Models["GET /api/models"]
-    Models --> Redis
-    Redis -. "miss / invalid / unavailable" .-> Project
+所有 `/api/models*` 接口统一返回 `{ "status": "success", "data": ... }`，前端 `web/src/api/model.ts` 统一解包 `data`；错误仍由 HTTP 状态码（`404 / 409 / 422 / 500 / 502`）表达。
 
-    Models --> Selector["ModelContext / ModelSelector"]
-    Selector --> Run["Conversation + Run model ID"]
-    Run --> Resolve["ModelConnection resolver"]
-    Resolve --> DB
-    Resolve --> Factory["ChatModel protocol factory"]
-    Factory --> Agent["Leader / SubAgent / Summary"]
-```
+- **目录面 `GET /api/models?category=chat|embedding|rerank`**（默认 `chat`）：
+  `data` 为以 `provider_id` 为键的厂商字典，每项包含 `provider_id`、`display_name`、`models`（元素为 `{ model_id, category, capabilities }`）；仅包含 `is_enabled=true` 且至少有一个匹配 `category` 模型的供应商，不包含 URL / `api_key` / `has_api_key`，不拼接额外 `id`，不计算 `default_model`。无可用模型时 `data` 为 `{}`。
+- **管理面 `/api/models/providers`**：
+  返回全量供应商配置（含未启用项、三类 URL、协议、`has_api_key` 与完整 `models`），永不回传明文 `api_key`。
 
-## 3. Ownership
+## 4. Ownership
 
 | 状态 | Owner | 生命周期 |
 | --- | --- | --- |
-| Provider 与连接参数 | PostgreSQL `model_provider` | 管理员写入，平台共享 |
-| 公开模型列表 | PostgreSQL 投影；Redis 是副本 | 一小时 TTL，可随时重建 |
-| Conversation 模型绑定 | PostgreSQL Conversation metadata | 对话级选择 |
-| Run 模型快照 | PostgreSQL AgentRun metadata | 单次运行选择 |
-| `ModelConnection` | Worker 内存 | 单次执行解析，不持久化 |
-| LangChain ChatModel | Agent 执行内存 | 单次执行构造，不缓存 |
+| Provider 与模型清单 | PostgreSQL `model_provider` | 启动补齐内置模板（不覆盖既有行），管理员维护 |
+| 全量已启用模型目录 | PostgreSQL 投影；Redis 是副本 | 1 小时 TTL，供应商变更后刷新，失效可随时重建 |
+| Conversation 模型绑定 | PostgreSQL `Conversation.conversation_metadata["model"]` | 对话级显式绑定（可选） |
+| Run 模型快照 | PostgreSQL `AgentRun.run_metadata["model"]` | 单次运行冻结快照 |
+| Chat / Embedding / Rerank 实例 | 执行内存 | 单次执行构造，不缓存 |
 
-Provider 不绑定 User；所有登录用户读取同一模型列表。Provider 管理是管理员行为，管理员邮箱由部署配置
-`ADMIN_EMAILS` 声明；浏览器只访问 FastAPI，不直接访问 Redis 或数据库。
+## 5. Runtime Boundary & 选型不变量
 
-代码模块的依赖方向为 `server/router -> server/entities + server/service -> src/model + Repository -> ORM`：
+模型引用统一为 `provider_id:model_id`，按第一个 `:` 切分（`provider_id` 仅允许 `[a-z0-9_-]`，`model_id` 可继续包含 `/` 或 `:`）。
 
-- `server/entities/model.py` 只拥有前后端 HTTP 请求与响应 DTO；
-- `src/model/provider.py` 拥有 Provider 值类型、校验和 Service 写入命令；
-- `src/model/runtime.py` 拥有 `ModelConnection` 与 `create_chat_model()`，不访问数据库；
-- `server/service/model_service.py` 编排 DTO 映射、事务、连接解析和运行时构造入口；
-- Repository 只处理 ORM，不依赖 DTO 或运行时对象。
+**显式选型、零 fallback**：不在 `config.py` 中维护 `default_model` / `flash_model` / `fallback_model`，不做跨层级静默降级；任何模型若不存在、供应商已停用或 `category` 不匹配，直接报错。
 
-## 4. Lifecycle
+各业务入口规则：
 
-```mermaid
-sequenceDiagram
-    participant App as FastAPI lifespan
-    participant Service as Model Service
-    participant DB as PostgreSQL
-    participant Redis
+- **`POST /api/chat/thread`**：`metadata.model` 可选；传入则调 `get_enabled_model(..., category="chat")` 校验并写入绑定，不传则留空。
+- **`PATCH /api/chat/thread/{thread_id}`**：修改 `metadata.model` 时查库校验。
+- **`POST /api/agent/runs`**：优先使用请求显式传入的 `model`，未传时仅读取当前会话 `conversation_metadata["model"]`；两者皆空或不可用直接报错，有效且与原绑定不同时同步更新会话绑定。
+- **排队出队与 Steer**：直接校验当前会话绑定的 `model`，不可用直接报错。
+- **Worker 执行**：直接消费 `run_metadata["model"]` 冻结快照，通过 `load_chat_model` 查库构造实例，不重跑选型逻辑。
+- **标题生成**：复用当前会话绑定的 `conversation_metadata["model"]`；无绑定或不可用时直接截断首条问题文本，不切换其他模型。
+- **SubAgent**：使用子 Agent 自身 `agent_config["model"]`；未单独配置时沿用父 Run 的模型，查库校验不可用直接报错。
+- **Embedding / Rerank**：由知识库显式传入或绑定的 `provider_id:model_id`，按对应 `category` 查库校验。
 
-    App->>Service: 校验全部预置
-    Service->>DB: 插入缺失 provider_id 并提交
-    App->>Service: 构建公开模型列表
-    Service->>DB: 读取已启用 Provider
-    Service->>Redis: SET model:chat:list:v3 EX 3600
-    Note over App,Redis: 数据库失败阻止启动；Redis 失败不阻止启动
-```
-
-预置只提供首次插入值，不覆盖已保存记录。Provider 更新先提交 PostgreSQL，再删除并重建 Redis 列表；
-刷新失败不回滚已提交配置，后续读取回源 PostgreSQL。
-
-## 5. Runtime Boundary
-
-公开模型 ID 统一为 `provider/model`，按第一个 `/` 切分，模型名称可以继续包含 `/` 或 `:`。
-Run API 在写入快照前以 PostgreSQL 校验选择；Worker 执行时由 Model Service 重新解析当前 Provider 配置，
-得到 `src/model/runtime.py::ModelConnection`，再通过同模块的协议工厂创建 ChatModel。Run、Context、Redis
-和事件均不保存凭据或连接对象。
-
-Agent 只消费显式传入的 ChatModel 和 `BaseContext.model` ID，不在构图过程中读取数据库、Redis 或环境中的
-Chat Provider。静态 `load_model(model: str)`、Chat Provider 目录和旧目录缓存已经退役；Embedding 与
-Rerank 继续由 Knowledge 相关配置拥有。
+`api_key` 支持环境变量名引用（全大写下划线格式）或明文存库，运行时由 `resolve_provider_api_key` 解析；业务层不接触明文 `api_key`。

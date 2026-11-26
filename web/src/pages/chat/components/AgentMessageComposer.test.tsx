@@ -204,27 +204,21 @@ describe("AgentMessageComposer", () => {
         models={[
           {
             id: "first",
+            model_id: "first",
             name: "First",
-            display_name: "First",
-            version: "1",
             provider: "test",
-            icon: "",
+            provider_name: "Test",
+            capabilities: ["chat"],
             is_available: true,
-            is_default: true,
-            is_fallback: false,
-            is_flash: false,
           },
           {
             id: "second",
+            model_id: "second",
             name: "Second",
-            display_name: "Second",
-            version: "2",
             provider: "test",
-            icon: "",
+            provider_name: "Test",
+            capabilities: ["chat"],
             is_available: true,
-            is_default: false,
-            is_fallback: false,
-            is_flash: false,
           },
         ]}
       />,
@@ -329,4 +323,18 @@ describe("AgentMessageComposer", () => {
     fireEvent.keyDown(editor, { key: "Backspace" });
     expect(setDraft).toHaveBeenCalledWith("Read ");
   });
+});
+
+it("submits queue or steer while preserving the explicit stop action", () => {
+  const submit = vi.fn();
+  const cancel = vi.fn();
+  render(<AgentMessageComposer {...baseProps} draft="next" running submit={submit} cancel={cancel} />);
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), { key: "Enter" });
+  expect(submit).toHaveBeenLastCalledWith("enqueue");
+  fireEvent.click(screen.getByRole("button", { name: "Dispatch policy" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Steer response" }));
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  expect(submit).toHaveBeenLastCalledWith("steer");
+  fireEvent.click(screen.getByRole("button", { name: "Cancel response" }));
+  expect(cancel).toHaveBeenCalledOnce();
 });

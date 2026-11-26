@@ -99,7 +99,6 @@ async def create_thread(
             uid=current_user.uid,
             agent_id=thread.agent_id,
             title=thread.title,
-            summary=thread.summary,
             metadata=thread.metadata,
             project_id=thread.project_id,
         )
@@ -122,11 +121,6 @@ async def create_thread(
         pinned_at=conversation.pinned_at,
         agent_id=str(conversation.agent_id),
         title=str(conversation.title),
-        summary=(
-            str(conversation.summary)
-            if conversation.summary is not None
-            else None
-        ),
         metadata=dict(conversation.conversation_metadata or {}),
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
@@ -217,7 +211,7 @@ async def update_thread(
     current_user: AuthenticatedUser,
     db: AsyncSession = Depends(get_db),
 ) -> ThreadSummaryResponse:
-    """更新指定对话的标题、摘要或用户元数据。"""
+    """更新指定对话的标题、归组或用户元数据。"""
     try:
         result = await thread_service.update_thread(
             db,
@@ -225,7 +219,6 @@ async def update_thread(
             thread_id=thread_id,
             fields=set(payload.model_fields_set),
             title=payload.title,
-            summary=payload.summary,
             metadata=payload.metadata,
             project_id=payload.project_id,
             pinned=payload.pinned,

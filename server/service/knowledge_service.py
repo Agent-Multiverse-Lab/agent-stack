@@ -8,9 +8,7 @@ from uuid import uuid4
 from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.service.model_service import resolve_runtime_model
 from server.entities.knowledge_workspace import KnowledgeSettings
-from src.database.repositories.knowledge_workspace_repository import KnowledgeWorkspaceRepository
 from src.configs import config as sys_config
 from src.database.models import (
     KnowledgeBase,
@@ -22,6 +20,7 @@ from src.database.repositories import (
     KnowledgeEmbeddingBindingRepository,
     KnowledgeFileRepository,
 )
+from src.database.repositories.knowledge_workspace_repository import KnowledgeWorkspaceRepository
 from src.knowledge.base import KnowledgeRecord
 from src.knowledge.embedding_service import EmbeddingService
 from src.knowledge.factory import KnowledgeFactory
@@ -31,11 +30,12 @@ from src.knowledge.store.milvus.milvus import MilvusKnowledge
 from src.knowledge.store.neo4j.neo4j_store import get_graph_store
 from src.model import (
     RerankDocument,
+    get_enabled_model,
+    load_chat_model,
     load_embedding_model,
     load_reranker,
-    resolve_embedding_model,
 )
-from src.model.runtime import create_chat_model
+from src.model.service import list_models
 from src.storage.minio import get_storage, sanitize_filename
 from src.utils import logger
 
@@ -272,7 +272,7 @@ async def index_file(
 
         binding = await bindings.get(uid=uid, kb_id=kb_id)
         binding_created = binding is None
-        embedding, resolved_spec, batch_size = _create_embedding_service(
+        embedding, resolved_spec, batch_size = await _create_embedding_service(db,
             binding.embedding_model_spec if binding is not None else settings.embedding_model_spec,
             expected_dimension=(
                 binding.embedding_dimension if binding is not None else None
@@ -369,7 +369,7 @@ async def search(
         raise ValueError("知识库检索 limit 必须大于 0")
 
     binding = await _require_binding(db, uid, kb_id)
-    embedding, _, _ = _create_embedding_service(
+    embedding, _, _ = await _create_embedding_service(db,
         binding.embedding_model_spec,
         expected_dimension=binding.embedding_dimension,
         batch_size=binding.embedding_batch_size,
@@ -405,6 +405,7 @@ async def search(
 
     try:
         reranked_hits = await _rerank_hits(
+            db=db,
             query=query,
             hits=hits,
             limit=limit,
@@ -638,12 +639,29 @@ async def get_file_markdown(
     }
 
 
+async def _require_chat_model_ref(
+    db: AsyncSession,
+    model_ref: str | None = None,
+) -> str:
+    """校验显式传入的聊天模型，或从已启用目录中选择首个可用聊天模型。"""
+    if isinstance(model_ref, str) and model_ref.strip():
+        resolved = await get_enabled_model(db, model_ref.strip(), category="chat")
+        return resolved.model_ref
+    catalog = await list_models(db, category="chat")
+    for entry in catalog.values():
+        models = entry.get("models") or []
+        if models:
+            return f"{entry['provider_id']}:{models[0]['model_id']}"
+    raise ValueError("未配置可用的聊天模型")
+
+
 async def extract_file(
     db: AsyncSession,
     *,
     uid: str,
     kb_id: str,
     file_id: str,
+    model_ref: str | None = None,
 ) -> dict[str, Any]:
     """抽取知识文件实体关系并写入 Neo4j 与 Milvus 实体集合。"""
     knowledge_files = KnowledgeFileRepository(db)
@@ -686,9 +704,9 @@ async def extract_file(
                 len(markdown_text),
             )
             markdown_text = markdown_text[:_EXTRACT_MAX_CHARS]
-        connection = await resolve_runtime_model(db, sys_config.flash_model)
+        chat_model_ref = await _require_chat_model_ref(db, model_ref)
         result = await GraphExtractor(
-            model=create_chat_model(connection)
+            model=await load_chat_model(chat_model_ref, db=db)
         ).extract(markdown_text)
 
         entities = []
@@ -714,7 +732,7 @@ async def extract_file(
             await _require_binding(db, uid, kb_id) if entities else None
         )
         if binding is not None:
-            embedding, _, _ = _create_embedding_service(
+            embedding, _, _ = await _create_embedding_service(db,
                 binding.embedding_model_spec,
                 expected_dimension=binding.embedding_dimension,
                 batch_size=binding.embedding_batch_size,
@@ -857,7 +875,7 @@ async def search_entities(
 ) -> dict[str, Any]:
     """使用实体向量检索知识库实体。"""
     binding = await _require_binding(db, uid, kb_id)
-    embedding, _, _ = _create_embedding_service(
+    embedding, _, _ = await _create_embedding_service(db,
         binding.embedding_model_spec,
         expected_dimension=binding.embedding_dimension,
         batch_size=binding.embedding_batch_size,
@@ -891,6 +909,7 @@ async def chat(
     kb_id: str,
     query: str,
     limit: int,
+    model_ref: str | None = None,
 ) -> dict[str, Any]:
     """基于知识库检索结果同步生成带引用的回答。"""
     result = await search(
@@ -927,8 +946,8 @@ async def chat(
             zip(citations, range(1, len(citations) + 1), strict=True)
         )
     )
-    connection = await resolve_runtime_model(db, sys_config.default_model)
-    model = create_chat_model(connection)
+    chat_model_ref = await _require_chat_model_ref(db, model_ref)
+    model = await load_chat_model(chat_model_ref, db=db)
     response = await model.ainvoke(
         [
             SystemMessage(content=_CHAT_SYSTEM_PROMPT),
@@ -952,13 +971,15 @@ def _get_knowledge(knowledge_type: str) -> MilvusKnowledge:
 
 async def _rerank_hits(
     *,
+    db: AsyncSession,
     query: str,
     hits: Sequence[Mapping[str, Any]],
     limit: int,
 ) -> list[dict[str, Any]]:
     """重排 Milvus 命中并保留原始业务字段和向量分数。"""
     documents, hits_by_id = _prepare_rerank_documents(hits)
-    results = await load_reranker().arerank(
+    reranker = await load_reranker(db=db)
+    results = await reranker.arerank(
         query,
         documents,
         top_n=limit,
@@ -1036,17 +1057,21 @@ async def _require_binding(
     return binding
 
 
-def _create_embedding_service(
+async def _create_embedding_service(
+    db: AsyncSession,
     model_spec: str | None,
     *,
     expected_dimension: int | None,
     batch_size: int | None,
 ) -> tuple[EmbeddingService, str, int]:
-    """根据统一 Provider 配置装配无基础设施依赖的向量服务。"""
-    resolved_spec, _, provider = resolve_embedding_model(model_spec)
-    resolved_batch_size = batch_size or provider.batch_size
+    """根据入库模型配置装配无基础设施依赖的向量服务。"""
+    resolved_spec = (model_spec or sys_config.embed_model).strip()
+    if not resolved_spec:
+        raise ValueError("未配置 Embedding 模型，应设置 EMBED_MODEL=provider_id:model_id")
+    resolved_batch_size = batch_size or sys_config.embedding_batch_size
+    embedding_model = await load_embedding_model(resolved_spec, db=db)
     service = EmbeddingService(
-        load_embedding_model(resolved_spec),
+        embedding_model,
         model_spec=resolved_spec,
         batch_size=resolved_batch_size,
         expected_dimension=expected_dimension,

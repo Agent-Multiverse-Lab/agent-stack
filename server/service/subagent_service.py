@@ -5,12 +5,11 @@ from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import server.service.agent_run_service as agent_run_service
+from server.service.arq_queue_servcie import enqueue_agent_run
 from server.service.input_message_service import AgentInputMsg
-from server.service.model_service import resolve_runtime_model
 from src.database.models import AgentRun, Conversation, Message
 from src.database.repositories import AgentRepository, AgentRunRepository, ConversationRepository
-from src.model import resolve_chat_model_selection
+from src.model import get_enabled_model
 
 
 class SubAgentMessageRecord(TypedDict):
@@ -137,7 +136,7 @@ class SubAgentRunService:
             tool_call_id=tool_call_id,
             request_id=request_id,
         )
-        await agent_run_service.enqueue_agent_run(record["run_id"])
+        await enqueue_agent_run(record["run_id"])
         return record
 
     async def get_parent_run(self, *, created_by_run_id: str) -> AgentRun:
@@ -196,8 +195,14 @@ class SubAgentRunService:
             agent = await AgentRepository(self.db).get_by_slug_for_run_type(slug=agent_slug, run_type="subagent")
             if agent is None:
                 raise ValueError("子智能体不存在或已停用")
-            model = resolve_chat_model_selection(agent_model=(agent.agent_config or {}).get("model"))
-            await resolve_runtime_model(self.db, model)
+            agent_model = (agent.agent_config or {}).get("model")
+            selected_model = (
+                agent_model
+                if (isinstance(agent_model, str) and agent_model)
+                else (parent_run.run_metadata or {}).get("model")
+            )
+            resolved_model = await get_enabled_model(self.db, selected_model, category="chat")
+            model = resolved_model.model_ref
 
             child_thread_id = str(uuid4())
 

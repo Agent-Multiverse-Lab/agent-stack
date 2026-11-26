@@ -56,13 +56,22 @@ class FakeAgent:
 
 
 class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # 本组验证流协议；持久化和审计 SQL 由独立测试验证。
+        for current in (
+            patch.object(thread_service, "_build_model_message_audit_collector", return_value=None),
+            patch.object(thread_service, "save_message_from_langgraph_state", AsyncMock(return_value=None)),
+        ):
+            current.start()
+            self.addCleanup(current.stop)
+
     async def test_build_agent_runtime_looks_up_uuid_thread_for_user(self):
         thread_id = "b2308e62-68a3-433e-b051-7e0c218a9249"
         conversation_repository = SimpleNamespace(
             get_conversation_by_thread_id_for_user=AsyncMock(
                 return_value=SimpleNamespace(
                     uid="user-1",
-                    conversation_metadata={},
+                    conversation_metadata={"model": "dashscope:qwen3.8-max"},
                 )
             )
         )
@@ -101,7 +110,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                 db=db,
             )
 
-        self.assertEqual((agent_item, agent_instance, "dashscope/qwen3.8-max"), result)
+        self.assertEqual((agent_item, agent_instance, "dashscope:qwen3.8-max"), result)
         resolve_class.assert_called_once_with(agent_item.backend_id)
         resolve_class.return_value.assert_called_once_with()
         conversation_repository.get_conversation_by_thread_id_for_user.assert_awaited_once_with(
@@ -115,17 +124,14 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             run_id="run-1",
             thread_id="thread-1",
             request_id="request-1",
-            model="dashscope/qwen3.8-max",
+            model="dashscope:qwen3.8-max",
         )
 
-        self.assertEqual("dashscope/qwen3.8-max", context["model"])
+        self.assertEqual("dashscope:qwen3.8-max", context["model"])
 
     async def collect_events(self, agent: FakeAgent, *, conversation_metadata=None) -> list[dict]:
-        agent_item = SimpleNamespace(slug="test-agent", agent_config={"model": "dashscope/qwen3.8-max"})
-        model_id = thread_service.resolve_chat_model_selection(
-            conversation_model=(conversation_metadata or {}).get("model"),
-            agent_model=agent_item.agent_config["model"],
-        )
+        agent_item = SimpleNamespace(slug="test-agent", agent_config={"model": "dashscope:qwen3.8-max"})
+        model_id = (conversation_metadata or {}).get("model") or agent_item.agent_config["model"]
         input_message = SimpleNamespace(
             content="hello",
             image_content=None,
@@ -134,7 +140,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             langchain_msg=HumanMessage(content="hello"),
         )
         current_user = SimpleNamespace(uid="user-1")
-        save_messages = AsyncMock()
+        save_messages = AsyncMock(return_value=None)
         self.save_messages = save_messages
 
         with (
@@ -318,6 +324,35 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("interrupted", kwargs["error_type"])
         self.assertEqual("run-1", kwargs["run_id"])
 
+    async def test_resume_cancel_saves_checkpoint_before_partial_text(self):
+        order = []
+        class PartialResume(FakeAgent):
+            async def stream_message_by_resume(self, *_args, **_kwargs):
+                yield "messages", ({"event": "content-block-delta", "index": 0, "delta": {"type": "text-delta", "text": "恢复半句"}}, {"run_id": "model-1"})
+                raise asyncio.CancelledError()
+
+        async def save_checkpoint(**kwargs):
+            order.append("checkpoint")
+
+        async def save_partial(*args, **kwargs):
+            order.append("partial")
+            self.assertEqual(kwargs["full_msg"].content, "恢复半句")
+
+        with (
+            patch.object(thread_service, "_build_agent_runtime", AsyncMock(return_value=(SimpleNamespace(agent_config={}, slug="a"), PartialResume(), "test/model"))),
+            patch.object(thread_service, "_require_thread", AsyncMock(return_value=SimpleNamespace(conversation_metadata={}))),
+            patch.object(thread_service, "save_message_from_langgraph_state", save_checkpoint),
+            patch.object(thread_service, "save_partial_message", save_partial),
+            patch.object(thread_service.postgres_manager, "get_async_session_context", fake_session),
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                async for _ in thread_service.resume_agent_response(
+                    resume_input={"answer": "yes"}, thread_id="t", current_user=SimpleNamespace(uid="u"), db=object(),
+                    runtime_metadata={"run_id": "r", "request_id": "q", "worker_id": "w", "agent_slug": "a", "model": "test/model"},
+                ):
+                    pass
+        self.assertEqual(order, ["checkpoint", "partial"])
+
     async def test_v3_delta_populates_loading_response(self) -> None:
         metadata = {"run_id": "model-run-1"}
         events = await self.collect_events(
@@ -452,8 +487,8 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_chat_stream_loads_bound_model_into_runtime_context(self):
         agent = FakeAgent()
-        await self.collect_events(agent, conversation_metadata={"model": "deepseek/deepseek-v4-flash"})
-        self.assertEqual(agent.runtime_context["model"], "deepseek/deepseek-v4-flash")
+        await self.collect_events(agent, conversation_metadata={"model": "deepseek:deepseek-v4-flash"})
+        self.assertEqual(agent.runtime_context["model"], "deepseek:deepseek-v4-flash")
 
     async def test_resume_stream_passes_command_without_human_message(self) -> None:
         agent = FakeAgent()
@@ -464,7 +499,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             patch(
                 "server.service.thread_service._build_agent_runtime",
                 new_callable=AsyncMock,
-                return_value=(agent_item, agent, "dashscope/qwen3.8-max"),
+                return_value=(agent_item, agent, "dashscope:qwen3.8-max"),
             ),
             patch(
                 "server.service.thread_service._check_conv_status",
@@ -473,13 +508,13 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             ),
             patch(
                 "server.service.thread_service.save_message_from_langgraph_state",
-                new_callable=AsyncMock,
+                new=AsyncMock(return_value=None),
             ),
             patch(
                 "server.service.thread_service.check_agent_interrupt_handler",
                 new=no_interrupt,
             ),
-            patch.object(thread_service, "_require_thread", AsyncMock(return_value=SimpleNamespace(conversation_metadata={"model": "deepseek/deepseek-v4-flash"}))),
+            patch.object(thread_service, "_require_thread", AsyncMock(return_value=SimpleNamespace(conversation_metadata={"model": "deepseek:deepseek-v4-flash"}))),
         ):
             events = [
                 json.loads(chunk)
@@ -489,7 +524,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
                     runtime_metadata={
                         "run_id": "resume-run",
                         "request_id": "resume-request",
-                        "model": "dashscope/qwen3.8-max",
+                        "model": "dashscope:qwen3.8-max",
                         "worker_id": "worker-1",
                         "run_type": "resume",
                         "resume": {"answer": "PostgreSQL"},
@@ -501,7 +536,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual({"answer": "PostgreSQL"}, agent.resume_input.resume)
         self.assertEqual("finished", events[-1]["status"])
-        self.assertEqual(agent.runtime_context["model"], "dashscope/qwen3.8-max")
+        self.assertEqual(agent.runtime_context["model"], "dashscope:qwen3.8-max")
 
     async def test_resume_stream_error_yields_error_chunk(self) -> None:
         agent = FakeAgent(error=RuntimeError("resume failed"))
@@ -512,7 +547,7 @@ class ThreadStreamEventTest(unittest.IsolatedAsyncioTestCase):
             patch(
                 "server.service.thread_service._build_agent_runtime",
                 new_callable=AsyncMock,
-                return_value=(agent_item, agent, "dashscope/qwen3.8-max"),
+                return_value=(agent_item, agent, "dashscope:qwen3.8-max"),
             ),
             patch(
                 "server.service.thread_service._check_conv_status",

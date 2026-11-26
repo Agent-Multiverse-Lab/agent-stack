@@ -27,5 +27,4 @@
 - 主服务只下发最小参数，不传递敏感会话凭据。
 - API/Worker 不持有 Docker Socket；控制端口仅供可信服务访问。目标主机仍需完成部署及隔离验收。
 
-能力契约见 [cube-runtime](../spec/sandbox/cube-runtime/spec.md)，启动步骤见
-[部署指南](../../docker/cube/README.md)。
+启动步骤见 [部署指南](../../docker/cube/README.md)。

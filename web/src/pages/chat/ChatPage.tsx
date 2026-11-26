@@ -10,11 +10,13 @@ import {
   listChatAgents,
   renameThread,
 } from "@/api/thread";
+import { ApiError } from "@/api/client";
 import type { UploadedAttachmentResponse } from "@/api/attachment";
 import { Input } from "@/components/ui/input";
 import type { AgentRunEndEvent } from "@/api/agent-run";
 import { AskUser } from "@/pages/chat/components/AskUser";
 import { AgentMessageComposer } from "@/pages/chat/components/AgentMessageComposer";
+import { QueuedRequestList } from "@/pages/chat/components/QueuedRequestList";
 import {
   ChatWorkspaceSidebar,
   type ChatSidebarTab,
@@ -30,6 +32,14 @@ import { useTranslation } from "@/i18n";
 /** 识别切换会话或卸载页面时主动中断请求产生的异常。 */
 const isAbortError = (caught: unknown) =>
   caught instanceof DOMException && caught.name === "AbortError";
+
+/** 识别并发晋升导致操作返回 409 冲突并附带 run_id 的响应异常。 */
+const isPromotedConflictError = (caught: unknown) =>
+  caught instanceof ApiError &&
+  caught.status === 409 &&
+  typeof caught.data?.run_id === "string";
+
+const PROMOTE_RECHECK_DELAYS_MS = [80, 160, 320];
 
 interface ChatSubmission {
   query: string;
@@ -69,6 +79,14 @@ export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<ChatSidebarTab>("state");
 
+  /** 仅在版本仍匹配时拉取并同步等待区列表，避免流式输出期间覆盖页面消息。 */
+  async function syncQueuedRequests(id: string, expected: number) {
+    const detail = await getThreadDetail(id);
+    if (operation.current === expected) {
+      run.setQueuedRequests(detail.queued_requests ?? []);
+    }
+  }
+
   /** 中断当前页面的事件订阅并释放控制器引用。 */
   const abortStream = () => {
     controller.current?.abort();
@@ -96,7 +114,7 @@ export default function ChatPage() {
    * 断流后读取会话状态，仍在运行则间隔一秒重连；终态后重新加载持久化消息。
    */
   async function monitorRun(id: string, expected: number) {
-    const monitoredRunId = run.getState().runId;
+    let monitoredRunId = run.getState().runId ?? "";
     if (!monitoredRunId || !run.getState().streamUrl || !run.isActive()) return;
 
     while (
@@ -134,11 +152,11 @@ export default function ChatPage() {
         } catch {
           // 会话详情读取失败时保留已知 Run 状态，继续尝试订阅。
         }
-        if (
-          operation.current !== expected ||
-          run.getState().runId !== monitoredRunId
-        )
-          return;
+        if (operation.current !== expected) return;
+        if (run.isActive() && run.getState().runId !== monitoredRunId) {
+          monitoredRunId = run.getState().runId ?? "";
+          continue;
+        }
         if (!run.isActive()) {
           setError(
             run.getState().runStatus === "failed"
@@ -155,6 +173,9 @@ export default function ChatPage() {
 
       if (operation.current !== expected) return;
       setError("");
+      const hadSteerQueued = run
+        .getState()
+        .queuedRequests.some((item) => item.dispatch_policy === "steer");
       try {
         await loadThreadDetail(id, expected);
       } catch (caught) {
@@ -163,6 +184,46 @@ export default function ChatPage() {
         }
       }
       if (operation.current !== expected) return;
+      if (run.isActive() && run.getState().runId !== monitoredRunId) {
+        monitoredRunId = run.getState().runId ?? "";
+        continue;
+      }
+
+      const shouldRecheckPromotion =
+        endEvent.status === "completed" ||
+        (endEvent.status === "cancelled" &&
+          (hadSteerQueued ||
+            run
+              .getState()
+              .queuedRequests.some((item) => item.dispatch_policy === "steer")));
+      if (shouldRecheckPromotion) {
+        for (const delay of PROMOTE_RECHECK_DELAYS_MS) {
+          if (
+            operation.current !== expected ||
+            run.isActive() ||
+            run.getState().pendingInteraction ||
+            run.getState().queuedRequests.length === 0
+          ) {
+            break;
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, delay));
+          if (operation.current !== expected) return;
+          try {
+            await loadThreadDetail(id, expected);
+          } catch {
+            // 仅作等待区切换窗口的短暂补偿重拉，读取失败时不覆盖终态页面。
+          }
+          if (operation.current !== expected) return;
+          if (run.isActive() && run.getState().runId !== monitoredRunId) {
+            break;
+          }
+        }
+        if (run.isActive() && run.getState().runId !== monitoredRunId) {
+          monitoredRunId = run.getState().runId ?? "";
+          continue;
+        }
+      }
+
       if (endEvent.status === "failed") {
         setError(endEvent.error || t("Agent execution failed"));
       }
@@ -313,12 +374,95 @@ export default function ChatPage() {
     attachments.setAttachments(submission.attachments);
   }
 
+  /** 刷新会话详情并切流监控当前（或新晋升）的活动 Run。 */
+  async function refreshAndMonitorThread(threadId: string) {
+    const expected = ++operation.current;
+    abortStream();
+    const activeRun = await loadThreadDetail(threadId, expected);
+    if (operation.current === expected && activeRun && run.isActive()) {
+      void monitorRun(threadId, expected);
+    }
+  }
+
+  /** 在会话运行中以 enqueue 或 steer 即时请求后端落库，返回 200 时直接切流到新 Run。 */
+  async function sendBusySubmission(packet: {
+    query: string;
+    attachments: UploadedAttachmentResponse[];
+    dispatchPolicy: "enqueue" | "steer";
+  }) {
+    const currentThread = thread.getState().thread;
+    if (!currentThread || submissionInFlight.current) return false;
+    let activeExpected = operation.current;
+    submissionInFlight.current = true;
+    setSubmitting(true);
+    setError("");
+    try {
+      const result = await run.createRun({
+        query: packet.query,
+        agentId: currentThread.agent_id,
+        threadId: currentThread.thread_id,
+        attachmentFileIds: packet.attachments.map((item) => item.file_id),
+        modelId: selectedModelId || undefined,
+        dispatchPolicy: packet.dispatchPolicy,
+      });
+      if (operation.current !== activeExpected) return false;
+      setDraft("");
+      attachments.clearAttachments();
+      attachments.clearAttachmentError();
+      if (result.run_id !== null) {
+        activeExpected = ++operation.current;
+        abortStream();
+        const activeRun = await loadThreadDetail(
+          currentThread.thread_id,
+          activeExpected,
+        );
+        if (operation.current !== activeExpected) return false;
+        if (result.status === "failed") setError(t("Agent execution failed"));
+        if (activeRun && run.isActive()) {
+          void monitorRun(currentThread.thread_id, activeExpected);
+        }
+      } else {
+        await syncQueuedRequests(currentThread.thread_id, activeExpected);
+      }
+      return true;
+    } catch (caught) {
+      if (operation.current === activeExpected && !isAbortError(caught)) {
+        setError(errorText(caught));
+      }
+      return false;
+    } finally {
+      if (operation.current === activeExpected) {
+        submissionInFlight.current = false;
+        setSubmitting(false);
+      }
+    }
+  }
+
   /**
    * 处理普通发送：需要时先创建会话，再提交 chat Run、刷新消息并订阅事件。
-   * 首条文本消息触发标题生成；创建 Run 未成功返回时恢复本地输入。
+   * 运行中无论是 enqueue 还是 steer 均立即发送 POST /api/agent/runs 持久化到数据库等待区。
    */
-  async function submit() {
-    if (run.isActive() || run.getState().pendingInteraction) return;
+  async function submit(dispatchPolicy: "enqueue" | "steer" = "enqueue") {
+    if (run.getState().pendingInteraction) return;
+    if (run.isActive()) {
+      const currentThread = thread.getState().thread;
+      const selected = [...attachments.getState().attachments];
+      const query = draft.trim();
+      if (
+        !currentThread ||
+        submissionInFlight.current ||
+        attachments.getState().uploadingCount > 0 ||
+        (!query && selected.length === 0)
+      ) {
+        return;
+      }
+      await sendBusySubmission({
+        query,
+        attachments: selected,
+        dispatchPolicy,
+      });
+      return;
+    }
     const isFirstMessage = thread.getState().messages.length === 0;
     const submission = beginSubmission();
     if (!submission) return;
@@ -364,7 +508,7 @@ export default function ChatPage() {
       if (operation.current !== expected) return;
       if (createdRun.status === "failed")
         setError(t("Agent execution failed"));
-      await monitorRun(currentThread.thread_id, expected);
+      void monitorRun(currentThread.thread_id, expected);
     } catch (caught) {
       if (operation.current === expected && !isAbortError(caught)) {
         setError(errorText(caught));
@@ -372,7 +516,89 @@ export default function ChatPage() {
       }
     } finally {
       if (operation.current === expected) {
-        controller.current = null;
+        submissionInFlight.current = false;
+        setSubmitting(false);
+      }
+    }
+  }
+
+  /** 乐观移除等待区条目并调用逻辑软取消接口；409 已晋升时自动接入新 Run，其余失败回滚。 */
+  async function removeQueuedRequest(requestId: string) {
+    const currentThread = thread.getState().thread;
+    if (!currentThread) return;
+    const expected = operation.current;
+    const previous = run.getState().queuedRequests;
+    run.setQueuedRequests((items) =>
+      items.filter((item) => item.request_id !== requestId),
+    );
+    setError("");
+    try {
+      await run.cancelQueuedRequest(requestId);
+      if (operation.current !== expected) return;
+      await syncQueuedRequests(currentThread.thread_id, expected);
+    } catch (caught) {
+      if (operation.current !== expected || isAbortError(caught)) return;
+      if (isPromotedConflictError(caught)) {
+        try {
+          await refreshAndMonitorThread(currentThread.thread_id);
+        } catch (refreshCaught) {
+          if (!isAbortError(refreshCaught)) {
+            setError(errorText(refreshCaught));
+          }
+        }
+        return;
+      }
+      run.setQueuedRequests(previous);
+      setError(errorText(caught));
+    }
+  }
+
+  /** 将等待区请求原地升级为 steer（202），或在会话空闲时就地晋升执行（200）。 */
+  async function steerQueuedRequest(requestId: string) {
+    const currentThread = thread.getState().thread;
+    if (!currentThread || submissionInFlight.current) return;
+    let activeExpected = operation.current;
+    submissionInFlight.current = true;
+    setSubmitting(true);
+    setError("");
+    try {
+      const result = await run.steerQueuedRequest(requestId);
+      if (operation.current !== activeExpected) return;
+      if (result.run_id !== null) {
+        activeExpected = ++operation.current;
+        abortStream();
+        const activeRun = await loadThreadDetail(
+          currentThread.thread_id,
+          activeExpected,
+        );
+        if (operation.current !== activeExpected) return;
+        if (result.status === "failed") setError(t("Agent execution failed"));
+        if (activeRun && run.isActive()) {
+          void monitorRun(currentThread.thread_id, activeExpected);
+        }
+      } else {
+        await syncQueuedRequests(currentThread.thread_id, activeExpected);
+      }
+    } catch (caught) {
+      if (operation.current !== activeExpected || isAbortError(caught)) return;
+      if (isPromotedConflictError(caught)) {
+        try {
+          await refreshAndMonitorThread(currentThread.thread_id);
+        } catch (refreshCaught) {
+          if (!isAbortError(refreshCaught)) {
+            setError(errorText(refreshCaught));
+          }
+        }
+        return;
+      }
+      setError(errorText(caught));
+      try {
+        await syncQueuedRequests(currentThread.thread_id, activeExpected);
+      } catch {
+        // 同步失败时不覆盖已记录的业务错误提示。
+      }
+    } finally {
+      if (operation.current === activeExpected) {
         submissionInFlight.current = false;
         setSubmitting(false);
       }
@@ -445,7 +671,7 @@ export default function ChatPage() {
     runState.cancelling ||
     runState.resuming ||
     Boolean(pending) ||
-    (submitting && !active);
+    submitting;
   const docked = threadState.messages.length > 0 || Boolean(pending);
   const displayedError = attachmentState.uploadError || error;
   const conversationTitle =
@@ -599,6 +825,16 @@ export default function ChatPage() {
                 submit={(answers) => void submitResume(answers)}
               />
             )}
+            {runState.queuedRequests.length > 0 && (
+              <QueuedRequestList
+                requests={runState.queuedRequests}
+                isActive={active}
+                hasPendingInteraction={Boolean(pending)}
+                isSubmitting={submitting}
+                onSteer={(requestId) => void steerQueuedRequest(requestId)}
+                onRemove={(requestId) => void removeQueuedRequest(requestId)}
+              />
+            )}
             <AgentMessageComposer
               draft={draft}
               setDraft={setDraft}
@@ -614,7 +850,7 @@ export default function ChatPage() {
               selectModel={selectModel}
               upload={(files) => void attachments.uploadFiles(files)}
               removeAttachment={attachments.removeAttachment}
-              submit={() => void submit()}
+              submit={(policy) => void submit(policy)}
               cancel={() => void cancel()}
             />
           </div>

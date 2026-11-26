@@ -359,6 +359,51 @@ class AgentRunOwnershipTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(other_conv_found)
 
+    async def test_unresumed_interrupted_blocks_delete_and_can_cancel(self):
+        self.run.agent_status = "interrupted"
+        self.db.commit()
+
+        self.assertTrue(
+            await self.repository.has_active_for_conversations(
+                conversation_ids=[1], uid="user-1"
+            )
+        )
+
+        cancelled = await self.repository.request_cancel("run-1")
+        self.db.commit()
+        self.assertIsNotNone(cancelled)
+        self.assertEqual(cancelled.agent_status, "cancelled")
+        self.assertIsNotNone(cancelled.finished_at)
+        self.assertFalse(
+            await self.repository.has_active_for_conversations(
+                conversation_ids=[1], uid="user-1"
+            )
+        )
+
+    async def test_resumed_interrupted_is_not_active_and_cancel_keeps_status(self):
+        self.run.agent_status = "interrupted"
+        resume_child = AgentRun(
+            id="run-resume-1",
+            uid="user-1",
+            conversation_id=1,
+            thread_id="thread-1",
+            agent_id="LeaderAgent",
+            run_type="resume",
+            created_by_run_id="run-1",
+            agent_status="completed",
+        )
+        self.db.add(resume_child)
+        self.db.commit()
+
+        self.assertFalse(
+            await self.repository.has_active_for_conversations(
+                conversation_ids=[1], uid="user-1"
+            )
+        )
+        unchanged = await self.repository.request_cancel("run-1")
+        self.db.commit()
+        self.assertEqual(unchanged.agent_status, "interrupted")
+
 
 
 if __name__ == "__main__":

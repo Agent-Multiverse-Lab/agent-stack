@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from server.service import model_service as service
+from src.model import service
 from test.test_model_repository import SQLiteModelTestCase
 
 
@@ -36,7 +36,9 @@ class ModelCatalogTest(SQLiteModelTestCase):
             name="Qwen",
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             enabled_models=[
-                {"model_id": "qwen3.8-max", "model_type": "qwen"},
+                {"model_id": "qwen3.8-max", "category": "chat", "capabilities": ["tools"]},
+                {"model_id": "text-embedding-v4", "category": "embedding", "capabilities": []},
+                {"model_id": "qwen3-rerank", "category": "rerank", "capabilities": []},
             ],
         )
         await self.insert_provider(
@@ -44,66 +46,69 @@ class ModelCatalogTest(SQLiteModelTestCase):
             name="Disabled",
             is_enabled=False,
             enabled_models=[
-                {"model_id": "hidden", "model_type": "openai"},
+                {"model_id": "hidden", "category": "chat", "capabilities": []},
             ],
         )
         await self.db.commit()
 
-    async def test_builds_public_catalog_from_enabled_database_providers(self):
-        catalog = await service.build_model_list(self.db)
-
-        self.assertEqual(["dashscope/qwen3.8-max"], [item.id for item in catalog.models])
-        model = catalog.models[0]
+    async def test_builds_grouped_catalog_from_enabled_database_providers(self):
+        catalog = await service.build_model_catalog(self.db, category="chat")
+        self.assertEqual(list(catalog.keys()), ["dashscope"])
+        self.assertEqual(catalog["dashscope"]["provider_id"], "dashscope")
+        self.assertEqual(catalog["dashscope"]["display_name"], "Qwen")
         self.assertEqual(
-            (model.display_name, model.version, model.icon),
-            ("Qwen", "3.8 Max", "qwen"),
+            catalog["dashscope"]["models"],
+            [{"model_id": "qwen3.8-max", "category": "chat", "capabilities": ["tools"]}],
         )
-        self.assertTrue(model.is_available)
+        self.assertNotIn("id", catalog["dashscope"]["models"][0])
+        self.assertNotIn("default_model", catalog)
 
-    async def test_cache_hit_returns_strict_cached_catalog_without_rewrite(self):
+        embedding_catalog = await service.build_model_catalog(self.db, category="embedding")
+        self.assertEqual(
+            embedding_catalog["dashscope"]["models"],
+            [{"model_id": "text-embedding-v4", "category": "embedding", "capabilities": []}],
+        )
+
+    async def test_cache_hit_returns_filtered_catalog_without_rewrite(self):
         cached_catalog = {
-            "default_model": "dashscope/cached-model",
-            "fallback_model": "",
-            "flash_model": "",
-            "image_model": "",
-            "models": [
-                {
-                    "id": "dashscope/cached-model",
-                    "name": "cached-model",
-                    "display_name": "Qwen",
-                    "version": "cached-model",
-                    "provider": "dashscope",
-                    "icon": "qwen",
-                    "is_available": True,
-                    "is_default": True,
-                    "is_fallback": False,
-                    "is_flash": False,
-                }
-            ],
+            "dashscope": {
+                "provider_id": "dashscope",
+                "display_name": "Qwen",
+                "models": [
+                    {"model_id": "cached-chat", "category": "chat", "capabilities": []},
+                    {"model_id": "cached-emb", "category": "embedding", "capabilities": []},
+                ],
+            }
         }
         redis = FakeRedis(json.dumps(cached_catalog).encode())
 
         with patch.object(service, "get_async_redis_client", return_value=redis):
-            result = await service.list_models(self.db)
+            chat_result = await service.list_models(self.db, category="chat")
+            emb_result = await service.list_models(self.db, category="embedding")
 
-        self.assertEqual(cached_catalog, result.model_dump())
-        self.assertEqual(service.MODEL_LIST_CACHE_KEY, redis.get_key)
+        self.assertEqual(chat_result["dashscope"]["models"][0]["model_id"], "cached-chat")
+        self.assertEqual(len(chat_result["dashscope"]["models"]), 1)
+        self.assertEqual(emb_result["dashscope"]["models"][0]["model_id"], "cached-emb")
+        self.assertEqual(service.MODEL_CATALOG_CACHE_KEY, redis.get_key)
         self.assertIsNone(redis.set_arguments)
 
-    async def test_cache_miss_builds_from_database_and_sets_ttl(self):
+    async def test_cache_miss_builds_full_catalog_and_sets_ttl(self):
         redis = FakeRedis()
 
         with patch.object(service, "get_async_redis_client", return_value=redis):
-            result = await service.list_models(self.db)
+            result = await service.list_models(self.db, category="chat")
 
         key, raw_catalog, ttl = redis.set_arguments
-        self.assertEqual(service.MODEL_LIST_CACHE_KEY, key)
+        self.assertEqual(service.MODEL_CATALOG_CACHE_KEY, key)
         self.assertEqual(service.MODEL_LIST_CACHE_TTL_SECONDS, ttl)
-        self.assertEqual(result.model_dump(), json.loads(raw_catalog))
+        stored = json.loads(raw_catalog)
+        self.assertEqual(len(stored["dashscope"]["models"]), 3)
+        self.assertEqual(len(result["dashscope"]["models"]), 1)
+        self.assertEqual(result["dashscope"]["models"][0]["model_id"], "qwen3.8-max")
 
     async def test_invalid_cache_and_redis_failure_fall_back_to_database(self):
         for redis in (
-            FakeRedis(b'{"models":[{"id":"incomplete"}]}'),
+            FakeRedis(b'{"dashscope":{"models":[{"id":"incomplete"}]}}'),
             FakeRedis(error=RedisConnectionError("unavailable")),
         ):
             with self.subTest(redis=redis), patch.object(
@@ -111,9 +116,9 @@ class ModelCatalogTest(SQLiteModelTestCase):
                 "get_async_redis_client",
                 return_value=redis,
             ):
-                result = await service.list_models(self.db)
+                result = await service.list_models(self.db, category="chat")
 
             self.assertEqual(
-                ["dashscope/qwen3.8-max"],
-                [item.id for item in result.models],
+                ["qwen3.8-max"],
+                [item["model_id"] for item in result["dashscope"]["models"]],
             )

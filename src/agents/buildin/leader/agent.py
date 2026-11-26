@@ -11,7 +11,6 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
 from server.service.mcp_service import get_mcp_tools
-from server.service.model_service import load_chat_model
 from src.agents.backends.composite_backend import (
     ROUTE_SKILL,
     create_composite_backend,
@@ -25,11 +24,13 @@ from src.agents.buildin.leader.prompt import TODO_MIDDLEWARE_SYSTEM_PROMPT, buil
 from src.agents.buildin.leader.tools import ask_user, calculator
 from src.agents.middlewares.memory_middleware import create_memory_middleware
 from src.agents.middlewares.sandbox_middleware import create_sandbox_middleware
+from src.agents.middlewares.steer_stop_middleware import SteerStopMiddleware
 from src.agents.middlewares.subagent_middlware import create_subagent_middleware
 from src.agents.middlewares.summary_middleware import (
     create_summary_middleware_from_context,
 )
 from src.knowledge.tools import web_search
+from src.model import load_chat_model
 
 
 class LeaderAgent(BaseAgent):
@@ -44,6 +45,7 @@ class LeaderAgent(BaseAgent):
         backend = create_composite_backend(context)
         delegation = await create_subagent_middleware(parent_context=context)
         return [
+            SteerStopMiddleware(),
             create_sandbox_middleware(),
             create_custom_filesystem_middleware(
                 context=context,

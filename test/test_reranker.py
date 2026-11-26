@@ -4,7 +4,7 @@ import json
 import unittest
 from collections.abc import Sequence
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
@@ -12,7 +12,7 @@ from server.service import knowledge_service as knowledge_service_module
 from src.configs import config as sys_config
 from src.model import (
     BaseReranker,
-    DashScopeReranker,
+    HttpReranker,
     RerankDocument,
     RerankError,
     load_reranker,
@@ -86,8 +86,8 @@ class BaseRerankerTest(unittest.IsolatedAsyncioTestCase):
             )
 
 
-class DashScopeRerankerTest(unittest.IsolatedAsyncioTestCase):
-    """验证 DashScope 请求和响应适配。"""
+class HttpRerankerTest(unittest.IsolatedAsyncioTestCase):
+    """验证 HTTP Reranker 请求和响应适配。"""
 
     async def test_sends_expected_payload_and_maps_response_indices(
         self,
@@ -111,7 +111,7 @@ class DashScopeRerankerTest(unittest.IsolatedAsyncioTestCase):
 
         transport = httpx.MockTransport(handler)
         async with httpx.AsyncClient(transport=transport) as client:
-            reranker = DashScopeReranker(
+            reranker = HttpReranker(
                 model="qwen3-rerank",
                 api_key="test-key",
                 endpoint="https://example.com/reranks",
@@ -167,7 +167,7 @@ class DashScopeRerankerTest(unittest.IsolatedAsyncioTestCase):
 
         transport = httpx.MockTransport(handler)
         async with httpx.AsyncClient(transport=transport) as client:
-            reranker = DashScopeReranker(
+            reranker = HttpReranker(
                 model="qwen3-rerank",
                 api_key="test-key",
                 endpoint="https://example.com/reranks",
@@ -185,25 +185,43 @@ class DashScopeRerankerTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn("sensitive provider body", str(context.exception))
 
-    def test_loader_uses_rerank_environment_fields(self) -> None:
-        """统一构造入口应从配置读取 API Key、URL 和超时。"""
-        with (
-            patch.object(sys_config, "rerank_model", "dashscope/qwen3-rerank"),
-            patch.object(sys_config, "dashscope_api_key", "test-key"),
-            patch.object(
-                sys_config,
-                "dashscope_rerank_url",
-                "https://example.com/reranks",
-            ),
-            patch.object(
-                sys_config,
-                "rerank_request_timeout_seconds",
-                12.0,
-            ),
-        ):
-            reranker = load_reranker()
+    async def test_loader_uses_rerank_database_provider_and_env_url(self) -> None:
+        """统一构造入口应从入库 Provider 读取 API Key、URL 和超时。"""
+        from test.test_model_repository import SQLiteModelTestCase
 
-        self.assertIsInstance(reranker, DashScopeReranker)
+        case = SQLiteModelTestCase()
+        await case.asyncSetUp()
+        try:
+            await case.insert_provider(
+                "dashscope",
+                name="Qwen",
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                api_key="DASHSCOPE_API_KEY",
+                is_enabled=True,
+                enabled_models=[
+                    {"model_id": "qwen3-rerank", "category": "rerank"}
+                ],
+            )
+            await case.db.commit()
+            with (
+                patch.object(sys_config, "rerank_model", "dashscope:qwen3-rerank"),
+                patch.object(sys_config, "dashscope_api_key", "test-key"),
+                patch.object(
+                    sys_config,
+                    "dashscope_rerank_url",
+                    "https://example.com/reranks",
+                ),
+                patch.object(
+                    sys_config,
+                    "rerank_request_timeout_seconds",
+                    12.0,
+                ),
+            ):
+                reranker = await load_reranker(db=case.db)
+        finally:
+            await case.asyncTearDown()
+
+        self.assertIsInstance(reranker, HttpReranker)
         self.assertEqual("https://example.com/reranks", reranker.endpoint)
         self.assertEqual(12.0, reranker.request_timeout)
 
@@ -282,6 +300,18 @@ class KnowledgeRerankServiceTest(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(
                 knowledge_service_module,
+                "_workspace_settings",
+                AsyncMock(
+                    return_value=SimpleNamespace(
+                        top_k=8,
+                        candidate_limit=50,
+                        min_score=None,
+                        rerank=True,
+                    )
+                ),
+            ),
+            patch.object(
+                knowledge_service_module,
                 "KnowledgeEmbeddingBindingRepository",
                 return_value=FakeBindingRepository(),
             ),
@@ -293,26 +323,23 @@ class KnowledgeRerankServiceTest(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 knowledge_service_module,
                 "_create_embedding_service",
-                return_value=(
-                    FakeEmbeddingService(),
-                    "mock/embedding",
-                    2,
+                AsyncMock(
+                    return_value=(
+                        FakeEmbeddingService(),
+                        "mock/embedding",
+                        2,
+                    )
                 ),
             ),
             patch.object(
                 knowledge_service_module,
                 "load_reranker",
-                return_value=FakeReranker([(0, 0.2), (1, 0.95)]),
+                AsyncMock(return_value=FakeReranker([(0, 0.2), (1, 0.95)])),
             ),
             patch.object(
                 knowledge_service_module.sys_config,
                 "rerank_model",
-                "dashscope/qwen3-rerank",
-            ),
-            patch.object(
-                knowledge_service_module.sys_config,
-                "rerank_candidate_limit",
-                50,
+                "dashscope:qwen3-rerank",
             ),
         ):
             result = await knowledge_service_module.search(
@@ -335,7 +362,7 @@ class KnowledgeRerankServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             {
                 "applied": True,
-                "model_spec": "dashscope/qwen3-rerank",
+                "model_spec": "dashscope:qwen3-rerank",
                 "candidate_count": 2,
                 "result_count": 2,
             },

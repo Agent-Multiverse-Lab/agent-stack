@@ -5,11 +5,6 @@
 数据平台负责多来源影像目录的统一治理、受控检索和 OGC 服务发布控制。它不拥有 Agent Run，
 也不在目录 Gateway 中执行影像算法或渲染瓦片。
 
-行为规格入口：
-
-- [Satellite Imagery Catalog Spec](../spec/data-platform/satellite-imagery-catalog/spec.md)
-- [Imagery OGC Publishing Spec](../spec/data-platform/imagery-ogc-publishing/spec.md)
-
 ## 2. Runtime topology
 
 ```text

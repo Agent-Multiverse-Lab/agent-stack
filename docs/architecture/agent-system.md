@@ -4,12 +4,6 @@
 
 负责将上下文转为可执行的代理图，统一入口是 `LeaderAgent`，并通过中间件连接子代理与工具。
 
-行为规格入口：
-
-- [Context Management Spec](../spec/agent/context-management/spec.md)
-- [Subagent Delegation Spec](../spec/agent/subagent-delegation/spec.md)
-- [Agent Construction Spec](../spec/agent/agent-construction/spec.md)
-
 ## 2. Core Components
 
 - `src/agents/base_agent.py`：agent 执行基类。
@@ -34,10 +28,7 @@ agent 运行上下文只来自：
 上下文能力由 `src/agents/base_context.py` 和具体 Agent/SubAgent context 承载；
 `server/service/` 或 Worker 在执行入口组装运行时值，再通过方法契约传入 Agent。
 消息等单次调用数据属于 Graph State，不属于平行的运行配置来源。
-模型选择在入口按 Run 模型快照、会话 metadata 绑定、Agent 配置、应用默认值的优先级确定；
-构图和摘要仅消费 Context 快照。会话创建持久化 `conversation_metadata.model`，Agent 首次注册持久化
-`agent_config.model`，普通 Run 创建解析并保存 `run_metadata.model`。
-配置文件中的默认模型在 Context 实例或执行快照创建时读取，通过 `update_context()` 传入执行链路。
+模型引用采用显式 `provider_id:model_id` 并做零 fallback 校验，不从 `config.py` 读取默认/备用模型。主对话在创建 Run 时优先校验请求显式传入的模型（并同步更新会话 `conversation_metadata.model`），未传时仅读取会话已有绑定；SubAgent 使用自身 `agent_config.model`（未配置时沿用父 Run 模型）。Worker 执行仅消费冻结快照 `run_metadata.model`，通过 `update_context()` 传入执行链路，构图和摘要仅消费 Context 快照。
 
 ## 4. Sub-agent Rule
 

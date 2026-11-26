@@ -19,7 +19,7 @@ const now = "2026-11-13T00:00:00Z"
 beforeEach(() => {
   installBrowserStubs()
   projects = [{ project_id: "proj-1", name: "Research", pinned: false, pinned_at: null, created_at: now, updated_at: now }]
-  threads = [{ thread_id: "thread-1", title: "Analysis", summary: null, agent_id: "leader", metadata: {}, project_id: null, pinned: false, pinned_at: null, created_at: now, updated_at: now }]
+  threads = [{ thread_id: "thread-1", title: "Analysis", agent_id: "leader", metadata: {}, project_id: null, pinned: false, pinned_at: null, created_at: now, updated_at: now }]
   vi.mocked(listProjects).mockImplementation(async () => [...projects])
   vi.mocked(listThreads).mockImplementation(async (options) => ({
     items: threads.filter((thread) => (!options?.pinned || thread.pinned) && (!options?.unassigned || thread.project_id === null) && (options?.project_id === undefined || thread.project_id === options.project_id)),

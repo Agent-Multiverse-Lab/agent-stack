@@ -11,53 +11,46 @@ from cryptography.fernet import Fernet
 from pydantic import SecretStr
 from sqlalchemy import create_engine, inspect, text
 
-from server.service import model_service as service
 from src.configs import config
 from src.database.models import ModelProvider, User
-from src.database.repositories.model_repository import ModelRepository
-from src.model.provider import ModelProviderCreate
+from src.model.repository import ModelProviderRepository
 from test.test_model_repository import SQLiteModelTestCase
 
 
 class ModelGlobalProviderTest(SQLiteModelTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
-        refresh = patch.object(
-            service,
-            "refresh_model_list_cache",
-            new_callable=AsyncMock,
-            return_value=True,
+        await self.insert_provider(
+            "deepseek",
+            name="Shared",
+            base_url="https://example.com/v1",
+            api_key="shared-key",
+            is_enabled=True,
+            enabled_models=[{"model_id": "chat", "category": "chat", "capabilities": []}],
         )
-        refresh.start()
-        self.addCleanup(refresh.stop)
-        await service.create_provider(self.db, ModelProviderCreate(
-            provider_id="deepseek", name="Shared", base_url="https://example.com/v1",
-            api_key="shared-key", is_enabled=True,
-            enabled_models=[{"model_id": "chat", "model_type": "deepseek"}],
-        ))
+        await self.db.commit()
 
     async def test_repositories_share_global_configuration_and_deletion(self):
-        other = ModelRepository(self.db)
-        provider = await other.get_provider_by_id("deepseek")
+        other = ModelProviderRepository(self.db)
+        provider = await other.get_model_provider_by_id("deepseek")
         self.assertEqual(provider.name, "Shared")
-        self.assertEqual((await service.resolve_runtime_model(self.db, "deepseek/chat")).api_key.get_secret_value(), "shared-key")
-        await service.delete_provider(self.db, "deepseek")
-        self.assertIsNone(await other.get_provider_by_id("deepseek"))
+        await other.require_model("deepseek:chat")
+        await self.repository.delete_model_provider("deepseek")
+        await self.db.commit()
+        self.assertIsNone(await other.get_model_provider_by_id("deepseek"))
 
     async def test_deleting_user_does_not_delete_or_modify_provider(self):
         self.session.delete(self.session.get(User, 1))
         self.session.commit()
-        provider = await self.repository.get_provider_by_id("deepseek")
+        provider = await self.repository.get_model_provider_by_id("deepseek")
         self.assertEqual(provider.api_key, "shared-key")
         self.assertEqual(provider.name, "Shared")
         self.assertNotIn("user_id", ModelProvider.__table__.columns)
         self.assertEqual([column.name for column in ModelProvider.__table__.primary_key], ["provider_id"])
 
-    async def test_repository_rejects_identity_and_ownership_changes(self):
-        provider = await self.repository.get_provider_by_id("deepseek")
-        for values in ({"user_id": 2}, {"provider_id": "other"}):
-            with self.assertRaises(ValueError):
-                await self.repository.update_provider(provider, **values)
+    async def test_repository_rejects_identity_changes(self):
+        with self.assertRaises(ValueError):
+            await self.repository.update_model_provider("deepseek", provider_id="other")
 
 
 def migration(name):

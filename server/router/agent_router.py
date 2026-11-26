@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.entities.agent import (
@@ -9,13 +9,13 @@ from server.entities.agent import (
     AgentResponse,
     AgentRunCreateRequest,
     AgentUpdateRequest,
+    QueuedAgentRunResponse,
 )
-from server.service.agent_run_service import (
-    AgentRunConflictError,
-    cancel_run_service,
-    create_agent_run_service,
-    create_resume_agent_run_service,
-    stream_agent_run_events,
+from server.exception import AgentRunConflictError
+from server.service import (
+    agent_run_request_queue_service,
+    agent_run_request_service,
+    agent_run_service,
 )
 from server.service.agent_service import get_agent_context
 from server.utils.auth import AuthenticatedUser
@@ -91,15 +91,15 @@ async def create_agent_run(
     current_user: AuthenticatedUser,
     db: AsyncSession = Depends(get_db),
 ):
-    """先保存请求与输入，再按会话状态创建 Run，提交后入队。"""
+    """按会话状态和策略接收请求，创建 Run 提交后入队。"""
     if not config.enable_run_queue:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="请开启 ARQ 队列模式",
+            detail="请开启队列模式",
         )
 
     try:
-        run = await create_agent_run_service(
+        run = await agent_run_request_service.submit_agent_run_request(
             db=db,
             current_user=current_user,
             query=agentrun_request.query,
@@ -107,6 +107,7 @@ async def create_agent_run(
             thread_id=agentrun_request.thread_id,
             request_metadata=agentrun_request.request_metadata,
             image_content=agentrun_request.image_content,
+            dispatch_policy=agentrun_request.dispatch_policy,
         )
     except LookupError as exc:
         raise HTTPException(
@@ -124,6 +125,9 @@ async def create_agent_run(
             detail=str(exc),
         ) from exc
 
+    if isinstance(run, QueuedAgentRunResponse):
+        return JSONResponse(status_code=202, content=run.model_dump())
+
     return {
         "run_id": run.id,
         "thread_id": run.thread_id,
@@ -131,6 +135,86 @@ async def create_agent_run(
         "request_id": run.request_id,
         "stream_url": (
             f"/api/agent/runs/{run.id}/events?thread_id={run.thread_id}"
+        ),
+    }
+
+
+def _conflict_response(exc: AgentRunConflictError) -> JSONResponse:
+    if exc.run_id is not None:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc), "run_id": exc.run_id},
+        )
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=str(exc),
+    )
+
+
+@agent_router.delete("/runs/requests/{request_id}")
+async def cancel_queued_agent_run_request(
+    request_id: str,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """逻辑软取消等待区中的排队请求及其未绑定输入消息。"""
+    try:
+        return await agent_run_request_queue_service.cancel_queued_request(
+            db=db,
+            current_user=current_user,
+            request_id=request_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except AgentRunConflictError as exc:
+        return _conflict_response(exc)
+
+
+@agent_router.post("/runs/requests/{request_id}/steer")
+async def steer_queued_agent_run_request(
+    request_id: str,
+    current_user: AuthenticatedUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """将等待区请求原地升级为 steer，或在会话空闲时就地晋升执行。"""
+    if not config.enable_run_queue:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="请开启 ARQ 队列模式",
+        )
+
+    try:
+        result = await agent_run_request_queue_service.steer_queued_request(
+            db=db,
+            current_user=current_user,
+            request_id=request_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except AgentRunConflictError as exc:
+        return _conflict_response(exc)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    if isinstance(result, QueuedAgentRunResponse):
+        return JSONResponse(status_code=202, content=result.model_dump())
+
+    return {
+        "run_id": result.id,
+        "thread_id": result.thread_id,
+        "status": result.agent_status,
+        "request_id": result.request_id,
+        "stream_url": (
+            f"/api/agent/runs/{result.id}/events?thread_id={result.thread_id}"
         ),
     }
 
@@ -150,7 +234,7 @@ async def resume_agent_run(
         )
 
     try:
-        run = await create_resume_agent_run_service(
+        run = await agent_run_service.create_resume_agent_run(
             db=db,
             current_user=current_user,
             interrupted_run_id=interrupted_run_id,
@@ -195,7 +279,7 @@ async def cancel_agent_run(
 ):
     """请求取消当前用户的 Agent Run。"""
     try:
-        return await cancel_run_service(
+        return await agent_run_service.cancel_agent_run(
             run_id=run_id,
             current_user_id=current_user.uid,
             db=db,
@@ -226,7 +310,7 @@ async def stream_run_event(
         raise HTTPException(status_code=404, detail="Agent Run 不存在")
 
     return StreamingResponse(
-        stream_agent_run_events(
+        agent_run_service.stream_agent_run_events(
             run_id=run_id,
             current_uid=current_user.uid,
             thread_id=thread_id,

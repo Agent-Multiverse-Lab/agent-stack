@@ -49,6 +49,7 @@ export type HumanQuestion = HumanQuestionResponse
 export type InteractionRequired = InteractionRequiredResponse
 
 export interface AgentRunCreateInput {
+  dispatchPolicy?: "enqueue" | "reject" | "steer"
   query: string
   agentId: string
   threadId: string
@@ -115,6 +116,7 @@ export type ChatRenderItem =
     }
   | {
       kind: "agent_run"
+      stopReason?: string
       key: string
       runId: string
       threadId?: string

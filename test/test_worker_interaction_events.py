@@ -15,12 +15,13 @@ class WorkerInteractionEventTest(unittest.IsolatedAsyncioTestCase):
         nodes = [
             node for node in tree.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name in {"map_stream_event", "_finalize_run"}
+            and node.name in {"map_stream_event", "finalize_run"}
         ]
         self.namespace = {
             "Any": Any,
             "json": json,
             "set_run_terminal": AsyncMock(),
+            "dispatch_next_queued_request": AsyncMock(),
             "write_stream_event": AsyncMock(),
             "write_end_stream_event": AsyncMock(),
             "clear_agent_run_cancel_signal": AsyncMock(),
@@ -28,7 +29,7 @@ class WorkerInteractionEventTest(unittest.IsolatedAsyncioTestCase):
         }
         exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), "exec"), self.namespace)
         self.map_event = self.namespace["map_stream_event"]
-        self.finalize = self.namespace["_finalize_run"]
+        self.finalize = self.namespace["finalize_run"]
         self.questions = [{
             "question_id": "continue", "question": "Continue?",
             "options": [{"label": "Yes", "value": "yes"}],

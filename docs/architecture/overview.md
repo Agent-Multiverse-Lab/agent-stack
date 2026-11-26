@@ -12,7 +12,7 @@ Web/API -> Service -> Worker -> Agent Runtime -> Storage/RAG。
 - **Knowledge Domain**：文件上传、解析、切块、索引、检索、重排。
 - **Persistence Domain**：PostgreSQL / Redis / RustFS / Milvus 的状态与存储边界。
 - **Sandbox Domain**：外部能力执行隔离边界。
-- **Model Domain**：管理平台级 Chat 模型供应商预置、全局配置、脱敏模型列表和运行时连接解析。
+- **Model Domain**：管理平台级 Chat/Embedding/Rerank 模型供应商预置与配置、按厂商分组的已启用脱敏目录与运行时连接解析。
 - **Data Platform Domain**：卫星来源、集合、场景和波段资产的有界检索。
 
 ## 3. High-level Topology
@@ -33,7 +33,7 @@ SatelliteAgent -> Python gRPC Client -> Go Gateway -> PostgreSQL/PostGIS
 ## 4. Data Ownership
 
 - PostgreSQL: 用户、会话、消息、Run 及知识基础数据。
-- Redis: ARQ 队列、运行信号、`run:events:{run_id}` 流与可重建的全局模型展示列表。
+- Redis: ARQ 队列、运行信号、`run:events:{run_id}` 流与可重建的全量已启用模型脱敏目录。
 - RustFS: 知识文件和解析产物。
 - Milvus: 向量索引数据。
 
@@ -55,7 +55,7 @@ SatelliteAgent -> Python gRPC Client -> Go Gateway -> PostgreSQL/PostGIS
 | `src/database/` | SQLAlchemy 模型、会话和责任命名的仓储 | Redis Stream 或 Agent 推理 |
 | `src/storage/` | RustFS、Redis/ARQ 的基础设施适配 | Run 生命周期业务语义 |
 | `src/configs/` | 类型化配置、环境解析、默认值和校验 | 业务编排和可变运行时状态 |
-| `src/model/` | Provider-neutral 的 Chat、Embedding、Reranker 构造 | 数据库或向量库查询 |
+| `src/model/` | Chat/Embedding/Rerank 模型配置、预置、仓储、服务与运行时构造 | HTTP 路由与前端页面状态 |
 | `src/third_party/` | 外部 SDK 的小型兼容边界 | 应用策略和通用业务工具 |
 | `src/utils/` | 跨子系统复用的无状态通用帮助函数 | 单一子系统的领域逻辑 |
 | `docker/cube/` | CubeSandbox 部署、预检和运行验收 | 应用持久化和 Agent Run 编排 |
@@ -69,8 +69,8 @@ SatelliteAgent -> Python gRPC Client -> Go Gateway -> PostgreSQL/PostGIS
 ## 7. Document Ownership
 
 - 稳定的全局原则：[`docs/constitution.md`](../constitution.md)。
-- 系统拓扑和模块所有权：本目录。
-- 能力行为、合同和验收：[`docs/spec/`](../spec/README.md)。
+- 系统拓扑、模块所有权与长期不变量：本目录。
+- 进行中的单文件功能设计：[`docs/develop/`](../develop/README.md)（具体接口与字段定义以源码和测试为准）。
 - 长期技术取舍：[`docs/adr/`](../adr/README.md)。
 - 源码只实现并验证上述文档，不反向复制完整架构说明。
 

@@ -10,7 +10,6 @@ class ThreadRequest(BaseModel):
     """创建顶层对话的请求。"""
 
     title: str | None = None
-    summary: str | None = None
     agent_id: str
     metadata: dict[str, Any] | None = None
     project_id: str | None = Field(default=None, min_length=1, max_length=64)
@@ -36,7 +35,6 @@ class ThreadSummaryResponse(BaseModel):
     project_id: str | None = None
     pinned: bool = False
     pinned_at: datetime | None = None
-    summary: str | None
     agent_id: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
@@ -122,6 +120,16 @@ class ThreadListResponse(BaseModel):
     next_cursor: str | None
 
 
+class QueuedRunRequestItem(BaseModel):
+    """会话等待区中尚未晋升为 Run 的排队请求。"""
+
+    request_id: str
+    dispatch_policy: str
+    queue_seq: int | None = None
+    content: str
+    created_at: datetime
+
+
 class ThreadDetailResponse(BaseModel):
     """对话及其一页消息历史。"""
 
@@ -130,6 +138,7 @@ class ThreadDetailResponse(BaseModel):
     next_before_message_id: int | None
     active_run: ThreadRunMetadataResponse | None
     pending_interaction: InteractionRequired | None
+    queued_requests: list[QueuedRunRequestItem] = Field(default_factory=list)
 
 
 class ThreadUpdateRequest(BaseModel):
@@ -138,7 +147,6 @@ class ThreadUpdateRequest(BaseModel):
     title: str | None = Field(default=None, max_length=255)
     project_id: str | None = Field(default=None, min_length=1, max_length=64)
     pinned: bool | None = None
-    summary: str | None = None
     metadata: dict[str, Any] | None = None
 
 

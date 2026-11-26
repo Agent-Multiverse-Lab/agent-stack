@@ -1,33 +1,51 @@
-export interface ChatModelOption {
-  id: string
-  name: string
-  display_name: string
-  version: string
-  provider: string
-  icon: string
-  is_available: boolean
-  is_default: boolean
-  is_fallback: boolean
-  is_flash: boolean
-}
-
 export type ModelProviderId = string
+export type ModelProtocol = "openai_compatible" | "anthropic" | "gemini"
+export type ModelCategory = "chat" | "embedding" | "rerank"
 export type ChatCapability = "chat" | "vision" | "reasoning" | "tools" | "code" | "audio" | "video"
 
-export interface SettingsModel {
+export interface ModelCatalogItem {
   model_id: string
+  category: ModelCategory
   capabilities: ChatCapability[]
 }
 
-export interface ModelProviderMetadata {
+export interface ProviderModelCatalogEntry {
   provider_id: string
-  name: string
-  is_enabled: boolean
-  has_api_key: boolean
+  display_name: string
+  models: ModelCatalogItem[]
 }
 
-export interface ModelProvider extends ModelProviderMetadata {
+export type ModelCatalog = Record<string, ProviderModelCatalogEntry>
+
+export interface ModelApiResponse<T> {
+  status: "success"
+  data: T
+}
+
+export interface ChatModelOption {
+  id: string
+  model_id: string
+  name: string
+  provider: string
+  provider_name: string
+  capabilities: ChatCapability[]
+  is_available: boolean
+}
+
+export interface SettingsModel {
+  model_id: string
+  category: ModelCategory
+  capabilities: ChatCapability[]
+}
+
+export interface ModelProvider {
+  provider_id: string
+  name: string
+  protocol?: ModelProtocol
   base_url: string
-  protocol: "openai_compatible"
-  enabled_models: SettingsModel[]
+  embedding_base_url: string
+  rerank_base_url: string
+  is_enabled: boolean
+  has_api_key: boolean
+  models: SettingsModel[]
 }

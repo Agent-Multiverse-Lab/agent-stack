@@ -60,6 +60,7 @@ class ModelMessageAuditCollector:
         self.thread_id = thread_id
         self.worker_id = worker_id
         self._operations: dict[tuple[str, str], _ModelOperation] = {}
+        self.last_operation_id: str | None = None
 
     async def consume(self, message: Any, metadata: dict[str, Any] | None) -> None:
         """消费一条 raw messages ProtocolEvent；非生命周期消息保持无副作用。"""
@@ -119,6 +120,7 @@ class ModelMessageAuditCollector:
         operation_id = str(message.get("id") or metadata.get("run_id") or "").strip()
         if not operation_id:
             raise ValueError("message-start 缺少稳定 Model operation id")
+        self.last_operation_id = operation_id
         current_operation = self._operations.get(key)
         if current_operation is not None and current_operation.operation_id != operation_id:
             raise ValueError("同一 Model lifecycle 不能更换 operation id")

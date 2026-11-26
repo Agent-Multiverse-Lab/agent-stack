@@ -81,7 +81,7 @@ flowchart TB
 
 ## Next Steps
 
-1. **卫星数据资源库**：在现有目录表和 Go Gateway 基础上，完善 Asset key 迁移与 gRPC 契约；导入经过校验的 STAC 1.1.0 多来源元数据，并验证目标库的迁移、空间查询和项目隔离。详见[实施计划](docs/spec/data-platform/satellite-imagery-catalog/plan.md)和[任务清单](docs/spec/data-platform/satellite-imagery-catalog/tasks.md)。
+1. **卫星数据资源库**：在现有目录表和 Go Gateway 基础上，完善 Asset key 迁移与 gRPC 契约；导入经过校验的 STAC 1.1.0 多来源元数据，并验证目标库的迁移、空间查询和项目隔离。详见[数据平台架构](docs/architecture/data-platform-system.md)。
 2. **Go Data Platform MCP**：先定义接口与数据所有权，再提供面向 Agent 的受控资产操作、权限校验、处理任务、版本和血缘工具。该服务尚未实现；当前卫星目录查询仍走 `SatelliteAgent → Python gRPC 客户端 → Gateway`。
 
 ## 本地启动
@@ -115,7 +115,7 @@ npm run dev
 ## 文档
 
 - [系统架构与模块边界](docs/architecture/README.md)
-- [能力规格索引](docs/spec/README.md)
+- [进行中的功能设计](docs/develop/README.md)
 - [本地开发与验证](docs/development.md)
 - [卫星目录 Gateway](gateway/README.md)
 - [贡献规范](CONTRIBUTING.md)

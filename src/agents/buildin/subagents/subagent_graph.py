@@ -3,7 +3,6 @@
 from langchain.agents import create_agent
 
 from server.service.mcp_service import get_mcp_server_errors, get_mcp_tools, list_mcp_servers
-from server.service.model_service import load_chat_model
 from src.agents.backends.composite_backend import create_custom_filesystem_middleware
 from src.agents.base_agent import BaseAgent
 from src.agents.buildin.subagents.subagent_context import SubAgentContext
@@ -14,6 +13,7 @@ from src.agents.middlewares.image_validation_middleware import (
 from src.agents.middlewares.model_retry_middleware import create_model_retry_middleware
 from src.agents.middlewares.sandbox_middleware import create_sandbox_middleware
 from src.knowledge.tools import knowledge_search, web_search
+from src.model import load_chat_model
 from src.third_party.satellite_gateway.tools import build_satellite_catalog_tools
 
 

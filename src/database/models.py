@@ -18,7 +18,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from src.database.base import Base
-from src.database.credential_types import EncryptedCredential, EncryptedHeaders
 from src.database.satellite_models import (
     SatelliteBusinessScene,  # noqa: F401
     SatelliteCollection,  # noqa: F401
@@ -36,22 +35,36 @@ AUDIT_MESSAGE_TYPES = (MODEL_AUDIT_MESSAGE_TYPE, TOOL_AUDIT_MESSAGE_TYPE)
 
 
 class ModelProvider(Base):
-    """平台共享的聊天模型供应商配置。"""
+    """平台共享的模型供应商配置（支持 Chat / Embedding / Rerank）。"""
 
     __tablename__ = "model_provider"
 
-    provider_id = Column(String(64), primary_key=True)
-    name = Column(String(255), nullable=False)
-    base_url = Column(Text, nullable=False)
-    protocol = Column(String(32), nullable=False)
-    api_key = Column(EncryptedCredential(), nullable=False, default="")
-    extra_headers = Column(EncryptedHeaders(), nullable=False, default=dict)
-    is_enabled = Column(Boolean, nullable=False, default=False, server_default=false())
-    enabled_models = Column(JSON, nullable=False, default=list)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    provider_id = Column(String(64), primary_key=True, comment="模型供应商唯一标识")
+    name = Column(String(255), nullable=False, comment="供应商展示名称")
+    base_url = Column(Text, nullable=False, comment="Chat 接口基础地址")
+    embedding_base_url = Column(
+        Text, nullable=False, default="", server_default="", comment="Embedding 接口基础地址"
+    )
+    rerank_base_url = Column(
+        Text, nullable=False, default="", server_default="", comment="Rerank 接口基础地址"
+    )
+    protocol = Column(
+        String(32), nullable=False, comment="模型协议类型（openai_compatible/anthropic/gemini）"
+    )
+    api_key = Column(String, nullable=False, default="", comment="API 密钥或环境变量名")
+    extra_headers = Column(JSON, nullable=False, default=dict, comment="附加请求头配置")
+    is_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=false(), comment="是否启用该供应商"
+    )
+    enabled_models = Column(
+        JSON, nullable=False, default=list, comment="已启用的模型清单（含分类与能力）"
+    )
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), comment="创建时间"
+    )
     updated_at = Column(
         DateTime(timezone=True), nullable=False,
-        server_default=func.now(), onupdate=func.now(),
+        server_default=func.now(), onupdate=func.now(), comment="更新时间",
     )
 
 
@@ -105,7 +118,6 @@ class Conversation(Base):
     thread_id = Column(String(64), unique=True, index=True, nullable=False, comment="会话的thread_id")
     agent_id = Column(String(64), index=True, nullable=False, comment="当前会话绑定的agent")
     title = Column(String(255), nullable=False, comment="会话标题")
-    summary = Column(Text, nullable=True, comment="会话摘要")
     project_id = Column(String(64), ForeignKey("project.project_id", ondelete="SET NULL"), nullable=True, index=True)
     pinned_at = Column(DateTime(timezone=True), nullable=True)
     conversation_metadata = Column(JSON, nullable=False, default=dict, comment="会话元数据")
@@ -238,22 +250,27 @@ class ToolCall(Base):
 
 
 class AgentRunRequest(Base):
-    """已接收的聊天请求；输入由 trigger_message_id 指向的 Message 持有。"""
+    """输入关联与会话等待区；事务由持有会话锁的 Service 编排。"""
 
     __tablename__ = "agent_run_request"
+    __table_args__ = (
+        Index("ix_agent_run_request_thread_queued", "thread_id", "queue_seq",
+              postgresql_where=text("status = 'queued'"),
+              sqlite_where=text("status = 'queued'")),
+    )
 
     request_id = Column(String(128), primary_key=True)
     uid = Column(String(64), nullable=False)
-    conversation_id = Column(
-        Integer, ForeignKey("conversation.id", ondelete="CASCADE"),
-        nullable=False, index=True,
-    )
-    thread_id = Column(String(64), nullable=False)
+    thread_id = Column(String(64), nullable=False, index=True)
     agent_id = Column(String(128), nullable=False)
     trigger_message_id = Column(
         Integer, ForeignKey("message.id", ondelete="CASCADE"), nullable=False,
     )
+    dispatch_policy = Column(String(16), nullable=False, server_default="enqueue")
+    status = Column(String(16), nullable=False, server_default="dispatched")
+    queue_seq = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    trigger_message = relationship("Message")
 
 
 class AgentRun(Base):

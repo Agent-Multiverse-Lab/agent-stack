@@ -35,11 +35,12 @@ vi.mock("@/api/attachment", () => ({
 vi.mock("@/i18n", () => ({ useTranslation: () => ({ t: (value: string) => value }) }));
 vi.mock("@/pages/chat/hooks/useAgentRun", () => ({
   useAgentRun: () => ({
-    state: { pendingInteraction: null, cancelling: false, resuming: false },
-    getState: () => ({ pendingInteraction: null }),
+    state: { pendingInteraction: null, queuedRequests: [], cancelling: false, resuming: false },
+    getState: () => ({ pendingInteraction: null, queuedRequests: [] }),
     isActive: () => false,
     clearRun: () => {},
     restoreRunFromThread: () => null,
+    setQueuedRequests: () => {},
     createRun: mocks.createRun,
   }),
 }));
@@ -74,21 +75,23 @@ vi.mock("@/pages/chat/components/AgentMessageComposer", () => ({
   ),
 }));
 
-const qwen = "dashscope/qwen3.8-max";
-const deepseek = "deepseek/deepseek-v4-flash";
+const qwen = "dashscope:qwen4-max";
+const deepseek = "deepseek:deepseek-flash";
 const catalog = {
-  default_model: qwen,
-  fallback_model: "",
-  flash_model: deepseek,
-  image_model: "",
-  models: [qwen, deepseek].map((id) => ({
-    id, name: id, display_name: id, version: "", provider: id.split("/")[0], icon: "",
-    is_available: true, is_default: id === qwen, is_fallback: false, is_flash: id === deepseek,
-  })),
+  dashscope: {
+    provider_id: "dashscope",
+    display_name: "Qwen",
+    models: [{ model_id: "qwen4-max", category: "chat" as const, capabilities: [] }],
+  },
+  deepseek: {
+    provider_id: "deepseek",
+    display_name: "DeepSeek",
+    models: [{ model_id: "deepseek-flash", category: "chat" as const, capabilities: [] }],
+  },
 };
 
 const thread = {
-  uid: "user-1", thread_id: "thread-1", title: "Conversation", summary: null, agent_id: "LeaderAgent",
+  uid: "user-1", thread_id: "thread-1", title: "Conversation", agent_id: "LeaderAgent",
   metadata: { model: deepseek }, created_at: "2026-10-14T00:00:00Z", updated_at: "2026-10-14T00:00:00Z",
 };
 
@@ -133,7 +136,7 @@ function renderChat(path: string) {
 it("binds the selected model while creating a conversation and its first Run", async () => {
   renderChat("/");
   await waitFor(() => expect(screen.getByLabelText("Model").textContent).toBe(qwen));
-  fireEvent.click(screen.getByRole("button", { name: deepseek }));
+  fireEvent.click(screen.getByRole("button", { name: "deepseek-flash" }));
   fireEvent.change(screen.getByLabelText("Question"), { target: { value: "Hello" } });
   fireEvent.click(screen.getByRole("button", { name: "Submit" }));
   await waitFor(() => expect(mocks.createRun).toHaveBeenCalled());
@@ -176,7 +179,7 @@ it("restores a conversation model without resetting a later explicit selection",
   renderChat("/c/thread-1");
   await waitFor(() => expect(screen.getByLabelText("Model").textContent).toBe(deepseek));
   expect(screen.getByRole("heading", { name: "Conversation" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: qwen }));
+  fireEvent.click(screen.getByRole("button", { name: "qwen4-max" }));
   fireEvent.change(screen.getByLabelText("Question"), { target: { value: "New message" } });
   expect(screen.getByLabelText("Model").textContent).toBe(qwen);
 });

@@ -2,13 +2,15 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 import { listAgents, getAgentContext, updateAgent } from "@/api/agent"
-import { getModelProvider, listModelProviders } from "@/api/model"
+import { createModelProvider, getModelProvider, listModelProviders } from "@/api/model"
 import AgentPage from "@/pages/agent/AgentPage"
 import { installBrowserStubs } from "@/test/browserStubs"
 import type { Agent } from "@/types/agent"
 
 vi.mock("@/api/agent", () => ({ listAgents: vi.fn(), getAgentContext: vi.fn(), updateAgent: vi.fn() }))
 vi.mock("@/api/model", () => ({
+  createModelProvider: vi.fn(),
+  deleteModelProvider: vi.fn(),
   discoverProviderModels: vi.fn(),
   getModelProvider: vi.fn(),
   listModelProviders: vi.fn(),
@@ -58,22 +60,31 @@ beforeEach(() => {
     summary_keep_messages: 8, summary_tool_result_token_limit: 250, summary_prompt: "Summarize findings",
     tools: ["search"], mcps: ["documents"], skill_root: "/skills",
   })
+  vi.mocked(createModelProvider).mockResolvedValue({
+    provider_id: "openai",
+    cache_refreshed: true,
+  })
   vi.mocked(listModelProviders).mockResolvedValue([
     {
       provider_id: "deepseek",
       name: "DeepSeek",
+      base_url: "https://api.deepseek.com/v1",
+      embedding_base_url: "",
+      rerank_base_url: "",
       is_enabled: true,
       has_api_key: true,
+      models: [],
     },
   ])
   vi.mocked(getModelProvider).mockResolvedValue({
     provider_id: "deepseek",
     name: "DeepSeek",
     base_url: "https://api.deepseek.com/v1",
-    protocol: "openai_compatible",
+    embedding_base_url: "",
+    rerank_base_url: "",
     is_enabled: true,
     has_api_key: true,
-    enabled_models: [],
+    models: [],
   })
 })
 
@@ -422,4 +433,41 @@ it("renders the top header with the Agent title, switches between Agents and Mod
   fireEvent.click(agentsButton)
   expect(agentsButton.getAttribute("aria-pressed")).toBe("true")
   expect(await screen.findByRole("article", { name: "DB coordinator" })).toBeTruthy()
+})
+
+it("allows creating a new model provider from the Models tab", async () => {
+  render(<AgentPage />)
+  await screen.findByRole("article", { name: "DB coordinator" })
+  fireEvent.click(screen.getByRole("button", { name: "Models" }))
+  await screen.findByRole("article", { name: "DeepSeek" })
+
+  fireEvent.click(screen.getByRole("button", { name: "Add provider" }))
+  const createDialog = await screen.findByRole("dialog", { name: "Add provider" })
+  fireEvent.change(within(createDialog).getByLabelText("Provider ID"), {
+    target: { value: "openai" },
+  })
+  fireEvent.change(within(createDialog).getByLabelText("Display name"), {
+    target: { value: "OpenAI" },
+  })
+  fireEvent.change(within(createDialog).getByLabelText("Base URL"), {
+    target: { value: "https://api.openai.com/v1" },
+  })
+  fireEvent.change(within(createDialog).getByLabelText("API Key"), {
+    target: { value: "OPENAI_API_KEY" },
+  })
+  fireEvent.click(within(createDialog).getByRole("button", { name: "Create" }))
+
+  await waitFor(() =>
+    expect(createModelProvider).toHaveBeenCalledWith({
+      provider_id: "openai",
+      name: "OpenAI",
+      protocol: "openai_compatible",
+      base_url: "https://api.openai.com/v1",
+      embedding_base_url: "",
+      rerank_base_url: "",
+      api_key: "OPENAI_API_KEY",
+      is_enabled: false,
+      models: [],
+    })
+  )
 })
