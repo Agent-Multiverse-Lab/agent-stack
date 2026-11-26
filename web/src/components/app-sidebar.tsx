@@ -4,7 +4,6 @@ import * as React from "react";
 import {
   BotIcon,
   BookOpenCheckIcon,
-  FilesIcon,
   MapIcon,
   SearchIcon,
   SquarePenIcon,
@@ -90,8 +89,7 @@ export function AppSidebar({
         name: "Sandbox",
         logo: <SquareTerminalIcon />,
         url: "/sandbox",
-        isActive:
-          location.pathname === "/sandbox" || location.pathname === "/static",
+        isActive: location.pathname === "/sandbox",
       },
     ],
     navMain: [
@@ -112,12 +110,6 @@ export function AppSidebar({
         url: "/agent",
         icon: <BotIcon />,
         isActive: location.pathname === "/agent",
-      },
-      {
-        title: "Satellite",
-        url: "/static",
-        icon: <FilesIcon />,
-        isActive: location.pathname === "/static",
       },
       {
         title: "Map",

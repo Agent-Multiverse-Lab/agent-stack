@@ -85,7 +85,7 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: postgis/postgis:17-3.5-alpine
+    image: postgres:17-alpine
     container_name: agent-stack-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}

@@ -14,7 +14,6 @@ export default function App() {
       "/": "Chat",
       "/knowledge": "Knowledge",
       "/agent": "Agent",
-      "/static": "Satellite",
       "/map": "Map",
       "/sandbox": "Sandbox",
     };

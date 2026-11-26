@@ -2,7 +2,6 @@
 
 from src.agents.library.subagents.citation import CITATION_AGENT
 from src.agents.library.subagents.image_processing import IMAGE_AGENT
-from src.agents.library.subagents.satellite import SATELLITE_AGENT
 from src.agents.library.subagents.search import SEARCH_AGENT
 
-SUBAGENTS = (SEARCH_AGENT, CITATION_AGENT, IMAGE_AGENT, SATELLITE_AGENT)
+SUBAGENTS = (SEARCH_AGENT, CITATION_AGENT, IMAGE_AGENT)

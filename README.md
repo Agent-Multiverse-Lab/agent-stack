@@ -21,7 +21,6 @@ Web 端提供登录、会话和聊天界面。FastAPI 创建 Agent Run，Redis/A
 | `SearchAgent` | 网络与知识库检索 |
 | `CitationAgent` | 核对回答声明与检索证据 |
 | `ImageProcessingAgent` | 装配已配置的图像处理 MCP 工具，并校验工具返回的内嵌单帧图像能否完整解码 |
-| `SatelliteAgent` | 通过已配置的 MCP 工具检索与分析卫星影像 |
 
 知识模块负责文件解析、切块、索引与检索；RustFS 保存文件和解析产物，Milvus 保存向量索引。CubeSandbox 提供独立的工具与代码执行隔离，部署见 [CubeSandbox 指南](docker/cube/README.md)。MCP 服务需单独部署并在 `.env` 中配置，未配置时相应工具不可用。
 
@@ -48,7 +47,6 @@ flowchart TB
     Delegate --> Search[SearchAgent]
     Delegate --> Citation[CitationAgent]
     Delegate --> Image[ImageProcessingAgent]
-    Delegate --> Satellite[SatelliteAgent]
 ```
 
 ### 数据与工具

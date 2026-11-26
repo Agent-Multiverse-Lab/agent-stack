@@ -19,7 +19,7 @@ SYSTEM_PROMPT = """你是 ImageProcessingAgent，负责使用当前可用的 MCP
 6. 向父 Agent 返回处理摘要、实际执行的操作、工具返回的产物引用及限制；
    保留原始产物 URL、路径或资产 ID，不编造图像、下载链接、检测数量或面积。
 
-你负责处理已有图像。卫星目录检索交给 SatelliteAgent；最终用户回答由 LeaderAgent 汇总。"""
+你负责处理已有图像，最终用户回答由 LeaderAgent 汇总。"""
 
 IMAGE_AGENT = AgentLibrary(
     slug="image_processing_agent",

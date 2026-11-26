@@ -9,7 +9,6 @@ import ChatPage from "@/pages/chat/ChatPage";
 import KnowledgePage from "@/pages/knowledge/KnowledgePage";
 import KnowledgeBaseDetailPage from "@/pages/knowledge/KnowledgeBaseDetailPage";
 import AgentPage from "@/pages/agent/AgentPage";
-import Satellite from "@/pages/statellite/Satellite";
 import SandboxPage from "@/pages/sandbox/SandboxPage";
 
 const MapPage = lazy(() => import("@/pages/map/MapPage"));
@@ -71,7 +70,6 @@ export default function AppRoutes() {
           <Route path="knowledge" element={<KnowledgePage />} />
           <Route path="knowledge/:kbId" element={<KnowledgeBaseDetailPage />} />
           <Route path="agent" element={<AgentPage />} />
-          <Route path="static" element={<Satellite />} />
           <Route
             path="map"
             element={
