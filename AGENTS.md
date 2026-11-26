@@ -1,49 +1,35 @@
 # Repository Agent Guide
 
-`AGENTS.md` 是代理进入本仓库后的最小入口。详细规则、系统边界与进行中的功能设计放在 `docs/`，具体实现以源码为准。
+`AGENTS.md` 是代理进入本仓库后的渐进式入口；`CLAUDE.md` 直接导入本文件。具体表结构、接口、依赖和命令以源码、Schema、Compose 与测试为准。
 
-`CLAUDE.md` 直接导入本文件。
-
-## 1. 当前项目描述
+## 项目概览
 
 `agent-stack` 是一个面向技术学习和工程实践的多 Agent 系统：
 
 - 后端是 FastAPI，使用 LangChain/LangGraph 组织 Agent 执行。
 - PostgreSQL 保存业务持久化状态；Redis/ARQ 负责队列、运行信号和事件流。
-- RustFS 保存文件和解析产物，Milvus 承载知识检索向量。
+- RustFS 保存文件和解析产物，Milvus 承载知识检索向量，Neo4j 保存知识图谱。
 - CubeSandbox 提供独立的工具和代码执行隔离，部署配置位于 `docker/cube/`。
 - `web/` 是 React/TypeScript 前端，负责 API 消费、页面状态和展示。
 
-当前目录职责、依赖方向和数据所有权见
-[docs/architecture/overview.md](docs/architecture/overview.md)。
+## 按需加载文档
 
-## 2. 可加载的文档
-
-以下是可读取文档，按当前任务类型按需读取，不读取与当前任务无关的文档：
-
-1. 读取 [docs/working-rules.md](docs/working-rules.md)，加载当前仓库级开发规则。
-2. 读取 [docs/architecture/README.md](docs/architecture/README.md) 与对应的
-   `docs/architecture/<system>-system.md`，明确系统边界和长期不变量后，直接读取真实源码。
-3. 任务涉及 `web/` 的页面、组件、目录、命名、样式或交互时，读取
-   [docs/frontend/README.md](docs/frontend/README.md)。
-4. 若当前任务在 `docs/develop/` 下存在对应的单文件设计稿，按需读取了解方向和关键取舍。
-5. 需要启动、迁移或验证时，读取 [docs/development.md](docs/development.md)。
-6. 需要提交或发起 Pull Request 时，读取 [docs/contributing.md](docs/contributing.md)。
-7. 只有任务涉及已有技术取舍时，才读取 [docs/adr/README.md](docs/adr/README.md) 和相关 ADR。
-
-## 3. 能力路由
+只按当前任务范围读取对应入口，不加载与当前任务无关的文档：
 
 | 任务范围 | 先读取 |
 | --- | --- |
-| Agent 构造、上下文、子代理 | `docs/architecture/agent-system.md` |
-| Run 生命周期、取消、事件流、排队派发 | `docs/architecture/run-system.md` |
-| 知识上传、解析、索引、检索 | `docs/architecture/knowledge-system.md` |
-| 状态和存储所有权 | `docs/architecture/persistence-system.md` |
-| 认证和用户身份 | `docs/architecture/auth-system.md` |
-| 沙箱和工具隔离 | `docs/architecture/sandbox-system.md` |
-| 模型供应商预置、平台配置和目录缓存 | `docs/architecture/model-system.md` |
-| 跨系统拓扑和目录职责 | `docs/architecture/overview.md` |
-| Web 页面、组件、目录、命名、样式、品牌与交互 | `docs/frontend/README.md` |
-| 进行中的单文件功能设计 | `docs/develop/` |
-| 本地启动、迁移和验证 | `docs/development.md` |
-| Pull Request 和 Git 提交 | `docs/contributing.md` |
+| 系统拓扑、代码地图与架构不变量 | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Web 前端目录、组件、样式与验证 | [web/AGENTS.md](web/AGENTS.md)、[docs/develop-guides/design.md](docs/develop-guides/design.md) |
+| 编写或维护文档 | [docs/AGENTS.md](docs/AGENTS.md)、[docs/develop-guides/documentation-guidelines.md](docs/develop-guides/documentation-guidelines.md) |
+| 非平凡改动的设计提案与决策记录 | [docs/develop-guides/decisions/README.md](docs/develop-guides/decisions/README.md) |
+| 核心运行机制详解 | [docs/mechanisms/index.md](docs/mechanisms/index.md) |
+| 本地启动、迁移、部署与验证命令 | [docs/develop-guides/development.md](docs/develop-guides/development.md) |
+| Git 提交与 Pull Request 规范 | [CONTRIBUTING.md](CONTRIBUTING.md) |
+
+## 工作原则
+
+1. **直接与克制**：严格禁止因假设性或极低概率风险主动添加未要求的警告、免责声明、审批流程、冗余 fallback 或防御性校验；不写空洞保证、多层模糊修饰或与权责无关的反向范围说明。
+2. **按需决策，不堆过程文档**：普通修复和明确的单点需求直接实现；改变持久状态、生命周期、权限边界、公开契约或引入新抽象/依赖的非平凡改动，在 `docs/develop-guides/decisions/proposed/` 写短提案，落地后迁至 `implemented/`；本地临时计划放在被 Git 忽略的 `docs/vibe/`。
+3. **尊重边界与事实 Owner**：源码、Schema、Compose 与测试拥有可执行事实；移动或删除文件、调整模块所有权或修改公开契约前先说明影响并取得确认。
+4. **子树规则叠加**：进入 `web/` 或 `docs/` 工作时同时遵循对应子树的 `AGENTS.md`，子树规则只补充本目录，不复制到根文件。
+5. **验证如实报告**：只报告实际执行过的命令、测试与观察到的结果；仅修改文档时至少运行 `git diff --check`。

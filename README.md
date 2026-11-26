@@ -91,7 +91,7 @@ npm ci
 npm run dev
 ```
 
-Compose 数据卷默认位于宿主机 `/var/lib/agent-stack/volume/`（通过 `AGENT_STACK_DATA_DIR` 配置），对象存储由 RustFS 提供。更多命令见[开发指南](docs/development.md)。
+Compose 数据卷默认位于宿主机 `/var/lib/agent-stack/volume/`（通过 `AGENT_STACK_DATA_DIR` 配置），对象存储由 RustFS 提供。更多命令见[开发指南](docs/develop-guides/development.md)。
 
 ## 界面预览
 
@@ -101,7 +101,7 @@ Compose 数据卷默认位于宿主机 `/var/lib/agent-stack/volume/`（通过 `
 
 ## 文档
 
-- [系统架构与模块边界](docs/architecture/README.md)
-- [进行中的功能设计](docs/develop/README.md)
-- [本地开发与验证](docs/development.md)
+- [系统架构与代码地图](ARCHITECTURE.md)
+- [开发与部署指南](docs/develop-guides/development.md)
+- [文档与决策规范](docs/develop-guides/documentation-guidelines.md)
 - [贡献规范](CONTRIBUTING.md)
