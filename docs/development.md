@@ -38,23 +38,8 @@ uv run --no-sync alembic upgrade head
 uv run --no-sync alembic downgrade -1
 ```
 
-卫星目录迁移完成后，可显式加载固定测试目录：
-
-```bash
-uv run --no-sync python scripts/load_satellite_catalog_fixture.py
-```
-
-## Satellite Gateway
-
-```bash
-cd gateway
-go test ./...
-go run ./cmd/server
-```
-
-启动前设置 `DATABASE_URL`（普通 PostgreSQL DSN）和 `GATEWAY_SHARED_TOKEN`。Python API/Worker
-使用相同的 `SATELLITE_GATEWAY_TOKEN`，并通过 `SATELLITE_GATEWAY_TARGET` 指向 gRPC 服务。
-Gateway 在 Compose 中属于 `gateway` profile，默认不启动。
+历史卫星目录迁移保留在 Alembic revision 链中，现有数据库表与数据不自动删除。
+为支持新环境重放历史迁移，Compose 继续使用带 PostGIS 的 PostgreSQL 镜像。
 
 ## 本地基础设施和服务
 

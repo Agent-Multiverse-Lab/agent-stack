@@ -104,34 +104,6 @@ services:
       retries: 10
     restart: unless-stopped
 
-  gateway:
-    profiles:
-      - gateway
-    build:
-      context: .
-      dockerfile: docker/gateway.Dockerfile
-    image: agent-stack-gateway:${VERSION:-0.1.0}
-    container_name: agent-stack-gateway
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-multi_agent_s2c}
-      GATEWAY_GRPC_ADDRESS: ":50051"
-      GATEWAY_HEALTH_ADDRESS: ":8080"
-      GATEWAY_SHARED_TOKEN: ${SATELLITE_GATEWAY_TOKEN:-development-only-change-me}
-    ports:
-      - "${SATELLITE_GATEWAY_PORT:-50051}:50051"
-      - "${SATELLITE_GATEWAY_HEALTH_PORT:-18080}:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    networks:
-      - agent-stack-network
-    restart: unless-stopped
-
   redis:
     image: redis:8-alpine
     container_name: agent-stack-redis

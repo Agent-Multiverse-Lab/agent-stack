@@ -12,7 +12,6 @@
 - PostgreSQL 保存业务持久化状态；Redis/ARQ 负责队列、运行信号和事件流。
 - RustFS 保存文件和解析产物，Milvus 承载知识检索向量。
 - CubeSandbox 提供独立的工具和代码执行隔离，部署配置位于 `docker/cube/`。
-- `gateway/` 提供 Go gRPC 卫星影像目录和 PostGIS 空间检索。
 - `web/` 是 React/TypeScript 前端，负责 API 消费、页面状态和展示。
 
 当前目录职责、依赖方向和数据所有权见
@@ -43,7 +42,6 @@
 | 认证和用户身份 | `docs/architecture/auth-system.md` |
 | 沙箱和工具隔离 | `docs/architecture/sandbox-system.md` |
 | 模型供应商预置、平台配置和目录缓存 | `docs/architecture/model-system.md` |
-| 卫星影像目录和多源检索 | `docs/architecture/data-platform-system.md` |
 | 跨系统拓扑和目录职责 | `docs/architecture/overview.md` |
 | Web 页面、组件、目录、命名、样式、品牌与交互 | `docs/frontend/README.md` |
 | 进行中的单文件功能设计 | `docs/develop/` |
