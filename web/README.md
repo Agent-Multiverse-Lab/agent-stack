@@ -36,10 +36,10 @@ The token is exposed to the browser; use a public token and configure its allowe
 URLs in the Mapbox console. Restart Vite after changing the environment file.
 The map supports coordinate lookup, street/satellite switching, labels, and linked
 location markers. Without a token, the local illustrative example remains available.
-Live place search, satellite catalog search, and Map conversation are not connected.
+Live place search and Map conversation are not connected.
 
 ## Frontend conventions
 
-Directory ownership, naming, component selection, styling, theme tokens, interaction rules,
-and validation requirements are documented in
-[`docs/frontend/README.md`](../docs/frontend/README.md).
+Development rules live in [`web/AGENTS.md`](AGENTS.md); directory ownership, naming, component selection,
+styling, theme tokens, and validation requirements are documented in
+[`docs/develop-guides/design.md`](../docs/develop-guides/design.md).

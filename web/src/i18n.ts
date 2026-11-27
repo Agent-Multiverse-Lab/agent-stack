@@ -37,9 +37,6 @@ const translations = {
   "Present artifacts": "展示成果",
   "Search the web": "搜索网页",
   "Search knowledge base": "检索知识库",
-  "List satellite sources": "列出卫星数据源",
-  "Search satellite scenes": "检索卫星影像",
-  "Inspect satellite scenes": "查看卫星影像详情",
   "Delegate task": "委派任务",
   "Start subagent": "启动子智能体",
   "Check subagent status": "查看子智能体状态",
@@ -348,7 +345,6 @@ const translations = {
   "No agents yet": "暂无智能体",
   "No subagents yet": "暂无子智能体",
   "Disabled": "已禁用",
-  "Satellite": "卫星",
   "Map": "地图",
   "Map canvas": "地图画布",
   "Image search": "影像检索",
@@ -531,9 +527,6 @@ const translations = {
   "Agent setup is not connected": "代理配置尚未连接",
   "Agent configuration will be available here after the backend is connected.":
     "后端连接后，可在这里配置代理。",
-  "Satellite unavailable": "卫星功能暂不可用",
-  "Satellite content will be available here after the backend is connected.":
-    "后端连接后，可在这里查看卫星内容。",
   "Sandbox is not connected": "沙箱尚未连接",
   "Sandbox sessions will appear here after runtime services are connected.":
     "运行时服务连接后，沙箱会话将显示在这里。",

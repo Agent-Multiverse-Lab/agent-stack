@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from fastapi import FastAPI
 
-from server.router.model_router import router
+from server.router.model_provider_router import router
 from server.utils.auth import get_current_user, is_admin_user
 from src.configs import config
 from src.database import User, get_db
